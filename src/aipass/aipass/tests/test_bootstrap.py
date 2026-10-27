@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_bootstrap.py
 # Description: Tests for init bootstrap handler (DPLAN-0164)
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-05-04
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py and the init/update flows it drives."""
@@ -698,7 +698,7 @@ class TestSharedSkillsScaffold:
         assert link.is_symlink()
         assert link.resolve() == (target / ".agents" / "skills").resolve()
         assert (link / "prep" / "SKILL.md").read_text(encoding="utf-8") == text
-        assert not (target / ".claude" / "commands").exists()
+        assert not (target / ".claude" / "commands" / "prep.md").exists()
         assert result["notes"] == []
 
     def test_a_refused_symlink_writes_a_copy_and_says_it_will_not_follow(self, tmp_path, monkeypatch):

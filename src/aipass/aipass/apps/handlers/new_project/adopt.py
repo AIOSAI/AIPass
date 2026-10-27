@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: adopt.py
 # Description: aipass adopt — bring an existing projects/ directory into AIPass
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-07-20
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """
@@ -29,6 +29,7 @@ from aipass.aipass.apps.handlers.init.bootstrap import (
     LINK_STATE_MISSING,
     PREP_SKILL_REL,
     SKILLS_LINK_REL,
+    SWITCH_PAIR,
     _link_venv,
     _managed_manifest_entries,
     link_skills,
@@ -158,6 +159,8 @@ def adopt_project(target: Path, *, no_agent: bool = False, dry_run: bool = False
             )
 
         _write_if_missing(target / PREP_SKILL_REL, sc.prep_skill_md(), dry_run=dry_run, planned=files)
+        for rel, content in SWITCH_PAIR:
+            _write_if_missing(target / rel, content(), dry_run=dry_run, planned=files)
         if shared_skills_state(target)["link"] == LINK_STATE_MISSING:
             note = None if dry_run else link_skills(target)
             notes.extend([note] if note else [])

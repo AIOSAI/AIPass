@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_bootstrap_update.py
 # Description: Tests for update_project: the plan, stamp-only, the retrofit, seeds and cleanup
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-10-08
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py: update_project and the plans it reads."""
@@ -368,8 +368,8 @@ def test_update_project_creates_missing_managed_dirs(tmp_path, monkeypatch, thro
     local_settings = target.resolve() / ".claude" / "settings.local.json"
     assert (str(local_settings) in result["updated_files"]) is not throwaway_home
     assert local_settings.exists() is not throwaway_home
-    # tier0_kernel, tier1_navmap, hooks.json, settings.json, prep, plus settings.local.json for a real home
-    assert len(result["updated_files"]) == (5 if throwaway_home else 6)
+    # tier0_kernel, tier1_navmap, hooks.json, settings.json, prep, /codex, plus settings.local.json for a real home
+    assert len(result["updated_files"]) == (6 if throwaway_home else 7)
     assert str((target / "AGENTS.md").resolve()) in result["already_current"]
 
 
@@ -739,7 +739,6 @@ def _a_project_from_before_the_shared_skills(tmp_path, prep_text: str) -> Path:
     skill = target / ".agents" / "skills" / "prep" / "SKILL.md"
     skill.unlink()
     legacy = target / ".claude" / "commands" / "prep.md"
-    legacy.parent.mkdir()
     legacy.write_text(prep_text, encoding="utf-8")
     manifest_path = target / ".aipass" / "scaffold_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -791,3 +790,59 @@ class TestSharedSkillsUpdate:
         assert result["pending"] is True
         assert not (target / ".claude" / "skills").exists()
         assert (target / ".claude" / "commands" / "prep.md").is_file()
+
+
+_SWITCH = {".claude/commands/codex.md": sc.codex_command_md(), ".codex/skills/claude/SKILL.md": sc.claude_skill_md()}
+
+
+class TestProviderSwitchPair:
+    """init writes /codex and $claude into a project; the update adds them to an older one, edits kept."""
+
+    def test_init_writes_both_switch_files_verbatim_and_hashes_them(self, tmp_path):
+        target = tmp_path / "proj"
+        target.mkdir()
+        init_project(target, project_name="switch")
+
+        manifest = read_manifest(target)["files"]
+        for rel, body in _SWITCH.items():
+            assert (target / rel).read_text(encoding="utf-8") == body
+            assert manifest[rel] == sc_sha256(body)
+
+    def test_update_adds_a_missing_switch_file_and_keeps_an_edited_one(self, tmp_path):
+        target = tmp_path / "proj"
+        target.mkdir()
+        init_project(target, project_name="older")
+        command = target / ".claude" / "commands" / "codex.md"
+        command.unlink()
+        skill = target / ".codex" / "skills" / "claude" / "SKILL.md"
+        skill.write_text("# my own switch\n", encoding="utf-8")
+        manifest_path = target / ".aipass" / "scaffold_manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        del manifest["files"][".claude/commands/codex.md"]
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+        result = update_project(target)
+
+        assert command.read_text(encoding="utf-8") == sc.codex_command_md()
+        assert skill.read_text(encoding="utf-8") == "# my own switch\n"
+        actions = {e["path"]: e["action"] for e in result["files"]}
+        assert actions[".claude/commands/codex.md"] == "create"
+        assert actions[".codex/skills/claude/SKILL.md"] == "kept-local"
+
+    def test_a_hand_copy_matching_the_template_is_current_and_adopted(self, tmp_path):
+        target = tmp_path / "proj"
+        target.mkdir()
+        init_project(target, project_name="copied")
+        manifest_path = target / ".aipass" / "scaffold_manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        for rel in _SWITCH:
+            del manifest["files"][rel]
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+        result = update_project(target)
+
+        entries = {e["path"]: e for e in result["files"]}
+        for rel, body in _SWITCH.items():
+            assert entries[rel]["action"] == "current"
+            assert entries[rel]["writes"] is False
+            assert read_manifest(target)["files"][rel] == sc_sha256(body)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: New project handler — create projects inside AIPass
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-07-17
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """
@@ -28,6 +28,7 @@ from aipass.aipass.apps.handlers.init.bootstrap import (
     SKILLS_LINK_REL,
     _managed_manifest_entries,
     link_skills,
+    write_switch_pair,
 )
 from aipass.aipass.shared import scaffold_content as sc
 from aipass.prax import logger
@@ -204,6 +205,7 @@ def _scaffold_aipass(target: Path, name: str) -> tuple[list[str], list[str]]:
     prep_path.parent.mkdir(parents=True)
     sm.write_text_lf(prep_path, sc.prep_skill_md())
     created.append(PREP_SKILL_REL)
+    created.extend(write_switch_pair(target))
     note = link_skills(target)
     created.append(SKILLS_LINK_REL)
 

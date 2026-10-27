@@ -122,15 +122,19 @@ backup taken just before it stays. Code:
 
 ## Both CLIs see every shared skill
 
-The Scaffold group carries three rows about the skills in `.agents/skills/`.
+The Scaffold group carries four rows about the skills in `.agents/skills/` and
+the provider switch.
 `shared skills` passes when each `SKILL.md` has a `name` and a `description` in
 its frontmatter. `skills link` passes when `.claude/skills` is a symlink
 resolving to `.agents/skills`, and warns when it is missing, a copy, or points
 elsewhere. `legacy prep` warns when an old `.claude/commands/prep.md` sits
-beside the skill, so `/prep` is offered twice. `doctor --fix` makes a missing
-link and renames an unedited legacy `prep.md` to `prep(disabled).md`, one
-`skills fix` row per change; a copy, a foreign link and an edited `prep.md` are
-left for you. On Windows the link needs `git config core.symlinks true` and the
+beside the skill, so `/prep` is offered twice. `provider switch` passes when
+the project holds both `.claude/commands/codex.md` (`/codex`) and
+`.codex/skills/claude/SKILL.md` (`$claude`), and names a missing one.
+`doctor --fix` makes a missing link, writes a missing switch file and renames an
+unedited legacy `prep.md` to `prep(disabled).md`, one `skills fix` row per
+change; a copy, a foreign link, an existing switch file and an edited `prep.md`
+are left for you. On Windows the link needs `git config core.symlinks true` and the
 right to make links; without them `--fix` writes a copy that will not follow
 `.agents/skills`, and the row says so.
 

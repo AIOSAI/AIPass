@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_new_project.py
 # Description: Tests for aipass new — project creation handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-07-17
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/handlers/new_project/__init__.py and apps/modules/new_project.py."""
@@ -1065,7 +1065,7 @@ def test_e2e_agent_files_are_in_the_birth_commit(_e2e_project):
     assert any(line.startswith(rel) for line in tracked)
 
 
-def test_create_project_writes_the_prep_skill_and_links_claude_skills_to_it(host_env, monkeypatch):
+def test_create_project_writes_the_prep_skill_the_switch_pair_and_links_claude_skills_to_it(host_env, monkeypatch):
     monkeypatch.chdir(host_env)
     with (
         patch("subprocess.run", side_effect=_mock_git_run),
@@ -1078,5 +1078,7 @@ def test_create_project_writes_the_prep_skill_and_links_claude_skills_to_it(host
     assert (target / ".agents" / "skills" / "prep" / "SKILL.md").read_text(encoding="utf-8") == sc.prep_skill_md()
     assert (target / ".claude" / "skills").resolve() == (target / ".agents" / "skills").resolve()
     assert ".agents/skills/prep/SKILL.md" in result["files"]
-    assert not (target / ".claude" / "commands").exists()
+    assert (target / ".claude" / "commands" / "codex.md").read_text(encoding="utf-8") == sc.codex_command_md()
+    assert (target / ".codex" / "skills" / "claude" / "SKILL.md").read_text(encoding="utf-8") == sc.claude_skill_md()
+    assert not (target / ".claude" / "commands" / "prep.md").exists()
     assert result["notes"] == []

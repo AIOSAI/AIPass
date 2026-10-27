@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2026-04-16
 # Modified: 2026-10-26
 # =============================================
@@ -1098,7 +1098,7 @@ def _tree_in_use(root: Path) -> str:
     return str(root)
 
 
-_SKILL_ROW_LABELS = ("shared skills", "skills link", "legacy prep", "skills fix")
+_SKILL_ROW_LABELS = ("shared skills", "skills link", "legacy prep", "provider switch", "skills fix")
 _FIX_COMMAND = "aipass doctor --fix"
 
 
@@ -1143,11 +1143,19 @@ def _check_shared_skills(root: Path) -> List[CheckResult]:
     elif state["legacy_prep"] == "edited":
         detail = f"{bs.LEGACY_PREP_REL} is edited, so it is yours and kept: /prep is offered twice"
         rows.append(CheckResult("legacy prep", GLYPH_WARN, detail, f"Fold your edits into {bs.PREP_SKILL_REL}"))
+
+    if state["switch_missing"]:
+        detail = f"missing {', '.join(state['switch_missing'])}: the chat cannot switch CLI here"
+        cure = f"{fix}, or 'aipass init update {root}'"
+        rows.append(CheckResult("provider switch", GLYPH_WARN, detail, cure))
+    else:
+        detail = "/codex and $claude present (" + ", ".join(rel for rel, _ in bs.SWITCH_PAIR) + ")"
+        rows.append(CheckResult("provider switch", GLYPH_PASS, detail, ""))
     return rows
 
 
 def _fix_shared_skills() -> List[CheckResult]:
-    """--fix: make a missing skills link, retire an unedited legacy prep command; one row per change."""
+    """--fix: make a missing skills link, write a missing switch file, retire an unedited legacy prep command."""
     from aipass.aipass.apps.handlers.init.bootstrap import repair_shared_skills
 
     reg_path = _find_registry()

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: bootstrap.py
 # Description: Init handler — bootstrap an AIPass project in any directory
-# Version: 2.3.0
+# Version: 2.4.0
 # Created: 2026-03-14
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """
@@ -50,11 +50,18 @@ _MANIFEST_TRACKED: tuple = (
     ".claude/settings.json",
     ".claude/settings.local.json",
     ".agents/skills/prep/SKILL.md",
+    ".claude/commands/codex.md",
+    ".codex/skills/claude/SKILL.md",
     "AGENTS.md",
 )
 
 PREP_SKILL_REL = ".agents/skills/prep/SKILL.md"
 LEGACY_PREP_REL = ".claude/commands/prep.md"
+#: The provider switch pair, one file per CLI so neither offers its own switch.
+SWITCH_PAIR: tuple = (
+    (".claude/commands/codex.md", sc.codex_command_md),
+    (".codex/skills/claude/SKILL.md", sc.claude_skill_md),
+)
 SKILLS_REL = ".agents/skills"
 SKILLS_LINK_REL = ".claude/skills"
 _SKILLS_LINK_TARGET = Path("..") / ".agents" / "skills"
@@ -111,7 +118,8 @@ def shared_skills_state(target: Path) -> dict:
     ``skills`` the folder names under .agents/skills holding a SKILL.md, ``incomplete``
     those whose frontmatter lacks a name or a description, ``link`` one of the
     LINK_STATE_* values, ``link_to`` where a symlinked .claude/skills resolves,
-    ``legacy_prep`` "managed", "edited" or "" for an old .claude/commands/prep.md."""
+    ``legacy_prep`` "managed", "edited" or "" for an old .claude/commands/prep.md,
+    ``switch_missing`` the SWITCH_PAIR paths absent."""
     master = target / SKILLS_REL
     skills = sorted(p.parent for p in master.glob("*/SKILL.md"))
     incomplete = [s.name for s in skills if not {"name", "description"} <= _frontmatter_keys(s / "SKILL.md")]
@@ -126,6 +134,7 @@ def shared_skills_state(target: Path) -> dict:
     else:
         state = LINK_STATE_MISSING
     legacy = target / LEGACY_PREP_REL
+    switch_missing = [rel for rel, _ in SWITCH_PAIR if not (target / rel).is_file()]
     legacy_prep = "" if not legacy.is_file() else "managed" if _is_managed_legacy_prep(target, legacy) else "edited"
     return {
         "skills": [s.name for s in skills],
@@ -133,17 +142,20 @@ def shared_skills_state(target: Path) -> dict:
         "link": state,
         "link_to": link_to,
         "legacy_prep": legacy_prep,
+        "switch_missing": switch_missing,
     }
 
 
 def repair_shared_skills(target: Path) -> list[str]:
-    """Make a missing .claude/skills link, and retire an unedited legacy prep command once the skill exists.
+    """Make a missing .claude/skills link, write a missing switch file, retire an unedited legacy prep command.
 
-    Returns one line per change. A copy, a foreign link and an edited prep.md are the owner's: left."""
+    Returns one line per change. A copy, a foreign link, an edited prep.md and an existing switch file are the
+    owner's: left."""
     actions: list[str] = []
     if shared_skills_state(target)["link"] == LINK_STATE_MISSING:
         note = link_skills(target)
         actions.append(note or f"Linked {SKILLS_LINK_REL} -> {_SKILLS_LINK_TARGET.as_posix()}")
+    actions.extend(f"Wrote {rel}" for rel in write_switch_pair(target))
     legacy = target / LEGACY_PREP_REL
     if legacy.is_file() and (target / PREP_SKILL_REL).is_file() and _is_managed_legacy_prep(target, legacy):
         disabled = sm.disabled_path(legacy)
@@ -152,6 +164,17 @@ def repair_shared_skills(target: Path) -> list[str]:
         legacy.rename(disabled)
         actions.append(f"Retired {LEGACY_PREP_REL} -> {disabled.name}: {PREP_SKILL_REL} replaces it")
     return actions
+
+
+def write_switch_pair(target: Path) -> list[str]:
+    """Write each SWITCH_PAIR file absent under *target*; an existing one is never touched. Returns the paths written."""
+    written: list[str] = []
+    for rel, content in SWITCH_PAIR:
+        if not (target / rel).exists():
+            (target / rel).parent.mkdir(parents=True, exist_ok=True)
+            sm.write_text_lf(target / rel, content())
+            written.append(rel)
+    return written
 
 
 def _is_managed_legacy_prep(target: Path, legacy: Path) -> bool:
@@ -435,6 +458,7 @@ def init_project(
         prep_path.parent.mkdir(parents=True, exist_ok=True)
         sm.write_text_lf(prep_path, sc.prep_skill_md())
         created.append(str(prep_path))
+    created.extend(str(target / rel) for rel in write_switch_pair(target))
     notes: list[str] = []
     if shared_skills_state(target)["link"] == LINK_STATE_MISSING:
         note = link_skills(target)
@@ -617,6 +641,7 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
         text = _read_text(src) if src and src.is_file() else None
         managed.append((f".aipass/{tier_file}", aipass_dir / tier_file, text))
     managed.append((PREP_SKILL_REL, target / PREP_SKILL_REL, sc.prep_skill_md()))
+    managed.extend((rel, target / rel, content()) for rel, content in SWITCH_PAIR)
 
     for rel, dest, template_text in managed:
         current_hash = sm.hash_file(dest)

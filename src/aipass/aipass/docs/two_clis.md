@@ -15,7 +15,7 @@ reads at startup and how a ritual is typed. This page is the map of both.
 |---|---|---|
 | Instructions | `AGENTS.md`, natively | `AGENTS.md`, natively |
 | Shared skills | `.claude/skills/`, a symlink to `../.agents/skills` | `.agents/skills/`, natively |
-| CLI-only skills | `.claude/commands/codex.md` (the switch to Codex) | `.codex/skills/claude/` (the switch back) |
+| CLI-only skills | `.claude/commands/codex.md` (the switch to Codex), in the AIPass tree and every project | `.codex/skills/claude/SKILL.md` (the switch back), in the AIPass tree and every project |
 | Hooks | `~/.claude/settings.json` | `$CODEX_HOME/hooks.json`, else `~/.codex/hooks.json` |
 | Session pointer | `.ai_mail.local/session.json` in the branch | the same file |
 | Handoff on a switch | `.ai_mail.local/handoff.md` in the branch | the same file |
@@ -26,6 +26,14 @@ natively. Claude Code reads `.claude/skills/`, which is a tracked symlink to it,
 so both CLIs see the one file. `aipass init`, `aipass new` and `aipass adopt`
 write a project's prep skill at `.agents/skills/prep/SKILL.md` and make the
 link; `aipass doctor` checks both (see [`doctor.md`](doctor.md)).
+
+**The switch pair.** `/codex` and `$claude` are CLI-only on purpose:
+`.claude/commands/` is read by Claude Code alone, `.codex/skills/` by Codex
+alone, so neither CLI offers a switch to itself. Codex finds `.codex/skills`
+walking up from the working directory to the git root, so a branch inside a
+project sees the project's copy. The same three doors write both files into a
+project as managed files; `aipass doctor` names a missing one and `--fix` writes
+it, and `aipass init update` adds them to an older project.
 
 **Hooks.** `.claude/provider_manifest.json` holds the hook rows for both CLIs:
 `cli.claude` and `cli.codex`. `aipass doctor --fix` and `setup.sh` write the

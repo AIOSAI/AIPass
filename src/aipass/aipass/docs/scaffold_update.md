@@ -58,6 +58,13 @@ keeps an edited one, saying so in the plan. Where the filesystem refuses the
 link, a copy is written into `.claude/skills/` and the run says the copy will
 not follow `.agents/skills`; [`two_clis.md`](two_clis.md) has the rest.
 
+## The provider switch pair
+
+`/codex` (`.claude/commands/codex.md`) and `$claude`
+(`.codex/skills/claude/SKILL.md`) are managed files under the same hash rule.
+An update writes a missing one, keeps an edited one as `kept-local`, and adopts
+a hand copy that matches the template into the manifest as current.
+
 ## `.updateignore` — the owner decides what an update skips
 
 Drop the file at the project root, beside the registry. Same fashion as

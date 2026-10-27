@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_doctor_home.py
 # Description: Tests for doctor's home, owner-seating, preflight, citizen-count and shared-skills rows
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-10-08
 # Modified: 2026-10-26
 # =============================================
@@ -662,6 +662,8 @@ class TestSharedSkillsRows:
         fixes = [r.detail for r in self.printed["Scaffold"] if r.label == "skills fix"]
         assert fixes == [
             "Linked .claude/skills -> ../.agents/skills",
+            "Wrote .claude/commands/codex.md",
+            "Wrote .codex/skills/claude/SKILL.md",
             "Retired .claude/commands/prep.md -> prep(disabled).md: .agents/skills/prep/SKILL.md replaces it",
         ]
 
@@ -676,3 +678,25 @@ class TestSharedSkillsRows:
         assert legacy.read_text(encoding="utf-8") == "# my own prep\n"
         assert rows["legacy prep"].glyph == GLYPH_WARN
         assert "is edited, so it is yours and kept" in rows["legacy prep"].detail
+
+    def test_a_missing_switch_file_is_named_with_both_cures(self) -> None:
+        command = self.root / ".claude" / "commands" / "codex.md"
+        command.parent.mkdir(parents=True)
+        command.write_text(sc.codex_command_md(), encoding="utf-8")
+
+        row = self._rows()["provider switch"]
+
+        assert row.glyph == GLYPH_WARN
+        assert row.detail == "missing .codex/skills/claude/SKILL.md: the chat cannot switch CLI here"
+        assert row.remediation == f"Run: aipass doctor --fix, or 'aipass init update {self.root}'"
+
+    def test_fix_writes_the_missing_switch_file_and_leaves_an_edited_one(self) -> None:
+        skill = self.root / ".codex" / "skills" / "claude" / "SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text("# my own switch\n", encoding="utf-8")
+
+        rows = self._rows(fix=True)
+
+        assert (self.root / ".claude" / "commands" / "codex.md").read_text(encoding="utf-8") == sc.codex_command_md()
+        assert skill.read_text(encoding="utf-8") == "# my own switch\n"
+        assert rows["provider switch"].glyph == GLYPH_PASS
