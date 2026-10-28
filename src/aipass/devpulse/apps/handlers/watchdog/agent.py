@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: agent.py
 # Description: Watchdog Agent Handler — block until dispatched agent exits
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-04-14
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
 # Liveness is ai_mail's dispatch lock: dispatch_monitor deletes it on any exit.
@@ -13,8 +13,10 @@
 
 import json
 import os
+import sqlite3
 import sys
 import time
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 
@@ -22,7 +24,14 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 from aipass.devpulse.apps.handlers.watchdog import registry as _registry
 from aipass.devpulse.apps.handlers.json import json_handler
-from aipass.ai_mail.apps.modules.door_session_pointer import CLAUDE, CODEX, codex_thread_file, read_pointer
+from aipass.ai_mail.apps.modules.door_session_pointer import (
+    CLAUDE,
+    CODEX,
+    OPENCODE,
+    codex_thread_file,
+    opencode_db,
+    read_pointer,
+)
 
 
 def _stderr(msg: str) -> None:
@@ -226,7 +235,7 @@ def _codex_inflight_from_lines(lines: list[str], source: str = "?") -> bool:
 
 class TranscriptScanner:
     """Cached per-tick view of one branch's ``~/.claude/projects/<dir>`` tree, or of the one
-    Codex rollout its session pointer names when built with ``branch_path``.
+    Codex rollout or OpenCode session row its session pointer names when built with ``branch_path``.
 
     A full walk and tail re-read every tick cost a few percent of a core per watch, so a
     tick is one ``os.stat`` pass and the tail verdict is cached on ``(size, mtime)``.
@@ -241,6 +250,8 @@ class TranscriptScanner:
         self.branch_path = branch_path
         self.provider = CLAUDE
         self._codex_thread: str | None = None
+        self._opencode_session: str | None = None
+        self._opencode_updated: int = 0
         self._watched: tuple[str, str] | None = None
         self._top_dir = str(projects_dir)
         self._paths: list[str] = []
@@ -256,7 +267,12 @@ class TranscriptScanner:
     def refresh(self, now: float) -> None:
         """Re-read the pointer, then re-list the watched files with the provider's lister."""
         self._follow_pointer()
-        paths, unreadable = self._codex_paths() if self.provider == CODEX else self._claude_paths()
+        if self.provider == CODEX:
+            paths, unreadable = self._codex_paths()
+        elif self.provider == OPENCODE:
+            paths, unreadable = self._opencode_paths()
+        else:
+            paths, unreadable = self._claude_paths()
         self._paths = paths
         self.unreadable = unreadable
         self._last_refresh = now
@@ -266,14 +282,42 @@ class TranscriptScanner:
         if self.branch_path is None:
             return
         pointer = read_pointer(self.branch_path) or {}
-        codex = pointer.get("provider") == CODEX
-        self.provider = CODEX if codex else CLAUDE
-        self._codex_thread = pointer.get("session_id") if codex else None
+        provider = pointer.get("provider")
+        self.provider = provider if provider in (CODEX, OPENCODE) else CLAUDE
+        self._codex_thread = pointer.get("session_id") if self.provider == CODEX else None
+        self._opencode_session = pointer.get("session_id") if self.provider == OPENCODE else None
 
     def _codex_paths(self) -> tuple[list[str], dict[str, str]]:
         thread_file = codex_thread_file(self._codex_thread) if self._codex_thread else None
         self._note_watched(str(thread_file))
         return ([str(thread_file)] if thread_file is not None else []), {}
+
+    def _opencode_paths(self) -> tuple[list[str], dict[str, str]]:
+        """OpenCode keeps no per-session file: the session's row in its store is the transcript."""
+        self._note_watched(f"{opencode_db()}#{self._opencode_session}")
+        row = self._opencode_row()
+        self._opencode_updated = row[0] if isinstance(row, tuple) else 0
+        return [], {}
+
+    def _opencode_row(self) -> tuple[int, int | None, str | None] | None | bool:
+        """``(time_updated, time_idle, idle_outcome)`` of the pointed session, read-only.
+
+        None when there is no store or no such row; False when the store exists but could not be
+        read this tick (a lock, a schema change), which the callers count as in flight.
+        """
+        db = opencode_db()
+        if not self._opencode_session or db is None or not db.is_file():
+            return None
+        try:
+            with closing(sqlite3.connect(f"file:{db}?mode=ro", uri=True)) as conn:
+                row = conn.execute(
+                    "select time_updated, time_idle, idle_outcome from session_v2 where id=?",
+                    (self._opencode_session,),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            logger.warning("[watchdog.agent] opencode store %s unreadable, counted as in flight: %s", db, exc)
+            return False
+        return (int(row[0] or 0), row[1], row[2]) if row is not None else None
 
     def _note_watched(self, path: str) -> None:
         if self._watched != (self.provider, path):
@@ -342,6 +386,12 @@ class TranscriptScanner:
         """
         if now - self._last_refresh >= self.REFRESH_INTERVAL:
             self.refresh(now)
+        if self.provider == OPENCODE:
+            row = self._opencode_row()
+            if not isinstance(row, tuple):
+                return False
+            grew, self._opencode_updated = row[0] > self._opencode_updated, row[0]
+            return grew
         prev = self._stat_pass()
         return any(size > prev.get(path, 0) for path, size in self.sizes.items())
 
@@ -351,7 +401,14 @@ class TranscriptScanner:
 
         A parent blocked on a sub-agent holds its in-flight call in the parent
         transcript while the sub-agent's nested file is the newest.
+
+        OpenCode: the pointed session's row, in flight until it idles after its last update.
         """
+        if self.provider == OPENCODE:
+            row = self._opencode_row()
+            if row is False:
+                return True
+            return isinstance(row, tuple) and (row[2] is None or (row[1] or 0) < row[0])
         checked: set[str] = set()
         for candidate in (self.newest, self.newest_toplevel):
             if candidate is None or candidate[0] in checked:

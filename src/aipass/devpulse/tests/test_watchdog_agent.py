@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_agent.py
 # Description: Tests for the watchdog agent handler
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-04-14
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
 """Tests for apps/handlers/watchdog/agent.py: watch_agent, TranscriptScanner and StallTracker."""
@@ -15,6 +15,7 @@
 
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import time
@@ -993,3 +994,46 @@ def test_codex_rollout_tail_decides_inflight(tmp_path, monkeypatch, tail, inflig
     s = agent_handler.TranscriptScanner(tmp_path / "proj", now=0.0, branch_path=branch)
 
     assert s.last_entry_inflight() is inflight
+
+
+def _opencode_store(path: Path, session_id: str, updated: int, idle: int | None, outcome: str | None) -> None:
+    """One session_v2 row in a scratch OpenCode store, the three columns the scanner reads."""
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "create table if not exists session_v2 "
+            "(id text primary key, time_updated int, time_idle int, idle_outcome text)"
+        )
+        conn.execute(
+            "insert or replace into session_v2 values (?, ?, ?, ?)",
+            (session_id, updated, idle, outcome),
+        )
+
+
+def test_opencode_pointer_watches_the_session_row(tmp_path, monkeypatch):
+    """An opencode pointer watches no file: the row's time_updated is growth, idle after update is done."""
+    branch = tmp_path / "branch"
+    branch.mkdir()
+    store = tmp_path / "opencode.db"
+    _opencode_store(store, "ses_1", updated=1000, idle=None, outcome=None)
+    monkeypatch.setattr(agent_handler, "opencode_db", lambda: store)
+    _write_pointer(branch, "opencode", "ses_1")
+
+    s = agent_handler.TranscriptScanner(tmp_path / "proj", now=0.0, branch_path=branch)
+    assert s.provider == "opencode" and s._paths == []
+    assert s.last_entry_inflight() is True  # never idled
+    assert s.tick(1.0) is False  # nothing changed since the watch started
+
+    _opencode_store(store, "ses_1", updated=2000, idle=1500, outcome="succeeded")
+    assert s.tick(2.0) is True  # time_updated grew
+    assert s.last_entry_inflight() is True  # idled before its last update: a turn is running
+
+    _opencode_store(store, "ses_1", updated=2000, idle=2001, outcome="succeeded")
+    assert s.tick(3.0) is False
+    assert s.last_entry_inflight() is False
+
+    _write_pointer(branch, "opencode", "ses_missing")
+    s.refresh(4.0)
+    assert s.last_entry_inflight() is False  # no row is no agent, not a stall
+
+    store.write_text("not a database", encoding="utf-8")
+    assert s.last_entry_inflight() is True  # an unreadable store counts as in flight
