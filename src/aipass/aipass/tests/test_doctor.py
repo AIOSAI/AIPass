@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_doctor.py
 # Description: Tests for aipass doctor: the command, the run and the provider checks
-# Version: 1.8.2
+# Version: 1.9.0
 # Created: 2026-04-16
 # Modified: 2026-10-28
 # =============================================
@@ -878,10 +878,20 @@ class TestHooksJsonCheck:
         assert "init update" in hooks_results[0].remediation
 
 
+def _codex_on_path(monkeypatch) -> None:
+    """A fake codex whose every verb exits 1: the codex rows and plan are gated on an installed binary."""
+    monkeypatch.setattr(_doctor_wire, "_codex_which", lambda name: "/fake/codex")
+    monkeypatch.setattr(_doctor_wire, "_codex_run", lambda args, **_kw: subprocess.CompletedProcess(args, 1, "", ""))
+
+
 class TestCodexHooksRow:
     """The codex hooks row: .codex/hooks.json measured against cli.codex, and --fix writing it."""
 
     _BRIDGE = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/codex.py"
+
+    @pytest.fixture(autouse=True)
+    def _codex(self, monkeypatch) -> None:
+        _codex_on_path(monkeypatch)
 
     def _world(self, tmp_path, rows: list, settings: dict | None = None):
         manifest = tmp_path / "repo" / ".claude" / "provider_manifest.json"
@@ -933,6 +943,37 @@ class TestCodexHooksRow:
         assert f"Write 1 Codex hook(s) from cli.codex into {codex.resolve()}" in report["planned"]
         assert report["applied"] is False
         assert not codex.exists()
+
+    def test_a_settings_file_changed_before_apply_is_a_json_error_not_a_crash(self, tmp_path, monkeypatch) -> None:
+        manifest, home = self._world(tmp_path, [], {"includeGitInstructions": False})
+        settings = home / ".claude" / "settings.json"
+        planned = _doctor_wire.plan_settings_fix
+
+        def plan_then_race(*args):
+            plans = planned(*args)
+            settings.write_text('{"theirs": 1}', encoding="utf-8")
+            return plans
+
+        monkeypatch.setattr(_doctor_wire, "plan_settings_fix", plan_then_race)
+        with _home_at(home):
+            report = _doctor_wire.settings_fix_report(manifest, yes=True)
+
+        assert "settings changed since planned" in report["error"]
+        assert report["applied"] is False
+        assert settings.read_text(encoding="utf-8") == '{"theirs": 1}'
+
+    def test_no_codex_installed_shows_no_row_plans_nothing_and_writes_no_file(self, tmp_path, monkeypatch) -> None:
+        """setup.sh's `command -v codex` rule: no binary, no codex row, plan or write."""
+        manifest, home = self._world(tmp_path, [{"command": f"{self._BRIDGE} Stop", "event": "Stop"}])
+        monkeypatch.setattr(_doctor_wire, "_codex_which", lambda name: None)
+
+        with _home_at(home):
+            report = _doctor_wire.settings_fix_report(manifest)
+            _doctor_wire.fix_provider_settings(manifest, yes=True)
+
+        assert self._rows(manifest, home) == []
+        assert not [line for line in report["planned"] if "Codex" in line]
+        assert not (tmp_path / "codex_home").exists()
 
 
 class TestCodexCliRows:
@@ -1028,6 +1069,7 @@ class TestCodexCliRows:
         world = TestCodexHooksRow()
         rows = [{"command": f"{world._BRIDGE} Stop", "event": "Stop"}]
         manifest, home = world._world(tmp_path, rows)
+        _codex_on_path(monkeypatch)
         monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
         config = tmp_path / "codex" / "config.toml"
         config.parent.mkdir()
@@ -1036,7 +1078,7 @@ class TestCodexCliRows:
             labels = [r.label for r in check_provider_manifest() if r.label.startswith("codex")]
             _doctor_wire.fix_provider_settings(manifest, yes=True)
 
-        assert labels == ["codex hooks", "codex binary"]
+        assert labels[:2] == ["codex hooks", "codex binary"]
         assert config.read_text(encoding="utf-8") == "[features]\nmemories = true\n"
 
 
@@ -1487,3 +1529,50 @@ class TestDoctorFixAsks:
             groups = self._groups_via_run_doctor(fix=True, yes=True)
 
         assert groups["Identity"] == [still]
+
+
+class TestDoctorManifestRunsOnce:
+    """A default doctor probes the provider CLIs once; the interactive wire re-runs only on a gap it can close."""
+
+    _BRIDGE = TestCodexHooksRow._BRIDGE
+
+    def _versions(self, tmp_path, monkeypatch, capsys, claude: dict, settings: dict | None = None) -> "tuple[int, str]":
+        """Run a default doctor (interactive, no --fix); count `codex --version` at the subprocess edge."""
+        mod = "aipass.aipass.apps.modules.doctor"
+        stubbed = ("_check_system", "check_identity", "_check_community", "_check_structure", "_check_scaffold")
+        for name in (*stubbed, "_check_sandbox"):
+            monkeypatch.setattr(f"{mod}.{name}", lambda: [])
+        monkeypatch.setattr(f"{mod}._check_services", lambda **_kw: doctor.check_provider_manifest())
+        manifest = tmp_path / ".claude" / "provider_manifest.json"
+        manifest.parent.mkdir()
+        (tmp_path / ".claude" / "settings.json").write_text(json.dumps(settings or {}), encoding="utf-8")
+        codex = {"hooks": [{"command": f"{self._BRIDGE} Stop", "event": "Stop"}]}
+        manifest.write_text(json.dumps({"cli": {"claude": {"hooks": [], **claude}, "codex": codex}}), encoding="utf-8")
+        monkeypatch.setattr(f"{mod}._find_manifest", lambda: manifest)
+        calls: list = []
+
+        def run(args, **_kw):
+            calls.append(args[1])
+            return subprocess.CompletedProcess(args, 1, "", "")
+
+        monkeypatch.setattr(_doctor_wire, "_codex_which", lambda name: "/fake/codex")
+        monkeypatch.setattr(_doctor_wire, "_codex_run", run)
+        with patch("sys.stdin", _Stdin("", tty=False)), _home_at(tmp_path):
+            run_doctor(interactive=True)
+        return calls.count("--version"), " ".join(capsys.readouterr().out.split())
+
+    def test_a_clean_services_group_runs_the_provider_probes_once(self, tmp_path, monkeypatch, capsys) -> None:
+        deny = {"permissions": {"deny": ["Edit(~/x)"]}}
+        versions, out = self._versions(tmp_path, monkeypatch, capsys, deny, settings=deny)
+
+        assert versions == 1
+        assert "Planned changes" not in out
+
+    @pytest.mark.parametrize(
+        "claude", [{"permissions": {"deny": ["Edit(~/x)"]}}, {"settings": {"includeGitInstructions": False}}]
+    )
+    def test_a_wire_gap_still_offers_the_interactive_wire(self, tmp_path, monkeypatch, capsys, claude) -> None:
+        versions, out = self._versions(tmp_path, monkeypatch, capsys, claude)
+
+        assert versions == 2
+        assert "Planned changes to the provider settings" in out

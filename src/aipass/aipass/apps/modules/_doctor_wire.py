@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: _doctor_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-05-08
 # Modified: 2026-10-28
 # =============================================
@@ -54,7 +54,7 @@ from aipass.aipass.apps.handlers.provider_wire import (
     settings_diff,
     settings_gaps,
 )
-from aipass.aipass.apps.handlers.opencode_cli import check_opencode_cli
+from aipass.aipass.apps.handlers.opencode_cli import check_opencode_cli, cli_proc, first_line, opencode_binary
 from aipass.aipass.apps.handlers.settings_backup import DOOR_DOCTOR_FIX, DOOR_INSTALL, SettingsBackupError
 from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS, GLYPH_WARN
 
@@ -165,7 +165,7 @@ def _codex_trust_row(wanted: dict) -> SettingsCheckResult:
 def _codex_hooks_rows(manifest: dict, manifest_path: Path) -> List[SettingsCheckResult]:
     """Does the user-level hooks file hold cli.codex's rows first, and are they trusted?"""
     wanted = codex_hooks_document(manifest)
-    if wanted is None:
+    if wanted is None or not _codex_which("codex"):
         return []
     count = sum(len(entries) for entries in wanted["hooks"].values())
     try:
@@ -199,20 +199,6 @@ def check_codex_side(manifest: dict, manifest_path: Path) -> List[SettingsCheckR
     return rows + check_codex_cli(codex_config_path()) if rows else rows
 
 
-def _codex_proc(args: List[str]) -> Optional[subprocess.CompletedProcess]:
-    """Run one read-only codex verb; None when it could not run at all."""
-    try:
-        return _codex_run(args, capture_output=True, text=True, timeout=15)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        logger.warning("[doctor] %s failed: %s", " ".join(args), exc)
-        return None
-
-
-def _first_line(proc: Optional[subprocess.CompletedProcess]) -> str:
-    text = "" if proc is None else (proc.stdout or proc.stderr or "").strip()
-    return text.splitlines()[0] if text else "no output"
-
-
 def check_codex_cli(config_path: Path) -> List[SettingsCheckResult]:
     """Codex's binary, login, model and config pins. Read-only: config.toml is the owner's to edit."""
     codex = _codex_which("codex")
@@ -220,16 +206,16 @@ def check_codex_cli(config_path: Path) -> List[SettingsCheckResult]:
         return [
             SettingsCheckResult(CODEX_BINARY_LABEL, GLYPH_PASS, "not on PATH — Codex is optional, rows skipped", "")
         ]
-    version = _codex_proc([codex, "--version"])
+    version = cli_proc([codex, "--version"], _codex_run)
     if version is None or version.returncode != 0:
         rows = [SettingsCheckResult(CODEX_BINARY_LABEL, GLYPH_WARN, f"{codex}: --version failed", "Reinstall Codex")]
     else:
-        rows = [SettingsCheckResult(CODEX_BINARY_LABEL, GLYPH_PASS, _first_line(version), "")]
-    login = _codex_proc([codex, "login", "status"])
+        rows = [SettingsCheckResult(CODEX_BINARY_LABEL, GLYPH_PASS, first_line(version), "")]
+    login = cli_proc([codex, "login", "status"], _codex_run)
     if login is not None and login.returncode == 0:
-        rows.append(SettingsCheckResult(CODEX_LOGIN_LABEL, GLYPH_PASS, _first_line(login), ""))
+        rows.append(SettingsCheckResult(CODEX_LOGIN_LABEL, GLYPH_PASS, first_line(login), ""))
     else:
-        rows.append(SettingsCheckResult(CODEX_LOGIN_LABEL, GLYPH_WARN, _first_line(login), "Run: codex login"))
+        rows.append(SettingsCheckResult(CODEX_LOGIN_LABEL, GLYPH_WARN, first_line(login), "Run: codex login"))
     config, problem = read_codex_config(config_path)
     rows.append(_codex_model_row(codex, config, problem, config_path))
     rows.extend(_codex_pin_rows(config, problem, config_path))
@@ -243,7 +229,7 @@ def _codex_model_row(codex: str, config: dict, problem: str, path: Path) -> Sett
     model = config.get("model")
     if not model:
         return SettingsCheckResult(CODEX_MODEL_LABEL, GLYPH_PASS, "none set — Codex's default", "")
-    proc = _codex_proc([codex, "debug", "models"])
+    proc = cli_proc([codex, "debug", "models"], _codex_run)
     try:
         catalog = json.loads(proc.stdout)["models"] if proc is not None and proc.returncode == 0 else None
         slugs = {m["slug"]: m.get("visibility") for m in catalog} if catalog is not None else None
@@ -286,7 +272,7 @@ def check_provider_sides(manifest: dict, manifest_path: Path) -> List[SettingsCh
 
 def check_opencode_side(manifest_path: Path) -> List[SettingsCheckResult]:
     """The opencode plugin row, then OpenCode's binary, login and model. None without cli.opencode rows."""
-    state = opencode_plugin_state(manifest_path)
+    state = opencode_plugin_state(manifest_path) if opencode_binary() else None
     if state is None:
         return []
     plugin = opencode_plugin_path()
@@ -321,7 +307,7 @@ def plan_settings_fix(manifest_path: Optional[Path], settings_path: Optional[Pat
     stale = plan_stale_deny(settings_path, base=plans[0].after if plans else None)
     if stale is not None:
         plans.append(stale)
-    codex = plan_codex_hooks(manifest_path) if manifest_path is not None else None
+    codex = plan_codex_hooks(manifest_path) if manifest_path is not None and _codex_which("codex") else None
     if codex is not None:
         plans.append(codex)
     return plans
@@ -370,7 +356,11 @@ def _apply_settings_plans(
         actions = apply_settings_plan(plan, door if plan.door == DOOR_DOCTOR_FIX else None, consent)
         for action in actions if show else []:
             success(action)
-    plugin = install_opencode_plugin(manifest_path, door, consent) if manifest_path is not None else []
+    plugin = (
+        install_opencode_plugin(manifest_path, door, consent)
+        if manifest_path and opencode_plugin_plan(manifest_path)
+        else []
+    )
     for action in plugin if show else []:
         success(action)
 
@@ -429,8 +419,12 @@ def settings_fix_report(manifest_path: Optional[Path], yes: bool = False) -> dic
         "applied": False,
     }
     if (plans or plugin) and yes:
-        _apply_settings_plans(plans, DOOR_DOCTOR_FIX, CONSENT_YES, show=False, manifest_path=manifest_path)
-        report["applied"] = True
+        try:
+            _apply_settings_plans(plans, DOOR_DOCTOR_FIX, CONSENT_YES, show=False, manifest_path=manifest_path)
+            report["applied"] = True
+        except SettingsBackupError as exc:
+            logger.error("[doctor] settings write refused: %s", exc)
+            report["error"] = str(exc)
     json_handler.log_operation("settings_fix_report", {"plans": len(plans), "applied": report["applied"]})
     return report
 

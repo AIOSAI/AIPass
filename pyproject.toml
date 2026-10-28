@@ -74,7 +74,6 @@ host = [
     # failing to start.
     "python-multipart>=0.0.9",
 ]
-seedgo = []
 dev = [
     "pytest>=9.0.3",
     "pytest-cov",
@@ -106,9 +105,6 @@ aipass = "aipass.aipass.apps.aipass:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/aipass"]
-
-[tool.hatch.build.targets.wheel.force-include]
-".claude/hooks" = "aipass/_hooks"
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "src"]

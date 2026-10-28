@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: bootstrap.py
 # Description: Init handler — bootstrap an AIPass project in any directory
-# Version: 2.6.0
+# Version: 2.6.1
 # Created: 2026-03-14
 # Modified: 2026-10-28
 # =============================================
@@ -167,15 +167,14 @@ def shared_skills_state(target: Path) -> dict:
 
 
 def repair_shared_skills(target: Path) -> list[str]:
-    """Make a missing .claude/skills link, write a missing switch file, retire an unedited legacy prep command.
+    """Make a missing .claude/skills link, retire an unedited legacy prep command.
 
-    Returns one line per change. A copy, a foreign link, an edited prep.md and an existing switch file are the
-    owner's: left."""
+    Returns one line per change. A copy, a foreign link and an edited prep.md are the owner's: left. Switch files
+    are not written here: 'aipass init update' writes them and records their hash in the manifest."""
     actions: list[str] = []
     if shared_skills_state(target)["link"] == LINK_STATE_MISSING:
         note = link_skills(target)
         actions.append(note or f"Linked {SKILLS_LINK_REL} -> {_SKILLS_LINK_TARGET.as_posix()}")
-    actions.extend(f"Wrote {rel}" for rel in write_switch_pair(target))
     legacy = target / LEGACY_PREP_REL
     if legacy.is_file() and (target / PREP_SKILL_REL).is_file() and _is_managed_legacy_prep(target, legacy):
         disabled = sm.disabled_path(legacy)

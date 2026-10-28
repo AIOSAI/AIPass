@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: scaffold_content.py
 # Description: Shared template content generators for project scaffolding
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-04-22
 # Modified: 2026-10-28
 # =============================================
@@ -481,9 +481,39 @@ def prep_md() -> str:
     )
 
 
+# The respawn's AIPASS_HOME: the caller's value, else the repo that owns the drone on PATH.
+_AIPASS_HOME_ENV = (
+    r'''-e AIPASS_HOME="${AIPASS_HOME:-$(cd "$(dirname "$(readlink -f "$(command -v drone)")")/../.." && pwd)}"'''
+)
+
+
+def _handoff_shape(src: str, dst: str, trigger: str, memories: bool = True) -> str:
+    """The fenced handoff template every switch text asks for, moving the chat from *src* to *dst* on *trigger*."""
+    tail = " The next model has your memories; the handoff carries what memories do not: the live thread."
+    return (
+        "   ```\n"
+        f"   Hi. You are <branch>, the same citizen, continuing a chat that just moved from {src} to {dst} on the user's "
+        f"{trigger}. Run your startup protocol first (memories one file per call, dashboard refresh, inbox), then read "
+        "this handoff and pick up the Resuming line. Say in one line that you are here and what you are on; no recap.\n"
+        "\n"
+        f"   ## Handoff from {src}, <date time>\n"
+        "   Primary request and intent: what the user asked for, in their words where it matters.\n"
+        "   Decisions made: rulings, with who made them.\n"
+        "   Files touched: paths; which are committed, which are not.\n"
+        "   In flight: dispatches out (ids), sub-agents, background work, open mails.\n"
+        "   Errors met and how they ended.\n"
+        "   Current work: where exactly the chat stood.\n"
+        "   Resuming: the step-0 line, then the next concrete action.\n"
+        "   ```\n"
+        "\n"
+        f"   Facts only, no praise, no narration. Under 2,500 words.{tail if memories else ''}\n"
+    )
+
+
 def codex_command_md() -> str:
     """Generate .claude/commands/codex.md, the /codex switch; Claude Code only, Codex never reads it."""
-    return r"""# Switch to Codex
+    return (
+        r"""# Switch to Codex
 
 Purpose: move this chat from Claude Code to Codex in one turn, in this same terminal. It is still you: memories saved, the live thread written down, Codex opens where you stood. Works like a compaction, except the next model reads the summary.
 
@@ -497,27 +527,17 @@ Purpose: move this chat from Claude Code to Codex in one turn, in this same term
 1. **Prep, compact form.** Do the memory steps of `.agents/skills/prep/SKILL.md` (session entry, key learnings, todos reconciled, observations if any) and update any plan this chat touched. Skip the compass review and the git suggestion; note uncommitted files in the handoff instead.
 2. **Write the handoff** to `.ai_mail.local/handoff.md` (untracked, beside the session pointer). Overwrite; one file, the latest switch. The whole file is the first prompt Codex receives, so write it to the next model, in this shape:
 
-   ```
-   Hi. You are <branch>, the same citizen, continuing a chat that just moved from Claude Code to Codex on the user's /codex. Run your startup protocol first (memories one file per call, dashboard refresh, inbox), then read this handoff and pick up the Resuming line. Say in one line that you are here and what you are on; no recap.
-
-   ## Handoff from Claude Code, <date time>
-   Primary request and intent: what the user asked for, in their words where it matters.
-   Decisions made: rulings, with who made them.
-   Files touched: paths; which are committed, which are not.
-   In flight: dispatches out (ids), sub-agents, background work, open mails.
-   Errors met and how they ended.
-   Current work: where exactly the chat stood.
-   Resuming: the step-0 line, then the next concrete action.
-   ```
-
-   Facts only, no praise, no narration. Under 2,500 words. The next model has your memories; the handoff carries what memories do not: the live thread.
-3. **Switch.** Run, with the Bash tool:
+"""
+        + _handoff_shape("Claude Code", "Codex", "/codex")
+        + r"""3. **Switch.** Run, with the Bash tool:
 
    ```bash
    p=$$; PANE=""; while [ "$p" -gt 1 ] && [ -z "$PANE" ]; do PANE=$(tmux list-panes -a -F '#{pane_id} #{pane_pid}' 2>/dev/null | awk -v pid="$p" '$2==pid{print $1}'); p=$(awk '{print $4}' /proc/$p/stat); done
    [ -n "$PANE" ] || PANE=$(tmux list-panes -a -F '#{pane_id} #{pane_current_command} #{pane_current_path}' 2>/dev/null | awk -v d="$PWD" '$2=="claude" && $3==d{print $1; exit}')
    test -n "$PANE" || { echo "not in a tmux pane: open Codex yourself: codex --dangerously-bypass-approvals-and-sandbox \"\$(cat .ai_mail.local/handoff.md)\""; exit 1; }
-   tmux respawn-pane -k -t "$PANE" -c "$PWD" -e AIPASS_HOME="${AIPASS_HOME:-$(cd "$(dirname "$(readlink -f "$(command -v drone)")")/../.." && pwd)}" 'codex --dangerously-bypass-approvals-and-sandbox "$(cat .ai_mail.local/handoff.md)"'
+   tmux respawn-pane -k -t "$PANE" -c "$PWD" """
+        + _AIPASS_HOME_ENV
+        + r""" 'codex --dangerously-bypass-approvals-and-sandbox "$(cat .ai_mail.local/handoff.md)"'
    ```
 
    The posture mirrors BAUD's rooms (`claude --permission-mode bypassPermissions`): the hooks are the gates on both CLIs.
@@ -526,11 +546,13 @@ Purpose: move this chat from Claude Code to Codex in one turn, in this same term
 
 Never exist twice: do not open Codex in a new window or a second pane while this one lives. The pane is the seat.
 """
+    )
 
 
 def claude_skill_md() -> str:
     """Generate .codex/skills/claude/SKILL.md, the $claude switch; Codex only, Claude Code never reads it."""
-    return r"""---
+    return (
+        r"""---
 name: claude
 description: Switch this chat from Codex to Claude Code in one turn, in this same terminal. Use when the user says /claude, "switch to claude", "back to claude" or "hand over to claude". Saves memories, writes the handoff, replaces this pane with Claude Code greeted by the handoff.
 ---
@@ -547,39 +569,31 @@ Purpose: move this chat from Codex to Claude Code in one turn, in this same term
 1. **Prep, compact form.** Do the memory steps of `.agents/skills/prep/SKILL.md` (session entry, key learnings, todos reconciled, observations if any) and update any plan this chat touched. Skip the git suggestion; note uncommitted files in the handoff instead.
 2. **Write the handoff** to `.ai_mail.local/handoff.md` (untracked, beside the session pointer). Overwrite; one file, the latest switch. The whole file is the first prompt Claude receives, so write it to the next model, in this shape:
 
-   ```
-   Hi. You are <branch>, the same citizen, continuing a chat that just moved from Codex to Claude Code on the user's /claude. Run your startup protocol first (memories one file per call, dashboard refresh, inbox), then read this handoff and pick up the Resuming line. Say in one line that you are here and what you are on; no recap.
-
-   ## Handoff from Codex, <date time>
-   Primary request and intent: what the user asked for, in their words where it matters.
-   Decisions made: rulings, with who made them.
-   Files touched: paths; which are committed, which are not.
-   In flight: dispatches out (ids), sub-agents, background work, open mails.
-   Errors met and how they ended.
-   Current work: where exactly the chat stood.
-   Resuming: the step-0 line, then the next concrete action.
-   ```
-
-   Facts only, no praise, no narration. Under 2,500 words. The next model has your memories; the handoff carries what memories do not: the live thread.
-3. **Switch.** Run in the shell. The model: `fable` when the branch is devpulse, `opus` for every other branch (the owner's rule: Fable is devpulse's seat only).
+"""
+        + _handoff_shape("Codex", "Claude Code", "/claude")
+        + r"""3. **Switch.** Run in the shell. The model: `fable` when the branch is devpulse, `opus` for every other branch (the owner's rule: Fable is devpulse's seat only).
 
    ```bash
    MODEL=opus; [ "$(basename "$PWD")" = devpulse ] && MODEL=fable
    p=$$; PANE=""; while [ "$p" -gt 1 ] && [ -z "$PANE" ]; do PANE=$(tmux list-panes -a -F '#{pane_id} #{pane_pid}' 2>/dev/null | awk -v pid="$p" '$2==pid{print $1}'); p=$(awk '{print $4}' /proc/$p/stat); done
    [ -n "$PANE" ] || PANE=$(tmux list-panes -a -F '#{pane_id} #{pane_current_command} #{pane_current_path}' 2>/dev/null | awk -v d="$PWD" '$2=="codex" && $3==d{print $1; exit}')
    test -n "$PANE" || { echo "not in a tmux pane: open Claude yourself: claude --model $MODEL \"\$(cat .ai_mail.local/handoff.md)\""; exit 1; }
-   tmux respawn-pane -k -t "$PANE" -c "$PWD" -e AIPASS_HOME="${AIPASS_HOME:-$(cd "$(dirname "$(readlink -f "$(command -v drone)")")/../.." && pwd)}" "claude --model $MODEL \"\$(cat .ai_mail.local/handoff.md)\""
+   tmux respawn-pane -k -t "$PANE" -c "$PWD" """
+        + _AIPASS_HOME_ENV
+        + r""" "claude --model $MODEL \"\$(cat .ai_mail.local/handoff.md)\""
    ```
 
    This kills Codex in this pane and starts Claude Code in its place, in the same directory, with the handoff as its first prompt. Codex runs this shell from its long-lived app-server daemon, not from the pane: the shell's ancestors never reach the pane, and `$TMUX_PANE` is whatever pane first started the daemon. So the pane is the one whose command is `codex` and whose path is this directory. The daemon also carries the env of the Codex that first started it; when that env lacks `AIPASS_HOME`, every hook exits 127 and the value here falls back to the repo that owns the `drone` on PATH. Nothing runs after it; do not expect to see its output. The Codex thread stays on disk, resumable by hand with `codex resume`.
 
 Never exist twice: do not open Claude in a new window or a second pane while this one lives. The pane is the seat.
 """
+    )
 
 
 def opencode_command_md() -> str:
     """Generate .claude/commands/opencode.md, the /opencode switch from Claude Code."""
-    return r"""# Switch to OpenCode
+    return (
+        r"""# Switch to OpenCode
 
 Purpose: move this chat from Claude Code to OpenCode in one turn, in this same terminal. It is still you: memories saved, the live thread written down, OpenCode opens where you stood, on whatever model it is set to. Works like a compaction, except the next model reads the summary.
 
@@ -595,39 +609,31 @@ Purpose: move this chat from Claude Code to OpenCode in one turn, in this same t
 1. **Prep, compact form.** Do the memory steps of `.agents/skills/prep/SKILL.md` (session entry, key learnings, todos reconciled, observations if any) and update any plan this chat touched. Skip the compass review and the git suggestion; note uncommitted files in the handoff instead.
 2. **Write the handoff** to `.ai_mail.local/handoff.md` (untracked, beside the session pointer). Overwrite; one file, the latest switch. The whole file is the first prompt OpenCode receives, so write it to the next model, in this shape:
 
-   ```
-   Hi. You are <branch>, the same citizen, continuing a chat that just moved from Claude Code to OpenCode on the user's /opencode. Run your startup protocol first (memories one file per call, dashboard refresh, inbox), then read this handoff and pick up the Resuming line. Say in one line that you are here and what you are on; no recap.
-
-   ## Handoff from Claude Code, <date time>
-   Primary request and intent: what the user asked for, in their words where it matters.
-   Decisions made: rulings, with who made them.
-   Files touched: paths; which are committed, which are not.
-   In flight: dispatches out (ids), sub-agents, background work, open mails.
-   Errors met and how they ended.
-   Current work: where exactly the chat stood.
-   Resuming: the step-0 line, then the next concrete action.
-   ```
-
-   Facts only, no praise, no narration. Under 2,500 words. The next model has your memories; the handoff carries what memories do not: the live thread.
-3. **Switch.** Run, with the Bash tool, with `MODEL` set to the slash word from the arguments or left empty:
+"""
+        + _handoff_shape("Claude Code", "OpenCode", "/opencode")
+        + r"""3. **Switch.** Run, with the Bash tool, with `MODEL` set to the slash word from the arguments or left empty:
 
    ```bash
    MODEL=""; CFG=""; [ -n "$MODEL" ] && CFG="OPENCODE_CONFIG_CONTENT={\"model\":\"$MODEL\"}"
    p=$$; PANE=""; while [ "$p" -gt 1 ] && [ -z "$PANE" ]; do PANE=$(tmux list-panes -a -F '#{pane_id} #{pane_pid}' 2>/dev/null | awk -v pid="$p" '$2==pid{print $1}'); p=$(awk '{print $4}' /proc/$p/stat); done
    [ -n "$PANE" ] || PANE=$(tmux list-panes -a -F '#{pane_id} #{pane_current_command} #{pane_current_path}' 2>/dev/null | awk -v d="$PWD" '$2=="claude" && $3==d{print $1; exit}')
    test -n "$PANE" || { echo "not in a tmux pane: open OpenCode yourself: $CFG opencode --standalone --auto --prompt \"\$(cat .ai_mail.local/handoff.md)\""; exit 1; }
-   tmux respawn-pane -k -t "$PANE" -c "$PWD" -e AIPASS_HOME="${AIPASS_HOME:-$(cd "$(dirname "$(readlink -f "$(command -v drone)")")/../.." && pwd)}" ${CFG:+-e "$CFG"} 'PATH="$HOME/.opencode/bin:$PATH" opencode --standalone --auto --prompt "$(cat .ai_mail.local/handoff.md)"'
+   tmux respawn-pane -k -t "$PANE" -c "$PWD" """
+        + _AIPASS_HOME_ENV
+        + r""" ${CFG:+-e "$CFG"} 'PATH="$HOME/.opencode/bin:$PATH" opencode --standalone --auto --prompt "$(cat .ai_mail.local/handoff.md)"'
    ```
 
    The `PATH` prefix is the curl installer's bin, which `~/.bashrc` adds for login shells only: a respawned pane runs `sh -c` with the tmux server's env. `--auto` is OpenCode's bypass posture, as `--permission-mode bypassPermissions` is Claude's: the hooks are the gates on every CLI. This kills Claude Code in this pane and starts OpenCode in its place, in the same directory, with the handoff as its first prompt. The pane is found by walking up from this shell to the process tmux started, never from `$TMUX_PANE`; when the walk finds nothing, by the pane whose command is `claude` and whose path is this directory. `--standalone` gives this seat a private server with this pane's env: without it the TUI joins the user's shared server, which keeps the env of whoever started it, so the inline model config and `AIPASS_HOME` carried by `-e` never reach the model call or the hooks. Nothing runs after it; do not expect to see its output. The Claude transcript stays on disk, resumable by hand with `claude --resume`.
 
 Never exist twice: do not open OpenCode in a new window or a second pane while this one lives. The pane is the seat.
 """
+    )
 
 
 def opencode_skill_md() -> str:
     """Generate .codex/skills/opencode/SKILL.md, the $opencode switch from Codex."""
-    return r"""---
+    return (
+        r"""---
 name: opencode
 description: Switch this chat from Codex to OpenCode in one turn, in this same terminal. Use when the user says $opencode, "switch to opencode" or "hand over to opencode". Saves memories, writes the handoff, replaces this pane with OpenCode greeted by the handoff.
 ---
@@ -646,39 +652,31 @@ Purpose: move this chat from Codex to OpenCode in one turn, in this same termina
 1. **Prep, compact form.** Do the memory steps of `.agents/skills/prep/SKILL.md` (session entry, key learnings, todos reconciled, observations if any) and update any plan this chat touched. Skip the git suggestion; note uncommitted files in the handoff instead.
 2. **Write the handoff** to `.ai_mail.local/handoff.md` (untracked, beside the session pointer). Overwrite; one file, the latest switch. The whole file is the first prompt OpenCode receives, so write it to the next model, in this shape:
 
-   ```
-   Hi. You are <branch>, the same citizen, continuing a chat that just moved from Codex to OpenCode on the user's $opencode. Run your startup protocol first (memories one file per call, dashboard refresh, inbox), then read this handoff and pick up the Resuming line. Say in one line that you are here and what you are on; no recap.
-
-   ## Handoff from Codex, <date time>
-   Primary request and intent: what the user asked for, in their words where it matters.
-   Decisions made: rulings, with who made them.
-   Files touched: paths; which are committed, which are not.
-   In flight: dispatches out (ids), sub-agents, background work, open mails.
-   Errors met and how they ended.
-   Current work: where exactly the chat stood.
-   Resuming: the step-0 line, then the next concrete action.
-   ```
-
-   Facts only, no praise, no narration. Under 2,500 words. The next model has your memories; the handoff carries what memories do not: the live thread.
-3. **Switch.** Run in the shell, with `MODEL` set to the slash word from the message or left empty:
+"""
+        + _handoff_shape("Codex", "OpenCode", "$opencode")
+        + r"""3. **Switch.** Run in the shell, with `MODEL` set to the slash word from the message or left empty:
 
    ```bash
    MODEL=""; CFG=""; [ -n "$MODEL" ] && CFG="OPENCODE_CONFIG_CONTENT={\"model\":\"$MODEL\"}"
    p=$$; PANE=""; while [ "$p" -gt 1 ] && [ -z "$PANE" ]; do PANE=$(tmux list-panes -a -F '#{pane_id} #{pane_pid}' 2>/dev/null | awk -v pid="$p" '$2==pid{print $1}'); p=$(awk '{print $4}' /proc/$p/stat); done
    [ -n "$PANE" ] || PANE=$(tmux list-panes -a -F '#{pane_id} #{pane_current_command} #{pane_current_path}' 2>/dev/null | awk -v d="$PWD" '$2=="codex" && $3==d{print $1; exit}')
    test -n "$PANE" || { echo "not in a tmux pane: open OpenCode yourself: $CFG opencode --standalone --auto --prompt \"\$(cat .ai_mail.local/handoff.md)\""; exit 1; }
-   tmux respawn-pane -k -t "$PANE" -c "$PWD" -e AIPASS_HOME="${AIPASS_HOME:-$(cd "$(dirname "$(readlink -f "$(command -v drone)")")/../.." && pwd)}" ${CFG:+-e "$CFG"} 'PATH="$HOME/.opencode/bin:$PATH" opencode --standalone --auto --prompt "$(cat .ai_mail.local/handoff.md)"'
+   tmux respawn-pane -k -t "$PANE" -c "$PWD" """
+        + _AIPASS_HOME_ENV
+        + r""" ${CFG:+-e "$CFG"} 'PATH="$HOME/.opencode/bin:$PATH" opencode --standalone --auto --prompt "$(cat .ai_mail.local/handoff.md)"'
    ```
 
    The `PATH` prefix is the curl installer's bin, which `~/.bashrc` adds for login shells only: a respawned pane runs `sh -c` with the tmux server's env. `--auto` is OpenCode's bypass posture, as `--dangerously-bypass-approvals-and-sandbox` is Codex's: the hooks are the gates on every CLI. This kills Codex in this pane and starts OpenCode in its place, in the same directory, with the handoff as its first prompt. Codex runs this shell from its long-lived app-server daemon, not from the pane: the shell's ancestors never reach the pane, so the pane is the one whose command is `codex` and whose path is this directory. `--standalone` gives this seat a private server with this pane's env: without it the TUI joins the user's shared server, which keeps the env of whoever started it, so the inline model config and `AIPASS_HOME` carried by `-e` never reach the model call or the hooks. Nothing runs after it; do not expect to see its output. The Codex thread stays on disk, resumable by hand with `codex resume`.
 
 Never exist twice: do not open OpenCode in a new window or a second pane while this one lives. The pane is the seat.
 """
+    )
 
 
 def opencode_claude_md() -> str:
     """Generate .opencode/commands/claude.md, the /claude switch from OpenCode."""
-    return r"""---
+    return (
+        r"""---
 description: Switch this chat from OpenCode to Claude Code in one turn, in this same terminal. Saves memories, writes the handoff, replaces this pane with Claude Code greeted by the handoff. Argument: fresh (no handoff).
 ---
 
@@ -696,38 +694,30 @@ Arguments given: `$ARGUMENTS`
 1. **Prep, compact form.** Load the `prep` skill with the skill tool and do its memory steps (session entry, key learnings, todos reconciled, observations if any); update any plan this chat touched. Skip the git suggestion; note uncommitted files in the handoff instead.
 2. **Write the handoff** to `.ai_mail.local/handoff.md` (untracked, beside the session pointer). Overwrite; one file, the latest switch. The whole file is the first prompt Claude receives, so write it to the next model, in this shape:
 
-   ```
-   Hi. You are <branch>, the same citizen, continuing a chat that just moved from OpenCode to Claude Code on the user's /claude. Run your startup protocol first (memories one file per call, dashboard refresh, inbox), then read this handoff and pick up the Resuming line. Say in one line that you are here and what you are on; no recap.
-
-   ## Handoff from OpenCode, <date time>
-   Primary request and intent: what the user asked for, in their words where it matters.
-   Decisions made: rulings, with who made them.
-   Files touched: paths; which are committed, which are not.
-   In flight: dispatches out (ids), sub-agents, background work, open mails.
-   Errors met and how they ended.
-   Current work: where exactly the chat stood.
-   Resuming: the step-0 line, then the next concrete action.
-   ```
-
-   Facts only, no praise, no narration. Under 2,500 words.
-3. **Switch.** Run this with the shell tool, exactly. The model: `fable` when the branch is devpulse, `opus` for every other branch (the owner's rule).
+"""
+        + _handoff_shape("OpenCode", "Claude Code", "/claude", memories=False)
+        + r"""3. **Switch.** Run this with the shell tool, exactly. The model: `fable` when the branch is devpulse, `opus` for every other branch (the owner's rule).
 
    ```bash
    MODEL=opus; [ "$(basename "$PWD")" = devpulse ] && MODEL=fable
    PANE=$(tmux list-panes -a -F '#{pane_id} #{pane_current_command} #{pane_current_path}' 2>/dev/null | awk -v d="$PWD" '$2=="opencode" && $3==d{print $1; exit}')
    test -n "$PANE" || { echo "not in a tmux pane: open Claude yourself: claude --model $MODEL \"\$(cat .ai_mail.local/handoff.md)\""; exit 1; }
-   tmux respawn-pane -k -t "$PANE" -c "$PWD" -e AIPASS_HOME="${AIPASS_HOME:-$(cd "$(dirname "$(readlink -f "$(command -v drone)")")/../.." && pwd)}" "claude --model $MODEL \"\$(cat .ai_mail.local/handoff.md)\""
+   tmux respawn-pane -k -t "$PANE" -c "$PWD" """
+        + _AIPASS_HOME_ENV
+        + r""" "claude --model $MODEL \"\$(cat .ai_mail.local/handoff.md)\""
    ```
 
    This kills OpenCode in this pane and starts Claude Code in its place, in the same directory, with the handoff as its first prompt. OpenCode runs this shell inside its background server, not in the pane, so the pane is found as the one whose command is `opencode` and whose path is this directory. Nothing runs after it; do not expect to see its output. The OpenCode session stays in its store, resumable by hand with `opencode --continue`.
 
 Never exist twice: do not open Claude in a new window or a second pane while this one lives. The pane is the seat.
 """
+    )
 
 
 def opencode_codex_md() -> str:
     """Generate .opencode/commands/codex.md, the /codex switch from OpenCode."""
-    return r"""---
+    return (
+        r"""---
 description: Switch this chat from OpenCode to Codex in one turn, in this same terminal. Saves memories, writes the handoff, replaces this pane with Codex greeted by the handoff. Argument: fresh (no handoff).
 ---
 
@@ -745,32 +735,23 @@ Arguments given: `$ARGUMENTS`
 1. **Prep, compact form.** Load the `prep` skill with the skill tool and do its memory steps (session entry, key learnings, todos reconciled, observations if any); update any plan this chat touched. Skip the git suggestion; note uncommitted files in the handoff instead.
 2. **Write the handoff** to `.ai_mail.local/handoff.md` (untracked, beside the session pointer). Overwrite; one file, the latest switch. The whole file is the first prompt Codex receives, so write it to the next model, in this shape:
 
-   ```
-   Hi. You are <branch>, the same citizen, continuing a chat that just moved from OpenCode to Codex on the user's /codex. Run your startup protocol first (memories one file per call, dashboard refresh, inbox), then read this handoff and pick up the Resuming line. Say in one line that you are here and what you are on; no recap.
-
-   ## Handoff from OpenCode, <date time>
-   Primary request and intent: what the user asked for, in their words where it matters.
-   Decisions made: rulings, with who made them.
-   Files touched: paths; which are committed, which are not.
-   In flight: dispatches out (ids), sub-agents, background work, open mails.
-   Errors met and how they ended.
-   Current work: where exactly the chat stood.
-   Resuming: the step-0 line, then the next concrete action.
-   ```
-
-   Facts only, no praise, no narration. Under 2,500 words.
-3. **Switch.** Run this with the shell tool, exactly:
+"""
+        + _handoff_shape("OpenCode", "Codex", "/codex", memories=False)
+        + r"""3. **Switch.** Run this with the shell tool, exactly:
 
    ```bash
    PANE=$(tmux list-panes -a -F '#{pane_id} #{pane_current_command} #{pane_current_path}' 2>/dev/null | awk -v d="$PWD" '$2=="opencode" && $3==d{print $1; exit}')
    test -n "$PANE" || { echo "not in a tmux pane: open Codex yourself: codex --dangerously-bypass-approvals-and-sandbox \"\$(cat .ai_mail.local/handoff.md)\""; exit 1; }
-   tmux respawn-pane -k -t "$PANE" -c "$PWD" -e AIPASS_HOME="${AIPASS_HOME:-$(cd "$(dirname "$(readlink -f "$(command -v drone)")")/../.." && pwd)}" 'codex --dangerously-bypass-approvals-and-sandbox "$(cat .ai_mail.local/handoff.md)"'
+   tmux respawn-pane -k -t "$PANE" -c "$PWD" """
+        + _AIPASS_HOME_ENV
+        + r""" 'codex --dangerously-bypass-approvals-and-sandbox "$(cat .ai_mail.local/handoff.md)"'
    ```
 
    The posture mirrors every AIPass seat: the hooks are the gates on all three CLIs. This kills OpenCode in this pane and starts Codex in its place, in the same directory, with the handoff as its first prompt. OpenCode runs this shell inside its background server, not in the pane, so the pane is found as the one whose command is `opencode` and whose path is this directory. Nothing runs after it; do not expect to see its output. The OpenCode session stays in its store, resumable by hand with `opencode --continue`.
 
 Never exist twice: do not open Codex in a new window or a second pane while this one lives. The pane is the seat.
 """
+    )
 
 
 def _opencode_ritual_md(description: str, skill: str) -> str:

@@ -97,7 +97,7 @@ Codex reads the same hook shape from the user-level `$CODEX_HOME/hooks.json`
 doors merge the manifest's `cli.codex.hooks` rows into it: rows running the
 AIPass Codex bridge are replaced, every other row is kept, and the AIPass groups
 come first in each event. A manifest with no `cli.codex` rows leaves the file
-as it is. The `codex hooks` row passes when the AIPass rows match the manifest,
+as it is, and so does a machine with no `codex` on PATH: no row, no write. The `codex hooks` row passes when the AIPass rows match the manifest,
 and warns, naming `aipass doctor --fix`, when they are missing or differ. Once
 they match, `codex trust` checks that `~/.codex/config.toml` holds a
 `trusted_hash` under `[hooks.state."<file>:<event>:<group>:<index>"]` for each
@@ -112,7 +112,8 @@ rows read the Codex side and never write `~/.codex/config.toml`; see
 OpenCode has no hook file: its hooks run through one plugin, the hooks branch's
 `apps/handlers/bridges/opencode_plugin.ts`, installed byte-equal as
 `$XDG_CONFIG_HOME/opencode/plugins/aipass.ts` (`~/.config/opencode/plugins/aipass.ts`
-when `XDG_CONFIG_HOME` is unset). When the manifest has `cli.opencode` rows, the
+when `XDG_CONFIG_HOME` is unset). With no `opencode` installed there is no row and
+no write. When the manifest has `cli.opencode` rows, the
 `opencode plugin` row passes on a byte-equal copy and warns on a missing or stale
 one, naming `aipass doctor --fix` and the `cp` that does the same by hand: the
 verdict `drone @hooks verify` gives, in doctor's words. `--fix` copies it, with
@@ -164,11 +165,11 @@ the project holds every switch file: `.claude/commands/codex.md` (`/codex`) and
 `.claude/commands/opencode.md` (`/opencode`) for Claude Code,
 `.codex/skills/claude/SKILL.md` (`$claude`) and `.codex/skills/opencode/SKILL.md`
 (`$opencode`) for Codex, and `.opencode/commands/` `claude.md`, `codex.md`,
-`memo.md`, `prep.md` and `compass.md` for OpenCode. It names each missing one.
-`doctor --fix` makes a missing link, writes a missing switch file and renames an
-unedited legacy `prep.md` to `prep(disabled).md`, one `skills fix` row per
-change; a copy, a foreign link, an existing switch file and an edited `prep.md`
-are left for you. On Windows the link needs `git config core.symlinks true` and the
+`memo.md`, `prep.md` and `compass.md` for OpenCode. It names each missing one,
+and the cure is `aipass init update`, which writes them and records their hash.
+`doctor --fix` makes a missing link and renames an unedited legacy `prep.md` to
+`prep(disabled).md`, one `skills fix` row per change; it writes no switch file,
+and a copy, a foreign link and an edited `prep.md` are left for you. On Windows the link needs `git config core.symlinks true` and the
 right to make links; without them `--fix` writes a copy that will not follow
 `.agents/skills`, and the row says so.
 

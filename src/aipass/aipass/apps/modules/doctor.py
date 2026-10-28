@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.13.0
+# Version: 1.14.0
 # Created: 2026-04-16
 # Modified: 2026-10-28
 # =============================================
@@ -475,13 +475,14 @@ def check_provider_manifest(
         return results
 
     manifest_hooks = claude_section.get("hooks", [])
-    provider_settings_path = settings_path
-    provider_hooks: dict = {}
-    if provider_settings_path.exists():
+    provider: dict = {}
+    if settings_path.exists():
         try:
-            provider_hooks = json.loads(provider_settings_path.read_text(encoding="utf-8")).get("hooks", {})
+            provider = json.loads(settings_path.read_text(encoding="utf-8"))
         except Exception as exc:
-            logger.warning("[doctor] provider settings read error (hooks): %s", exc)
+            logger.warning("[doctor] provider settings read error: %s", exc)
+    provider = provider if isinstance(provider, dict) else {}
+    provider_hooks: dict = provider.get("hooks", {})
 
     missing_hooks = []
     for hook in manifest_hooks:
@@ -521,14 +522,7 @@ def check_provider_manifest(
     missing_env: List[str] = []
     manifest_env = claude_section.get("env", {})
     if manifest_env:
-        provider_settings_path = settings_path
-        provider_env: dict = {}
-        if provider_settings_path.exists():
-            try:
-                provider_env = json.loads(provider_settings_path.read_text(encoding="utf-8")).get("env", {})
-            except Exception as exc:
-                logger.warning("[doctor] provider settings read error (env): %s", exc)
-
+        provider_env: dict = provider.get("env", {})
         missing_env = [k for k in manifest_env if k not in provider_env]
         if not missing_env:
             results.append(CheckResult("env vars", GLYPH_PASS, f"{len(manifest_env)} provider env vars set", ""))
@@ -548,14 +542,7 @@ def check_provider_manifest(
     manifest_deny = manifest_perms.get("deny", [])
     manifest_ask = manifest_perms.get("ask", [])
     if manifest_deny or manifest_ask:
-        provider_settings_path = settings_path
-        provider_perms: dict = {}
-        if provider_settings_path.exists():
-            try:
-                provider_perms = json.loads(provider_settings_path.read_text(encoding="utf-8")).get("permissions", {})
-            except Exception as exc:
-                logger.warning("[doctor] provider settings read error (permissions): %s", exc)
-
+        provider_perms: dict = provider.get("permissions", {})
         provider_deny = set(provider_perms.get("deny", []))
         provider_ask = set(provider_perms.get("ask", []))
 
@@ -1137,7 +1124,7 @@ def _check_shared_skills(root: Path) -> List[CheckResult]:
 
     if state["switch_missing"]:
         detail = f"missing {', '.join(state['switch_missing'])}: the chat cannot switch CLI here"
-        cure = f"{fix}, or 'aipass init update {root}'"
+        cure = f"Run 'aipass init update {root}'"
         rows.append(CheckResult("provider switch", GLYPH_WARN, detail, cure))
     else:
         detail = "Claude, Codex and OpenCode switches present (" + ", ".join(rel for rel, _ in bs.SWITCH_PAIR) + ")"
@@ -1146,7 +1133,7 @@ def _check_shared_skills(root: Path) -> List[CheckResult]:
 
 
 def _fix_shared_skills() -> List[CheckResult]:
-    """--fix: make a missing skills link, write a missing switch file, retire an unedited legacy prep command."""
+    """--fix: make a missing skills link, retire an unedited legacy prep command."""
     from aipass.aipass.apps.handlers.init.bootstrap import repair_shared_skills
 
     reg_path = _find_registry()
@@ -1240,6 +1227,12 @@ def _check_scaffold() -> List[CheckResult]:
     return results + skills_rows
 
 
+def _wire_gap(row: CheckResult) -> bool:
+    """A non-pass row the interactive wire could close: hooks, env, permissions or a settings key."""
+    wired = row.label in ("hooks", "env vars", "permissions") or row.detail.startswith("manifest wants")
+    return wired and row.glyph != GLYPH_PASS
+
+
 def _compute_doctor_groups(
     verbose: bool = False,
     interactive: bool = False,
@@ -1277,7 +1270,7 @@ def _compute_doctor_groups(
         stale_results = [CheckResult(*tup) for tup in reconcile_stale_deny(fix=False)]
         services = groups.get("Services", [])
         groups["Services"] = [r for r in services if r.label != "rm deny migration"] + stale_results + settings_rows
-    elif interactive:
+    elif interactive and any(_wire_gap(row) for row in groups.get("Services", [])):
         manifest_results = check_provider_manifest(interactive=True)
         if manifest_results:
             groups["Services"] = merge_manifest_rows(groups.get("Services", []), manifest_results)

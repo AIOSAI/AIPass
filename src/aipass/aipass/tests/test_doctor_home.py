@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_doctor_home.py
 # Description: Tests for doctor's home, owner-seating, preflight, citizen-count, shared-skills, shadow and smoke rows
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-10-08
 # Modified: 2026-10-28
 # =============================================
@@ -666,15 +666,6 @@ class TestSharedSkillsRows:
         fixes = [r.detail for r in self.printed["Scaffold"] if r.label == "skills fix"]
         assert fixes == [
             "Linked .claude/skills -> ../.agents/skills",
-            "Wrote .claude/commands/codex.md",
-            "Wrote .codex/skills/claude/SKILL.md",
-            "Wrote .claude/commands/opencode.md",
-            "Wrote .codex/skills/opencode/SKILL.md",
-            "Wrote .opencode/commands/claude.md",
-            "Wrote .opencode/commands/codex.md",
-            "Wrote .opencode/commands/memo.md",
-            "Wrote .opencode/commands/prep.md",
-            "Wrote .opencode/commands/compass.md",
             "Retired .claude/commands/prep.md -> prep(disabled).md: .agents/skills/prep/SKILL.md replaces it",
         ]
 
@@ -702,20 +693,25 @@ class TestSharedSkillsRows:
         missing += ".opencode/commands/claude.md, .opencode/commands/codex.md, .opencode/commands/memo.md, "
         missing += ".opencode/commands/prep.md, .opencode/commands/compass.md"
         assert row.detail == f"missing {missing}: the chat cannot switch CLI here"
-        assert row.remediation == f"Run: aipass doctor --fix, or 'aipass init update {self.root}'"
+        assert row.remediation == f"Run 'aipass init update {self.root}'"
 
-    def test_fix_writes_the_missing_switch_file_and_leaves_an_edited_one(self) -> None:
+    def test_fix_writes_no_switch_file_and_still_links_the_skills(self) -> None:
+        self._skill("prep", "name: prep\ndescription: wrap up\n")
         skill = self.root / ".codex" / "skills" / "claude" / "SKILL.md"
         skill.parent.mkdir(parents=True)
         skill.write_text("# my own switch\n", encoding="utf-8")
 
         rows = self._rows(fix=True)
 
-        assert (self.root / ".claude" / "commands" / "codex.md").read_text(encoding="utf-8") == sc.codex_command_md()
+        assert not (self.root / ".claude" / "commands" / "codex.md").exists()
+        assert not (self.root / ".opencode").exists()
         assert skill.read_text(encoding="utf-8") == "# my own switch\n"
-        assert rows["provider switch"].glyph == GLYPH_PASS
-        assert rows["provider switch"].detail.startswith("Claude, Codex and OpenCode switches present (")
-        assert ".opencode/commands/compass.md)" in rows["provider switch"].detail
+        assert (self.root / ".claude" / "skills").resolve() == (self.root / ".agents" / "skills").resolve()
+        assert rows["skills link"].glyph == GLYPH_PASS
+        assert rows["provider switch"].glyph == GLYPH_WARN
+        assert rows["provider switch"].detail.startswith(
+            "missing .claude/commands/codex.md, .claude/commands/opencode.md"
+        )
 
 
 class TestInstructionShadowRows:

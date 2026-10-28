@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: provider_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.10.0
+# Version: 1.11.0
 # Created: 2026-07-11
 # Modified: 2026-10-28
 # =============================================
@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Mapping, NamedTuple, Optional
 
 from aipass.prax import logger
 from aipass.aipass.apps.handlers.json import json_handler
+from aipass.aipass.apps.handlers.opencode_cli import opencode_binary
 from aipass.aipass.apps.handlers.settings_backup import (
     DOOR_DOCTOR_FIX,
     DOOR_SETUP_SH,
@@ -715,8 +716,8 @@ def opencode_plugin_state(manifest_path: Path) -> Optional[str]:
 
 
 def opencode_plugin_plan(manifest_path: Optional[Path]) -> List[str]:
-    """The planned line for a missing or stale OpenCode plugin; [] when it matches or is not wanted."""
-    if manifest_path is None or opencode_plugin_state(manifest_path) in (None, STATE_SET):
+    """The planned line for a missing or stale OpenCode plugin; [] when it matches, is not wanted, or no opencode."""
+    if manifest_path is None or not opencode_binary() or opencode_plugin_state(manifest_path) in (None, STATE_SET):
         return []
     return [f"Install the OpenCode plugin: cp {opencode_plugin_source(manifest_path)} {opencode_plugin_path()}"]
 

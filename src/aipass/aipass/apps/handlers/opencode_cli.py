@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: opencode_cli.py
 # Description: Doctor's read-only OpenCode rows — binary, login, model
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-28
 # Modified: 2026-10-28
 # =============================================
@@ -46,16 +46,16 @@ class OpenCodeRow(NamedTuple):
     remediation: str
 
 
-def _proc(args: List[str]) -> Optional[subprocess.CompletedProcess]:
-    """Run one read-only opencode verb; None when it could not run at all."""
+def cli_proc(args: List[str], run=None) -> Optional[subprocess.CompletedProcess]:
+    """Run one read-only CLI verb; None when it could not run at all. *run* is the caller's seam."""
     try:
-        return _run(args, capture_output=True, text=True, timeout=15)
+        return (run or _run)(args, capture_output=True, text=True, timeout=15)
     except (OSError, subprocess.TimeoutExpired) as exc:
         logger.warning("[opencode_cli] %s failed: %s", " ".join(args), exc)
         return None
 
 
-def _first_line(proc: Optional[subprocess.CompletedProcess]) -> str:
+def first_line(proc: Optional[subprocess.CompletedProcess]) -> str:
     """The first line the verb printed, stdout before stderr."""
     text = "" if proc is None else (proc.stdout or proc.stderr or "").strip()
     return text.splitlines()[0] if text else "no output"
@@ -94,22 +94,27 @@ def _auth_names(proc: Optional[subprocess.CompletedProcess]) -> Optional[List[st
     return [str(e.get("provider") or e.get("id") or e) if isinstance(e, dict) else str(e) for e in listed]
 
 
-def check_opencode_cli(config_dir: Path) -> List[OpenCodeRow]:
-    """OpenCode's binary, login and model; absent, one PASS row and nothing runs."""
+def opencode_binary() -> Optional[str]:
+    """The opencode executable, or None when OpenCode is not installed."""
     # The curl installer puts opencode in ~/.opencode/bin, on PATH only through ~/.bashrc.
     search = os.pathsep.join([os.environ.get("PATH", ""), str(Path.home() / ".opencode" / "bin")])
-    opencode = _which("opencode", path=search)
+    return _which("opencode", path=search)
+
+
+def check_opencode_cli(config_dir: Path) -> List[OpenCodeRow]:
+    """OpenCode's binary, login and model; absent, one PASS row and nothing runs."""
+    opencode = opencode_binary()
     if not opencode:
         return [OpenCodeRow(OPENCODE_BINARY_LABEL, GLYPH_PASS, NOT_INSTALLED, "")]
-    version = _proc([opencode, "--version"])
+    version = cli_proc([opencode, "--version"])
     if version is None or version.returncode != 0:
         rows = [OpenCodeRow(OPENCODE_BINARY_LABEL, GLYPH_WARN, f"{opencode}: --version failed", "Reinstall OpenCode")]
     else:
-        rows = [OpenCodeRow(OPENCODE_BINARY_LABEL, GLYPH_PASS, f"{_first_line(version)} ({opencode})", "")]
-    auth = _proc([opencode, "auth", "list", "--format", "json"])
+        rows = [OpenCodeRow(OPENCODE_BINARY_LABEL, GLYPH_PASS, f"{first_line(version)} ({opencode})", "")]
+    auth = cli_proc([opencode, "auth", "list", "--format", "json"])
     names = _auth_names(auth)
     if names is None:
-        rows.append(OpenCodeRow(OPENCODE_LOGIN_LABEL, GLYPH_WARN, _first_line(auth), "Run: opencode auth list"))
+        rows.append(OpenCodeRow(OPENCODE_LOGIN_LABEL, GLYPH_WARN, first_line(auth), "Run: opencode auth list"))
     else:
         rows.append(OpenCodeRow(OPENCODE_LOGIN_LABEL, GLYPH_PASS, ", ".join(names) or NO_LOGIN, ""))
     model, problem = _read_model(config_dir)

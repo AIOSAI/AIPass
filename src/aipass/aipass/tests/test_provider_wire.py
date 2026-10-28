@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_provider_wire.py
 # Description: Tests for provider_wire — hook merges per CLI, backup and receipt first; doctor's codex, opencode rows
-# Version: 1.11.0
+# Version: 1.12.0
 # Created: 2026-08-01
 # Modified: 2026-10-28
 # =============================================
@@ -30,7 +30,6 @@ import pytest  # pyright: ignore[reportMissingImports]
 from aipass.aipass.tests.support_doctor import _home_at
 
 from aipass.aipass.apps.handlers import opencode_cli, provider_wire, settings_backup
-from aipass.aipass.apps.handlers.opencode_cli import NOT_INSTALLED
 from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS, GLYPH_WARN
 from aipass.aipass.apps.modules.doctor import check_provider_manifest
 from aipass.aipass.apps.modules._doctor_wire import (
@@ -64,6 +63,26 @@ def _wire(manifest, settings_path) -> list:
     plan = plan_wire_provider(manifest, settings_path)
     assert plan is not None
     return apply_settings_plan(plan)
+
+
+def _failing_cli(args, **_kw) -> subprocess.CompletedProcess:
+    """A fake CLI whose every verb exits 1: the rows read it, nothing real runs."""
+    return subprocess.CompletedProcess(args, 1, "", "")
+
+
+@pytest.fixture
+def codex_on_path(monkeypatch) -> None:
+    """Hand doctor a fake codex: its rows and plans are gated on the binary being installed."""
+    wire = "aipass.aipass.apps.modules._doctor_wire"
+    monkeypatch.setattr(f"{wire}._codex_which", lambda name: "/fake/codex")
+    monkeypatch.setattr(f"{wire}._codex_run", _failing_cli)
+
+
+@pytest.fixture
+def opencode_on_path(monkeypatch) -> None:
+    """Codex's twin: a fake opencode binary for the plugin rows and plan."""
+    monkeypatch.setattr(opencode_cli, "_which", lambda name, path=None: "/fake/opencode")
+    monkeypatch.setattr(opencode_cli, "_run", _failing_cli)
 
 
 def _write_world(tmp_path, manifest_hooks: list, existing_hooks: dict):
@@ -904,6 +923,7 @@ class TestCodexHooks:
         assert [r["file"] for r in _receipts(codex)] == ["config.toml"]
 
 
+@pytest.mark.usefixtures("codex_on_path")
 class TestCodexDoctorRows:
     """Doctor's codex hooks rows: the user-level file, its trust in config.toml, a repo file firing twice."""
 
@@ -1104,6 +1124,7 @@ class TestOpenCodePlugin:
         assert actions[0] == f"Backed up the OpenCode plugin to {_folder(plugin) / backup}"
         assert plugin.read_bytes() == _PLUGIN_SOURCE
 
+    @pytest.mark.usefixtures("opencode_on_path")
     def test_a_manifest_without_opencode_rows_installs_nothing(self, tmp_path) -> None:
         manifest, _source, plugin = _opencode_world(tmp_path, rows=False)
 
@@ -1112,6 +1133,7 @@ class TestOpenCodePlugin:
         assert not plugin.parent.exists()
 
 
+@pytest.mark.usefixtures("opencode_on_path")
 class TestOpenCodeDoctorRows:
     """Doctor's opencode rows: the plugin measured against the source, fixed by --fix; the CLI read, never run."""
 
@@ -1124,10 +1146,8 @@ class TestOpenCodeDoctorRows:
         after = check_opencode_side(manifest)
 
         cure = f"Run: aipass doctor --fix (or cp {source} {plugin})"
-        assert before == [
-            ("opencode plugin", GLYPH_WARN, f"OpenCode plugin missing: {plugin}", cure),
-            ("opencode binary", GLYPH_PASS, NOT_INSTALLED, ""),
-        ]
+        assert before[0] == ("opencode plugin", GLYPH_WARN, f"OpenCode plugin missing: {plugin}", cure)
+        assert before[1][:2] == ("opencode binary", GLYPH_WARN)
         assert fixed == []
         assert plugin.read_bytes() == _PLUGIN_SOURCE
         assert after[0] == ("opencode plugin", GLYPH_PASS, f"{plugin} matches the hooks branch copy", "")
@@ -1135,7 +1155,7 @@ class TestOpenCodeDoctorRows:
     def test_a_stale_plugin_warns_and_the_json_plan_names_the_copy_without_writing(self, tmp_path) -> None:
         manifest, source, plugin = _opencode_world(tmp_path, installed=b"// old\n")
 
-        (row, _binary) = check_opencode_side(manifest)
+        row, *_cli_rows = check_opencode_side(manifest)
         with _home_at(tmp_path / "home"):
             report = settings_fix_report(manifest)
 
@@ -1151,7 +1171,25 @@ class TestOpenCodeDoctorRows:
             with _home_at(tmp_path / "home"):
                 labels = [r.label for r in check_provider_manifest() if r.label.startswith("opencode")]
 
-        assert labels == ["opencode plugin", "opencode binary"]
+        assert labels == ["opencode plugin", "opencode binary", "opencode login", "opencode model"]
+
+    def test_no_opencode_installed_shows_no_row_plans_nothing_and_writes_no_plugin(self, tmp_path, monkeypatch) -> None:
+        """setup.sh's `command -v opencode` rule: no binary, no plugin row, plan or write."""
+        manifest, _source, plugin = _opencode_world(tmp_path)
+        doc = json.loads(manifest.read_text(encoding="utf-8"))
+        doc["cli"]["claude"]["permissions"] = {"deny": ["Edit(~/x)"]}  # another plan, so --fix does write
+        manifest.write_text(json.dumps(doc), encoding="utf-8")
+        monkeypatch.setattr(opencode_cli, "_which", lambda name, path=None: None)
+
+        with _home_at(tmp_path / "home"):
+            report = settings_fix_report(manifest)
+            fixed = fix_provider_settings(manifest, yes=True)
+
+        assert check_opencode_side(manifest) == []
+        assert not [line for line in report["planned"] if "OpenCode" in line]
+        assert fixed == []
+        assert (tmp_path / "home" / ".claude" / "settings.json").exists()
+        assert not plugin.parent.exists()
 
     def _cli(self, monkeypatch, tmp_path, auth: tuple = (0, "[]"), config: str | None = None) -> list:
         searched = []
