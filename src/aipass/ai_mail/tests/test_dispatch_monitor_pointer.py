@@ -12,6 +12,7 @@
 # seedgo: no-test-needed(shared) — main()'s attempts and the bounce: tests/test_dispatch_monitor.py
 
 import json
+import sqlite3
 import time
 import pytest
 from pathlib import Path
@@ -922,3 +923,61 @@ class TestTheOpenCodeMonitorRun:
         _, runs, _, _ = _run_opencode_main(monkeypatch, main_argv, tmp_path, OPENCODE_STREAM)
 
         assert "OPENCODE_CONFIG_CONTENT" not in runs[0]["env"]
+
+
+class TestTheRunRecordAfterTheRun:
+    def _plant_store(self, tmp_path, monkeypatch, model):
+        db = tmp_path / "opencode.db"
+        with sqlite3.connect(db) as conn:
+            conn.execute("create table session_message (session_id text, type text, seq int, data text)")
+            conn.execute("insert into session_message values (?, 'assistant', 1, ?)", (OC_SESSION, json.dumps(model)))
+        conn.close()
+        monkeypatch.setenv("OPENCODE_DB", str(db))
+
+    def test_the_observed_model_comes_from_the_runtime_row_not_the_request(
+        self, monkeypatch, main_argv, pointer_home, tmp_path
+    ):
+        self._plant_store(tmp_path, monkeypatch, {"model": {"id": "gpt-6.1-sol", "providerID": "openai"}})
+        config = '--opencode-config={"model": "opencode/asked", "provider": {"secret": "k"}}'
+
+        _, _, _, branch_path = _run_opencode_main(monkeypatch, main_argv, tmp_path, OPENCODE_STREAM, flags=(config,))
+
+        pointer = mod.session_pointer.read_pointer(branch_path) or {}
+        assert (pointer["model_requested"], pointer["selection_source"]) == ("opencode/asked", "inline_config")
+        assert (pointer["model_provider"], pointer["model_observed"]) == ("openai", "gpt-6.1-sol")
+        assert pointer["observed_at"] and "secret" not in json.dumps(pointer)
+        wake_back = mod.wake_sender
+        assert isinstance(wake_back, MagicMock)
+        assert wake_back.call_args.kwargs["run_line"] == (
+            f"run: opencode · openai/gpt-6.1-sol (observed; inline_config) session {OC_SESSION}"
+        )
+
+    def test_an_unseen_model_stays_pending_and_the_bounce_says_so(self, monkeypatch, main_argv, pointer_home, tmp_path):
+        monkeypatch.setenv("OPENCODE_DB", str(tmp_path / "missing.db"))
+
+        _, _, bounce, branch_path = _run_opencode_main(
+            monkeypatch, main_argv, tmp_path, OPENCODE_FREE_LIMIT, exit_code=1
+        )
+
+        pointer = mod.session_pointer.read_pointer(branch_path) or {}
+        assert (pointer["model_observed"], pointer["observed_at"]) == ("pending", None)
+        assert bounce.call_args.args[1].endswith(
+            f"run: opencode · cli_default (requested, observed pending; cli_default) session {pointer['session_id']}"
+        )
+
+
+@pytest.mark.parametrize(
+    "cmd, provider, config, expected",
+    [
+        (["claude", "-p", "Hi", "--model", "claude-opus-5-5"], "claude", "", ("claude-opus-5-5", "flag")),
+        (["codex", "exec", "-m", "gpt-6.1-sol", "--json", "Hi"], "codex", "", ("gpt-6.1-sol", "flag")),
+        (["opencode", "run", "-m", "openai/x", "Hi"], "opencode", '{"model": "y"}', ("openai/x", "flag")),
+        (["opencode", "run", "Hi"], "opencode", '{"model": "y"}', ("y", "inline_config")),
+        (["opencode", "run", "Hi"], "opencode", "not json", ("cli_default", "cli_default")),
+        (["codex", "exec", "-m"], "codex", "", ("cli_default", "cli_default")),
+    ],
+)
+def test_the_requested_model_and_its_source_come_from_the_argv(cmd, provider, config, expected):
+    run = mod.requested_run(cmd, provider, config)
+
+    assert (run["host_cli"], run["model_requested"], run["selection_source"]) == (provider, *expected)

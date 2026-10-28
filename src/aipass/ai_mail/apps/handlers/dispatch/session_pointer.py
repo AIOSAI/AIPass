@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: session_pointer.py
 # Description: Durable per-branch "current session" pointer for dispatch
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-20
 # Modified: 2026-10-28
 # =============================================
@@ -169,8 +169,17 @@ def read_pointer(branch_path: Path) -> Optional[dict]:
     return data
 
 
-def write_pointer(branch_path: Path, session_id: str, set_by: str, provider: str = CLAUDE) -> bool:
-    """Record `session_id` as the branch's current session. Returns success.
+PENDING = "pending"
+CLI_DEFAULT = "cli_default"
+RUN_KEYS = ("host_cli", "model_provider", "model_requested", "model_observed", "selection_source", "observed_at")
+
+
+def write_pointer(
+    branch_path: Path, session_id: str, set_by: str, provider: str = CLAUDE, *, run: Optional[dict] = None
+) -> bool:
+    """Record `session_id` as the branch's current session, with its run record. Returns success.
+
+    `run` sets any of RUN_KEYS; the rest default to host_cli=provider, pending and cli_default.
 
     Atomic (temp + fsync + os.replace): a half-written id would fail the next ``--resume``. Never raises.
     """
@@ -183,7 +192,14 @@ def write_pointer(branch_path: Path, session_id: str, set_by: str, provider: str
         "cwd": str(Path(branch_path).resolve()),
         # A pointer without the key is a Claude pointer: every pointer written before the key existed.
         "provider": provider,
+        "host_cli": provider,
+        "model_provider": PENDING,
+        "model_requested": CLI_DEFAULT,
+        "model_observed": PENDING,
+        "selection_source": CLI_DEFAULT,
+        "observed_at": None,
     }
+    payload.update({key: value for key, value in (run or {}).items() if key in RUN_KEYS})
 
     tmp_name = None
     try:
@@ -208,6 +224,95 @@ def write_pointer(branch_path: Path, session_id: str, set_by: str, provider: str
                 os.unlink(tmp_name)
             except OSError as e:
                 logger.info("[session_pointer] Could not remove temp file %s: %s", tmp_name, e)
+
+
+def record_run(branch_path: Path, run: dict) -> bool:
+    """Stamp this run's record onto the branch's current pointer; False when there is no pointer to stamp."""
+    pointer = read_pointer(branch_path)
+    if pointer is None:
+        return False
+    provider = pointer.get("provider", CLAUDE)
+    return write_pointer(branch_path, pointer["session_id"], pointer.get("set_by", "unknown"), provider, run=run)
+
+
+def observe_model(branch_path: Path, session_id: str, provider: str) -> Tuple[Optional[str], Optional[str]]:
+    """(vendor, model id) from the runtime's own newest assistant row for the session, or (None, None) unseen."""
+    try:
+        if provider == OPENCODE:
+            return _observe_opencode(session_id)
+        if provider == CODEX:
+            return _observe_codex(session_id)
+        return _observe_claude(branch_path, session_id)
+    except (OSError, sqlite3.Error, ValueError) as e:
+        logger.info("[session_pointer] %s model for %s not observable: %s", provider, session_id, e)
+        return None, None
+
+
+def _observe_opencode(session_id: str) -> Tuple[Optional[str], Optional[str]]:
+    db = opencode_db()
+    if db is None or not db.is_file():
+        return None, None
+    with closing(sqlite3.connect(f"file:{db}?mode=ro", uri=True)) as conn:
+        row = conn.execute(
+            "select data from session_message where session_id=? and type='assistant' order by seq desc limit 1",
+            (session_id,),
+        ).fetchone()
+    model = json.loads(row[0]).get("model") if row else None
+    if not isinstance(model, dict) or not model.get("id"):
+        return None, None
+    return model.get("providerID"), model["id"]
+
+
+def _jsonl_rows(path: Optional[Path]) -> list:
+    if path is None or not path.is_file():
+        return []
+    rows = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as e:
+            logger.info("[session_pointer] skipping a non-JSON line in %s: %s", path, e)
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows
+
+
+def _observe_codex(thread_id: str) -> Tuple[Optional[str], Optional[str]]:
+    vendor, model = None, None
+    for row in _jsonl_rows(codex_thread_file(thread_id)):
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        if row.get("type") == "session_meta":
+            vendor = payload.get("model_provider") or vendor
+        elif row.get("type") == "turn_context" and payload.get("model"):
+            model = payload["model"]
+    return (vendor, model) if model else (None, None)
+
+
+def _observe_claude(branch_path: Path, session_id: str) -> Tuple[Optional[str], Optional[str]]:
+    model = None
+    for row in _jsonl_rows(transcript_file(branch_path, session_id)):
+        message = row.get("message") if isinstance(row.get("message"), dict) else {}
+        if row.get("type") == "assistant" and message.get("model"):
+            model = message["model"]
+    # Claude Code names Anthropic's models only; the transcript row carries no vendor field.
+    return ("anthropic", model) if model else (None, None)
+
+
+def format_run_line(record: Optional[dict]) -> str:
+    """One line from a run record: observed when seen, else requested and said so. Never a config's contents."""
+    if not record:
+        return "run: no pointer recorded"
+    host = record.get("host_cli") or record.get("provider", CLAUDE)
+    source = record.get("selection_source", CLI_DEFAULT)
+    session = record.get("session_id", "?")
+    observed = record.get("model_observed", PENDING)
+    if observed and observed != PENDING:
+        vendor = record.get("model_provider")
+        shown = observed if "/" in observed or not vendor or vendor == PENDING else f"{vendor}/{observed}"
+        return f"run: {host} · {shown} (observed; {source}) session {session}"
+    requested = record.get("model_requested", CLI_DEFAULT)
+    return f"run: {host} · {requested} (requested, observed pending; {source}) session {session}"
 
 
 def _transcript_candidates(branch_path: Path, session_id: str) -> Optional[list[Path]]:

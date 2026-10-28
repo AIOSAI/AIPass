@@ -3,7 +3,7 @@
 # Description: Tests for the dispatch monitor's units - rate limit, fresh cmd, startup check, kill, logs, lock, JSONL
 # Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-28
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's units: startup check, kill, result logs, own lock, JSONL."""
@@ -306,7 +306,7 @@ def _bounce_reason(monkeypatch, argv, tmp_path, stdout_text):
 def test_unparseable_stdout_is_reported_as_no_result_json(monkeypatch, main_argv, tmp_path):
     reason = _bounce_reason(monkeypatch, main_argv[0], tmp_path, "not json at all\nstill not json")
 
-    assert reason.endswith("Last attempt result JSON: (no result JSON captured)")
+    assert "Last attempt result JSON: (no result JSON captured)\n\nrun: claude" in reason
 
 
 def test_the_bounce_names_every_error_field_of_the_result_json(monkeypatch, main_argv, tmp_path):

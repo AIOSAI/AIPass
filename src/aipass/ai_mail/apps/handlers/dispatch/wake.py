@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.10.0
+# Version: 3.11.0
 # Created: 2026-03-02
 # Modified: 2026-10-28
 # =============================================
@@ -896,6 +896,15 @@ def wake_branch(
     from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import NO_WAKE_BACK_FLAG
 
     from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import OPENCODE_CONFIG_FLAG_PREFIX, PROVIDER_FLAG_PREFIX
+
+    from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import requested_run
+
+    run = requested_run(claude_cmd, provider, headless_config)
+    session_flags = ("--session-id", "--resume", "--session", "resume")
+    run["session_id"] = next(
+        (claude_cmd[i + 1] for i, arg in enumerate(claude_cmd[:-1]) if arg in session_flags), session_pointer.PENDING
+    )
+    status.info("run", session_pointer.format_run_line(run))
 
     monitor_flags = [] if wake_back else [NO_WAKE_BACK_FLAG]
     if provider != PROVIDER_CLAUDE:

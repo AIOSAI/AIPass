@@ -3,7 +3,7 @@
 # Description: Tests for what each dispatch attempt leaves behind - stdout, exit codes, result JSON, the lock
 # Version: 1.1.1
 # Created: 2026-10-08
-# Modified: 2026-10-25
+# Modified: 2026-10-28
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's attempt artifacts: stdout, stderr, result JSON, lock."""
@@ -284,7 +284,7 @@ def test_a_result_json_after_banner_text_still_reaches_the_bounce(monkeypatch, m
 def test_a_dispatch_that_printed_nothing_bounces_with_no_result_json(monkeypatch, main_argv, tmp_path):
     reason = _bounce_reason(monkeypatch, main_argv[0], tmp_path, lambda stdout_log: 1)
 
-    assert reason.endswith("Last attempt result JSON: (no result JSON captured)")
+    assert "Last attempt result JSON: (no result JSON captured)\n\nrun: claude" in reason
 
 
 def test_a_lock_turned_unreadable_mid_run_is_left_in_place(monkeypatch, main_argv, tmp_path):

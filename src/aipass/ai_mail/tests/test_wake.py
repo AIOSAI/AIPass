@@ -1166,6 +1166,11 @@ class TestCodexWake:
         args = _claude_args(calls["popen"][0]["cmd"])
         assert args == ["codex", "exec", "resume", self.THREAD, "-m", "gpt-6.1-sol", *self._tail(branch_path, args)]
         assert status.find_step("session") == ("ok", "session", f"resuming {self.THREAD} (pointer)")
+        assert status.find_step("run") == (
+            "info",
+            "run",
+            f"run: codex · gpt-6.1-sol (requested, observed pending; flag) session {self.THREAD}",
+        )
 
     def test_fresh_ignores_a_live_codex_pointer(self, tmp_path, monkeypatch, fake_home):
         branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
@@ -1293,6 +1298,11 @@ class TestOpenCodeWake:
         assert status.find_step("provider") == ("ok", "provider", "opencode")
         assert status.find_step("model") == ("ok", "model", "opencode/glm-5.3-flash-free")
         assert status.find_step("session")[2].startswith("fresh, OpenCode mints the id")
+        assert status.find_step("run") == (
+            "info",
+            "run",
+            "run: opencode · opencode/glm-5.3-flash-free (requested, observed pending; flag) session pending",
+        )
 
     def test_a_wake_without_a_model_passes_no_dash_m_and_says_opencode_default(self, tmp_path, monkeypatch):
         _plant_opencode_store(tmp_path, monkeypatch, [])

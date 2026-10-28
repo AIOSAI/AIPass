@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.13.0
+# Version: 2.14.0
 # Created: 2026-03-02
 # Modified: 2026-10-28
 # =============================================
@@ -20,6 +20,7 @@ import socket
 import sys
 import subprocess
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -91,7 +92,9 @@ STREAMING_PROVIDERS = (CODEX, OPENCODE)
 WAKE_RESULT_DECLINED = "declined"
 
 
-def wake_sender(sender: str, branch_email: str, exit_code: int, target_home: Optional[Path] = None) -> str:
+def wake_sender(
+    sender: str, branch_email: str, exit_code: int, target_home: Optional[Path] = None, run_line: str = ""
+) -> str:
     """Wake the dispatcher back after target completion.
 
     A door: main() calls it, and its tags are read in dispatch_wake.log and by managers.
@@ -121,7 +124,7 @@ def wake_sender(sender: str, branch_email: str, exit_code: int, target_home: Opt
         # sender="" ends the wake-back chain. The message names the target: an empty inbox is normal here.
         wake_back_message = (
             f"{branch_email} finished (exit {exit_code}). Check its reply in your inbox, "
-            "verify what it did, and continue."
+            "verify what it did, and continue." + (f"\n{run_line}" if run_line else "")
         )
         wake_status, success = wake_branch(sender, custom_message=wake_back_message, auto=True, sender="")
 
@@ -129,7 +132,7 @@ def wake_sender(sender: str, branch_email: str, exit_code: int, target_home: Opt
         manager_step = wake_status.find_step("manager")
         if manager_step and manager_step[0] == "info":
             # The wake is refused; the notification is not optional.
-            if _mail_wake_back(sender, branch_email, exit_code, target_home):
+            if _mail_wake_back(sender, branch_email, exit_code, target_home, run_line):
                 return "mailed_manager"
             return "failed_manager_mail"
 
@@ -198,7 +201,9 @@ def _send_from_ai_mail(
     )
 
 
-def _mail_wake_back(sender: str, branch_email: str, exit_code: int, target_home: Optional[Path]) -> bool:
+def _mail_wake_back(
+    sender: str, branch_email: str, exit_code: int, target_home: Optional[Path], run_line: str = ""
+) -> bool:
     """Deliver the wake-back as MAIL when the sender cannot be woken.
 
     Managers stay blocklisted from wakes: two claudes on one session id kill the running job.
@@ -211,7 +216,7 @@ def _mail_wake_back(sender: str, branch_email: str, exit_code: int, target_home:
         f"You are a manager, so no agent was woken — that is by design and not a "
         f"failure. This mail IS the wake-back.\n\n"
         f"Check {branch_email}'s reply in your inbox, verify what it did, and hand "
-        f"off the next phase if there is one."
+        f"off the next phase if there is one." + (f"\n\n{run_line}" if run_line else "")
     )
     try:
         result = _send_from_ai_mail(sender, subject, body, target_home)
@@ -628,6 +633,39 @@ def reconcile_opencode_pointer(branch_path: Path, stdout_log: str) -> None:
 
 # Exit 0 with this marker is incomplete, not success: the ceiling killed the tasks, maybe the reply.
 BG_TASKS_MARKER = "Background tasks still running"
+
+
+def requested_run(cmd: list, provider: str, opencode_config: str = "") -> dict:
+    """The run's requested half, from the argv the door built and the config's model key alone."""
+    flag = "--model" if provider == "claude" else "-m"
+    if flag in cmd[:-1] and cmd[cmd.index(flag) + 1]:
+        return {"host_cli": provider, "model_requested": cmd[cmd.index(flag) + 1], "selection_source": "flag"}
+    try:
+        inline = json.loads(opencode_config).get("model") if opencode_config else None
+    except (ValueError, AttributeError) as e:
+        logger.info("[monitor] opencode config carries no readable model key: %s", e)
+        inline = None
+    if inline:
+        return {"host_cli": provider, "model_requested": inline, "selection_source": "inline_config"}
+    return {"host_cli": provider, "model_requested": session_pointer.CLI_DEFAULT, "selection_source": "cli_default"}
+
+
+def stamp_run(branch_path: Path, cmd: list, provider: str, opencode_config: str = "") -> str:
+    """Record requested and observed model on the pointer; return the run line the mails print."""
+    run = requested_run(cmd, provider, opencode_config)
+    pointer = session_pointer.read_pointer(branch_path)
+    if pointer is not None:
+        vendor, model = session_pointer.observe_model(branch_path, pointer["session_id"], provider)
+        if model:
+            # Observed only from the runtime's own row; a requested model is never promoted.
+            same = pointer.get("model_observed") == model and pointer.get("observed_at")
+            run.update(
+                model_provider=vendor or session_pointer.PENDING,
+                model_observed=model,
+                observed_at=pointer["observed_at"] if same else datetime.now().astimezone().isoformat(),
+            )
+        session_pointer.record_run(branch_path, run)
+    return session_pointer.format_run_line(session_pointer.read_pointer(branch_path))
 
 
 def _rotate_attempt_stdout(stdout_log: str, attempt: int) -> None:
@@ -1142,6 +1180,8 @@ def main():
         reconcile_codex_pointer(branch_path, stdout_log)
     elif exit_code == 0 and provider != OPENCODE:
         reconcile_pointer(branch_path, stdout_log, cmd)
+    run_line = stamp_run(branch_path, cmd, provider, opencode_config)
+    logger.info("[monitor] %s %s", branch_email, run_line)
 
     max_turns_hit = False
     try:
@@ -1190,7 +1230,7 @@ def main():
         elif "overloaded" in content.lower() or "529" in content:
             reason = f"API overloaded (all {len(attempts)} attempts failed, {duration}s)"
 
-        reason += f"\n\nLast attempt result JSON: {_summarize_result_json(stdout_log, provider)}"
+        reason += f"\n\nLast attempt result JSON: {_summarize_result_json(stdout_log, provider)}\n\n{run_line}"
 
         bounce_delivered = _note_undelivered_bounce(
             _send_bounce(branch_email, reason, sender, lock_file, stderr_log), branch_email, reason, sender
@@ -1203,7 +1243,7 @@ def main():
             f"Agent exited 0 after {duration}s but background tasks were still running and were "
             f"terminated at the headless print-mode ceiling. Work handed to those tasks is gone "
             f"and no reply may have been sent — re-dispatch if the task is not complete.\n\n"
-            f"Result JSON: {_summarize_result_json(stdout_log, provider)}"
+            f"Result JSON: {_summarize_result_json(stdout_log, provider)}\n\n{run_line}"
         )
         bounce_delivered = _note_undelivered_bounce(
             _send_bounce(branch_email, reason, sender, lock_file, stderr_log), branch_email, reason, sender
@@ -1223,7 +1263,7 @@ def main():
 
     # Before the report, so wake_result is known when it is assembled.
     if wake_back:
-        wake_result = wake_sender(sender, branch_email, exit_code, target_home=branch_path)
+        wake_result = wake_sender(sender, branch_email, exit_code, target_home=branch_path, run_line=run_line)
     else:
         logger.info(
             "[monitor] Wake-back declined by caller: %s finished, sender %s not woken or mailed",

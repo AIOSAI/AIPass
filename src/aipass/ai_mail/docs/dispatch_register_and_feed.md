@@ -2,7 +2,7 @@
 
 # The dispatch register, completion reports and the notification feed
 
-**Branch** ai_mail · **Code** `apps/handlers/notify.py`, `apps/handlers/email/delivery.py`, `apps/handlers/dispatch/wake.py`, `apps/handlers/dispatch/dispatch_monitor.py`, `apps/handlers/dispatch/register.py`
+**Branch** ai_mail · **Code** `apps/handlers/notify.py`, `apps/handlers/email/delivery.py`, `apps/handlers/dispatch/wake.py`, `apps/handlers/dispatch/dispatch_monitor.py`, `apps/handlers/dispatch/register.py`, `apps/handlers/dispatch/session_pointer.py`
 
 ---
 
@@ -237,6 +237,37 @@ Tests re-root the register and the reports directory to `tmp_path` via an autous
 conftest fixture. `wake_branch` registers before spawning and the wake tests mock
 the spawn, so an unguarded run would write phantom "outstanding" entries into the
 live register.
+
+## The run record
+
+Every dispatch says which host ran it and which model answered. The record lives on the
+session pointer, `.ai_mail.local/session.json`, beside `session_id` and `provider`:
+
+```
+host_cli         : claude | codex | opencode   (the same fact as provider)
+model_provider   : the vendor as the host names it, or "pending"
+model_requested  : what the door asked for, or "cli_default"
+model_observed   : the id the runtime's own assistant row reports, or "pending"
+selection_source : flag | inline_config | project_config | user_config | cli_default | unknown
+observed_at      : ISO time of the first observation, or null
+```
+
+- **Requested comes from the argv** the door built: `--model` (claude) or `-m` (codex,
+  opencode) is `flag`; otherwise the `model` key of an `--opencode-config` object is
+  `inline_config`; otherwise `cli_default`. Project and user `opencode.json` are not
+  resolved here, so a model they set reads as `cli_default`.
+- **Observed comes from the runtime's own row** for the pointer's session, read by
+  `session_pointer.observe_model()` after the run: the newest assistant row of
+  OpenCode's `session_message` table (read-only), the last assistant line of the Claude
+  transcript, the last `turn_context` of the Codex rollout. Unseen stays `pending`; a
+  requested model is never promoted to observed.
+- **One line, three surfaces.** `format_run_line()` prints it in the dispatch result
+  (step `run`, at send: observed is always pending there), at the end of the bounce,
+  and at the end of the completion wake-back (message or manager mail):
+  `run: opencode · openai/gpt-6.1-sol (observed; flag) session ses_…`.
+  Never a credential or a config's contents.
+- `write_pointer(..., run=...)` sets the keys; a call without `run` writes the defaults,
+  with `host_cli` taken from `provider`.
 
 ## Related
 

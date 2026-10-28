@@ -443,10 +443,10 @@ def test_pointer_file_is_valid_json_on_disk(branch):
     write_pointer(branch, "sess-1", "wake")
     raw = pointer_path(branch).read_text(encoding="utf-8")
     parsed = json.loads(raw)
-    assert set(parsed) == {"session_id", "set_at", "set_by", "cwd", "provider"}
+    assert set(parsed) == {"session_id", "set_at", "set_by", "cwd", "provider", *mod.RUN_KEYS}
     assert parsed["provider"] == "claude"
-    # Indented, not a blob: one newline after the brace and one after each of the five keys.
-    assert raw.count("\n") == 6, raw
+    # Indented, not a blob: one newline after the brace and one after each of the eleven keys.
+    assert raw.count("\n") == 12, raw
 
 
 class TestTheMismatchMessageIsReadableOnBothPlatforms:
@@ -590,7 +590,7 @@ class TestTheProviderOnThePointer:
 
         assert session_id == self.THREAD
         assert str(rollout) in reason
-        assert read_pointer(branch)["provider"] == "codex"
+        assert (read_pointer(branch) or {}).get("provider") == "codex"
 
     def test_a_codex_pointer_with_no_rollout_starts_fresh_never_minus_c(self, branch, fake_home):
         write_pointer(branch, self.THREAD, "monitor-codex", provider="codex")
@@ -661,3 +661,101 @@ class TestTheOpenCodePointer:
         session_id, reason = resolve_resume_target(branch)
 
         assert session_id is None and "pointer is for opencode, waking on claude" in reason
+
+
+class TestTheRunRecord:
+    """The pointer says which host ran, what was asked for, and what the runtime's own row reported."""
+
+    def test_the_old_call_shape_defaults_to_pending_and_cli_default(self, branch):
+        write_pointer(branch, "ses_x", "monitor-opencode", provider="opencode")
+
+        data = read_pointer(branch) or {}
+
+        assert data["host_cli"] == data["provider"] == "opencode"
+        assert (data["model_provider"], data["model_observed"]) == ("pending", "pending")
+        assert (data["model_requested"], data["selection_source"], data["observed_at"]) == (
+            "cli_default",
+            "cli_default",
+            None,
+        )
+
+    def test_run_sets_only_known_keys(self, branch):
+        write_pointer(branch, "s", "wake", run={"model_requested": "m1", "selection_source": "flag", "api_key": "k"})
+
+        data = read_pointer(branch) or {}
+
+        assert (data["model_requested"], data["selection_source"]) == ("m1", "flag")
+        assert "api_key" not in data
+
+    def test_record_run_keeps_the_session_and_resets_what_this_run_did_not_see(self, branch):
+        write_pointer(branch, "ses_x", "monitor-opencode", provider="opencode", run={"model_observed": "old"})
+
+        assert mod.record_run(branch, {"model_requested": "openai/gpt-6.1-sol", "selection_source": "flag"})
+
+        data = read_pointer(branch) or {}
+        assert (data["session_id"], data["set_by"], data["provider"]) == ("ses_x", "monitor-opencode", "opencode")
+        assert data["model_observed"] == "pending"
+
+    def test_record_run_with_no_pointer_writes_nothing(self, branch):
+        assert mod.record_run(branch, {"model_requested": "m"}) is False
+        assert not pointer_path(branch).exists()
+
+    def test_opencode_is_observed_from_the_newest_assistant_row(self, tmp_path, monkeypatch, branch):
+        db = tmp_path / "opencode.db"
+        with sqlite3.connect(db) as conn:
+            conn.execute("create table session_message (session_id text, type text, seq int, data text)")
+            rows = [
+                ("ses_x", "assistant", 1, json.dumps({"model": {"id": "old", "providerID": "opencode"}})),
+                ("ses_x", "assistant", 2, json.dumps({"model": {"id": "gpt-6.1-sol", "providerID": "openai"}})),
+                ("ses_x", "user", 3, json.dumps({"model": {"id": "asked", "providerID": "x"}})),
+                ("ses_y", "assistant", 4, json.dumps({"model": {"id": "other", "providerID": "y"}})),
+            ]
+            conn.executemany("insert into session_message values (?, ?, ?, ?)", rows)
+        conn.close()
+        monkeypatch.setenv("OPENCODE_DB", str(db))
+
+        assert mod.observe_model(branch, "ses_x", "opencode") == ("openai", "gpt-6.1-sol")
+        assert mod.observe_model(branch, "ses_none", "opencode") == (None, None)
+
+    def test_an_opencode_store_without_the_table_is_unobserved_not_a_raise(self, tmp_path, monkeypatch, branch):
+        db = tmp_path / "opencode.db"
+        sqlite3.connect(db).close()
+        monkeypatch.setenv("OPENCODE_DB", str(db))
+
+        assert mod.observe_model(branch, "ses_x", "opencode") == (None, None)
+
+    def test_claude_is_observed_from_the_last_assistant_line(self, branch, fake_home):
+        target = _make_transcript(branch, "sess-1")
+        lines = [
+            {"type": "user", "message": {"model": "asked"}},
+            {"type": "assistant", "message": {"model": "claude-opus-5-5"}},
+        ]
+        target.write_text("\n".join(json.dumps(line) for line in lines) + "\nnot json\n", encoding="utf-8")
+
+        assert mod.observe_model(branch, "sess-1", "claude") == ("anthropic", "claude-opus-5-5")
+        assert mod.observe_model(branch, "sess-none", "claude") == (None, None)
+
+    def test_codex_is_observed_from_turn_context_and_session_meta(self, branch, fake_home):
+        thread = "01a1746b-c9c8-7891-ae8e-666b368caf13"
+        day = fake_home / ".codex" / "sessions" / "2026" / "10" / "28"
+        day.mkdir(parents=True)
+        lines = [
+            {"type": "session_meta", "payload": {"model_provider": "openai"}},
+            {"type": "turn_context", "payload": {"model": "gpt-6.1-sol"}},
+        ]
+        (day / f"rollout-2026-10-28T13-00-00-{thread}.jsonl").write_text(
+            "\n".join(json.dumps(line) for line in lines), encoding="utf-8"
+        )
+
+        assert mod.observe_model(branch, thread, "codex") == ("openai", "gpt-6.1-sol")
+
+    def test_the_run_line_says_observed_only_when_seen(self):
+        seen = {"host_cli": "opencode", "model_provider": "openai", "model_observed": "gpt-6.1-sol"}
+        seen.update(selection_source="flag", session_id="ses_1", model_requested="openai/gpt-6.1-sol")
+        unseen = {**seen, "model_observed": "pending", "host_cli": "codex", "model_requested": "gpt-6.1-sol"}
+
+        assert mod.format_run_line(seen) == "run: opencode · openai/gpt-6.1-sol (observed; flag) session ses_1"
+        assert (
+            mod.format_run_line(unseen) == "run: codex · gpt-6.1-sol (requested, observed pending; flag) session ses_1"
+        )
+        assert mod.format_run_line(None) == "run: no pointer recorded"
