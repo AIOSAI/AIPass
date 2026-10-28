@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor_home.py
 # Description: Tests for doctor's home, owner-seating, preflight, citizen-count, shared-skills and shadow rows
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-10-08
-# Modified: 2026-10-27
+# Modified: 2026-10-28
 # =============================================
 
 """Tests for apps/modules/doctor.py: AIPASS_HOME rows, seating, preflight, drone count, skills, shadows, gitignore."""
@@ -667,6 +667,13 @@ class TestSharedSkillsRows:
             "Linked .claude/skills -> ../.agents/skills",
             "Wrote .claude/commands/codex.md",
             "Wrote .codex/skills/claude/SKILL.md",
+            "Wrote .claude/commands/opencode.md",
+            "Wrote .codex/skills/opencode/SKILL.md",
+            "Wrote .opencode/commands/claude.md",
+            "Wrote .opencode/commands/codex.md",
+            "Wrote .opencode/commands/memo.md",
+            "Wrote .opencode/commands/prep.md",
+            "Wrote .opencode/commands/compass.md",
             "Retired .claude/commands/prep.md -> prep(disabled).md: .agents/skills/prep/SKILL.md replaces it",
         ]
 
@@ -690,7 +697,10 @@ class TestSharedSkillsRows:
         row = self._rows()["provider switch"]
 
         assert row.glyph == GLYPH_WARN
-        assert row.detail == "missing .codex/skills/claude/SKILL.md: the chat cannot switch CLI here"
+        missing = ".codex/skills/claude/SKILL.md, .claude/commands/opencode.md, .codex/skills/opencode/SKILL.md, "
+        missing += ".opencode/commands/claude.md, .opencode/commands/codex.md, .opencode/commands/memo.md, "
+        missing += ".opencode/commands/prep.md, .opencode/commands/compass.md"
+        assert row.detail == f"missing {missing}: the chat cannot switch CLI here"
         assert row.remediation == f"Run: aipass doctor --fix, or 'aipass init update {self.root}'"
 
     def test_fix_writes_the_missing_switch_file_and_leaves_an_edited_one(self) -> None:
@@ -703,6 +713,8 @@ class TestSharedSkillsRows:
         assert (self.root / ".claude" / "commands" / "codex.md").read_text(encoding="utf-8") == sc.codex_command_md()
         assert skill.read_text(encoding="utf-8") == "# my own switch\n"
         assert rows["provider switch"].glyph == GLYPH_PASS
+        assert rows["provider switch"].detail.startswith("Claude, Codex and OpenCode switches present (")
+        assert ".opencode/commands/compass.md)" in rows["provider switch"].detail
 
 
 class TestInstructionShadowRows:

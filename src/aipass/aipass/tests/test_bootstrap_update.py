@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_bootstrap_update.py
 # Description: Tests for update_project: the plan, stamp-only, the retrofit, seeds and cleanup
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-10-08
-# Modified: 2026-10-27
+# Modified: 2026-10-28
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py: update_project and the plans it reads."""
@@ -366,9 +366,9 @@ def test_update_project_creates_missing_managed_dirs(tmp_path, monkeypatch, thro
     local_settings = target.resolve() / ".claude" / "settings.local.json"
     assert (str(local_settings) in result["updated_files"]) is not throwaway_home
     assert local_settings.exists() is not throwaway_home
-    # tier0_kernel, tier1_navmap, .aipass/.gitignore, hooks.json, settings.json, prep, /codex,
+    # tier0_kernel, tier1_navmap, .aipass/.gitignore, hooks.json, settings.json, prep, /codex, /opencode,
     # plus settings.local.json for a real home
-    assert len(result["updated_files"]) == (7 if throwaway_home else 8)
+    assert len(result["updated_files"]) == (8 if throwaway_home else 9)
     assert str((target / "AGENTS.md").resolve()) in result["already_current"]
 
 
@@ -876,6 +876,30 @@ class TestProviderSwitchPair:
         actions = {e["path"]: e["action"] for e in result["files"]}
         assert actions[".claude/commands/codex.md"] == "create"
         assert actions[".codex/skills/claude/SKILL.md"] == "kept-local"
+
+    def test_an_older_project_is_planned_and_given_the_seven_opencode_files_verbatim(self, tmp_path):
+        target = tmp_path / "proj"
+        target.mkdir()
+        init_project(target, project_name="older")
+        opencode = {rel: body() for rel, body in bootstrap.SWITCH_PAIR if "opencode" in rel}
+        manifest_path = target / ".aipass" / "scaffold_manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        for rel in opencode:
+            (target / rel).rename(tmp_path / rel.replace("/", "_"))
+            del manifest["files"][rel]
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+        plan = update_project(target, apply=False)
+        planned = {e["path"]: e["action"] for e in plan["files"]}
+        on_disk_before = [rel for rel in opencode if (target / rel).exists()]
+        update_project(target)
+
+        assert len(opencode) == 7
+        assert {rel: planned[rel] for rel in opencode} == dict.fromkeys(opencode, "create")
+        assert on_disk_before == []
+        for rel, body in opencode.items():
+            assert (target / rel).read_text(encoding="utf-8") == body
+            assert read_manifest(target)["files"][rel] == sc_sha256(body)
 
     def test_a_hand_copy_matching_the_template_is_current_and_adopted(self, tmp_path):
         target = tmp_path / "proj"

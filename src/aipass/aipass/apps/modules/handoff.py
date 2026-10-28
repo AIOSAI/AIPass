@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: handoff.py
 # Description: CLI handoff orchestration — aipass handoff command
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-10-28
 # =============================================
 
 """
@@ -24,7 +24,7 @@ COMMAND = "handoff"
 
 INIT_PROMPT = "I just completed aipass init and am ready to start. What should I do first?"
 
-CLI_CHOICES = ["claude", "codex"]
+CLI_CHOICES = ["claude", "codex", "opencode"]
 FLAG_CHOICES = ["default", "skip-permissions"]
 
 

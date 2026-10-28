@@ -107,6 +107,22 @@ Next to it, the `codex binary`, `codex login`, `codex model` and `codex pins`
 rows read the Codex side and never write `~/.codex/config.toml`; see
 [`two_clis.md`](two_clis.md).
 
+OpenCode has no hook file: its hooks run through one plugin, the hooks branch's
+`apps/handlers/bridges/opencode_plugin.ts`, installed byte-equal as
+`$XDG_CONFIG_HOME/opencode/plugins/aipass.ts` (`~/.config/opencode/plugins/aipass.ts`
+when `XDG_CONFIG_HOME` is unset). When the manifest has `cli.opencode` rows, the
+`opencode plugin` row passes on a byte-equal copy and warns on a missing or stale
+one, naming `aipass doctor --fix` and the `cp` that does the same by hand: the
+verdict `drone @hooks verify` gives, in doctor's words. `--fix` copies it, with
+the backup and receipt below. Then `opencode binary` looks for `opencode` on
+PATH and in `~/.opencode/bin` (the curl installer's bin, on PATH only through
+`~/.bashrc`): absent, it passes as optional and the rest is skipped; found, it
+prints `opencode --version`. `opencode login` names the providers
+`opencode auth list --format json` prints, or `none (free models only)`.
+`opencode model` reads `model` from `opencode.json` (or `.jsonc`) in the same
+config folder, or says OpenCode picks its own default. Doctor never runs
+`opencode run`: it spends free quota and starts a server.
+
 Nothing is written before you see it. `doctor --fix` and plain `doctor` print
 the planned changes, one line each, then a unified diff per file, and ask
 once: `Apply these N changes to the provider settings? [y/N]`. Anything but
@@ -123,8 +139,8 @@ and [`apps/modules/_doctor_wire.py`](../apps/modules/_doctor_wire.py).
 Before any of these doors writes the personal settings file (`doctor --fix`,
 the install tail's doctor run, setup.sh's settings refresh, the stale-deny cleanup),
 it copies the file into `~/.claude/.backup/settings/` as
-`settings.json.<date>T<time>.<door>`. A write to Codex's `hooks.json` backs up
-to `.backup/settings/` beside it the same way. Then, after the write, it adds one line to
+`settings.json.<date>T<time>.<door>`. A write to Codex's `hooks.json`, or of
+the OpenCode plugin, backs up to `.backup/settings/` beside that file the same way. Then, after the write, it adds one line to
 `receipts.jsonl` in the same folder: when, which door, who, the backup's name,
 and the file's sha256 before and after. `doctor --fix` prints both paths. The
 backups are never pruned or rotated. If the backup or the receipt cannot be
@@ -142,8 +158,11 @@ its frontmatter. `skills link` passes when `.claude/skills` is a symlink
 resolving to `.agents/skills`, and warns when it is missing, a copy, or points
 elsewhere. `legacy prep` warns when an old `.claude/commands/prep.md` sits
 beside the skill, so `/prep` is offered twice. `provider switch` passes when
-the project holds both `.claude/commands/codex.md` (`/codex`) and
-`.codex/skills/claude/SKILL.md` (`$claude`), and names a missing one.
+the project holds every switch file: `.claude/commands/codex.md` (`/codex`) and
+`.claude/commands/opencode.md` (`/opencode`) for Claude Code,
+`.codex/skills/claude/SKILL.md` (`$claude`) and `.codex/skills/opencode/SKILL.md`
+(`$opencode`) for Codex, and `.opencode/commands/` `claude.md`, `codex.md`,
+`memo.md`, `prep.md` and `compass.md` for OpenCode. It names each missing one.
 `doctor --fix` makes a missing link, writes a missing switch file and renames an
 unedited legacy `prep.md` to `prep(disabled).md`, one `skills fix` row per
 change; a copy, a foreign link, an existing switch file and an edited `prep.md`

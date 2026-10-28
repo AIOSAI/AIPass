@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: handoff_platform/__init__.py
 # Description: OS-dispatched CLI session launch — tmux, wt.exe, fallback
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-20
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
 """
@@ -30,6 +30,7 @@ IS_LINUX = sys.platform.startswith("linux")
 
 _TMUX_SESSION = "aipass-handoff"
 CODEX_BYPASS_FLAG = "--dangerously-bypass-approvals-and-sandbox"
+OPENCODE_LAUNCH = 'PATH="$HOME/.opencode/bin:$PATH" opencode --standalone --auto --prompt'
 
 
 def build_cli_cmd(cli: str, flag_variant: str) -> str:
@@ -38,8 +39,12 @@ def build_cli_cmd(cli: str, flag_variant: str) -> str:
     if cli == "claude" and flag_variant == "skip-permissions":
         parts.append("--dangerously-skip-permissions")
     elif cli == "codex":
-        # The hooks gate both CLIs, so Codex runs in the posture the rooms and dispatch use.
+        # The hooks gate every CLI, so Codex runs in the posture the rooms and dispatch use.
         parts.append(CODEX_BYPASS_FLAG)
+    elif cli == "opencode":
+        # BAUD's room shape: the curl installer's bin is on PATH only via ~/.bashrc, and --standalone
+        # keeps a private server so this pane's env (AIPASS_HOME) reaches the hooks; the prompt follows --prompt.
+        return OPENCODE_LAUNCH
     return " ".join(parts)
 
 

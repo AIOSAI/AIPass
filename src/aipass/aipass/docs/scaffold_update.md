@@ -90,10 +90,14 @@ keeps an edited one, saying so in the plan. Where the filesystem refuses the
 link, a copy is written into `.claude/skills/` and the run says the copy will
 not follow `.agents/skills`; [`two_clis.md`](two_clis.md) has the rest.
 
-## The provider switch pair
+## The provider switch files
 
-`/codex` (`.claude/commands/codex.md`) and `$claude`
-(`.codex/skills/claude/SKILL.md`) are managed files under the same hash rule.
+Each CLI's switches to the other two are managed files under the same hash rule:
+`/codex` and `/opencode` (`.claude/commands/codex.md`, `.claude/commands/opencode.md`),
+`$claude` and `$opencode` (`.codex/skills/claude/SKILL.md`, `.codex/skills/opencode/SKILL.md`),
+and OpenCode's `/claude` and `/codex` (`.opencode/commands/claude.md`, `codex.md`), with
+its ritual commands `/memo`, `/prep` and `/compass` (`.opencode/commands/memo.md`,
+`prep.md`, `compass.md`), which load the shared skill of that name.
 An update writes a missing one, keeps an edited one as `kept-local`, and adopts
 a hand copy that matches the template into the manifest as current.
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: _doctor_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.5.1
+# Version: 1.6.0
 # Created: 2026-05-08
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
 """
@@ -40,7 +40,13 @@ from aipass.aipass.apps.handlers.provider_wire import (
     codex_hooks_document,
     codex_hooks_path,
     codex_trust_keys,
+    install_opencode_plugin,
     manifest_settings,
+    opencode_config_dir,
+    opencode_plugin_plan,
+    opencode_plugin_path,
+    opencode_plugin_source,
+    opencode_plugin_state,
     plan_codex_hooks,
     plan_wire_provider,
     read_codex_config,
@@ -48,6 +54,7 @@ from aipass.aipass.apps.handlers.provider_wire import (
     settings_diff,
     settings_gaps,
 )
+from aipass.aipass.apps.handlers.opencode_cli import check_opencode_cli
 from aipass.aipass.apps.handlers.settings_backup import DOOR_DOCTOR_FIX, DOOR_INSTALL, SettingsBackupError
 from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS, GLYPH_WARN
 
@@ -180,6 +187,7 @@ CODEX_BINARY_LABEL = "codex binary"
 CODEX_LOGIN_LABEL = "codex login"
 CODEX_MODEL_LABEL = "codex model"
 CODEX_PINS_LABEL = "codex pins"
+OPENCODE_PLUGIN_LABEL = "opencode plugin"
 # Seams: the suite's conftest makes codex absent, so no test runs the real binary.
 _codex_which = shutil.which
 _codex_run = subprocess.run
@@ -271,6 +279,26 @@ def _codex_pin_rows(config: dict, problem: str, path: Path) -> List[SettingsChec
     return rows or [SettingsCheckResult(CODEX_PINS_LABEL, GLYPH_PASS, f"{len(CODEX_PINS)} config pins set", "")]
 
 
+def check_provider_sides(manifest: dict, manifest_path: Path) -> List[SettingsCheckResult]:
+    """Doctor's per-CLI rows after the Claude ones: Codex's, then OpenCode's."""
+    return check_codex_side(manifest, manifest_path) + check_opencode_side(manifest_path)
+
+
+def check_opencode_side(manifest_path: Path) -> List[SettingsCheckResult]:
+    """The opencode plugin row, then OpenCode's binary, login and model. None without cli.opencode rows."""
+    state = opencode_plugin_state(manifest_path)
+    if state is None:
+        return []
+    plugin = opencode_plugin_path()
+    if state == STATE_SET:
+        row = SettingsCheckResult(OPENCODE_PLUGIN_LABEL, GLYPH_PASS, f"{plugin} matches the hooks branch copy", "")
+    else:
+        what = "missing" if state == STATE_MISSING else "stale (differs from the hooks branch copy)"
+        cure = f"Run: {WIRE_COMMAND} (or cp {opencode_plugin_source(manifest_path)} {plugin})"
+        row = SettingsCheckResult(OPENCODE_PLUGIN_LABEL, GLYPH_WARN, f"OpenCode plugin {what}: {plugin}", cure)
+    return [row, *(SettingsCheckResult(*r) for r in check_opencode_cli(opencode_config_dir()))]
+
+
 SETTINGS_FIX_LABEL = "settings fix"
 YES_COMMAND = "aipass doctor --fix --yes"
 NOT_APPLIED_NO_TTY = f"not applied: no tty — {YES_COMMAND}"
@@ -308,9 +336,9 @@ def plans_diff(plans: List[SettingsPlan]) -> List[str]:
     return lines
 
 
-def _render_settings_plan(plans: List[SettingsPlan]) -> int:
+def _render_settings_plan(plans: List[SettingsPlan], extra: Optional[List[str]] = None) -> int:
     """Print every planned change, one per line, then the unified diff. Returns the change count."""
-    planned = [line for plan in plans for line in plan.planned]
+    planned = [line for plan in plans for line in plan.planned] + (extra or [])
     console.print(f"\n[bold]Planned changes to the provider settings ({len(planned)}):[/bold]")
     for line in planned:
         console.print(f"  • {line}", markup=False, highlight=False)
@@ -334,13 +362,17 @@ def _ask_apply(count: int) -> Optional[str]:
     return CONSENT_TTY if answer in ("y", "yes") else None
 
 
-def _apply_settings_plans(plans: List[SettingsPlan], door: str, consent: str, show: bool = True) -> None:
-    """Write each plan through its backed-up door; the wire plan takes *door*, the reconcile its own."""
+def _apply_settings_plans(
+    plans: List[SettingsPlan], door: str, consent: str, show: bool = True, manifest_path: Optional[Path] = None
+) -> None:
+    """Write each plan through its backed-up door (the wire plan takes *door*), then the OpenCode plugin."""
     for plan in plans:
         actions = apply_settings_plan(plan, door if plan.door == DOOR_DOCTOR_FIX else None, consent)
-        if show:
-            for action in actions:
-                success(action)
+        for action in actions if show else []:
+            success(action)
+    plugin = install_opencode_plugin(manifest_path, door, consent) if manifest_path is not None else []
+    for action in plugin if show else []:
+        success(action)
 
 
 def fix_provider_settings(
@@ -356,14 +388,15 @@ def fix_provider_settings(
     except SettingsBackupError as exc:
         logger.error("[doctor] settings plan refused: %s", exc)
         return [SettingsCheckResult(SETTINGS_FIX_LABEL, GLYPH_FAIL, str(exc), "Repair the settings JSON, then re-run")]
-    if not plans:
+    plugin = opencode_plugin_plan(manifest_path)
+    if not plans and not plugin:
         return []
     if door == DOOR_INSTALL:
         consent: Optional[str] = CONSENT_INSTALL
     elif yes:
         consent = CONSENT_YES
     else:
-        count = _render_settings_plan(plans)
+        count = _render_settings_plan(plans, plugin)
         if not sys.stdin.isatty():
             logger.info("[doctor] --fix with no tty and no --yes — settings plan shown, nothing written")
             return [SettingsCheckResult(SETTINGS_FIX_LABEL, GLYPH_WARN, NOT_APPLIED_NO_TTY, YES_COMMAND)]
@@ -373,7 +406,7 @@ def fix_provider_settings(
             console.print(NOTHING_CHANGED)
             return [SettingsCheckResult(SETTINGS_FIX_LABEL, GLYPH_WARN, NOT_APPLIED_DECLINED, YES_COMMAND)]
     try:
-        _apply_settings_plans(plans, door, consent)
+        _apply_settings_plans(plans, door, consent, manifest_path=manifest_path)
     except SettingsBackupError as exc:
         logger.error("[doctor] settings write refused: %s", exc)
         return [SettingsCheckResult(SETTINGS_FIX_LABEL, GLYPH_FAIL, str(exc), "Re-run aipass doctor --fix")]
@@ -388,14 +421,15 @@ def settings_fix_report(manifest_path: Optional[Path], yes: bool = False) -> dic
     except SettingsBackupError as exc:
         logger.error("[doctor] settings plan refused: %s", exc)
         return {"planned": [], "notes": [], "diff": [], "applied": False, "error": str(exc)}
+    plugin = opencode_plugin_plan(manifest_path)
     report = {
-        "planned": [line for plan in plans for line in plan.planned],
+        "planned": [line for plan in plans for line in plan.planned] + plugin,
         "notes": [note for plan in plans for note in plan.notes],
         "diff": plans_diff(plans),
         "applied": False,
     }
-    if plans and yes:
-        _apply_settings_plans(plans, DOOR_DOCTOR_FIX, CONSENT_YES, show=False)
+    if (plans or plugin) and yes:
+        _apply_settings_plans(plans, DOOR_DOCTOR_FIX, CONSENT_YES, show=False, manifest_path=manifest_path)
         report["applied"] = True
     json_handler.log_operation("settings_fix_report", {"plans": len(plans), "applied": report["applied"]})
     return report
