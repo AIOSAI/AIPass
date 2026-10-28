@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.11.0
+# Version: 3.11.1
 # Created: 2026-03-02
 # Modified: 2026-10-28
 # =============================================
@@ -868,7 +868,8 @@ def wake_branch(
     elif provider == PROVIDER_OPENCODE:
         claude_cmd = _opencode_cmd(claude_bin, branch_path, email, prompt, resolved_model, fresh, status)
     # The session comes from session_pointer, not -c's file mtime; -c is the no-pointer fallback.
-    elif fresh:
+    # Another host's pointer names a session Claude cannot resume, and -c would leave it in place.
+    elif fresh or (session_pointer.read_pointer(branch_path) or {}).get("provider", PROVIDER_CLAUDE) != PROVIDER_CLAUDE:
         session_id = session_pointer.mint_session_id()
         # Before the spawn, so no crash leaves a live session nobody recorded.
         if not session_pointer.write_pointer(branch_path, session_id, "wake-fresh"):

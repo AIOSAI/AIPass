@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: session_pointer.py
 # Description: Durable per-branch "current session" pointer for dispatch
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-08-20
 # Modified: 2026-10-28
 # =============================================
@@ -227,12 +227,27 @@ def write_pointer(
 
 
 def record_run(branch_path: Path, run: dict) -> bool:
-    """Stamp this run's record onto the branch's current pointer; False when there is no pointer to stamp."""
+    """Stamp this run's record onto the branch's current pointer.
+
+    False when there is no pointer, or when the run's host is not the pointer's: that session is
+    not this run's, so the record is reset to pending rather than pairing one host with another's id.
+    """
     pointer = read_pointer(branch_path)
     if pointer is None:
         return False
     provider = pointer.get("provider", CLAUDE)
-    return write_pointer(branch_path, pointer["session_id"], pointer.get("set_by", "unknown"), provider, run=run)
+    set_by = pointer.get("set_by", "unknown")
+    host = run.get("host_cli", provider)
+    if host != provider:
+        logger.warning(
+            "[session_pointer] run on %s but pointer %s is %s's - run record left pending",
+            host,
+            pointer["session_id"],
+            provider,
+        )
+        write_pointer(branch_path, pointer["session_id"], set_by, provider)
+        return False
+    return write_pointer(branch_path, pointer["session_id"], set_by, provider, run=run)
 
 
 def observe_model(branch_path: Path, session_id: str, provider: str) -> Tuple[Optional[str], Optional[str]]:

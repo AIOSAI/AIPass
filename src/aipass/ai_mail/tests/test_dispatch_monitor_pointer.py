@@ -981,3 +981,14 @@ def test_the_requested_model_and_its_source_come_from_the_argv(cmd, provider, co
     run = mod.requested_run(cmd, provider, config)
 
     assert (run["host_cli"], run["model_requested"], run["selection_source"]) == (provider, *expected)
+
+
+def test_a_run_over_another_hosts_pointer_prints_its_own_host_and_no_foreign_session(tmp_path, pointer_home):
+    branch_path = tmp_path / "branch"
+    branch_path.mkdir()
+    mod.session_pointer.write_pointer(branch_path, "ses_x", "monitor-opencode", provider="opencode")
+
+    line = mod.stamp_run(branch_path, ["claude", "-c", "--model", "opus"], "claude")
+
+    assert line == "run: claude · opus (requested, observed pending; flag) session pending"
+    assert (mod.session_pointer.read_pointer(branch_path) or {})["host_cli"] == "opencode"

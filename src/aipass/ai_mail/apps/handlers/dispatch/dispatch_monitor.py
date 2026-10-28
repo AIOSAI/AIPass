@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.14.0
+# Version: 2.14.1
 # Created: 2026-03-02
 # Modified: 2026-10-28
 # =============================================
@@ -664,7 +664,8 @@ def stamp_run(branch_path: Path, cmd: list, provider: str, opencode_config: str 
                 model_observed=model,
                 observed_at=pointer["observed_at"] if same else datetime.now().astimezone().isoformat(),
             )
-        session_pointer.record_run(branch_path, run)
+    if pointer is None or not session_pointer.record_run(branch_path, run):
+        return session_pointer.format_run_line({**run, "session_id": session_pointer.PENDING})
     return session_pointer.format_run_line(session_pointer.read_pointer(branch_path))
 
 

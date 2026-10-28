@@ -691,6 +691,23 @@ class TestWakeSessionPointer:
         assert session_step is not None and session_step[0] == "ok"
         assert "11111111" in session_step[2]
 
+    def test_a_continue_over_another_hosts_pointer_starts_fresh_and_points_at_the_claude_session(
+        self, tmp_path, monkeypatch, fake_home
+    ):
+        """14:17 @baud: -c over an OpenCode pointer left it in place, so the run was stamped on ses_ ids."""
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        wake_mod.session_pointer.write_pointer(branch_path, "ses_opencode", "monitor-opencode", provider="opencode")
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        wake_branch("@testbranch", model="opus")
+
+        args = _claude_args(calls["popen"][0]["cmd"])
+        assert "-c" not in args and "--resume" not in args
+        pointer = wake_mod.session_pointer.read_pointer(branch_path) or {}
+        assert (pointer["provider"], pointer["set_by"]) == ("claude", "wake-fresh")
+        assert pointer["session_id"] == args[args.index("--session-id") + 1]
+
     def test_non_fresh_without_a_pointer_keeps_the_c_fallback(self, tmp_path, monkeypatch, fake_home):
         """No pointer = today's behaviour exactly. A wake is never worth failing over."""
         _make_wake_fixtures(tmp_path, monkeypatch)

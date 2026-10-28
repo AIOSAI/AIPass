@@ -759,3 +759,15 @@ class TestTheRunRecord:
             mod.format_run_line(unseen) == "run: codex · gpt-6.1-sol (requested, observed pending; flag) session ses_1"
         )
         assert mod.format_run_line(None) == "run: no pointer recorded"
+
+    def test_record_run_never_pairs_one_hosts_run_with_anothers_session(self, branch, monkeypatch):
+        warn = MagicMock()
+        monkeypatch.setattr(mod.logger, "warning", warn)
+        write_pointer(branch, "ses_x", "monitor-opencode", provider="opencode", run={"model_observed": "gpt"})
+
+        assert mod.record_run(branch, {"host_cli": "claude", "model_requested": "opus"}) is False
+
+        data = read_pointer(branch) or {}
+        assert (data["session_id"], data["provider"], data["host_cli"]) == ("ses_x", "opencode", "opencode")
+        assert (data["model_requested"], data["model_observed"]) == ("cli_default", "pending")
+        warn.assert_called_once()
