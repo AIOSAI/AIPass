@@ -656,6 +656,38 @@ class TestTheCodexMonitorRun:
         assert CODEX_ERROR in bounce.call_args.args[1]
         assert mod.session_pointer.read_pointer(branch_path) is None
 
+    def test_a_crashing_run_record_still_writes_the_report_and_closes_the_register(
+        self, monkeypatch, main_argv, pointer_home, tmp_path
+    ):
+        """Shipped defect: an OpenCode row with NULL data raised TypeError out of stamp_run and killed main()."""
+        monkeypatch.setattr(mod.session_pointer, "observe_model", MagicMock(side_effect=TypeError("NoneType")))
+
+        code, _, _, _ = _run_codex_main(monkeypatch, main_argv, tmp_path, CODEX_STREAM)
+
+        root = tmp_path / ".dispatch_register_root" / ".aipass"
+        assert code == 0
+        assert (root / "dispatch_reports" / "dsp-codex.json").is_file()
+        rows = [
+            json.loads(line) for line in (root / "dispatch_register.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        assert [r["status"] for r in rows if r["dispatch_id"] == "dsp-codex"] == ["completed"]
+
+    def test_a_failed_fresh_codex_run_stamps_no_model_onto_the_previous_thread(
+        self, monkeypatch, main_argv, pointer_home, tmp_path
+    ):
+        branch_path = main_argv[1].parent.parent
+        mod.session_pointer.write_pointer(branch_path, "old-thread", "monitor-codex", provider="codex")
+        monkeypatch.setattr(mod.session_pointer, "observe_model", MagicMock(return_value=("openai", "gpt-OLD")))
+
+        code, _, bounce, _ = _run_codex_main(monkeypatch, main_argv, tmp_path, [*CODEX_STREAM[:-1], CODEX_ERROR])
+
+        assert code == 1
+        assert bounce.call_args.args[1].endswith(
+            "run: codex · gpt-6.1-sol (requested, observed pending; flag) session pending"
+        )
+        pointer = mod.session_pointer.read_pointer(branch_path) or {}
+        assert (pointer["session_id"], pointer["model_observed"]) == ("old-thread", "pending")
+
 
 # Trimmed from the three `opencode run --format json` captures of 2026-10-28; every field the parser reads is kept.
 OC_SESSION = "ses_e7e57a92affeZUOP0zXJKK1vns"

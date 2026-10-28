@@ -14,13 +14,14 @@ Nothing here raises: a bad pointer degrades the dispatch to ``-c``.
 
 import json
 import os
+import re
 import sqlite3
 from contextlib import closing
 import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Iterator, Optional, Tuple
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
@@ -79,7 +80,7 @@ def transcript_dir(cwd: str | Path) -> Optional[Path]:
 
     The fleet's only copy of Claude's cwd encoding. None when the home cannot be named.
     """
-    encoded = str(cwd).replace("\\", "-").replace("/", "-").replace(":", "-").replace("_", "-").replace(".", "-")
+    encoded = re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
     home = _claude_home()
     if home is None:
         return None
@@ -278,19 +279,19 @@ def _observe_opencode(session_id: str) -> Tuple[Optional[str], Optional[str]]:
     return model.get("providerID"), model["id"]
 
 
-def _jsonl_rows(path: Optional[Path]) -> list:
+def _jsonl_rows(path: Optional[Path]) -> Iterator:
+    # Line by line: a long-lived transcript runs past 100 MB.
     if path is None or not path.is_file():
-        return []
-    rows = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError as e:
-            logger.info("[session_pointer] skipping a non-JSON line in %s: %s", path, e)
-            continue
-        if isinstance(row, dict):
-            rows.append(row)
-    return rows
+        return
+    with path.open(encoding="utf-8") as fh:
+        for line in fh:
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as e:
+                logger.info("[session_pointer] skipping a non-JSON line in %s: %s", path, e)
+                continue
+            if isinstance(row, dict):
+                yield row
 
 
 def _observe_codex(thread_id: str) -> Tuple[Optional[str], Optional[str]]:

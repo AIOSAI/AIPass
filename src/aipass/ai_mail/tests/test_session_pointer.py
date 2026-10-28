@@ -105,6 +105,12 @@ def test_transcript_dir_encodes_windows_paths(fake_home):
     assert result is not None and result.name == "C--repo-AIPass"
 
 
+def test_transcript_dir_encodes_every_non_alphanumeric_as_claude_does(fake_home):
+    """Claude Code encoded these characters this way on a live run, 2026-10-28; the old rule kept the space and +@()."""
+    result = transcript_dir("/srv/aimail probe+x@y(z)_w.v")
+    assert result is not None and result.name == "-srv-aimail-probe-x-y-z--w-v"
+
+
 def test_transcript_dir_lives_under_claude_projects(fake_home, tmp_path):
     result = transcript_dir(str(tmp_path / "some" / "branch"))
     assert result is not None and result.parent == fake_home / ".claude" / "projects"

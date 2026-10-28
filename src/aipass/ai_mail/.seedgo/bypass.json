@@ -160,7 +160,7 @@
       "file": "apps/modules/dispatch.py",
       "standard": "logged_fallback",
       "lines": [
-        404
+        370
       ],
       "reason": "Same CLI handler contract (ai_mail, fleet green legs 9 and 10): 326 is the send phase failing to resolve the sender, which has already called error() (mark_command_failed). True tells the router the command was recognised."
     },
@@ -324,9 +324,9 @@
       "file": "apps/handlers/dispatch/session_pointer.py",
       "standard": "logged_fallback",
       "lines": [
-        149,
-        152,
-        158
+        150,
+        153,
+        159
       ],
       "reason": "read_pointer (ai_mail, fleet green leg 9): the docstring states the contract - None, never a raise, when the pointer is missing, unreadable or malformed, because a pointer that cannot be trusted IS no pointer: every caller (wake.py fresh/resume decision, dispatch_monitor attempt 3) falls back to -c the same way. 208 is the plain truth (no file, no pointer); 211/217 are the documented equivalence. A raise here would cost the wake itself, which the module exists to avoid."
     }

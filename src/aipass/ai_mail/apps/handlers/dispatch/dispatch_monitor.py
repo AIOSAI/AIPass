@@ -618,9 +618,8 @@ def _add_opencode_usage(parsed: dict, part: dict) -> None:
         parsed["total_cost_usd"] = (parsed["total_cost_usd"] or 0) + cost
 
 
-def reconcile_opencode_pointer(branch_path: Path, stdout_log: str) -> None:
+def reconcile_opencode_pointer(branch_path: Path, session_id: Optional[str]) -> None:
     """Record the session the stream ran in, when it is not already the pointer's."""
-    session_id = parse_opencode_stream(stdout_log)["session_id"]
     if not isinstance(session_id, str) or not session_id.strip():
         logger.warning("[monitor] opencode stream for %s carried no sessionID — pointer unchanged", branch_path)
         return
@@ -650,10 +649,11 @@ def requested_run(cmd: list, provider: str, opencode_config: str = "") -> dict:
     return {"host_cli": provider, "model_requested": session_pointer.CLI_DEFAULT, "selection_source": "cli_default"}
 
 
-def stamp_run(branch_path: Path, cmd: list, provider: str, opencode_config: str = "") -> str:
+def stamp_run(branch_path: Path, cmd: list, provider: str, opencode_config: str = "", exit_code: int = 0) -> str:
     """Record requested and observed model on the pointer; return the run line the mails print."""
     run = requested_run(cmd, provider, opencode_config)
-    pointer = session_pointer.read_pointer(branch_path)
+    # A failed Codex run never moved the pointer: it still names the previous thread.
+    pointer = None if provider == CODEX and exit_code != 0 else session_pointer.read_pointer(branch_path)
     if pointer is not None:
         vendor, model = session_pointer.observe_model(branch_path, pointer["session_id"], provider)
         if model:
@@ -1116,7 +1116,7 @@ def main():
         opencode_stream = parse_opencode_stream(stdout_log) if provider == OPENCODE else None
         if opencode_stream is not None:
             # Every attempt, failed ones too: OpenCode minted the session, so a resume needs its id.
-            reconcile_opencode_pointer(branch_path, stdout_log)
+            reconcile_opencode_pointer(branch_path, opencode_stream["session_id"])
         if opencode_stream is not None and exit_code == 0 and not opencode_stream["succeeded"]:
             logger.warning("[monitor] %s opencode exited 0 without a text part — failed", branch_email)
             exit_code = OPENCODE_STREAM_FAILED
@@ -1181,7 +1181,12 @@ def main():
         reconcile_codex_pointer(branch_path, stdout_log)
     elif exit_code == 0 and provider != OPENCODE:
         reconcile_pointer(branch_path, stdout_log, cmd)
-    run_line = stamp_run(branch_path, cmd, provider, opencode_config)
+    try:
+        run_line = stamp_run(branch_path, cmd, provider, opencode_config, exit_code)
+    except Exception as e:
+        # The run line is an extra; the bounce, wake-back, report and register close below are not.
+        logger.warning("[monitor] %s run record failed, reporting without it: %s", branch_email, e)
+        run_line = ""
     logger.info("[monitor] %s %s", branch_email, run_line)
 
     max_turns_hit = False

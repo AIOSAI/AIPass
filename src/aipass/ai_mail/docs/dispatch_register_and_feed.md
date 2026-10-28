@@ -248,7 +248,7 @@ host_cli         : claude | codex | opencode   (the same fact as provider)
 model_provider   : the vendor as the host names it, or "pending"
 model_requested  : what the door asked for, or "cli_default"
 model_observed   : the id the runtime's own assistant row reports, or "pending"
-selection_source : flag | inline_config | project_config | user_config | cli_default | unknown
+selection_source : flag | inline_config | cli_default
 observed_at      : ISO time of the first observation, or null
 ```
 
