@@ -34,6 +34,7 @@ dependencies = [
     "pathspec>=0.12",
     "segno>=1.6",
     "keyring>=25.0",
+    "tomli>=2; python_version < '3.11'",
 ]
 
 [project.urls]

@@ -56,6 +56,7 @@ aipass/
 │   │   ├── baud.py                # phone face + baud-cli from a release
 │   │   ├── doctor.py              # health aggregation
 │   │   ├── _doctor_fix.py         # remediation report (--fix, --json)
+│   │   ├── _doctor_smoke.py       # opt-in live turn per provider (--smoke)
 │   │   ├── _doctor_wire.py        # provider rows, wire prompt
 │   │   ├── feedback.py            # pulse toggle — delegates to @hooks
 │   │   ├── handoff.py             # CLI launch

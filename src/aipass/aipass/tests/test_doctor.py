@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor.py
 # Description: Tests for aipass doctor: the command, the run and the provider checks
-# Version: 1.8.1
+# Version: 1.8.2
 # Created: 2026-04-16
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
 """Tests for apps/modules/doctor.py and apps/modules/_doctor_wire.py: the run and the provider checks."""
@@ -124,7 +124,7 @@ class TestDoctorHandleCommand:
         with patch("aipass.aipass.apps.modules.doctor.run_doctor", return_value=0) as run:
             result = handle_command("doctor", [])
         assert result is True
-        run.assert_called_once_with(verbose=False, interactive=True, fix=False, yes=False)
+        run.assert_called_once_with(verbose=False, interactive=True, fix=False, yes=False, smoke=False, model="")
 
     def test_info_flag_calls_introspection(self) -> None:
         """--info flag triggers print_introspection (returns True)."""
@@ -171,7 +171,7 @@ class TestDoctorHandleCommand:
         with patch("aipass.aipass.apps.modules.doctor.run_doctor", return_value=0) as mock_run:
             with patch("aipass.aipass.apps.modules.doctor.json_handler", autospec=True):
                 handle_command("doctor", ["--verbose"])
-        mock_run.assert_called_once_with(verbose=True, interactive=True, fix=False, yes=False)
+        mock_run.assert_called_once_with(verbose=True, interactive=True, fix=False, yes=False, smoke=False, model="")
 
     @pytest.mark.parametrize(("args", "shown"), [(["--verbose"], True), ([], False)])
     def test_verbose_shows_pytest_collect_errors(

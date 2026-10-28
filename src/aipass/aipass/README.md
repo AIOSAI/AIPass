@@ -90,7 +90,8 @@ A thin dispatcher with one module per command. `apps/aipass.py` discovers
 modules, routes the first argument, and owns nothing else: bare invocation and
 `--help` are its only output. The modules are `install.py` and `init_flow.py`
 for the two setup doors, `doctor.py` with `_doctor_fix.py` (the remediation
-report) and `_doctor_wire.py` (the provider rows and the wire prompt),
+report), `_doctor_wire.py` (the provider rows and the wire prompt) and
+`_doctor_smoke.py` (the opt-in live turn per provider),
 `help_chat.py` and `read.py` for the documentation lane, `new_project.py` and
 `adopt.py` for projects, `trust.py` for enrolment, `baud.py` for the phone
 face with `_phone_print.py` (the install's phone lines and pairing QR), `handoff.py` for the CLI launch, `profile.py` for what is remembered

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.12.0
+# Version: 1.13.0
 # Created: 2026-04-16
 # Modified: 2026-10-28
 # =============================================
@@ -53,6 +53,7 @@ from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
     find_project_root,
     scan_agents,
 )
+from aipass.aipass.apps.modules._doctor_smoke import check_smoke, print_smoke_json
 from aipass.aipass.apps.modules._doctor_fix import (
     print_json_report,
     print_remediation_report,
@@ -933,70 +934,31 @@ def _check_sandbox() -> List[CheckResult]:
     def _sev(ok: bool) -> str:
         return GLYPH_PASS if ok else GLYPH_FAIL
 
+    def _found(label: str, probe: dict, cure: str) -> CheckResult:
+        return CheckResult(label, _sev(probe["found"]), probe["path"] or "not found", "" if probe["found"] else cure)
+
     bwrap = check_bwrap_present()
-    results.append(
-        CheckResult(
-            "bwrap",
-            _sev(bwrap["found"]),
-            bwrap["path"] or "not found",
-            "" if bwrap["found"] else "sudo apt install bubblewrap",
-        )
-    )
+    results.append(_found("bwrap", bwrap, "sudo apt install bubblewrap"))
 
     if bwrap["found"]:
         func = check_bwrap_functional()
         detail = func["detail"]
         if not func["ok"] and func["sysctl_value"] is not None:
             detail = f"{detail} (apparmor_restrict_unprivileged_userns={func['sysctl_value']})"
-        results.append(
-            CheckResult(
-                "bwrap functional",
-                _sev(func["ok"]),
-                detail,
-                "",
-            )
-        )
+        results.append(CheckResult("bwrap functional", _sev(func["ok"]), detail, ""))
 
     node = check_node_present()
-    results.append(
-        CheckResult(
-            "node",
-            _sev(node["found"]),
-            node["path"] or "not found",
-            "" if node["found"] else "Install Node.js: https://nodejs.org/",
-        )
-    )
+    results.append(_found("node", node, "Install Node.js: https://nodejs.org/"))
 
     srt = check_srt_resolvable()
-    results.append(
-        CheckResult(
-            "srt (@anthropic-ai/sandbox-runtime)",
-            _sev(srt["found"]),
-            srt["path"] or "not found",
-            "" if srt["found"] else srt["install_hint"],
-        )
-    )
+    results.append(_found("srt (@anthropic-ai/sandbox-runtime)", srt, srt["install_hint"]))
 
     rg = check_rg_present()
-    results.append(
-        CheckResult(
-            "rg (ripgrep)",
-            _sev(rg["found"]),
-            rg["path"] or "not found",
-            "" if rg["found"] else "sudo apt install ripgrep  (or static binary to ~/.local/bin/rg)",
-        )
-    )
+    results.append(_found("rg (ripgrep)", rg, "sudo apt install ripgrep  (or static binary to ~/.local/bin/rg)"))
 
     project_root = find_project_root(Path.cwd())
     broker = check_broker_alive(project_root)
-    results.append(
-        CheckResult(
-            "broker daemon",
-            _sev(broker["alive"]),
-            broker["detail"],
-            "",
-        )
-    )
+    results.append(CheckResult("broker daemon", _sev(broker["alive"]), broker["detail"], ""))
 
     return results
 
@@ -1376,13 +1338,25 @@ def _print_doctor_groups(groups: Dict[str, List[CheckResult]]) -> tuple[int, int
     return pass_count, warn_count, error_count
 
 
-def run_doctor(verbose: bool = False, interactive: bool = False, fix: bool = False, yes: bool = False) -> int:
-    """Run all six groups and print results. Returns error count. *yes*: --fix writes without asking."""
+def run_doctor(
+    verbose: bool = False,
+    interactive: bool = False,
+    fix: bool = False,
+    yes: bool = False,
+    smoke: bool = False,
+    model: str = "",
+) -> int:
+    """Run all six groups and print results. Returns error count. *yes*: --fix writes without asking.
+
+    *smoke*: Services gains one live-turn row per provider (*model*: hooks' provider=model pairs).
+    """
     console.print()
     console.print("[bold cyan]aipass doctor[/bold cyan]")
     console.print()
 
     groups = _compute_doctor_groups(verbose=verbose, interactive=interactive, fix=fix, yes=yes)
+    if smoke:
+        groups["Services"] = groups.get("Services", []) + [CheckResult(*row) for row in check_smoke(model)]
     pass_count, warn_count, error_count = _print_doctor_groups(groups)
 
     logger.info("[doctor] run complete — pass=%d warn=%d error=%d", pass_count, warn_count, error_count)
@@ -1433,6 +1407,13 @@ def print_help() -> None:
     console.print("  [green]aipass doctor --fix[/green]     [dim]# Settings plan + diff, ask once; owner repair[/dim]")
     console.print("  [green]aipass doctor --fix --yes[/green][dim]# The same, writing without the question[/dim]")
     console.print("  [green]aipass doctor --fix --json[/green][dim]# Remediation + settings plan as JSON[/dim]")
+    console.print("  [green]aipass doctor --smoke[/green]   [dim]# + one live model turn per installed provider[/dim]")
+    console.print("  [green]aipass doctor --smoke --json[/green] [dim]# hooks' smoke results as JSON[/dim]")
+    console.print(
+        "  [green]aipass doctor --smoke --model opencode=<model>[/green] [dim]# pick a provider's model[/dim]"
+    )
+    console.print("    [dim]--smoke spends one model turn per installed provider and needs each one's login;[/dim]")
+    console.print("    [dim]not installed, no login, or a spent quota is a skip. Never part of --fix.[/dim]")
     console.print("  [green]aipass doctor --cross-os[/green][dim]# OS-gap + routing/version/hooks pre-flight[/dim]")
     console.print("  [green]aipass doctor --cross-os --e2e[/green][dim]# …also run the heavy e2e suite[/dim]")
     console.print(
@@ -1477,6 +1458,18 @@ def handle_command(command: str, args: list[str]) -> bool:
     fix_mode = "--fix" in args
     json_mode = "--json" in args
     yes_mode = "--yes" in args
+    smoke_mode = "--smoke" in args
+    model = args[args.index("--model") + 1] if "--model" in args[:-1] else ""
+
+    if smoke_mode and fix_mode:
+        cli_error("--smoke spends model turns and never runs with --fix: run them apart")
+        raise SystemExit(1)
+    if smoke_mode and json_mode:
+        rc = print_smoke_json(model)
+        json_handler.log_operation("doctor_smoke_json", {"rc": rc, "model": model})
+        if rc:
+            raise SystemExit(1)
+        return True
 
     if json_mode and fix_mode:
         settings_report = settings_fix_report(_find_manifest(), yes=yes_mode)
@@ -1487,7 +1480,9 @@ def handle_command(command: str, args: list[str]) -> bool:
             console.print(json.dumps({"provider_settings": settings_report}, indent=2), markup=False, highlight=False)
         return True
 
-    error_count = run_doctor(verbose=verbose, interactive=True, fix=fix_mode, yes=yes_mode)
+    error_count = run_doctor(
+        verbose=verbose, interactive=True, fix=fix_mode, yes=yes_mode, smoke=smoke_mode, model=model
+    )
     if fix_mode:
         project_root = find_project_root(Path.cwd())
         if project_root:

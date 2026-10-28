@@ -64,6 +64,8 @@ It observes presence only and never errors —
 | `doctor --fix` | A remediation report: the repair command for each failing row. A settings change is shown and asked first |
 | `doctor --fix --yes` | The same, writing the settings change without the question |
 | `doctor --fix --json` | That report as JSON, with the planned settings change under `provider_settings`; written only with `--yes`. `--json` alone falls through to the normal report |
+| `doctor --smoke` | Adds one Services row per provider from one live model turn each, through `drone @hooks smoke`: pass shows the time, skip the reason (not installed, no login, a spent quota), both ✓; fail is ✗ with hooks' reason. Spends one turn per installed provider; never runs with `--fix` |
+| `doctor --smoke --json` | hooks' result objects as given (`provider`, `status`, `why`, `session_id`, `elapsed_ms`), no other check. `--model provider=model,...` picks a model, either form |
 | `doctor --cross-os` | Cross-OS pre-flight — OS-gap cross-reference plus routing, versions and hook status |
 | `doctor --cross-os --e2e` | ...also runs the real e2e wiring suite. Heavy, opt-in |
 | `doctor --cross-os --record [PATH]` | Write a machine-filled Run Record for the human acceptance pass |
@@ -181,6 +183,7 @@ update: neither overwrites a file.
 Code: [`apps/modules/doctor.py`](../apps/modules/doctor.py), with the
 remediation report in [`apps/modules/_doctor_fix.py`](../apps/modules/_doctor_fix.py),
 the wiring rows in [`apps/modules/_doctor_wire.py`](../apps/modules/_doctor_wire.py),
+the live smoke rows in [`apps/modules/_doctor_smoke.py`](../apps/modules/_doctor_smoke.py),
 the cross-OS lane in [`apps/handlers/cross_os/`](../apps/handlers/cross_os) and
 the admin-lane reader in [`apps/handlers/admin_lane.py`](../apps/handlers/admin_lane.py).
 
