@@ -98,7 +98,7 @@ command to the one that claims it. `apps/modules/` holds one business-logic modu
 `engine` (the dispatcher itself), `engine_closure` (the files the engine imports, and the edit
 check that keeps a NameError out of them), `door_trust_registry` (the one modules file aipass may
 import for the trust registry), `cadence` (which turn a loader fires on), `injection_ledger` (what a
-seat was told, per turn), `grounding_content` (the
+seat was told, per turn), `grounding_receipt` (whether the grounding reached the model), `grounding_content` (the
 injected blocks and their budgets), `write_ownership` (whose file a write lands in, read from the registries),
 `bash_writes`, `shell_reader`, `shell_programs` and `testwrite_targets` (what a shell command can be
 seen to write, the programs it runs, and which writes are new tests), `admin_seat` and `testgate_policy` (who is exempt,

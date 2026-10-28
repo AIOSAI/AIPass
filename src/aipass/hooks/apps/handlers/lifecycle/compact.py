@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: compact.py
-# Version: 1.0.1
+# Version: 1.1.0
 # Description: Injects live state for post-compact recovery (PreCompact)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-10-24
+# Modified: 2026-10-28
 # =============================================
 
 """Reads branch state and injects recovery context before compaction."""
@@ -78,6 +78,11 @@ def handle(hook_data: dict) -> dict:
         cadence.reset_counter(hook_data=hook_data, caller="compact")
     except Exception as exc:
         logger.info("[HOOKS] compact: cadence reset failed: %s", exc)
+
+    try:
+        importlib.import_module("aipass.hooks.apps.modules.grounding_receipt").mark_pending(hook_data)
+    except Exception as exc:
+        logger.error("[HOOKS] compact: grounding receipt not set pending: %s", exc)
 
     try:
         cwd = hook_data.get("cwd", "") or str(Path.cwd())

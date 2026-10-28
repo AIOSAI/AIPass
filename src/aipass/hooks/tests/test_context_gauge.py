@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_context_gauge.py
-# Version: 1.6.0
-# Description: Tests for context_gauge prompt handler (guard per window; real model window; Codex; OpenCode's store and compact point)
+# Version: 1.7.0
+# Description: Tests for context_gauge (per-window guard, real window, Codex, OpenCode store) and the grounding receipt
 # Branch: hooks
 # Created: 2026-07-20
 # Modified: 2026-10-28
@@ -21,9 +21,11 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.hooks.apps.handlers.bridges import opencode as opencode_bridge
+from aipass.hooks.apps.handlers.lifecycle import compact
 from aipass.hooks.apps.handlers.prompt import context_gauge
 from aipass.hooks.apps.handlers.prompt.context_gauge import handle
-from aipass.hooks.apps.modules import context_window
+from aipass.hooks.apps.modules import context_window, grounding_receipt
 
 MODULE = "aipass.hooks.apps.handlers.prompt.context_gauge"
 CADENCE_MODULE = "aipass.hooks.apps.modules.cadence"
@@ -56,10 +58,10 @@ def _write_transcript(path, input_tokens=0, cache_read=0, cache_creation=0, mode
     path.write_text(json.dumps(entry), encoding="utf-8")
 
 
-def _codex_rollout(path, total_tokens, window=475_000, model="gpt-6.1-sol"):
+def _codex_rollout(path, total_tokens, window: int | None = 475_000, model="gpt-6.1-sol"):
     """A Codex rollout in the shape 0.164 writes: session_meta, turn_context, the newest token_count."""
     usage = {"input_tokens": total_tokens - 568, "cached_input_tokens": 7680, "output_tokens": 568}
-    info = {
+    info: dict[str, object] = {
         "total_token_usage": dict(usage, total_tokens=total_tokens),
         "last_token_usage": dict(usage, total_tokens=total_tokens),
     }
@@ -456,3 +458,119 @@ class TestOpenCodeStore:
         monkeypatch.setenv("OPENCODE_DB", str(tmp_path / "absent.db"))
         assert handle({"session_id": "ses_1", "provider": "opencode"})["stdout"] == ""
         assert self._gauge(tmp_path, monkeypatch, ("ses_9", "assistant", 2, _tokens(read=195_000))) == ""
+
+
+def _instruction_store(path, session, asked, effect, compactions=0):
+    """OpenCode's instruction tables: what was put (instruction_entry), the newest epoch's in-effect hashes
+    (instruction_state) resolved through instruction_blob, and completed compaction rows. Values are JSON text."""
+    with closing(sqlite3.connect(path)) as conn:
+        conn.execute("CREATE TABLE session_message (id text, session_id text, type text, seq integer, data text)")
+        conn.execute("CREATE TABLE instruction_entry (session_id text, key text, value text, removed integer)")
+        conn.execute("CREATE TABLE instruction_state (session_id text, current_values text)")
+        conn.execute("CREATE TABLE instruction_blob (hash text, value text)")
+        for key, value in asked.items():
+            conn.execute("INSERT INTO instruction_entry VALUES (?, ?, ?, 0)", (session, key, json.dumps(value)))
+        if "aipass-kernel" not in asked:
+            conn.execute("INSERT INTO instruction_entry VALUES (?, 'aipass-kernel', 'null', 1)", (session,))
+        hashes = {"core/date": "h-date"}
+        for n, (key, value) in enumerate(effect.items()):
+            hashes[f"api/{key}"] = f"h{n}"
+            conn.execute("INSERT INTO instruction_blob VALUES (?, ?)", (f"h{n}", json.dumps(value)))
+        conn.execute("INSERT INTO instruction_state VALUES (?, ?)", (session, json.dumps(hashes)))
+        for n in range(compactions):
+            conn.execute(
+                "INSERT INTO session_message VALUES (?, ?, 'compaction', ?, ?)",
+                (f"c{n}", session, n, json.dumps({"status": "completed"})),
+            )
+        conn.execute(
+            "INSERT INTO session_message VALUES ('cr', ?, 'compaction', 99, ?)",
+            (session, json.dumps({"status": "running"})),
+        )
+        conn.commit()
+
+
+GROUNDED = {key: f"text of {key}" for key in grounding_receipt.REQUIRED}
+
+
+class TestGroundingReceipt:
+    """The receipt at <branch>/.ai_mail.local/grounding.json, written at the prompt, pending at a compaction."""
+
+    @pytest.fixture
+    def seat(self, tmp_path, monkeypatch):
+        branch = tmp_path / "src" / "aipass" / "canary"
+        branch.mkdir(parents=True)
+        monkeypatch.setenv("OPENCODE_DB", str(tmp_path / "opencode.db"))
+        return branch
+
+    def _prompt(self, seat, provider="opencode", session="ses_1"):
+        with patch(f"{MODULE}._GUARD_DIR", seat):
+            stdout = handle({"session_id": session, "cwd": str(seat), "provider": provider})["stdout"]
+        doc = json.loads((seat / ".ai_mail.local" / "grounding.json").read_text(encoding="utf-8"))
+        return stdout, doc
+
+    def test_the_required_set_is_the_bridges_grounding_entries(self):
+        assert set(grounding_receipt.REQUIRED) == set(opencode_bridge.GROUNDING.values())
+
+    def test_the_store_carrying_every_entry_reads_verified_at_its_compaction_count(self, seat, tmp_path):
+        _instruction_store(tmp_path / "opencode.db", "ses_1", GROUNDED, GROUNDED, compactions=2)
+        stdout, doc = self._prompt(seat)
+        row = doc["current"]
+        assert stdout == ""
+        assert (row["status"], row["generation"], row["observation_boundary"]) == ("verified", 2, "opencode_store")
+        assert row["expected_digest"] == row["observed_digest"] and len(row["observed_digest"]) == 64
+        assert (row["session_id"], row["branch"], row["missing"], row["stale"]) == ("ses_1", "canary", [], [])
+        assert row["required_set_revision"] == grounding_receipt.REVISION
+
+    def test_a_lost_or_older_entry_reads_ungrounded_and_the_prompt_names_it_and_its_source(self, seat, tmp_path):
+        effect = {key: value for key, value in GROUNDED.items() if key != "aipass-navmap"}
+        effect["aipass-kernel"] = "the kernel before the edit"
+        _instruction_store(tmp_path / "opencode.db", "ses_1", GROUNDED, effect)
+        stdout, doc = self._prompt(seat)
+        row = doc["current"]
+        assert (row["status"], row["missing"], row["stale"]) == ("ungrounded", ["aipass-navmap"], ["aipass-kernel"])
+        assert row["expected_digest"] != row["observed_digest"]
+        assert stdout == (
+            "GROUNDING RECEIPT: your last model call did not carry aipass-kernel, aipass-navmap. "
+            "Re-read: $AIPASS_HOME/.aipass/tier0_kernel.md; $AIPASS_HOME/.aipass/tier1_navmap.md."
+        )
+
+    def test_a_session_with_nothing_put_yet_is_pending_and_silent(self, seat, tmp_path):
+        _instruction_store(tmp_path / "opencode.db", "ses_1", {}, {})
+        stdout, doc = self._prompt(seat)
+        assert (stdout, doc["current"]["status"], doc["current"]["missing"]) == ("", "pending", [])
+
+    def test_claude_and_codex_write_unverified_with_nothing_observed(self, seat):
+        for provider in ("claude", "codex"):
+            stdout, doc = self._prompt(seat, provider=provider)
+            row = doc["current"]
+            assert stdout == ""
+            assert (row["status"], row["observation_boundary"], row["generation"]) == ("unverified", "none", 0)
+            assert (row["expected_digest"], row["observed_digest"]) == (None, None)
+
+    def test_a_compaction_sets_pending_one_generation_on_and_the_next_prompt_reads_the_store(self, seat, tmp_path):
+        _instruction_store(tmp_path / "opencode.db", "ses_1", GROUNDED, GROUNDED, compactions=1)
+        self._prompt(seat)
+        compact.handle({"session_id": "ses_1", "cwd": str(seat)})
+        doc = json.loads((seat / ".ai_mail.local" / "grounding.json").read_text(encoding="utf-8"))
+        assert (doc["current"]["status"], doc["current"]["generation"]) == ("pending", 2)
+        assert doc["current"]["observed_digest"] is None
+        assert doc["current"]["observation_boundary"] == "opencode_store"
+        _, doc = self._prompt(seat)
+        assert (doc["current"]["status"], doc["current"]["generation"]) == ("verified", 1)
+        assert [old["status"] for old in doc["history"]] == ["pending", "verified"]
+
+    def test_claude_generation_counts_its_compactions(self, seat):
+        self._prompt(seat, provider="claude")
+        compact.handle({"session_id": "ses_1", "cwd": str(seat)})
+        _, doc = self._prompt(seat, provider="claude")
+        assert (doc["current"]["status"], doc["current"]["generation"]) == ("unverified", 1)
+
+    def test_history_keeps_changed_rows_only_and_at_most_twenty(self, seat):
+        self._prompt(seat, provider="claude")
+        _, doc = self._prompt(seat, provider="claude")
+        assert doc["history"] == []
+        for _ in range(25):
+            compact.handle({"session_id": "ses_1", "cwd": str(seat)})
+        _, doc = self._prompt(seat, provider="claude")
+        assert len(doc["history"]) == grounding_receipt.HISTORY_CAP
+        assert doc["history"][0]["generation"] == 25

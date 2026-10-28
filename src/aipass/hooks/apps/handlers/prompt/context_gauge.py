@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: context_gauge.py
-# Version: 1.5.0
-# Description: Calm heads-up to run /prep ($prep on Codex) as auto-compact approaches, once per window (UserPromptSubmit)
+# Version: 1.6.0
+# Description: Heads-up to run /prep ($prep on Codex) before auto-compact, and the grounding receipt (UserPromptSubmit)
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-20
@@ -75,7 +75,25 @@ def _reading(hook_data: dict, session_id: str) -> tuple[int, int, int] | None:
     return (context_window.context_fill_tokens(usage), window_size, trigger) if trigger > 0 else None
 
 
+def _receipt_line(hook_data: dict) -> str:
+    """Write the grounding receipt (modules/grounding_receipt.py); its line when the last call lost grounding."""
+    try:
+        return importlib.import_module("aipass.hooks.apps.modules.grounding_receipt").observe(hook_data)
+    except Exception as exc:
+        logger.error("[HOOKS] context_gauge: grounding receipt not written: %s", exc)
+        return ""
+
+
 def handle(hook_data: dict) -> dict:
+    """The context-fill nudge, then the grounding receipt's line when there is one."""
+    result = _gauge(hook_data)
+    line = _receipt_line(hook_data)
+    if line:
+        result = {**result, "stdout": "\n\n".join(part for part in (result["stdout"], line) if part)}
+    return result
+
+
+def _gauge(hook_data: dict) -> dict:
     """Inject a context-fill nudge once per threshold per session."""
     try:
         session_id = hook_data.get("session_id", "") or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
