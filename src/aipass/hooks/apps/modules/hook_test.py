@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: hook_test.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Description: Portable hook test runner — every hook with mock data; provider parity with real sessions
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-10
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
 """Portable hook test runner.
@@ -328,18 +328,18 @@ def run_parity(branch: Path, lanes: list[str], providers: list[str]) -> dict:
                 readings[provider] = runner.observe(row, entries, moved) if session_id and entries else runner.NO_DATA
             rows.append({**row.__dict__, "readings": readings, "verdict": runner.verdict(row, readings)})
     ok = not [r for r in rows if r["verdict"] in runner.FAILING]
-    return {"branch": str(branch), "rows": rows, "notes": notes, "ok": ok}
+    return {"branch": str(branch), "providers": providers, "rows": rows, "notes": notes, "ok": ok}
 
 
 def print_parity(results: dict) -> None:
-    """One table: row, Claude, Codex, verdict; accepted differences carry their reason."""
+    """One table: row, one column per provider run, verdict; accepted differences carry their reason."""
     table = Table(title=f"parity @ {results['branch']}")
-    for column in ("Lane", "Row", *runner.PROVIDERS, "Verdict"):
+    for column in ("Lane", "Row", *results["providers"], "Verdict"):
         table.add_column(column)
     styles = {runner.SAME: "green", runner.ACCEPTED: "yellow"}
     for row in results["rows"]:
         mark = f"{row['verdict']} ({row['accepted']})" if row["verdict"] == runner.ACCEPTED else row["verdict"]
-        cells = [row["readings"].get(p, "-") for p in runner.PROVIDERS]
+        cells = [row["readings"][p] for p in results["providers"]]
         style = styles.get(row["verdict"], "bold red")
         table.add_row(row["lane"], row["label"], *cells, f"[{style}]{mark}[/{style}]")
     CONSOLE.print(table)
@@ -350,15 +350,20 @@ def print_parity(results: dict) -> None:
 def _parity_command(args: list) -> bool:
     """drone @hooks parity: exit 1 on a real difference, so a merge train can gate on it."""
     if wants_help(args):
-        CONSOLE.print("[bold cyan]parity[/bold cyan] — the same scripted prompts on Claude and Codex, compared")
-        CONSOLE.print("  drone @hooks parity [--branch @canary|<path>] [--lane A,B,C,D,E,F] [--provider claude,codex]")
+        CONSOLE.print("[bold cyan]parity[/bold cyan] — the same scripted prompts on Claude, Codex, OpenCode, compared")
+        CONSOLE.print(
+            "  drone @hooks parity [--branch @canary|<path>] [--lane A,B,C,D,E,F] [--provider claude,codex,opencode]"
+        )
+        CONSOLE.print(
+            "  --provider defaults to claude,codex; opencode loads its plugin from OPENCODE_CONFIG_DIR when set"
+        )
         CONSOLE.print("  --json   also write artifacts/reports/parity_<date>.json")
         CONSOLE.print("Lane J is A,B,C with --branch at an external project's citizen. Exit 1 on DIFFERENT or no data.")
         return True
     parser = argparse.ArgumentParser(prog="drone @hooks parity", add_help=False)
     parser.add_argument("--branch", default="@canary")
     parser.add_argument("--lane", default=",".join(runner.LANES))
-    parser.add_argument("--provider", default=",".join(runner.PROVIDERS))
+    parser.add_argument("--provider", default=",".join(runner.DEFAULT_PROVIDERS))
     parser.add_argument("--json", action="store_true")
     opts, _unknown = parser.parse_known_args(args)
     branch = resolve_branch(opts.branch)

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_hook_test.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Tests for the portable hook test runner
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-10
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
 """Tests for apps/modules/hook_test.py and the parity handler it drives."""
@@ -354,19 +354,22 @@ _ALL_FOUR_REFUSE = [("PreToolUse", h, 2) for h in ("pre_edit_gate", "git_gate", 
 
 
 class FakeClis:
-    """Stands where claude and codex run: records each launch and writes its session's engine lines."""
+    """Stands where claude, codex and opencode run: records each launch and writes its session's engine lines.
+
+    An OpenCode model in *limited* answers the free tier's 429 after the plugin's hooks have run."""
 
     def __init__(self, monkeypatch, tmp_path, lines: dict[str, list[tuple[str, str, int]]]) -> None:
         self.calls: list[dict] = []
         self.lines = lines
-        self.ids = {"claude": "claude-sess", "codex": "codex-thread"}
+        self.ids = {"claude": "claude-sess", "codex": "codex-thread", "opencode": "ses_oc"}
+        self.limited: set[str] = set()
         self.log = tmp_path / "engine.jsonl"
         monkeypatch.setattr(diagnostics, "LOG_FILE", self.log)
         monkeypatch.setattr(runner.subprocess, "run", self._run)
 
     def _run(self, argv, **kwargs):
         self.calls.append({"argv": argv, **kwargs})
-        provider = argv[0]
+        provider = Path(argv[0]).name
         if provider not in self.ids:
             return subprocess.CompletedProcess(argv, 0, "sent", "")
         session = self.ids[provider]
@@ -374,15 +377,21 @@ class FakeClis:
             for event, hook, code in self.lines.get(provider, []):
                 entry = {"event": event, "hook": hook, "exit_code": code, "stdout_len": 0, "session_id": session}
                 handle.write(json.dumps(entry) + "\n")
+        if provider == "opencode" and argv[argv.index("-m") + 1] in self.limited:
+            refusal = {"type": "error", "sessionID": session, "error": {"type": "provider.free-limit", "status": 429}}
+            start = json.dumps({"type": "step_start", "sessionID": session})
+            return subprocess.CompletedProcess(argv, 1, start + "\n" + json.dumps(refusal), "")
         if provider == "claude":
             stdout = json.dumps({"type": "result", "session_id": session})
+        elif provider == "opencode":
+            stdout = json.dumps({"type": "step_start", "sessionID": session}) + "\n" + json.dumps({"type": "text"})
         else:
             stdout = json.dumps({"type": "thread.started", "thread_id": session})
         return subprocess.CompletedProcess(argv, 0, stdout if session else "", "")
 
 
 def _table(err: str) -> dict[str, list[str]]:
-    """The printed parity table, row label -> [lane, Claude, Codex, verdict]."""
+    """The printed parity table, row label -> [lane, one cell per provider run, verdict]."""
     cells = [[c.strip() for c in line.strip("│").split("│")] for line in err.splitlines() if line.startswith("│")]
     return {row[1]: [row[0], *row[2:]] for row in cells if row[0] != "Lane"}
 
@@ -464,4 +473,48 @@ class TestParity:
         _parity(tmp_path, "--lane", "C", "--provider", "claude")
         assert [c["argv"][0] for c in fake.calls] == ["claude"]
         table = _table(capsys.readouterr().err)
-        assert [row[1:] for row in table.values()] == [["refused", "-", "not compared"]] * 4
+        assert [row[1:] for row in table.values()] == [["refused", "not compared"]] * 4
+
+    def test_opencode_runs_headless_beside_the_others_and_its_session_is_read_off_the_stream(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        monkeypatch.setenv("OPENCODE_SESSION_ID", "outer-seat")
+        monkeypatch.setenv("OPENCODE_CONFIG_DIR", str(tmp_path / "ocdir"))
+        monkeypatch.setenv("PWD", str(tmp_path))
+        lines = {p: _ALL_FOUR_REFUSE for p in ("claude", "codex", "opencode")}
+        fake = FakeClis(monkeypatch, tmp_path, lines)
+        _parity(tmp_path, "--lane", "C", "--provider", "claude,codex,opencode")
+        table = _table(capsys.readouterr().err)
+        assert [row[1:] for row in table.values()] == [["refused", "refused", "refused", "same"]] * 4
+        opencode = fake.calls[2]
+        assert opencode["argv"][1:] == [
+            "run",
+            "--standalone",
+            "--format",
+            "json",
+            "--auto",
+            "-m",
+            runner.OPENCODE_MODELS[0],
+        ]
+        assert opencode["input"] == fake.calls[0]["input"] and opencode["cwd"] == str(tmp_path / "canary")
+        # OpenCode seats itself at $PWD before its real cwd: an inherited PWD runs the lane as the caller.
+        assert opencode["env"]["PWD"] == opencode["cwd"]
+        assert "OPENCODE_SESSION_ID" not in opencode["env"]
+        assert opencode["env"]["OPENCODE_CONFIG_DIR"] == str(tmp_path / "ocdir")
+
+    def test_a_free_limit_reruns_once_on_the_fallback_model(self, monkeypatch, tmp_path, capsys):
+        fake = FakeClis(monkeypatch, tmp_path, {"opencode": _ALL_FOUR_REFUSE, "claude": _ALL_FOUR_REFUSE})
+        fake.limited.add(runner.OPENCODE_MODELS[0])
+        _parity(tmp_path, "--lane", "C", "--provider", "claude,opencode")
+        models = [c["argv"][-1] for c in fake.calls if Path(c["argv"][0]).name == "opencode"]
+        assert models == list(runner.OPENCODE_MODELS)
+        assert [row[1:] for row in _table(capsys.readouterr().err).values()] == [["refused", "refused", "same"]] * 4
+
+    def test_every_model_limited_is_no_data_after_one_run_each(self, monkeypatch, tmp_path, capsys):
+        fake = FakeClis(monkeypatch, tmp_path, {"claude": _ALL_FOUR_REFUSE, "opencode": _ALL_FOUR_REFUSE})
+        fake.limited.update(runner.OPENCODE_MODELS)
+        with pytest.raises(SystemExit) as exit_info:
+            _parity(tmp_path, "--lane", "C", "--provider", "claude,opencode")
+        assert exit_info.value.code == 1
+        assert len([c for c in fake.calls if Path(c["argv"][0]).name == "opencode"]) == len(runner.OPENCODE_MODELS)
+        assert [row[2:] for row in _table(capsys.readouterr().err).values()] == [["no data", "no data"]] * 4

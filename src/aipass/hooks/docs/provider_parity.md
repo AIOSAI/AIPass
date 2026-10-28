@@ -2,17 +2,17 @@
 
 # Provider parity
 
-`drone @hooks parity` runs the same scripted prompts headless on Claude Code and on Codex from one branch's cwd and compares what the hooks did in each session, row by row. Exit 0 when every row is the same or an accepted difference; exit 1 on a real difference or a session that left no record, so a merge train can gate on it.
+`drone @hooks parity` runs the same scripted prompts headless on Claude Code, Codex and OpenCode from one branch's cwd and compares what the hooks did in each session, row by row. Exit 0 when every row is the same or an accepted difference; exit 1 on a real difference or a session that left no record, so a merge train can gate on it.
 
 ```
-drone @hooks parity [--branch @canary|<path>] [--lane A,B,C,D,E,F] [--provider claude,codex] [--json]
+drone @hooks parity [--branch @canary|<path>] [--lane A,B,C,D,E,F] [--provider claude,codex,opencode] [--json]
 ```
 
 `--branch` takes a path or `@name`, looked up in AIPass's registry, then in each project enrolled with `aipass trust`. Lane `J` expands to `A,B,C`; point `--branch` at an external project's citizen for it. `--json` also writes `artifacts/reports/parity_<date>.json`.
 
 ## The oracle
 
-`logs/engine.jsonl`. Every per-hook line carries the payload's `session_id`, and each CLI prints its session's id (Claude's result JSON `session_id`; Codex's first `--json` event, `thread.started`, `thread_id`). The runner reads both log generations for that id right after the session ends. engine.jsonl keeps two generations of about 500 KB, about 25 minutes on a busy fleet, so a session is read back before the next starts.
+`logs/engine.jsonl`. Every per-hook line carries the payload's `session_id`, and each CLI prints its session's id (Claude's result JSON `session_id`; Codex's first `--json` event, `thread.started`, `thread_id`; OpenCode's `sessionID` on every stream line, minted by OpenCode). The runner reads both log generations for that id right after the session ends. engine.jsonl keeps two generations of about 500 KB, about 25 minutes on a busy fleet, so a session is read back before the next starts.
 
 A row reads one hook in one session:
 
@@ -27,10 +27,11 @@ A provider whose session printed no id, or whose id has no lines, reads `no data
 
 ## Launch shapes
 
-Both run from `cwd = <branch>`, with the prompt on stdin (the edit gate refuses a long prompt as an argument), and with the env `dispatch_monitor` gives a headless wake: `AIPASS_SESSION_TYPE=dispatched`, every `CLAUDE*` and `CODEX*` variable stripped, `AIPASS_CALLER_BRANCH`, `AIPASS_CALLER_CWD` and `AIPASS_BOT_ID` dropped.
+Each runs from `cwd = <branch>`, with the prompt on stdin (the edit gate refuses a long prompt as an argument), and with the env `dispatch_monitor` gives a headless wake: `AIPASS_SESSION_TYPE=dispatched`, every `CLAUDE*` and `CODEX*` variable stripped, `AIPASS_CALLER_BRANCH`, `AIPASS_CALLER_CWD`, `AIPASS_BOT_ID` and `OPENCODE_SESSION_ID` dropped. `PWD` is set to the branch: OpenCode takes its directory from `$PWD` before its real cwd, so an inherited one runs the lane as the caller. `--provider` defaults to `claude,codex`; `opencode` is named to run.
 
 - Claude: `claude -p --model sonnet --permission-mode bypassPermissions --output-format json`
 - Codex: `codex exec --dangerously-bypass-approvals-and-sandbox --json -` (the model is the Codex config default)
+- OpenCode: `opencode run --standalone --format json --auto -m opencode/deepseek-v4.1-flash-free` (`opencode` on PATH, else `~/.opencode/bin/opencode`). The free tier's quota is per model and per day: a stream carrying `provider.free-limit` reruns the lane once on `opencode/nemotron-3.5-lightning-free`, and a second refusal reads `no data`. The run never passes `--session`: the free tier answers an id not in OpenCode's own shape with a false 429. The plugin loads from the user-level install or from `OPENCODE_CONFIG_DIR` when the caller sets it; a session the plugin never reached has no engine lines and reads `no data`.
 
 A session that runs past 600 seconds reads `no data`.
 

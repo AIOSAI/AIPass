@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_context_gauge.py
-# Version: 1.3.0
-# Description: Tests for context_gauge prompt handler (guard per window; real model window; the Codex rollout)
+# Version: 1.4.0
+# Description: Tests for context_gauge prompt handler (guard per window; real model window; Codex; OpenCode's store)
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-10-25
+# Modified: 2026-10-28
 # =============================================
 
 """Tests for apps/handlers/prompt/context_gauge.py."""
@@ -15,6 +15,8 @@
 # seedgo: no-test-needed(documentation) — the module docstring's account of the trigger
 
 import json
+import sqlite3
+from contextlib import closing
 from unittest.mock import patch
 
 import pytest
@@ -289,3 +291,57 @@ class TestCodexRollout:
         with patch(f"{MODULE}._GUARD_DIR", tmp_path):
             result = handle(hook_data)
         assert "~150k of 190k context (79%, as the status line counts it); auto-compact at ~180k." in result["stdout"]
+
+
+def _opencode_store(path, *messages: tuple[str, str, int, dict]) -> None:
+    """OpenCode's session_message table: (session_id, type, seq, tokens) rows, data as OpenCode writes it."""
+    with closing(sqlite3.connect(path)) as conn:
+        conn.execute("CREATE TABLE session_message (id text, session_id text, type text, seq integer, data text)")
+        for n, (session, kind, seq, tokens) in enumerate(messages):
+            data = json.dumps({"model": {"id": "deepseek-v4.1-flash-free"}, "tokens": tokens})
+            conn.execute("INSERT INTO session_message VALUES (?, ?, ?, ?, ?)", (f"m{n}", session, kind, seq, data))
+        conn.commit()
+
+
+def _tokens(inp=0, out=0, reasoning=0, read=0, write=0) -> dict:
+    return {"input": inp, "output": out, "reasoning": reasoning, "cache": {"read": read, "write": write}}
+
+
+class TestOpenCodeStore:
+    """An OpenCode session: the newest assistant message in OpenCode's store, counted as its status line counts it."""
+
+    def _gauge(self, tmp_path, monkeypatch, *messages, session="ses_1"):
+        store = tmp_path / "opencode.db"
+        _opencode_store(store, *messages)
+        monkeypatch.setenv("OPENCODE_DB", str(store))
+        with patch(f"{MODULE}._GUARD_DIR", tmp_path):
+            return handle({"session_id": session, "cwd": str(tmp_path), "provider": "opencode"})["stdout"]
+
+    def test_output_reasoning_and_cache_count_toward_the_fill_and_the_call_is_slash_prep(self, tmp_path, monkeypatch):
+        tokens = _tokens(inp=100_000, out=10_000, reasoning=6_000, read=40_000, write=4_000)
+        stdout = self._gauge(tmp_path, monkeypatch, ("ses_1", "assistant", 2, tokens))
+        assert stdout.startswith("CONTEXT GAUGE: ~160k of 200k context (80%, as the status line counts it);")
+        assert "/prep" in stdout and "$prep" not in stdout
+
+    def test_input_alone_under_the_threshold_is_silent(self, tmp_path, monkeypatch):
+        assert self._gauge(tmp_path, monkeypatch, ("ses_1", "assistant", 2, _tokens(inp=150_000))) == ""
+
+    def test_the_newest_assistant_message_of_this_session_is_the_reading(self, tmp_path, monkeypatch):
+        stdout = self._gauge(
+            tmp_path,
+            monkeypatch,
+            ("ses_1", "assistant", 1, _tokens(read=20_000)),
+            ("ses_1", "assistant", 5, _tokens(read=170_000)),
+            ("ses_1", "user", 6, {}),
+            ("ses_2", "assistant", 9, _tokens(read=20_000)),
+        )
+        assert stdout.startswith("CONTEXT GAUGE: ~170k of 200k context (85%,")
+
+    def test_ninety_five_percent_escalates(self, tmp_path, monkeypatch):
+        stdout = self._gauge(tmp_path, monkeypatch, ("ses_1", "assistant", 2, _tokens(read=192_000)))
+        assert "Compact fires soon" in stdout
+
+    def test_no_store_or_no_session_row_is_silent(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("OPENCODE_DB", str(tmp_path / "absent.db"))
+        assert handle({"session_id": "ses_1", "provider": "opencode"})["stdout"] == ""
+        assert self._gauge(tmp_path, monkeypatch, ("ses_9", "assistant", 2, _tokens(read=195_000))) == ""

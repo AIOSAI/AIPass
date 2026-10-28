@@ -817,6 +817,28 @@ else
     echo "Skipping Codex CLI (not installed)"
 fi
 
+# --- Install the OpenCode plugin (the `aipass doctor --fix` door: backup, byte-equal copy, receipt) ---
+# The curl installer puts opencode in ~/.opencode/bin, on PATH only through ~/.bashrc.
+if command -v opencode &>/dev/null || [ -x "$HOME/.opencode/bin/opencode" ]; then
+    echo "Installing the OpenCode plugin ..."
+    if "$VENV_PYTHON" - "$SCRIPT_DIR/.claude/provider_manifest.json" << 'PYEOF'
+import sys
+from pathlib import Path
+
+from aipass.aipass.apps.handlers.provider_wire import install_opencode_plugin
+
+for action in install_opencode_plugin(Path(sys.argv[1])):
+    print(f"  {action}")
+PYEOF
+    then
+        :
+    else
+        echo "  OpenCode plugin NOT installed (see the error above); run aipass doctor for the OpenCode rows."
+    fi
+else
+    echo "Skipping OpenCode (not installed)"
+fi
+
 # --- Set AIPASS_HOME + PATH so all services work from any project ---
 echo ""
 echo "Configuring cross-project access ..."
@@ -1056,6 +1078,7 @@ if [ "$FAIL" -eq 0 ]; then
     echo ""
     echo "CLI integrations:"
     echo "  Claude Code: hooks installed to ~/.claude/settings.json"
+    { command -v opencode &>/dev/null || [ -x "$HOME/.opencode/bin/opencode" ]; } && echo "  OpenCode:    plugin installed to ~/.config/opencode/plugins/aipass.ts"
     command -v codex &>/dev/null && echo "  Codex CLI:   hooks merged into ${CODEX_HOME:-~/.codex}/hooks.json, pins in its config.toml (trust them once in codex)"
     echo ""
 

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: context_window.py
-# Version: 1.6.0
-# Description: Transcript reader (Claude transcript + Codex rollout) and the compact window and point per CLI
+# Version: 1.7.0
+# Description: Context fill per CLI (Claude transcript, Codex rollout, OpenCode store) and the compact window
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-20
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
 """Live context fill and the model from a session transcript, and the window Claude Code runs.
@@ -17,12 +17,14 @@ of the most recent assistant turn (proven readable S326).
 
 Window, as Claude Code 2.1.304 picks it: the model's own window (`[1m]` suffix or a native-1M
 id -> 1M, else 200k), capped by an explicit window when one is set (env beats settings).
-Auto-compact fires at window - 33k."""
+Auto-compact fires at window - 33k. OpenCode keeps no transcript: opencode_fill reads its store."""
 
 import json
 import os
 import re
+import sqlite3
 from collections.abc import Callable
+from contextlib import closing
 from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
@@ -267,6 +269,52 @@ def codex_config_path() -> Path:
 def codex_hooks_path() -> Path:
     """Codex's user-level hooks.json, the only place its hook rows live."""
     return codex_home() / "hooks.json"
+
+
+# shortcut: every OpenCode model is read as 200k, the docs' unknown-model default; read limit.context once a cheap catalog source exists.
+OPENCODE_WINDOW = _DEFAULT_WINDOW
+_OPENCODE_LATEST = (
+    "SELECT data FROM session_message WHERE session_id = ? AND type = 'assistant' ORDER BY seq DESC LIMIT 1"
+)
+
+
+def opencode_db_path() -> Path:
+    """OpenCode's store: $OPENCODE_DB, else opencode/opencode.db in the XDG data home."""
+    if os.environ.get("OPENCODE_DB"):
+        return Path(os.environ["OPENCODE_DB"])
+    data = os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share"
+    return Path(data) / "opencode" / "opencode.db"
+
+
+def opencode_fill(session_id: str) -> int | None:
+    """An OpenCode session's live context as its status line counts it, or None when the store has no reading.
+
+    The newest assistant message's input + output + reasoning + cache read + cache write; session_v2's
+    tokens columns are running totals over every call, not the fill. The store is opened read-only.
+    """
+    db = opencode_db_path()
+    if not session_id or not db.is_file():
+        return None
+    try:
+        with closing(sqlite3.connect(f"{db.resolve().as_uri()}?mode=ro", uri=True, timeout=2)) as conn:
+            row = conn.execute(_OPENCODE_LATEST, (session_id,)).fetchone()
+        tokens = json.loads(row[0]).get("tokens") if row else None
+    except (sqlite3.Error, ValueError, AttributeError) as exc:
+        logger.info("[HOOKS] context_window: OpenCode store unreadable for %s: %s", session_id, exc)
+        return None
+    if not isinstance(tokens, dict):
+        return None
+    cache = tokens.get("cache")
+    if not isinstance(cache, dict):
+        cache = {}
+    counted = [
+        tokens.get("input"),
+        tokens.get("output"),
+        tokens.get("reasoning"),
+        cache.get("read"),
+        cache.get("write"),
+    ]
+    return sum(n for n in counted if isinstance(n, int))
 
 
 def _codex_config_int(key: str) -> int | None:

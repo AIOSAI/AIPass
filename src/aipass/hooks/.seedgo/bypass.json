@@ -1468,13 +1468,13 @@
       "file": "apps/modules/context_window.py",
       "standard": "logged_fallback",
       "lines": [
-        163,
-        166,
-        185,
-        188,
-        271
+        165,
+        168,
+        187,
+        190,
+        304
       ],
-      "reason": "Fleet green leg 5: the context gauge's reading; None shows no gauge. Display only, guards no write. 163-188: an unreadable transcript (Claude's or a Codex rollout) reads as no usage / no model. 271: an unset or unreadable Codex config.toml key reads as unset, so Codex's own default window and compact point stand."
+      "reason": "Fleet green leg 5: the context gauge's reading; None shows no gauge. Display only, guards no write. 165-190: an unreadable transcript (Claude's or a Codex rollout) reads as no usage / no model. 304: an unreadable OpenCode store reads as no usage, logged at INFO."
     },
     {
       "file": "apps/modules/cc_transcripts.py",
