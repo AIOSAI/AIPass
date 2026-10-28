@@ -324,6 +324,126 @@
       "env": {},
       "permissions": {},
       "commands": {}
+    },
+    "opencode": {
+      "plugin": "~/.config/opencode/plugins/aipass.ts",
+      "hooks": [
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py UserPromptSubmit:presence_gate",
+          "event": "UserPromptSubmit",
+          "timeout": 90
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py UserPromptSubmit:persistent_alert",
+          "event": "UserPromptSubmit",
+          "timeout": 90
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py UserPromptSubmit:tier0_kernel",
+          "event": "UserPromptSubmit",
+          "timeout": 90
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py UserPromptSubmit:navmap",
+          "event": "UserPromptSubmit",
+          "timeout": 90
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py UserPromptSubmit:branch_prompt",
+          "event": "UserPromptSubmit",
+          "timeout": 90
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py UserPromptSubmit:identity_injector",
+          "event": "UserPromptSubmit",
+          "timeout": 90
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py UserPromptSubmit:email_notification",
+          "event": "UserPromptSubmit",
+          "timeout": 90
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py UserPromptSubmit:compass_recall",
+          "event": "UserPromptSubmit",
+          "timeout": 90
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py UserPromptSubmit:feedback_pulse",
+          "event": "UserPromptSubmit",
+          "timeout": 90
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py UserPromptSubmit:auto_process",
+          "event": "UserPromptSubmit",
+          "timeout": 120
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py UserPromptSubmit:context_gauge",
+          "event": "UserPromptSubmit",
+          "timeout": 90
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py UserPromptSubmit:temporal",
+          "event": "UserPromptSubmit",
+          "timeout": 90
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py PreToolUse",
+          "event": "PreToolUse"
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py PostToolUse",
+          "event": "PostToolUse"
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py Stop",
+          "event": "Stop"
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py PreCompact:pre_compact",
+          "event": "PreCompact",
+          "timeout": 60
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py PreCompact:pre_compact_rollover",
+          "event": "PreCompact",
+          "timeout": 120
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py PreCompact:auto_process",
+          "event": "PreCompact",
+          "timeout": 120
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py PreCompact:pre_compact_prep",
+          "event": "PreCompact",
+          "timeout": 30
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py SessionStart:cadence_reset",
+          "event": "SessionStart",
+          "timeout": 30
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py SessionStart:release_notice",
+          "event": "SessionStart",
+          "timeout": 30
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py SessionStart:culture",
+          "event": "SessionStart",
+          "timeout": 30
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py SessionStart:session_pointer",
+          "event": "SessionStart",
+          "timeout": 30
+        }
+      ],
+      "env": {},
+      "permissions": {},
+      "commands": {}
     }
   }
 }

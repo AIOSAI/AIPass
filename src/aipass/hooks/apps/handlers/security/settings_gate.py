@@ -1,24 +1,26 @@
 # =================== AIPass ====================
 # Name: settings_gate.py
-# Version: 1.1.1
-# Description: No AI changes a provider's top-level settings alone: Claude asks the owner, Codex and headless deny
+# Version: 1.2.0
+# Description: No AI changes a provider's settings alone: Claude asks the owner; Codex, OpenCode, headless deny
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-10-25
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
 """The provider-settings gate (DPLAN-0424): the owner accepts every change to a CLI's own settings.
 
 Protected: Codex's top level (~/.codex/*.toml, hooks.json, auth.json, rules/**, and the same under
-$CODEX_HOME), Claude's (~/.claude/settings.json, settings.local.json), the repo wiring
+$CODEX_HOME), OpenCode's (~/.config/opencode: opencode.json[c], AGENTS.md, plugins/**, commands/**;
+~/.local/share/opencode/auth.json; XDG homes read), Claude's
+(~/.claude/settings.json, settings.local.json), the repo wiring
 (.claude/provider_manifest.json; .codex/hooks.json, retired, stays protected so it never returns
 unnoticed beside the user-level file and fires every hook twice), and the installers that write them
 (aipass doctor --fix, setup.sh, provider_wire.py) run from Bash.
 
 Interactive Claude asks the owner for Codex's files, the wiring and the installers; its own settings
 need no second ask (Claude Code prompts on them natively). Codex cannot ask (an ask is a failed hook
-and the call runs), so a Codex caller is denied, as is every headless seat.
+and the call runs) and neither can OpenCode's plugin, so their callers are denied, as is every headless seat.
 """
 
 import importlib
@@ -30,7 +32,11 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 DOORS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit", "Bash"})
 CODEX, CLAUDE, WIRING, INSTALLER = "Codex settings", "Claude settings", "AIPass provider wiring", "provider installer"
+OPENCODE = "OpenCode settings"
 _CODEX_FILES = frozenset({"hooks.json", "auth.json"})
+_OPENCODE_FILES = frozenset({"opencode.json", "opencode.jsonc", "agents.md"})
+_OPENCODE_DIRS = ("plugins", "commands")
+_NO_ASK = {"codex": "Codex", "opencode": "OpenCode"}
 _CLAUDE_FILES = frozenset({"settings.json", "settings.local.json"})
 _INSTALLER_SCRIPTS = frozenset({"setup.sh", "provider_wire.py"})
 _HEADLESS_TYPES = frozenset({"dispatched", "headless"})
@@ -40,14 +46,14 @@ ASK = (
     "Provider settings: {what} on {file} ({kind}). No AI changes a provider's settings without the owner "
     "accepting it. Accept only if you asked for this change."
 )
-DENY_CODEX = (
-    "{file} ({kind}) was not changed: no AI changes a provider's settings alone, and Codex cannot ask the owner. "
-    'Mail @devpulse, who asks Patrick: drone @ai_mail email @devpulse "Provider settings change" '
+DENY_NO_ASK = (
+    "{file} ({kind}) was not changed: no AI changes a provider's settings alone, and {cli} cannot ask the owner. "
+    'Mail @devpulse, who asks the owner: drone @ai_mail email @devpulse "Provider settings change" '
     '"<file>: <the change, and why>"'
 )
 DENY_HEADLESS = (
     "{file} ({kind}) was not changed: no AI changes a provider's settings alone, and a headless seat has nobody "
-    'to ask. Mail @devpulse, who asks Patrick: drone @ai_mail email @devpulse "Provider settings change" '
+    'to ask. Mail @devpulse, who asks the owner: drone @ai_mail email @devpulse "Provider settings change" '
     '"<file>: <the change, and why>"'
 )
 
@@ -61,6 +67,20 @@ def _codex_dirs() -> list[Path]:
     if os.environ.get("CODEX_HOME"):
         dirs.append(Path(os.environ["CODEX_HOME"]))
     return [d.resolve() for d in dirs]
+
+
+def _xdg(variable: str, *default: str) -> Path:
+    return Path(os.environ.get(variable) or Path.home().joinpath(*default))
+
+
+def _opencode(path: Path, whole: bool) -> bool:
+    """*path* is one of OpenCode's settings: its config directory's files, plugins and commands, or its auth file."""
+    config = (_xdg("XDG_CONFIG_HOME", ".config") / "opencode").resolve()
+    if _holds(path, config, whole) or (_same(path.parent, config) and path.name.lower() in _OPENCODE_FILES):
+        return True
+    if any(_same(folder, config / sub) for sub in _OPENCODE_DIRS for folder in (path, *path.parents)):
+        return True
+    return _same(path, (_xdg("XDG_DATA_HOME", ".local", "share") / "opencode" / "auth.json").resolve())
 
 
 def _holds(path: Path, folder: Path, whole: bool) -> bool:
@@ -79,6 +99,8 @@ def _kind(path: Path, whole: bool = False) -> str | None:
             return CODEX
         if any(_same(folder, codex / "rules") for folder in (path, *path.parents)):
             return CODEX
+    if _opencode(path, whole):
+        return OPENCODE
     claude = (Path.home() / ".claude").resolve()
     if _holds(path, claude, whole) or (_same(path.parent, claude) and path.name.lower() in _CLAUDE_FILES):
         return CLAUDE
@@ -166,7 +188,7 @@ def _branch(cwd: str) -> str:
 
 
 def handle(hook_data: dict) -> dict:
-    """Ask (interactive Claude) or deny (Codex, headless) a write to a provider's settings; allow everything else."""
+    """Ask (interactive Claude) or deny (Codex, OpenCode, headless) a write to a provider's settings; allow the rest."""
     tool_name = hook_data.get("tool_name", "") if isinstance(hook_data, dict) else ""
     if tool_name not in DOORS:
         return _ALLOW
@@ -177,8 +199,10 @@ def handle(hook_data: dict) -> dict:
         return _ALLOW
     cli = hook_data.get("provider") or "claude"
     file, kind = targets[0]
-    if cli == "codex" or _headless():
-        reason = (DENY_CODEX if cli == "codex" else DENY_HEADLESS).format(file=file, kind=kind)
+    if cli in _NO_ASK or _headless():
+        reason = DENY_HEADLESS.format(file=file, kind=kind)
+        if cli in _NO_ASK:
+            reason = DENY_NO_ASK.format(file=file, kind=kind, cli=_NO_ASK[cli])
         logger.warning(
             "[HOOKS] settings_gate: deny caller=%s cli=%s path=%s tool=%s", _branch(cwd), cli, file, tool_name
         )

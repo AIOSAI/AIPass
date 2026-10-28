@@ -78,6 +78,23 @@ Codex has no Notification event and no `manual`/`auto` PreCompact matcher, so a 
 
 ---
 
+## OpenCode
+
+OpenCode 2 has no shell-hook config. Its V2 plugin API is the seam: `apps/handlers/bridges/opencode_plugin.ts`, installed byte-equal as `~/.config/opencode/plugins/aipass.ts` (one file for every project; `$XDG_CONFIG_HOME` replaces `~/.config`). Plugins run inside the OpenCode server (`opencode serve`, shared by every run, or a private child under `--standalone`), once per directory. The seat's cwd is the plugin's `ctx.location.directory`, never the server's `process.cwd()`. The plugin reads `$AIPASS_HOME` from the server's environment and the manifest's `cli.opencode` rows from `$AIPASS_HOME/.claude/provider_manifest.json`. It runs each row's command for its event, one `Bun.spawnSync` per row in manifest order, with the payload on stdin and the row's timeout. With no `AIPASS_HOME`, no manifest or no rows, it logs an ERROR, injects one line saying the hooks are unwired, and refuses every tool.
+
+| OpenCode hook | Event the engine sees | What the plugin does with the answer |
+|---|---|---|
+| `session.hook("prompt")`, first sight of a session id | `SessionStart` (`source: startup`), then `UserPromptSubmit` | Appends each context, after two newlines, to `event.prompt.text`. A refusal cannot withhold the prompt, so its reason is appended instead |
+| `session.hook("prompt")` | `UserPromptSubmit` | As above |
+| `tool.hook("execute.before")` | `PreToolUse` | A deny is thrown: the model reads the reason as the tool's error and goes on |
+| `tool.hook("execute.after")` | `PostToolUse` with `tool_response` | Nothing |
+| `session.hook("compaction")` | `PreCompact` (`trigger: auto`) | Nothing. Not yet seen firing: a headless run never compacts |
+| `event.subscribe`: `session.execution.succeeded` or `failed` | `Stop` (`data.sessionID`) | Nothing |
+
+There is no Notification event, and SubagentStop is not wired. `opencode.py` does the mapping, once. It names the provider (`"provider": "opencode"`) and sets `CLAUDE_CODE_SESSION_ID` from the payload, as `codex.py` does. Tools map `shell` → `Bash`, `edit` → `Edit`, `write` → `Write`, `read` → `Read`, `glob`, `grep`, `webfetch`, `websearch` → their Claude names, `subagent` → `Task`, `skill` → `Skill`. The file tools' keys map `path` → `file_path`, `oldString` → `old_string`, `newString` → `new_string`, `replaceAll` → `replace_all`. OpenCode sends paths relative to the cwd. `execute` runs code no gate can read, so it is refused outright with a message naming `shell`. The answer is one JSON object, `{"deny": reason}`, `{"context": text}` or `{}`: any exit 2, a block, or a deny or ask decision is a deny. An engine that cannot load denies PreToolUse with the `HOOKS BROKEN` text, and so does a bridge the plugin cannot run. Breaks are written to `logs/bridge.log`. OpenCode keeps no transcript file (its store is SQLite), so the context gauge stays silent there. OpenCode's `permission.hook("evaluate")` is a second door the plugin leaves unused. `drone @hooks verify` reports a per-handler row wired only in `cli.opencode` as `wired for OpenCode only`. A missing plugin, a plugin that differs from the branch copy, or no rows is an ERROR naming the `cp` cure. OpenCode is not yet a parity provider (`drone @hooks parity`).
+
+---
+
 ## Related
 
 - [engine.md](engine.md) — what the engine does with the event once the bridge hands it over

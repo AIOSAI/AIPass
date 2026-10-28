@@ -1,18 +1,19 @@
 # =================== AIPass ====================
 # Name: test_codex_bridge.py
-# Version: 2.5.0
-# Description: Tests for the Codex bridge: stdin normalization, output envelope, apply_patch mapping
+# Version: 2.6.0
+# Description: Tests for the Codex and OpenCode bridges: payload mapping, output envelope, apply_patch, fail closed
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-10
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
-"""Tests for apps/handlers/bridges/codex.py."""
+"""Tests for apps/handlers/bridges/codex.py and apps/handlers/bridges/opencode.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that handlers/bridges/codex.py parses and imports its engine and loader
 # seedgo: no-test-needed(documentation) — the Codex protocol notes in the bridge's module docstring
+# seedgo: no-test-needed(generated) — that handlers/bridges/opencode_plugin.ts drives the bridge inside OpenCode, a live run
 # seedgo: no-test-needed(stdlib) — json.loads and json.dumps round-tripping a payload
 
 import importlib.util
@@ -24,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from aipass.hooks.apps.handlers.bridges import codex
+from aipass.hooks.apps.handlers.bridges import codex, opencode
 from aipass.hooks.apps.modules import engine
 from aipass.prax.apps.modules import logger as prax_logger
 
@@ -285,3 +286,126 @@ class TestBrokenEngine:
         codex.main()
         assert "HOOKS BROKEN" in capsys.readouterr().err, "the break must happen for the pin to mean anything"
         assert (live.read_bytes() if live.exists() else b"") == before, "medic reads that log as a real break"
+
+
+class OpenCodeBridge:
+    """Runs opencode.main() as the aipass.ts plugin does: argv event, payload on stdin, one JSON answer on stdout."""
+
+    def __init__(self, monkeypatch, capsys) -> None:
+        self.received: list[dict] = []
+        self.sessions: list[str | None] = []
+        self.answer = ("", 0)
+        self._monkeypatch = monkeypatch
+        self._capsys = capsys
+        monkeypatch.setenv(opencode.SESSION_ENV, "server-session")
+        monkeypatch.setattr(opencode, "_mount", lambda: "test")
+        monkeypatch.setattr(engine, "run_event", self._run_event)
+
+    def _run_event(self, arg: str, stdin_data: str) -> tuple[str, int]:
+        self.received.append(json.loads(stdin_data))
+        self.sessions.append(os.environ.get(opencode.SESSION_ENV))
+        return self.answer
+
+    def run(self, event: str, payload: dict) -> dict:
+        self._monkeypatch.setattr(sys, "argv", ["opencode.py", event])
+        self._monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+        opencode.main()
+        return json.loads(self._capsys.readouterr().out)
+
+
+@pytest.fixture
+def oc(monkeypatch, capsys) -> OpenCodeBridge:
+    return OpenCodeBridge(monkeypatch, capsys)
+
+
+class TestOpenCodeToolMap:
+    @pytest.mark.parametrize(
+        ("tool", "given", "name", "expected"),
+        [
+            ("shell", {"command": "ls"}, "Bash", {"command": "ls"}),
+            (
+                "edit",
+                {"path": "a.py", "oldString": "x", "newString": "y", "replaceAll": True},
+                "Edit",
+                {"file_path": "a.py", "old_string": "x", "new_string": "y", "replace_all": True},
+            ),
+            ("write", {"path": "a.py", "content": "x"}, "Write", {"file_path": "a.py", "content": "x"}),
+            ("read", {"path": "a.py", "offset": 1}, "Read", {"file_path": "a.py", "offset": 1}),
+            ("grep", {"pattern": "x", "path": "src"}, "Grep", {"pattern": "x", "path": "src"}),
+            ("subagent", {"prompt": "go"}, "Task", {"prompt": "go"}),
+            ("question", {"text": "ok?"}, "question", {"text": "ok?"}),
+        ],
+    )
+    def test_each_tool_reaches_the_gates_under_its_claude_name_and_keys(self, oc, tool, given, name, expected):
+        oc.run("PreToolUse", {"session_id": "s1", "cwd": "/w", "tool": tool, "input": given})
+        sent = oc.received[0]
+        assert (sent["tool_name"], sent["tool_input"], sent["provider"], sent["cwd"]) == (
+            name,
+            expected,
+            "opencode",
+            "/w",
+        )
+        assert "tool" not in sent and "input" not in sent
+
+    def test_execute_is_refused_and_never_reaches_the_engine(self, oc):
+        answer = oc.run("PreToolUse", {"session_id": "s1", "tool": "execute", "input": {"code": "x"}})
+        assert answer == {"deny": opencode.UNGATED}
+        assert "shell tool" in answer["deny"]
+        assert oc.received == []
+
+    def test_the_opencode_session_id_replaces_the_servers_for_the_engine(self, oc):
+        oc.run("UserPromptSubmit:temporal", {"session_id": "ses_1", "prompt": "hi"})
+        assert oc.sessions == ["ses_1"]
+
+
+class TestOpenCodeAnswer:
+    @pytest.mark.parametrize(
+        ("event", "output", "code", "reason"),
+        [
+            ("PreToolUse", json.dumps({"decision": "block", "reason": "not yours"}), 2, "not yours"),
+            ("PreToolUse", "plain refusal", 2, "plain refusal"),
+            ("PreToolUse", "", 2, "Blocked by AIPass hook"),
+            (
+                "PreToolUse",
+                json.dumps({"hookSpecificOutput": {"permissionDecision": "ask", "permissionDecisionReason": "ask me"}}),
+                0,
+                "ask me",
+            ),
+            ("UserPromptSubmit:presence_gate", json.dumps({"decision": "block", "reason": "who?"}), 2, "who?"),
+        ],
+    )
+    def test_a_refusal_in_any_form_is_a_deny_carrying_its_reason(self, oc, event, output, code, reason):
+        oc.answer = (output, code)
+        assert oc.run(event, {"tool": "shell", "input": {"command": "ls"}}) == {"deny": reason}
+
+    @pytest.mark.parametrize(
+        ("output", "expected"),
+        [
+            ("# Kernel\n", {"context": "# Kernel\n"}),
+            (json.dumps({"hookSpecificOutput": {"additionalContext": "navmap"}}), {"context": "navmap"}),
+            ("", {}),
+            ("{}", {}),
+        ],
+    )
+    def test_context_arrives_as_text_and_silence_as_nothing(self, oc, output, expected):
+        oc.answer = (output, 0)
+        assert oc.run("UserPromptSubmit:tier0_kernel", {"session_id": "s1", "prompt": "hi"}) == expected
+
+
+class TestOpenCodeBrokenEngine:
+    def test_a_broken_engine_denies_pretooluse_records_it_and_answers_nothing_elsewhere(
+        self, monkeypatch, capsys, tmp_path
+    ):
+        def _engine_gone():
+            raise ImportError("engine gone")
+
+        monkeypatch.setattr(opencode, "_mount", _engine_gone)
+        monkeypatch.setattr(opencode, "BREAK_LOG", str(tmp_path / "bridge.log"))
+        for event, expected in (("PreToolUse", True), ("UserPromptSubmit:temporal", False)):
+            monkeypatch.setattr(sys, "argv", ["opencode.py", event])
+            monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"tool": "shell", "input": {"command": "ls"}})))
+            opencode.main()
+            out, err = capsys.readouterr()
+            assert ("HOOKS BROKEN" in json.loads(out).get("deny", "")) is expected, event
+            assert "HOOKS BROKEN" in err
+        assert "bridges.opencode | ERROR" in (tmp_path / "bridge.log").read_text(encoding="utf-8")

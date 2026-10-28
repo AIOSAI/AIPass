@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_settings_gate.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Tests for the provider-settings gate: the decision table, the paths, the Bash shapes, the installers
 # Branch: hooks
 # Layer: tests
 # Created: 2026-10-25
-# Modified: 2026-10-25
+# Modified: 2026-10-28
 # =============================================
 
 """Tests for apps/handlers/security/settings_gate.py."""
@@ -13,7 +13,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that handlers/security/settings_gate.py parses and imports
 # seedgo: no-test-needed(constant) — the ASK / DENY_* wording beyond the file, the kind and the @devpulse door
-# seedgo: no-test-needed(documentation) — the module docstring's account of why Codex is deny-only
+# seedgo: no-test-needed(documentation) — the module docstring's account of why Codex and OpenCode are deny-only
 
 import json
 import os
@@ -38,6 +38,8 @@ def seat(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("AIPASS_HOME", str(repo))
     monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
     monkeypatch.delenv("AIPASS_SESSION_TYPE", raising=False)
     argv = {"claude": INTERACTIVE}
     monkeypatch.setattr(cc_sessions_mod, "cli_ancestor", lambda name: argv.get(name))
@@ -126,7 +128,7 @@ class TestCodexCaller:
     def test_every_top_level_file_is_denied_with_the_devpulse_door(self, seat, parts):
         result = _write(seat, seat["home"].joinpath(*parts), provider="codex")
         assert _decision(result) == "deny"
-        assert "Mail @devpulse, who asks Patrick" in _reason(result)
+        assert "Mail @devpulse, who asks the owner" in _reason(result)
         assert str(seat["home"].joinpath(*parts)) in _reason(result)
 
     def test_an_interactive_claude_above_does_not_turn_a_codex_deny_into_an_ask(self, seat):
@@ -136,6 +138,45 @@ class TestCodexCaller:
         (tmp_path / "codex_home").mkdir()
         monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex_home"))
         assert _decision(_write(seat, tmp_path / "codex_home" / "config.toml", provider="codex")) == "deny"
+
+
+class TestOpenCodeCaller:
+    @pytest.mark.parametrize(
+        "parts",
+        [
+            (".config", "opencode", "opencode.json"),
+            (".config", "opencode", "opencode.jsonc"),
+            (".config", "opencode", "AGENTS.md"),
+            (".config", "opencode", "plugins", "aipass.ts"),
+            (".config", "opencode", "commands", "prep.md"),
+            (".local", "share", "opencode", "auth.json"),
+        ],
+    )
+    def test_every_opencode_setting_is_denied_with_the_devpulse_door_and_asked_on_claude(self, seat, parts):
+        result = _write(seat, seat["home"].joinpath(*parts), provider="opencode")
+        assert _decision(result) == "deny"
+        assert "OpenCode cannot ask the owner" in _reason(result)
+        assert "Mail @devpulse, who asks the owner" in _reason(result)
+        assert _decision(_write(seat, seat["home"].joinpath(*parts))) == "ask"
+
+    def test_an_opencode_caller_is_denied_the_wiring_and_codex_too(self, seat):
+        assert (
+            _decision(_write(seat, seat["repo"] / ".claude" / "provider_manifest.json", provider="opencode")) == "deny"
+        )
+        assert _decision(_bash(seat, "cp x.ts ~/.config/opencode/plugins/", provider="opencode")) == "deny"
+
+    def test_xdg_homes_are_read(self, seat, tmp_path, monkeypatch):
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+        for target in (tmp_path / "cfg" / "opencode" / "opencode.json", tmp_path / "data" / "opencode" / "auth.json"):
+            assert _decision(_write(seat, target, provider="opencode")) == "deny", target
+
+    def test_opencodes_store_and_other_config_dirs_are_not_settings(self, seat):
+        for target in (
+            seat["home"] / ".local" / "share" / "opencode" / "opencode.db",
+            seat["home"] / ".config" / "other" / "opencode.json",
+        ):
+            assert _decision(_write(seat, target, provider="opencode")) == "allow", target
 
 
 class TestBashShapes:
