@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch.py
 # Description: Dispatch Module
-# Version: 3.7.0
+# Version: 3.8.0
 # Created: 2026-02-02
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
 """
@@ -45,6 +45,7 @@ DISPATCH (send + wake):
   drone @ai_mail dispatch @branch "Subject" "Body" --fresh            # Send + fresh wake
   drone @ai_mail dispatch @branch "Subject" "Body" --model opus       # Send + wake with Opus
   drone @ai_mail dispatch @branch "Subject" "Body" --provider codex --model gpt-6.1-sol  # Wake on Codex
+  drone @ai_mail dispatch @branch "Subject" "Body" --provider opencode --model opencode/glm-5.3-flash-free  # Wake on OpenCode
   drone @ai_mail dispatch @branch "Subject" "Body" --no-memory-save
 
 WAKE ONLY:
@@ -66,6 +67,9 @@ PROVIDER OPTIONS:
   --provider claude   Claude Code (default)
   --provider codex    Codex CLI; --model is passed verbatim as -m, absent means ~/.codex/config.toml.
                       Managers wake on Codex in the same lanes as on Claude.
+  --provider opencode OpenCode (opencode run --standalone --format json --auto); --model is passed
+                      verbatim as -m provider/model[#variant], absent means OpenCode's own default.
+                      Same lanes as Codex; the @daemon tmux self-wake runs opencode --auto --prompt.
 """
     console.print(help_text)
 
@@ -172,7 +176,7 @@ def _orchestrate_wake(args: List[str]) -> bool:
     if not args or args[0] in ["--help", "-h", "help"]:
         console.print("\n[bold]Wake - Manual branch spawn[/bold]")
         console.print(
-            '  Usage: dispatch wake @branch ["custom message"] [--fresh] [--model M] [--provider claude|codex]'
+            '  Usage: dispatch wake @branch ["custom message"] [--fresh] [--model M] [--provider claude|codex|opencode]'
         )
         console.print('  Or:    drone wake @branch ["custom message"]\n')
         return True
@@ -309,7 +313,7 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
 
     if len(filtered) < 3:
         error(
-            'Usage: dispatch @target "Subject" "Body" [--fresh] [--no-memory-save] [--model M] [--provider claude|codex]'
+            'Usage: dispatch @target "Subject" "Body" [--fresh] [--no-memory-save] [--model M] [--provider claude|codex|opencode]'
         )
         return True
 

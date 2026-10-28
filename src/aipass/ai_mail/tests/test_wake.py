@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_wake.py
 # Description: Tests for wake dispatch handler
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-03-29
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's wake_branch: the spawn, session pointer, model, provider and marking."""
@@ -14,6 +14,7 @@
 # seedgo: no-test-needed(shared) — the manager lanes and the dashboard refresh: tests/test_wake_managers.py
 
 import json
+import sqlite3
 import subprocess
 import pytest
 from pathlib import Path as _Path
@@ -1250,3 +1251,144 @@ class TestCodexWake:
         line = _tmux_line(calls, "send-keys")
         assert f'codex {model_flag}--dangerously-bypass-approvals-and-sandbox "$(cat {prompt_file})"' in line
         assert "--permission-mode" not in line and "--model" not in line
+
+
+def _plant_opencode_store(tmp_path, monkeypatch, rows):
+    """A session_v2 table at OPENCODE_DB holding (id, directory) rows."""
+    db = tmp_path / "opencode.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute("create table if not exists session_v2 (id text primary key, directory text)")
+        conn.executemany("insert into session_v2 values (?, ?)", rows)
+    conn.close()
+    monkeypatch.setenv("OPENCODE_DB", str(db))
+    return db
+
+
+class TestOpenCodeWake:
+    """provider="opencode" spawns `opencode run --session <id>`, the id ours and pointed before the spawn."""
+
+    HEAD = ["opencode", "run", "--standalone", "--format", "json", "--auto"]
+
+    def _wake(self, tmp_path, monkeypatch, plant=None, **kwargs):
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        if plant:
+            plant(branch_path)
+        _patch_wake_deps(monkeypatch, _find_opencode_bin=lambda: "opencode")
+        calls = _record_spawn_routes(monkeypatch)
+        status, ok = wake_branch("@testbranch", provider="opencode", **kwargs)
+        return branch_path, calls, status, ok
+
+    def test_a_fresh_wake_with_a_model_passes_dash_m_and_no_session_so_opencode_mints_the_id(
+        self, tmp_path, monkeypatch
+    ):
+        """02:16 measurement: the free tier answers 429 to a session id in any shape but OpenCode's own."""
+        _plant_opencode_store(tmp_path, monkeypatch, [])
+        branch_path, calls, status, ok = self._wake(tmp_path, monkeypatch, model="opencode/glm-5.3-flash-free")
+
+        assert ok is True
+        args = _claude_args(calls["popen"][0]["cmd"])
+        assert args == [*self.HEAD, "-m", "opencode/glm-5.3-flash-free", args[-1]]
+        assert args[-1].startswith("Hi. Check inbox") and "seedgo" in args[-1]
+        assert wake_mod.session_pointer.read_pointer(branch_path) is None
+        assert status.find_step("provider") == ("ok", "provider", "opencode")
+        assert status.find_step("model") == ("ok", "model", "opencode/glm-5.3-flash-free")
+        assert status.find_step("session")[2].startswith("fresh, OpenCode mints the id")
+
+    def test_a_wake_without_a_model_passes_no_dash_m_and_says_opencode_default(self, tmp_path, monkeypatch):
+        _plant_opencode_store(tmp_path, monkeypatch, [])
+        _, calls, status, _ = self._wake(tmp_path, monkeypatch)
+
+        args = _claude_args(calls["popen"][0]["cmd"])
+        assert "-m" not in args and args[: len(self.HEAD)] == self.HEAD
+        assert status.find_step("model") == ("ok", "model", "opencode default")
+
+    def test_a_pointer_whose_session_is_in_the_store_for_this_branch_resumes_by_id(self, tmp_path, monkeypatch):
+        sid = "ses_aipass_resume"
+        branch_dir = str((tmp_path / "src" / "aipass" / "testbranch").resolve())
+
+        def plant(branch_path):
+            assert str(branch_path.resolve()) == branch_dir
+            _plant_opencode_store(tmp_path, monkeypatch, [(sid, branch_dir)])
+            wake_mod.session_pointer.write_pointer(branch_path, sid, "wake-fresh", provider="opencode")
+
+        branch_path, calls, status, _ = self._wake(tmp_path, monkeypatch, plant=plant)
+
+        args = _claude_args(calls["popen"][0]["cmd"])
+        assert args == [*self.HEAD, "--session", sid, args[-1]]
+        assert status.find_step("session") == ("ok", "session", f"resuming {sid} (pointer)")
+        assert wake_mod.session_pointer.read_pointer(branch_path)["session_id"] == sid
+
+    @pytest.mark.parametrize(
+        "row, why",
+        [(None, "not found in"), ("elsewhere", "belongs to")],
+        ids=["absent-from-store", "another-directory"],
+    )
+    def test_a_pointer_the_store_does_not_vouch_for_starts_fresh_with_no_session_and_says_why(
+        self, tmp_path, monkeypatch, row, why
+    ):
+        sid = "ses_aipass_stale"
+
+        def plant(branch_path):
+            rows = [] if row is None else [(sid, str(tmp_path / row))]
+            _plant_opencode_store(tmp_path, monkeypatch, rows)
+            wake_mod.session_pointer.write_pointer(branch_path, sid, "wake-fresh", provider="opencode")
+
+        _, calls, status, _ = self._wake(tmp_path, monkeypatch, plant=plant)
+
+        args = _claude_args(calls["popen"][0]["cmd"])
+        assert "--session" not in args and sid not in args
+        assert why in status.find_step("session")[2]
+
+    def test_a_codex_pointer_starts_an_opencode_wake_fresh_with_the_resolvers_reason(self, tmp_path, monkeypatch):
+        def plant(branch_path):
+            _plant_opencode_store(tmp_path, monkeypatch, [])
+            wake_mod.session_pointer.write_pointer(branch_path, "ses_codexish", "monitor-codex", provider="codex")
+
+        _, calls, status, _ = self._wake(tmp_path, monkeypatch, plant=plant)
+
+        args = _claude_args(calls["popen"][0]["cmd"])
+        assert "ses_codexish" not in args
+        assert "pointer is for codex, waking on opencode - starting fresh" in status.find_step("session")[2]
+
+    def test_fresh_ignores_a_live_pointer_and_passes_no_session(self, tmp_path, monkeypatch):
+        sid = "ses_aipass_live"
+
+        def plant(branch_path):
+            _plant_opencode_store(tmp_path, monkeypatch, [(sid, str(branch_path.resolve()))])
+            wake_mod.session_pointer.write_pointer(branch_path, sid, "wake-fresh", provider="opencode")
+
+        _, calls, _, _ = self._wake(tmp_path, monkeypatch, plant=plant, fresh=True)
+
+        args = _claude_args(calls["popen"][0]["cmd"])
+        assert sid not in args and "--session" not in args
+
+    def test_the_monitor_is_told_opencode_and_the_register_row_says_so(self, tmp_path, monkeypatch):
+        _plant_opencode_store(tmp_path, monkeypatch, [])
+        _, calls, _, _ = self._wake(tmp_path, monkeypatch)
+
+        cmd = calls["popen"][0]["cmd"]
+        assert "--provider=opencode" in cmd[: cmd.index("--")]
+        assert [row["provider"] for row in register_mod.outstanding()] == ["opencode"]
+
+    @pytest.mark.parametrize(
+        "model, config",
+        [
+            (None, ""),
+            ("opencode/glm-5.3-flash-free", """OPENCODE_CONFIG_CONTENT='{"model": "opencode/glm-5.3-flash-free"}' """),
+        ],
+    )
+    def test_a_daemon_self_wake_of_a_manager_on_opencode_runs_a_standalone_tui_with_the_model_inline(
+        self, tmp_path, monkeypatch, model, config
+    ):
+        branch_path = _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch, _find_opencode_bin=lambda: "opencode")
+        calls = _record_spawn_routes(monkeypatch)
+
+        _, ok = wake_branch("@testbranch", sender="@daemon", provider="opencode", model=model)
+
+        assert ok is True and calls["popen"] == []
+        prompt_file = branch_path / ".daemon" / "last_wake_prompt.txt"
+        line = _tmux_line(calls, "send-keys")
+        assert f' {config}opencode --standalone --auto --prompt "$(cat {prompt_file})" Enter' in line
+        assert ("OPENCODE_CONFIG_CONTENT" in line) is bool(model)
+        assert "--model" not in line and "-m " not in line

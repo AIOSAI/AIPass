@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_wake_helpers.py
 # Description: Tests for the wake's small parts - dispatch status, the grant read, pid lock and branch resolution
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-10-08
-# Modified: 2026-10-25
+# Modified: 2026-10-28
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's helpers and pid_lock.py: status, locks, pids, resolve_branch."""
@@ -651,6 +651,15 @@ def test_clean_zombies_counts_a_codex_zombie_and_never_another_process(monkeypat
     assert clean_zombies() == 1
 
 
+def test_clean_zombies_counts_an_opencode_zombie(monkeypatch):
+    class FakeResult:
+        stdout = "  100 Z+   opencode\n  200 S    opencode\n"
+        returncode = 0
+
+    monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: FakeResult())
+    assert clean_zombies() == 1
+
+
 def test_clean_zombies_subprocess_error(monkeypatch):
     """Returns 0 on subprocess failure."""
     monkeypatch.setattr(
@@ -991,7 +1000,7 @@ class TestIsBranchOccupied:
         monkeypatch.setattr(pid_lock_mod, "_read_argv", lambda pid_str: argv)
         occupant = branch_occupant(tmp_path)
         assert asked[0][:3] == ["pgrep", "-l", "-x"]
-        assert all(re.fullmatch(asked[0][3], name) for name in ("claude", "codex"))
+        assert all(re.fullmatch(asked[0][3], name) for name in ("claude", "codex", "opencode"))
         assert not re.fullmatch(asked[0][3], "codex-helper")
         return occupant
 
@@ -1005,6 +1014,17 @@ class TestIsBranchOccupied:
     def test_mcp_server_and_headless_exec_are_not_sessions_either(self, tmp_path, monkeypatch):
         assert self._scan(tmp_path, monkeypatch, "codex", ["codex", "mcp-server"]) is None
         assert self._scan(tmp_path, monkeypatch, "codex", ["/usr/bin/codex", "exec", "--json", "hi"]) is None
+
+    def test_an_opencode_tui_in_the_branch_occupies_it_and_is_named(self, tmp_path, monkeypatch):
+        assert self._scan(tmp_path, monkeypatch, "opencode", ["opencode"]) == "opencode"
+        assert self._scan(tmp_path, monkeypatch, "opencode", ["opencode", "--auto", "--prompt", "hi"]) == "opencode"
+
+    def test_opencodes_service_daemon_and_standalone_child_are_not_sessions(self, tmp_path, monkeypatch):
+        assert self._scan(tmp_path, monkeypatch, "opencode", ["opencode", "serve", "--service"]) is None
+        assert self._scan(tmp_path, monkeypatch, "opencode", ["opencode", "serve", "--stdio", "--port", "0"]) is None
+
+    def test_a_bare_opencode_serve_still_occupies(self, tmp_path, monkeypatch):
+        assert self._scan(tmp_path, monkeypatch, "opencode", ["opencode", "serve", "--port", "4096"]) == "opencode"
 
     def test_a_claude_whose_argv_looks_like_a_subcommand_still_occupies(self, tmp_path, monkeypatch):
         assert self._scan(tmp_path, monkeypatch, "claude", ["claude", "exec"]) == "claude"

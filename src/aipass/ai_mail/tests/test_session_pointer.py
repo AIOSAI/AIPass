@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_session_pointer.py
 # Description: Tests for the durable per-branch session pointer
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-20
-# Modified: 2026-10-25
+# Modified: 2026-10-28
 # =============================================
 
 """Tests for apps/handlers/dispatch/session_pointer.py -- encoding, round trip, atomicity, resume."""
@@ -16,6 +16,7 @@
 # seedgo: no-test-needed(constant) — _BYTES_PER_MB, the internal MB conversion factor
 
 import json
+import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -599,3 +600,64 @@ class TestTheProviderOnThePointer:
         assert session_id is None
         assert "not found" in reason and reason.endswith("starting fresh")
         assert "falling back to -c" not in reason
+
+
+class TestTheOpenCodePointer:
+    """An OpenCode pointer resumes only when OpenCode's own store holds the session for this branch."""
+
+    @pytest.fixture
+    def store(self, tmp_path, monkeypatch):
+        db = tmp_path / "opencode.db"
+
+        def plant(rows):
+            with sqlite3.connect(db) as conn:
+                conn.execute("create table if not exists session_v2 (id text primary key, directory text)")
+                conn.executemany("insert into session_v2 values (?, ?)", rows)
+            conn.close()
+
+        monkeypatch.setenv("OPENCODE_DB", str(db))
+        return plant
+
+    def test_a_pointer_whose_session_the_store_holds_for_this_branch_resumes(self, branch, store):
+        store([("ses_live", str(branch.resolve()))])
+        write_pointer(branch, "ses_live", "wake-fresh", provider="opencode")
+
+        assert resolve_resume_target(branch, provider="opencode") == (
+            "ses_live",
+            "pointer valid - resuming opencode session ses_live",
+        )
+
+    def test_a_session_absent_from_the_store_starts_fresh_and_names_the_store(self, branch, store, tmp_path):
+        store([("ses_other", str(branch.resolve()))])
+        write_pointer(branch, "ses_live", "wake-fresh", provider="opencode")
+
+        session_id, reason = resolve_resume_target(branch, provider="opencode")
+
+        assert session_id is None
+        assert reason == f"session ses_live not found in {tmp_path / 'opencode.db'} - starting fresh"
+
+    def test_a_session_recorded_for_another_directory_starts_fresh(self, branch, store, tmp_path):
+        store([("ses_live", str(tmp_path / "elsewhere"))])
+        write_pointer(branch, "ses_live", "wake-fresh", provider="opencode")
+
+        session_id, reason = resolve_resume_target(branch, provider="opencode")
+
+        assert session_id is None and "belongs to" in reason and reason.endswith("starting fresh")
+
+    def test_no_store_at_all_starts_fresh_and_never_creates_one(self, branch, tmp_path, monkeypatch):
+        db = tmp_path / "missing.db"
+        monkeypatch.setenv("OPENCODE_DB", str(db))
+        write_pointer(branch, "ses_live", "wake-fresh", provider="opencode")
+
+        session_id, reason = resolve_resume_target(branch, provider="opencode")
+
+        assert session_id is None and "does not exist" in reason
+        assert not db.exists()
+
+    def test_an_opencode_pointer_never_resumes_a_claude_wake(self, branch, store):
+        store([("ses_live", str(branch.resolve()))])
+        write_pointer(branch, "ses_live", "wake-fresh", provider="opencode")
+
+        session_id, reason = resolve_resume_target(branch)
+
+        assert session_id is None and "pointer is for opencode, waking on claude" in reason

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.11.0
+# Version: 2.12.0
 # Created: 2026-03-02
-# Modified: 2026-10-25
+# Modified: 2026-10-28
 # =============================================
 
 """
@@ -80,6 +80,11 @@ PROVIDER_FLAG_PREFIX = "--provider="
 CODEX = session_pointer.CODEX
 # Exit 0 whose stream shows an `error` event or no `turn.completed`: a failed Codex turn.
 CODEX_STREAM_FAILED = -5
+OPENCODE = session_pointer.OPENCODE
+# Exit 0 whose stream carries no `text` part: an OpenCode run that never answered.
+OPENCODE_STREAM_FAILED = -6
+# The providers whose stdout streams live: startup is the first stdout byte, not a JSONL transcript.
+STREAMING_PROVIDERS = (CODEX, OPENCODE)
 WAKE_RESULT_DECLINED = "declined"
 
 
@@ -372,7 +377,15 @@ def cmd_for_attempt(claude_cmd: list, attempt: int, branch_path: Path, provider:
 
     The CLI refuses a reused --session-id, so each attempt is built for where the last left the session.
     Codex carries no session flags: attempts 1-2 re-run its argv, strike 3 drops `resume <id>`.
+    OpenCode re-runs its argv; strike 3 of a resume drops `--session <id>` and OpenCode mints a new one.
     """
+    if provider == OPENCODE:
+        if SESSION_FLAG_OPENCODE not in claude_cmd:
+            return list(claude_cmd), "fresh"
+        if attempt < 3:
+            return list(claude_cmd), "resume"
+        at = claude_cmd.index(SESSION_FLAG_OPENCODE)
+        return [*claude_cmd[:at], *claude_cmd[at + 2 :]], "fresh"
     if provider == CODEX:
         is_resume = claude_cmd[1:3] == ["exec", "resume"]
         if attempt < 3 or not is_resume:
@@ -425,6 +438,9 @@ def _fresh_cmd_with_new_id(claude_cmd: list, branch_path: Path) -> Tuple[list, s
     if not session_pointer.write_pointer(branch_path, new_id, "monitor-retry-fresh"):
         logger.warning("[monitor] Retry pointer write failed for %s — running fresh anyway", new_id)
     return fresh_cmd, "fresh"
+
+
+SESSION_FLAG_OPENCODE = "--session"
 
 
 def _transcript_exists(branch_path: Path, session_id: str) -> Optional[bool]:
@@ -517,6 +533,96 @@ def reconcile_codex_pointer(branch_path: Path, stdout_log: str) -> None:
         logger.warning("[monitor] Could not record codex thread %s for %s", thread_id, branch_path)
 
 
+def parse_opencode_stream(stdout_log: str) -> dict:
+    """Read an `opencode run --format json` stream: session_id, result, usage, cost, error, rate limit, succeeded.
+
+    result is the LAST `text` part; usage and total_cost_usd sum every step_finish. error is the first
+    `error` event's line, verbatim; succeeded needs a text part and no error. The stream has no closer.
+    """
+    parsed: dict = {
+        "session_id": None,
+        "result": "",
+        "usage": None,
+        "total_cost_usd": None,
+        "num_turns": 0,
+        "error": "",
+        "rate_limited": False,
+        "retry_after_s": None,
+        "succeeded": False,
+    }
+    try:
+        lines = Path(stdout_log).read_text(encoding="utf-8").splitlines()
+    except OSError as e:
+        logger.info("[monitor] No opencode stream to parse at %s: %s", stdout_log, e)
+        return parsed
+    has_text = False
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError as e:
+            logger.info("[monitor] opencode stream line is not JSON, skipped: %s", e)
+            continue
+        if not isinstance(event, dict):
+            continue
+        kind = event.get("type")
+        part = _as_dict(event.get("part"))
+        if parsed["session_id"] is None and event.get("sessionID"):
+            parsed["session_id"] = event.get("sessionID")
+        if kind == "text":
+            has_text = True
+            parsed["result"] = str(part.get("text", ""))
+        elif kind == "step_finish":
+            parsed["num_turns"] += 1
+            _add_opencode_usage(parsed, part)
+        elif kind == "error" and not parsed["error"]:
+            parsed["error"] = line.strip()
+            err = _as_dict(event.get("error"))
+            parsed["rate_limited"] = err.get("status") == 429 or err.get("type") == "provider.free-limit"
+            retry_ms = err.get("retryAfterMs")
+            if isinstance(retry_ms, (int, float)):
+                parsed["retry_after_s"] = int(retry_ms // 1000)
+    parsed["succeeded"] = has_text and not parsed["error"]
+    return parsed
+
+
+def _as_dict(value: object) -> dict:
+    """`value` when it is an object, else an empty one: a stream field may be absent or malformed."""
+    return value if isinstance(value, dict) else {}
+
+
+def _add_opencode_usage(parsed: dict, part: dict) -> None:
+    """Fold one step_finish's tokens and cost into the running totals, in the report's usage shape."""
+    tokens = _as_dict(part.get("tokens"))
+    cache = _as_dict(tokens.get("cache"))
+    usage = parsed["usage"] or {}
+    for key, value in (
+        ("input_tokens", tokens.get("input")),
+        ("output_tokens", tokens.get("output")),
+        ("reasoning_tokens", tokens.get("reasoning")),
+        ("cache_read_input_tokens", cache.get("read")),
+        ("cache_creation_input_tokens", cache.get("write")),
+    ):
+        if isinstance(value, (int, float)):
+            usage[key] = usage.get(key, 0) + value
+    parsed["usage"] = usage
+    cost = part.get("cost")
+    if isinstance(cost, (int, float)):
+        parsed["total_cost_usd"] = (parsed["total_cost_usd"] or 0) + cost
+
+
+def reconcile_opencode_pointer(branch_path: Path, stdout_log: str) -> None:
+    """Record the session the stream ran in, when it is not already the pointer's."""
+    session_id = parse_opencode_stream(stdout_log)["session_id"]
+    if not isinstance(session_id, str) or not session_id.strip():
+        logger.warning("[monitor] opencode stream for %s carried no sessionID — pointer unchanged", branch_path)
+        return
+    pointer = session_pointer.read_pointer(branch_path)
+    if pointer is not None and pointer.get("session_id") == session_id and pointer.get("provider") == OPENCODE:
+        return
+    if not session_pointer.write_pointer(branch_path, session_id.strip(), "monitor-opencode", provider=OPENCODE):
+        logger.warning("[monitor] Could not record opencode session %s for %s", session_id, branch_path)
+
+
 # Exit 0 with this marker is incomplete, not success: the ceiling killed the tasks, maybe the reply.
 BG_TASKS_MARKER = "Background tasks still running"
 
@@ -564,6 +670,14 @@ def _summarize_result_json(stdout_log: str, provider: str = "claude") -> str:
         if not stream["succeeded"]:
             return f"codex turn never completed, last agent_message: {stream['result'][:400] or '(none)'}"
         return f"codex turn completed, last agent_message: {stream['result'][:400]}"
+    if provider == OPENCODE:
+        stream = parse_opencode_stream(stdout_log)
+        if stream["error"]:
+            retry = f" (retryAfter {stream['retry_after_s']}s)" if stream["retry_after_s"] is not None else ""
+            return f"opencode error event{retry}: {stream['error'][:400]}"
+        if not stream["succeeded"]:
+            return "opencode run ended without a text part"
+        return f"opencode run answered, last text: {stream['result'][:400]}"
     data = _parse_result_json(stdout_log)
     if not data:
         return "(no result JSON captured)"
@@ -667,7 +781,7 @@ def _kill_process(process: subprocess.Popen, branch_email: str):
 
 
 def _stdout_written(stdout_log: str) -> bool:
-    """True once the attempt's stdout holds a byte: Codex streams --json live."""
+    """True once the attempt's stdout holds a byte: Codex and OpenCode stream JSON live."""
     try:
         return Path(stdout_log).stat().st_size > 0
     except OSError as e:
@@ -717,8 +831,8 @@ def run_with_startup_check(
         return -2, False
 
     # Claude's startup is read from the JSONL transcripts: --output-format json buffers stdout.
-    projects_dir = None if provider == CODEX else session_pointer.transcript_dir(cwd)
-    if projects_dir is None and provider != CODEX:
+    projects_dir = None if provider in STREAMING_PROVIDERS else session_pointer.transcript_dir(cwd)
+    if projects_dir is None and provider not in STREAMING_PROVIDERS:
         # After the spawn: raising would orphan a live agent with the lock held. The probe is optional.
         logger.warning("[monitor] no home directory — skipping the JSONL startup probe for %s", cwd)
     initial_sizes = _snapshot_jsonl_sizes(projects_dir) if projects_dir else {}
@@ -727,7 +841,7 @@ def run_with_startup_check(
 
     try:
         while time.time() < deadline:
-            if provider == CODEX and _stdout_written(stdout_log):
+            if provider in STREAMING_PROVIDERS and _stdout_written(stdout_log):
                 started = True
                 break
             if projects_dir is not None and _check_jsonl_activity(projects_dir, initial_sizes):
@@ -759,6 +873,15 @@ def run_with_startup_check(
             stdout_fh.close()
 
 
+def _final_result_json(stdout_log: str, provider: str) -> dict:
+    """The run's result in the report's shape, from the provider's own stdout form."""
+    if provider == CODEX:
+        return parse_codex_stream(stdout_log)
+    if provider == OPENCODE:
+        return parse_opencode_stream(stdout_log)
+    return _parse_result_json(stdout_log)
+
+
 def prepend_to_path(path_value: str, entry: str, sep: str = os.pathsep) -> str:
     """Return PATH with entry first, joined by the host's separator.
 
@@ -770,7 +893,7 @@ def prepend_to_path(path_value: str, entry: str, sep: str = os.pathsep) -> str:
 def main():
     """
     Usage: dispatch_monitor.py <branch_email> <lock_file> <sender> <stderr_log> [--no-wake-back]
-           [--provider=codex] -- <agent_argv...>
+           [--provider=codex|opencode] -- <agent_argv...>
 
     --no-wake-back declines the completion wake-back; sender is still used for bounce mail.
     """
@@ -839,6 +962,9 @@ def main():
     for key in list(spawn_env.keys()):
         if key.startswith("CLAUDE") or key == "AIPASS_BOT_ID":
             spawn_env.pop(key)
+        # A parent OpenCode's session markers must not reach the child; the store both ends read stays.
+        elif key.startswith("OPENCODE") and key != session_pointer.OPENCODE_DB_ENV:
+            spawn_env.pop(key)
     # 350k for every model, else an agent inherits its native window (1M). After the CLAUDE* strip.
     spawn_env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = "350000"
     spawn_env.pop("AIPASS_CALLER_BRANCH", None)
@@ -850,6 +976,8 @@ def main():
     lock_path = Path(lock_file).resolve()
     branch_path = lock_path.parent.parent
     cwd = str(branch_path)
+    # Popen's cwd leaves an inherited PWD naming the caller's directory; OpenCode files its session there.
+    spawn_env["PWD"] = cwd
 
     logs_dir = branch_path / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -932,6 +1060,13 @@ def main():
         if provider == CODEX and exit_code == 0 and not parse_codex_stream(stdout_log)["succeeded"]:
             logger.warning("[monitor] %s codex exited 0 without a clean turn.completed — failed", branch_email)
             exit_code = CODEX_STREAM_FAILED
+        opencode_stream = parse_opencode_stream(stdout_log) if provider == OPENCODE else None
+        if opencode_stream is not None:
+            # Every attempt, failed ones too: OpenCode minted the session, so a resume needs its id.
+            reconcile_opencode_pointer(branch_path, stdout_log)
+        if opencode_stream is not None and exit_code == 0 and not opencode_stream["succeeded"]:
+            logger.warning("[monitor] %s opencode exited 0 without a text part — failed", branch_email)
+            exit_code = OPENCODE_STREAM_FAILED
 
         if broker_sock is not None:
             broker_sock.close()
@@ -957,8 +1092,12 @@ def main():
                 logger.info("[monitor] %s succeeded on attempt %d/3", branch_email, attempt)
             break
 
-        if exit_code == CODEX_STREAM_FAILED:
+        if exit_code in (CODEX_STREAM_FAILED, OPENCODE_STREAM_FAILED):
             # The turn ran and may have acted (mail, memories); a re-run would repeat that work.
+            break
+        if opencode_stream is not None and opencode_stream["error"]:
+            # The stream named its failure (no route, free limit): a re-run meets the same answer.
+            logger.warning("[monitor] %s opencode error event: %s", branch_email, opencode_stream["error"][:400])
             break
 
         if startup_failed:
@@ -987,7 +1126,7 @@ def main():
     # Success only. `cmd` is the LAST attempt's: strike 3 remints, so the original would misreport.
     if exit_code == 0 and provider == CODEX:
         reconcile_codex_pointer(branch_path, stdout_log)
-    elif exit_code == 0:
+    elif exit_code == 0 and provider != OPENCODE:
         reconcile_pointer(branch_path, stdout_log, cmd)
 
     max_turns_hit = False
@@ -1026,7 +1165,13 @@ def main():
         reason = f"All {len(attempts)} attempts failed after {duration}s.\n" + "\n".join(attempt_details)
 
         content = _read_agent_stderr(stderr_log)
-        if "rate_limit" in content.lower() or "429" in content:
+        final_stream = parse_opencode_stream(stdout_log) if provider == OPENCODE else {}
+        if final_stream.get("rate_limited"):
+            retry = final_stream["retry_after_s"]
+            reason = (
+                f"API rate limit (opencode 429, retryAfter {retry if retry is not None else 'unknown'}s, {duration}s)"
+            )
+        elif "rate_limit" in content.lower() or "429" in content:
             reason = f"API rate limit (all {len(attempts)} attempts failed, {duration}s)"
         elif "overloaded" in content.lower() or "529" in content:
             reason = f"API overloaded (all {len(attempts)} attempts failed, {duration}s)"
@@ -1092,7 +1237,7 @@ def main():
             bg_orphaned=bg_orphaned,
             max_turns_hit=max_turns_hit,
             wake_result=wake_result,
-            result_json=parse_codex_stream(stdout_log) if provider == CODEX else _parse_result_json(stdout_log),
+            result_json=_final_result_json(stdout_log, provider),
         )
         report_path = report_mod.write_report(report)
         if report_path is None:

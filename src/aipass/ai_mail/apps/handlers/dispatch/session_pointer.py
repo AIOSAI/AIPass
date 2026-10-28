@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: session_pointer.py
 # Description: Durable per-branch "current session" pointer for dispatch
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-20
-# Modified: 2026-10-25
+# Modified: 2026-10-28
 # =============================================
 
 """Durable per-branch current-session pointer.
@@ -14,6 +14,8 @@ Nothing here raises: a bad pointer degrades the dispatch to ``-c``.
 
 import json
 import os
+import sqlite3
+from contextlib import closing
 import tempfile
 import uuid
 from datetime import datetime
@@ -28,6 +30,8 @@ POINTER_FILE_NAME = "session.json"
 
 CLAUDE = "claude"
 CODEX = "codex"
+OPENCODE = "opencode"
+OPENCODE_DB_ENV = "OPENCODE_DB"
 
 # MiB, to match what `ls -lh` and `du -h` show.
 _BYTES_PER_MB = 1024 * 1024
@@ -99,6 +103,35 @@ def codex_thread_file(thread_id: str) -> Optional[Path]:
         return None
     matches = sorted((home / ".codex" / "sessions").glob(f"*/*/*/rollout-*-{thread_id}.jsonl"))
     return matches[0] if matches else None
+
+
+def opencode_db() -> Optional[Path]:
+    """OpenCode's session store: OPENCODE_DB, else ~/.local/share/opencode/opencode.db; None without a home."""
+    override = os.environ.get(OPENCODE_DB_ENV)
+    if override:
+        return Path(override)
+    home = _claude_home()
+    if home is None:
+        return None
+    return home / ".local" / "share" / "opencode" / "opencode.db"
+
+
+def opencode_session_directory(session_id: str) -> Tuple[Optional[str], str]:
+    """The `directory` OpenCode recorded for a session, or (None, why it is not there). Read-only."""
+    db = opencode_db()
+    if db is None:
+        return None, "cannot determine this machine's home directory, so there is no opencode store to search"
+    if not db.is_file():
+        return None, f"opencode store {db} does not exist"
+    try:
+        with closing(sqlite3.connect(f"file:{db}?mode=ro", uri=True)) as conn:
+            row = conn.execute("select directory from session_v2 where id=?", (session_id,)).fetchone()
+    except sqlite3.Error as e:
+        logger.warning("[session_pointer] Cannot read opencode store %s: %s", db, e)
+        return None, f"opencode store {db} unreadable ({e})"
+    if row is None:
+        return None, f"session {session_id} not found in {db}"
+    return str(row[0]), ""
 
 
 def pointer_path(branch_path: Path) -> Path:
@@ -209,7 +242,7 @@ def resolve_resume_target(
     """Decide which session a dispatch to `branch_path` should resume.
 
     An id only when the pointer parses, names this provider, its cwd matches this branch, and the
-    transcript exists; never raises. Codex has no -c, so its fallback is a fresh thread.
+    transcript (OpenCode: its session_v2 row) exists; never raises. Codex and OpenCode fall back to fresh.
     """
     fallback = "falling back to -c" if provider == CLAUDE else "starting fresh"
     try:
@@ -240,6 +273,17 @@ def resolve_resume_target(
             f"pointer cwd mismatch - pointer says {_quote_path(pointer_cwd)} but this branch resolves to "
             f"{_quote_path(expected_cwd)} (moved or copied branch?) - {fallback}"
         )
+
+    if provider == OPENCODE:
+        directory, why = opencode_session_directory(session_id)
+        if directory is None:
+            return None, f"{why} - {fallback}"
+        if directory != expected_cwd:
+            return None, (
+                f"opencode session {session_id} belongs to {_quote_path(directory)}, not "
+                f"{_quote_path(expected_cwd)} - {fallback}"
+            )
+        return session_id, f"pointer valid - resuming opencode session {session_id}"
 
     if provider == CODEX:
         candidates = None if _claude_home() is None else [codex_thread_file(session_id)]

@@ -138,7 +138,7 @@ health while covering nothing.
 {"dispatch_id": "<uuid4>", "ts": "<iso>", "status": "completed", "report_path": "..."}
 ```
 
-`provider` names the CLI the wake spawned, `claude` or `codex`.
+`provider` names the CLI the wake spawned: `claude`, `codex` or `opencode`.
 
 The middle line is the **pid annotation**: a second
 `outstanding` record appended once the spawn returns a pid, which `open_dispatch`

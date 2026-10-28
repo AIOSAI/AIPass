@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: pid_lock.py
 # Description: Process liveness, branch occupancy and the dispatch lock
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-10-04
-# Modified: 2026-10-25
+# Modified: 2026-10-28
 # =============================================
 
 """
@@ -190,7 +190,7 @@ def _read_session_type_darwin(pid_str: str) -> str:
 
 
 # The agent CLIs a wake can spawn; pgrep reads the pattern as an exact-match regex.
-AGENT_PROCESS_NAMES = ("claude", "codex")
+AGENT_PROCESS_NAMES = ("claude", "codex", "opencode")
 AGENT_PROCESS_PATTERN = "|".join(AGENT_PROCESS_NAMES)
 
 # Session types that should NOT block dispatch (idle/background sessions)
@@ -200,6 +200,8 @@ _NON_BLOCKING_SESSION_TYPES = {"dispatched", "daemon"}
 # first TUI in a folder, parented by systemd --user, outliving every room) and headless `exec`.
 # codex-code-mode-host never reaches here: its comm is not `codex`, so pgrep -x skips it.
 CODEX_NON_SESSION_SUBCOMMANDS = frozenset({"app-server", "mcp-server", "exec"})
+# `opencode serve --service` is the user's background daemon, `serve --stdio` a `run --standalone` child.
+OPENCODE_NON_SESSION_SERVE_FLAGS = frozenset({"--service", "--stdio"})
 
 
 def _read_argv(pid_str: str) -> List[str]:
@@ -234,8 +236,18 @@ def _is_codex_non_session(pid_str: str) -> bool:
     return len(argv) > 1 and argv[1] in CODEX_NON_SESSION_SUBCOMMANDS
 
 
+def _is_opencode_non_session(pid_str: str) -> bool:
+    """True for an `opencode serve` daemon or standalone child; an unreadable argv counts as a session."""
+    try:
+        argv = _read_argv(pid_str)
+    except OSError as e:
+        logger.info("[wake] Cannot read argv for opencode PID %s, counted as a session: %s", pid_str, e)
+        return False
+    return len(argv) > 1 and argv[1] == "serve" and bool(OPENCODE_NON_SESSION_SERVE_FLAGS.intersection(argv[2:]))
+
+
 def branch_occupant(branch_path: Path) -> Optional[str]:
-    """The CLI ("claude" or "codex") of an interactive session in this branch directory, or None."""
+    """The CLI ("claude", "codex" or "opencode") of an interactive session in this branch directory, or None."""
     resolved = str(branch_path.resolve())
     try:
         # -l prints "<pid> <comm>": the comm is what matched, so it names the CLI.
@@ -254,6 +266,8 @@ def branch_occupant(branch_path: Path) -> Optional[str]:
             if _read_session_type(pid_str) in _NON_BLOCKING_SESSION_TYPES:
                 continue
             if cli == "codex" and _is_codex_non_session(pid_str):
+                continue
+            if cli == "opencode" and _is_opencode_non_session(pid_str):
                 continue
             return cli
     except (subprocess.SubprocessError, OSError):

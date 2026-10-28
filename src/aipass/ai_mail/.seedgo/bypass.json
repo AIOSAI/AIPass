@@ -160,7 +160,7 @@
       "file": "apps/modules/dispatch.py",
       "standard": "logged_fallback",
       "lines": [
-        369
+        373
       ],
       "reason": "Same CLI handler contract (ai_mail, fleet green legs 9 and 10): 326 is the send phase failing to resolve the sender, which has already called error() (mark_command_failed). True tells the router the command was recognised."
     },
@@ -179,9 +179,9 @@
       "file": "apps/handlers/dispatch/dispatch_monitor.py",
       "standard": "logged_fallback",
       "lines": [
-        145,
-        222,
-        543
+        150,
+        227,
+        649
       ],
       "reason": "The value is the true answer (ai_mail, fleet green leg 10; re-lined 2026-10-08 and 2026-10-16). 198: wake_sender returns an outcome word, and 'failed' is what its normal path also answers when the sender was not woken; a crash in the wake-back is that same outcome, it never reads as 'success', and log_wake_result plus the report's wake_result carry it. 299: _mail_wake_back returns True only when the mail went; False is its one failure answer, the same as a non-zero exit, and its caller turns it into 'failed_manager_mail'. 657: _parse_result_json documents {} for a stdout log that is missing or holds no JSON, which is what an unreadable log is to the report: build_report then records cost, tokens and turns as null, not as values."
     },
@@ -189,7 +189,7 @@
       "file": "apps/handlers/dispatch/wake.py",
       "standard": "logged_fallback",
       "lines": [
-        374
+        381
       ],
       "reason": "The value is the true answer (ai_mail, fleet green leg 11; re-lined in legs 13 and 16): is_manager's FileNotFoundError arm answers False because a branch with no passport has declared no class, which is what wake_branch's manager gate also does for a missing passport (pinned: test_missing_passport_continues). A passport that exists but cannot be read is the other arm, and since leg 11 it fails closed (True) under @devpulse's ruling e; since leg 12 an unreadable registry fails closed too."
     },
@@ -263,10 +263,10 @@
       "file": "apps/handlers/dispatch/pid_lock.py",
       "standard": "logged_fallback",
       "lines": [
-        286,
-        291,
-        294,
-        297
+        300,
+        305,
+        308,
+        311
       ],
       "reason": "check_pid_alive (public since leg 15; ai_mail, fleet green legs 9 and 10, under @devpulse's leg 10 ruling b for the os.kill family; moved from wake.py to pid_lock.py unchanged in leg 13): os.kill(pid, 0) answers through its exception. ProcessLookupError IS 'no such process' (False, 246) and PermissionError IS 'it exists, owned by another user' (True, 249); neither is a fallback. The two guessed arms, named as guesses: 241, the Windows probe raised, answers alive, the fail-closed direction (an occupied branch is not woken over and its lock is not reclaimed); 252, any other OSError, answers dead, but POSIX defines no other error for signal 0 (EINVAL needs a bad signal, EPERM and ESRCH are the two arms above), so the arm is unreachable there and Windows never reaches it. Since leg 13 this is the liveness rule of the one dispatch lock check, the wake's."
     },
@@ -274,8 +274,8 @@
       "file": "apps/handlers/dispatch/wake.py",
       "standard": "logged_fallback",
       "lines": [
-        299,
-        320
+        306,
+        327
       ],
       "reason": "The value is the true answer (ai_mail, fleet green leg 12; re-lined in legs 13 and 16). 362 and 386: _spawn_in_systemd_scope documents False as 'fall back to direct Popen', the same as a non-zero systemd-run, and its caller 1166 does exactly that."
     },
@@ -316,7 +316,7 @@
       "file": "tests/test_session_pointer.py",
       "standard": "literal_path",
       "lines": [
-        92
+        93
       ],
       "reason": "(ai_mail, fleet green leg 9; re-lined leg 17; its twin in test_dispatch_monitor_helpers.py retired 2026-10-10) transcript_dir encodes a cwd STRING ('/' '_' '.' to '-'); no file system answers it and tmp_path would make the oracle re-implement the encoding. Accepted as a string parse in the leg 7 ruling."
     },
@@ -324,9 +324,9 @@
       "file": "apps/handlers/dispatch/session_pointer.py",
       "standard": "logged_fallback",
       "lines": [
-        116,
-        119,
-        125
+        149,
+        152,
+        158
       ],
       "reason": "read_pointer (ai_mail, fleet green leg 9): the docstring states the contract - None, never a raise, when the pointer is missing, unreadable or malformed, because a pointer that cannot be trusted IS no pointer: every caller (wake.py fresh/resume decision, dispatch_monitor attempt 3) falls back to -c the same way. 208 is the plain truth (no file, no pointer); 211/217 are the documented equivalence. A raise here would cost the wake itself, which the module exists to avoid."
     }
