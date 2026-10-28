@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_bootstrap_update.py
 # Description: Tests for update_project: the plan, stamp-only, the retrofit, seeds and cleanup
-# Version: 1.5.1
+# Version: 1.6.0
 # Created: 2026-10-08
 # Modified: 2026-10-28
 # =============================================
@@ -978,3 +978,13 @@ def test_update_project_retires_an_unedited_old_hook_script_the_manifest_knows_a
     assert not (hooks_dir / "old.py").exists()
     assert (hooks_dir / "old(disabled).py").read_text(encoding="utf-8") == "print('aipass')\n"
     assert (hooks_dir / "edited.py").read_text(encoding="utf-8") == "print('mine')\n"
+
+
+def test_every_scaffold_switch_text_equals_its_repo_root_file_byte_for_byte():
+    """Each scaffold text is a copy of the AIPass root file; an edit to either side ships stale to every init."""
+    root = Path(_expected_aipass_home())
+    missing = [rel for rel, _ in bootstrap.SWITCH_PAIR if not (root / rel).is_file()]
+    if missing:
+        pytest.skip(f"repo-root switch files absent in this clone: {', '.join(missing)}")
+    drifted = [rel for rel, body in bootstrap.SWITCH_PAIR if (root / rel).read_bytes() != body().encode("utf-8")]
+    assert drifted == [], f"scaffold text differs from the root file: {', '.join(drifted)}"
