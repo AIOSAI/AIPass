@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: load.py
 # Description: Load Logging Configuration Handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2025-11-07
-# Modified: 2026-10-24
+# Modified: 2026-10-28
 # =============================================
 
 """

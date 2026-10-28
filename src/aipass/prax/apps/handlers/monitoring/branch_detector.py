@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_detector.py
 # Description: Branch Attribution Handler
-# Version: 0.1.2
+# Version: 0.2.0
 # Created: 2025-11-23
-# Modified: 2026-10-25
+# Modified: 2026-10-28
 # =============================================
 
 """
