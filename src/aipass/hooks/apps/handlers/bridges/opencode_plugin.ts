@@ -5,7 +5,8 @@ import { appendFileSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 type Row = { event: string; command: string; timeout?: number }
-type Answer = { deny?: string; context?: string }
+type Entry = { key: string; value: string }
+type Answer = { deny?: string; context?: string; entry?: Entry; entries?: Entry[] }
 
 const BROKEN = (error: string) =>
   `HOOKS BROKEN: the AIPass hook engine could not run (${error}).\n` +
@@ -54,9 +55,10 @@ export default Plugin.define({
       }
     }
 
-    // Every row of the event in manifest order; the first deny answers, contexts join in order.
+    // Every row of the event in manifest order; the first deny answers, contexts join in order, entries collect.
     const run = (event: string, payload: object): Answer => {
       const contexts: string[] = []
+      const entries: Entry[] = []
       for (const row of rows.filter((r) => r.event === event)) {
         const answer = call(row, { ...payload, hook_event_name: event })
         if (answer.broken) {
@@ -65,9 +67,10 @@ export default Plugin.define({
           continue
         }
         if (answer.deny) return { deny: answer.deny }
+        if (answer.entry) entries.push(answer.entry)
         if (answer.context) contexts.push(answer.context)
       }
-      return contexts.length ? { context: contexts.join("\n\n") } : {}
+      return { ...(contexts.length ? { context: contexts.join("\n\n") } : {}), ...(entries.length ? { entries } : {}) }
     }
 
     const base = (sessionID: string) => ({ session_id: sessionID, cwd, provider: "opencode" })
@@ -81,9 +84,23 @@ export default Plugin.define({
           started.add(event.sessionID)
           parts.push(run("SessionStart", { ...base(event.sessionID), source: "startup" }).context ?? "")
         }
-        const answer = run("UserPromptSubmit", { ...base(event.sessionID), prompt: event.prompt?.text ?? "" })
+        const answer = run("UserPromptSubmit", {
+          ...base(event.sessionID),
+          prompt: event.prompt?.text ?? "",
+          keeps_entries: true,
+        })
         // OpenCode cannot withhold a prompt from a plugin: a refusal travels with it instead.
         parts.push(answer.deny ?? answer.context ?? "")
+        // Keyed entries sit in the instruction block of every model call and survive a compaction; one that
+        // cannot be kept travels with the prompt, so the text arrives once either way.
+        for (const entry of answer.deny ? [] : answer.entries ?? []) {
+          try {
+            await ctx.session.instructions.entry.put({ sessionID: event.sessionID, key: entry.key, value: entry.value })
+          } catch (e) {
+            logError(`instruction entry ${entry.key} not kept, sent with the prompt: ${e}`)
+            parts.push(entry.value)
+          }
+        }
       }
       const added = parts.filter(Boolean).join("\n\n")
       if (added && event.prompt) event.prompt.text = `${event.prompt.text}\n\n${added}`
@@ -103,7 +120,8 @@ export default Plugin.define({
 
     try {
       await ctx.session.hook("compaction", async (event: any) => {
-        if (!unwired) run("PreCompact", { ...base(event.sessionID), trigger: "auto" })
+        // OpenCode 2.2's compaction event names no reason: auto, overflow and manual all read as auto.
+        if (!unwired) run("PreCompact", { ...base(event.sessionID), trigger: event.reason ?? "auto" })
       })
     } catch (e) {
       logError(`compaction hook unavailable, PreCompact rows do not fire: ${e}`)

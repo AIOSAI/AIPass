@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_context_gauge.py
-# Version: 1.4.0
-# Description: Tests for context_gauge prompt handler (guard per window; real model window; Codex; OpenCode's store)
+# Version: 1.5.0
+# Description: Tests for context_gauge prompt handler (guard per window; real model window; Codex; OpenCode's store and compact point)
 # Branch: hooks
 # Created: 2026-07-20
 # Modified: 2026-10-28
@@ -34,6 +34,10 @@ def no_user_settings(tmp_path, monkeypatch):
     """The user-level settings file moves under tmp_path and stays absent, so no live window leaks in."""
     monkeypatch.setattr(context_window, "user_settings_path", lambda: tmp_path / "home" / "user_settings.json")
     monkeypatch.setattr(context_window, "codex_config_path", lambda: tmp_path / "home" / "codex_config.toml")
+    monkeypatch.setattr(
+        context_window, "opencode_config_path", lambda: tmp_path / "home" / "opencode" / "opencode.json"
+    )
+    monkeypatch.delenv("OPENCODE_CONFIG_CONTENT", raising=False)
 
 
 def _write_transcript(path, input_tokens=0, cache_read=0, cache_creation=0, model=""):
@@ -293,13 +297,33 @@ class TestCodexRollout:
         assert "~150k of 190k context (79%, as the status line counts it); auto-compact at ~180k." in result["stdout"]
 
 
-def _opencode_store(path, *messages: tuple[str, str, int, dict]) -> None:
-    """OpenCode's session_message table: (session_id, type, seq, tokens) rows, data as OpenCode writes it."""
+_CATALOG = {
+    "opencode": {
+        "models": {
+            "deepseek-v4.1-flash-free": {"limit": {"context": 200_000, "output": 32_000}},
+            "big-pickle": {"limit": {"context": 200_000, "input": 160_000, "output": 32_000}},
+        }
+    }
+}
+
+
+def _opencode_store(path, *messages: tuple[str, str, int, dict], model="deepseek-v4.1-flash-free", catalog=_CATALOG):
+    """OpenCode's tables as it writes them: session_message rows (session, type, seq, tokens), each session's
+    model in session_v2, and the models.dev catalog in kv (a JSON body inside a JSON value)."""
     with closing(sqlite3.connect(path)) as conn:
         conn.execute("CREATE TABLE session_message (id text, session_id text, type text, seq integer, data text)")
+        conn.execute("CREATE TABLE session_v2 (id text, model text)")
+        conn.execute("CREATE TABLE kv (key text, value text)")
         for n, (session, kind, seq, tokens) in enumerate(messages):
-            data = json.dumps({"model": {"id": "deepseek-v4.1-flash-free"}, "tokens": tokens})
+            data = json.dumps({"model": {"id": model}, "tokens": tokens})
             conn.execute("INSERT INTO session_message VALUES (?, ?, ?, ?, ?)", (f"m{n}", session, kind, seq, data))
+        for session in {m[0] for m in messages}:
+            conn.execute(
+                "INSERT INTO session_v2 VALUES (?, ?)", (session, json.dumps({"id": model, "providerID": "opencode"}))
+            )
+        if catalog is not None:
+            value = json.dumps({"updatedAt": 1, "body": json.dumps(catalog)})
+            conn.execute("INSERT INTO kv VALUES ('models-dev:v2:catalog', ?)", (value,))
         conn.commit()
 
 
@@ -308,38 +332,86 @@ def _tokens(inp=0, out=0, reasoning=0, read=0, write=0) -> dict:
 
 
 class TestOpenCodeStore:
-    """An OpenCode session: the newest assistant message in OpenCode's store, counted as its status line counts it."""
+    """An OpenCode session: the newest assistant message in OpenCode's store, counted as its status line counts it,
+    against the compact point OpenCode computes from its catalog and compaction.buffer."""
 
-    def _gauge(self, tmp_path, monkeypatch, *messages, session="ses_1"):
-        store = tmp_path / "opencode.db"
-        _opencode_store(store, *messages)
-        monkeypatch.setenv("OPENCODE_DB", str(store))
+    def _gauge(self, tmp_path, monkeypatch, *messages, session="ses_1", **store):
+        db = tmp_path / "opencode.db"
+        _opencode_store(db, *messages, **store)
+        monkeypatch.setenv("OPENCODE_DB", str(db))
         with patch(f"{MODULE}._GUARD_DIR", tmp_path):
             return handle({"session_id": session, "cwd": str(tmp_path), "provider": "opencode"})["stdout"]
 
     def test_output_reasoning_and_cache_count_toward_the_fill_and_the_call_is_slash_prep(self, tmp_path, monkeypatch):
         tokens = _tokens(inp=100_000, out=10_000, reasoning=6_000, read=40_000, write=4_000)
         stdout = self._gauge(tmp_path, monkeypatch, ("ses_1", "assistant", 2, tokens))
-        assert stdout.startswith("CONTEXT GAUGE: ~160k of 200k context (80%, as the status line counts it);")
+        assert stdout.startswith(
+            "CONTEXT GAUGE: ~160k of 200k context (80%, as the status line counts it); auto-compact at ~170k."
+        )
         assert "/prep" in stdout and "$prep" not in stdout
 
     def test_input_alone_under_the_threshold_is_silent(self, tmp_path, monkeypatch):
-        assert self._gauge(tmp_path, monkeypatch, ("ses_1", "assistant", 2, _tokens(inp=150_000))) == ""
+        assert self._gauge(tmp_path, monkeypatch, ("ses_1", "assistant", 2, _tokens(inp=130_000))) == ""
 
     def test_the_newest_assistant_message_of_this_session_is_the_reading(self, tmp_path, monkeypatch):
         stdout = self._gauge(
             tmp_path,
             monkeypatch,
             ("ses_1", "assistant", 1, _tokens(read=20_000)),
-            ("ses_1", "assistant", 5, _tokens(read=170_000)),
+            ("ses_1", "assistant", 5, _tokens(read=140_000)),
             ("ses_1", "user", 6, {}),
             ("ses_2", "assistant", 9, _tokens(read=20_000)),
         )
-        assert stdout.startswith("CONTEXT GAUGE: ~170k of 200k context (85%,")
+        assert stdout.startswith("CONTEXT GAUGE: ~140k of 200k context (70%,")
 
-    def test_ninety_five_percent_escalates(self, tmp_path, monkeypatch):
-        stdout = self._gauge(tmp_path, monkeypatch, ("ses_1", "assistant", 2, _tokens(read=192_000)))
+    def test_ninety_five_percent_of_the_compact_point_escalates(self, tmp_path, monkeypatch):
+        stdout = self._gauge(tmp_path, monkeypatch, ("ses_1", "assistant", 2, _tokens(read=165_000)))
         assert "Compact fires soon" in stdout
+
+    def test_limit_input_beats_limit_context(self, tmp_path, monkeypatch):
+        stdout = self._gauge(
+            tmp_path, monkeypatch, ("ses_1", "assistant", 2, _tokens(read=110_000)), model="big-pickle"
+        )
+        assert stdout.startswith("CONTEXT GAUGE: ~110k of 160k context (69%,") and "auto-compact at ~136k." in stdout
+
+    def test_a_model_the_catalog_lacks_reads_200k(self, tmp_path, monkeypatch):
+        stdout = self._gauge(tmp_path, monkeypatch, ("ses_1", "assistant", 2, _tokens(read=140_000)), catalog={})
+        assert stdout.startswith("CONTEXT GAUGE: ~140k of 200k context (70%,") and "auto-compact at ~170k." in stdout
+
+    def test_config_content_beats_the_project_file(self, tmp_path, monkeypatch):
+        (tmp_path / "opencode.json").write_text('{"compaction": {"buffer": 100000}}', encoding="utf-8")
+        monkeypatch.setenv("OPENCODE_CONFIG_CONTENT", '{"compaction": {"buffer": 180000}}')
+        stdout = self._gauge(tmp_path, monkeypatch, ("ses_1", "assistant", 2, _tokens(read=17_000)))
+        assert "auto-compact at ~20k." in stdout
+
+    def test_the_user_file_sets_the_buffer_when_nothing_nearer_does(self, tmp_path, monkeypatch):
+        user = context_window.opencode_config_path()
+        user.parent.mkdir(parents=True)
+        user.write_text('{"compaction": {"buffer": 50000}}', encoding="utf-8")
+        stdout = self._gauge(tmp_path, monkeypatch, ("ses_1", "assistant", 2, _tokens(read=140_000)))
+        assert "auto-compact at ~150k." in stdout
+
+    def test_the_project_file_beats_the_user_file(self, tmp_path, monkeypatch):
+        (tmp_path / "opencode.json").write_text('{"compaction": {"buffer": 100000}}', encoding="utf-8")
+        user = context_window.opencode_config_path()
+        user.parent.mkdir(parents=True)
+        user.write_text('{"compaction": {"buffer": 50000}}', encoding="utf-8")
+        stdout = self._gauge(tmp_path, monkeypatch, ("ses_1", "assistant", 2, _tokens(read=90_000)))
+        assert "auto-compact at ~100k." in stdout
+
+    @pytest.mark.parametrize(
+        ("limit", "buffer", "point"),
+        [
+            (200_000, None, 170_000),
+            (160_000, None, 136_000),
+            (100_000, None, 84_000),
+            (20_000, None, 17_000),
+            (200_000, 180_000, 20_000),
+            (200_000, 200_000, 170_000),
+        ],
+    )
+    def test_compact_point_is_the_buffer_else_fifteen_percent_with_a_16k_floor(self, limit, buffer, point):
+        assert context_window.opencode_compact_point(limit, buffer) == point
 
     def test_no_store_or_no_session_row_is_silent(self, tmp_path, monkeypatch):
         monkeypatch.setenv("OPENCODE_DB", str(tmp_path / "absent.db"))

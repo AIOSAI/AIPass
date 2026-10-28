@@ -57,7 +57,7 @@ Marked `accepted (<reason>)`, never counted:
 - `start: culture`: a SessionStart row on both CLIs; on Claude inside `AIPASS_HOME` it is silent, since the CLI reads `.claude/AGENTS.md` natively there.
 - `subagent stop`: the sub-agent mechanism differs (the Agent tool on Claude, multi-agent on Codex).
 
-The settings gate (ask on Claude, deny on Codex), the status line and the Notification hook are accepted differences in the parity matrix, and no lane probes them. PreCompact is not probed: a headless session does not reach compaction.
+The settings gate (ask on Claude, deny on Codex), the status line and the Notification hook are accepted differences in the parity matrix, and no lane probes them. PreCompact is not probed by a lane: a parity session does not reach compaction. On OpenCode, a dispatch with `--opencode-config '{"compaction":{"buffer":180000}}'` compacts at 20k on deepseek-v4.1-flash-free, and the measured order of events is in [wiring.md](wiring.md#opencode).
 
 ## Not observed here
 

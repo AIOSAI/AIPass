@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_codex_bridge.py
-# Version: 2.6.0
+# Version: 2.7.0
 # Description: Tests for the Codex and OpenCode bridges: payload mapping, output envelope, apply_patch, fail closed
 # Branch: hooks
 # Layer: tests
@@ -389,7 +389,33 @@ class TestOpenCodeAnswer:
     )
     def test_context_arrives_as_text_and_silence_as_nothing(self, oc, output, expected):
         oc.answer = (output, 0)
-        assert oc.run("UserPromptSubmit:tier0_kernel", {"session_id": "s1", "prompt": "hi"}) == expected
+        assert oc.run("UserPromptSubmit:temporal", {"session_id": "s1", "prompt": "hi"}) == expected
+
+    @pytest.mark.parametrize(
+        ("hook", "key"),
+        [
+            ("tier0_kernel", "aipass-kernel"),
+            ("navmap", "aipass-navmap"),
+            ("branch_prompt", "aipass-branch-prompt"),
+            ("identity_injector", "aipass-identity"),
+        ],
+    )
+    def test_grounding_text_is_a_keyed_instruction_entry_that_outlives_a_compaction(self, oc, hook, key):
+        oc.answer = ("# Kernel\n", 0)
+        assert oc.run(f"UserPromptSubmit:{hook}", {"session_id": "s1", "prompt": "hi", "keeps_entries": True}) == {
+            "entry": {"key": key, "value": "# Kernel\n"}
+        }
+
+    def test_a_plugin_that_does_not_keep_entries_gets_the_grounding_as_text(self, oc):
+        oc.answer = ("# Kernel\n", 0)
+        assert oc.run("UserPromptSubmit:tier0_kernel", {"session_id": "s1", "prompt": "hi"}) == {
+            "context": "# Kernel\n"
+        }
+
+    def test_silent_grounding_and_another_events_text_stay_as_they_are(self, oc):
+        assert oc.run("UserPromptSubmit:navmap", {"session_id": "s1", "prompt": "hi", "keeps_entries": True}) == {}
+        oc.answer = ("culture", 0)
+        assert oc.run("SessionStart:navmap", {"session_id": "s1", "keeps_entries": True}) == {"context": "culture"}
 
 
 class TestOpenCodeBrokenEngine:

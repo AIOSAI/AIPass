@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: context_window.py
-# Version: 1.7.0
+# Version: 1.8.0
 # Description: Context fill per CLI (Claude transcript, Codex rollout, OpenCode store) and the compact window
 # Branch: hooks
 # Layer: apps/modules
@@ -17,7 +17,8 @@ of the most recent assistant turn (proven readable S326).
 
 Window, as Claude Code 2.1.304 picks it: the model's own window (`[1m]` suffix or a native-1M
 id -> 1M, else 200k), capped by an explicit window when one is set (env beats settings).
-Auto-compact fires at window - 33k. OpenCode keeps no transcript: opencode_fill reads its store."""
+Auto-compact fires at window - 33k. OpenCode keeps no transcript: opencode_fill reads its store, and
+opencode_window its models.dev catalog and compaction.buffer, the rule OpenCode 2.2 compacts by."""
 
 import json
 import os
@@ -271,11 +272,18 @@ def codex_hooks_path() -> Path:
     return codex_home() / "hooks.json"
 
 
-# shortcut: every OpenCode model is read as 200k, the docs' unknown-model default; read limit.context once a cheap catalog source exists.
-OPENCODE_WINDOW = _DEFAULT_WINDOW
 _OPENCODE_LATEST = (
     "SELECT data FROM session_message WHERE session_id = ? AND type = 'assistant' ORDER BY seq DESC LIMIT 1"
 )
+_OPENCODE_MODEL = "SELECT model FROM session_v2 WHERE id = ?"
+# The catalog is ~11 MB of JSON: SQLite extracts the one row instead of Python parsing it all.
+_OPENCODE_LIMIT = (
+    "SELECT json_extract(json_extract(value, '$.body'), '$.' || json_quote(?) || '.models.' || json_quote(?) || '.limit')"
+    " FROM kv WHERE key = 'models-dev:v2:catalog'"
+)
+_OPENCODE_HELD_BACK_PCT = 15
+_OPENCODE_HELD_BACK_FLOOR = 16_000
+_OPENCODE_FLOOR_FROM = 32_000
 
 
 def opencode_db_path() -> Path:
@@ -284,6 +292,16 @@ def opencode_db_path() -> Path:
         return Path(os.environ["OPENCODE_DB"])
     data = os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share"
     return Path(data) / "opencode" / "opencode.db"
+
+
+def opencode_config_path() -> Path:
+    """OpenCode's user config: opencode/opencode.json in the XDG config home."""
+    config = os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config"
+    return Path(config) / "opencode" / "opencode.json"
+
+
+def _opencode_store() -> sqlite3.Connection:
+    return sqlite3.connect(f"{opencode_db_path().resolve().as_uri()}?mode=ro", uri=True, timeout=2)
 
 
 def opencode_fill(session_id: str) -> int | None:
@@ -296,7 +314,7 @@ def opencode_fill(session_id: str) -> int | None:
     if not session_id or not db.is_file():
         return None
     try:
-        with closing(sqlite3.connect(f"{db.resolve().as_uri()}?mode=ro", uri=True, timeout=2)) as conn:
+        with closing(_opencode_store()) as conn:
             row = conn.execute(_OPENCODE_LATEST, (session_id,)).fetchone()
         tokens = json.loads(row[0]).get("tokens") if row else None
     except (sqlite3.Error, ValueError, AttributeError) as exc:
@@ -315,6 +333,68 @@ def opencode_fill(session_id: str) -> int | None:
         cache.get("write"),
     ]
     return sum(n for n in counted if isinstance(n, int))
+
+
+def opencode_compact_point(limit: int, buffer: int | None) -> int:
+    """OpenCode's auto-compact trigger: limit - compaction.buffer when set below the limit, else 15% held back, 16k at least from a 32k limit."""
+    if buffer is not None and 0 <= buffer < limit:
+        return limit - buffer
+    floor = _OPENCODE_HELD_BACK_FLOOR if limit >= _OPENCODE_FLOOR_FROM else 0
+    return limit - max(limit * _OPENCODE_HELD_BACK_PCT // 100, floor)
+
+
+def opencode_window(session_id: str, cwd: str) -> tuple[int, int]:
+    """(limit, compact point) OpenCode runs the session at; a model the catalog lacks reads 200k (logged)."""
+    limit = _opencode_limit(session_id)
+    if not limit:
+        logger.info("[HOOKS] context_window: no catalog limit for OpenCode session %s, reading 200k", session_id)
+        limit = _DEFAULT_WINDOW
+    return limit, opencode_compact_point(limit, _opencode_buffer(cwd))
+
+
+def _opencode_limit(session_id: str) -> int:
+    """The session model's limit.input, else limit.context, from the models.dev catalog in the store; 0 when absent."""
+    if not session_id or not opencode_db_path().is_file():
+        return 0
+    try:
+        with closing(_opencode_store()) as conn:
+            row = conn.execute(_OPENCODE_MODEL, (session_id,)).fetchone()
+            model = json.loads(row[0]) if row and row[0] else {}
+            found = conn.execute(_OPENCODE_LIMIT, (model.get("providerID"), model.get("id"))).fetchone()
+        limit = json.loads(found[0]) if found and found[0] else {}
+    except (sqlite3.Error, ValueError, AttributeError) as exc:
+        logger.info("[HOOKS] context_window: OpenCode catalog unreadable for %s: %s", session_id, exc)
+        return 0
+    value = limit.get("input") or limit.get("context") if isinstance(limit, dict) else None
+    return value if isinstance(value, int) and value > 0 else 0
+
+
+def _opencode_buffer(cwd: str) -> int | None:
+    """compaction.buffer by OpenCode's precedence: OPENCODE_CONFIG_CONTENT, the project's opencode.json, the user's."""
+    texts = [os.environ.get("OPENCODE_CONFIG_CONTENT", "")]
+    start = Path(cwd)
+    for folder in (start, *start.parents):
+        texts.append(_read_text(folder / "opencode.json"))
+        if (folder / ".git").exists():
+            break
+    texts.append(_read_text(opencode_config_path()))
+    for text in filter(None, texts):
+        try:
+            buffer = json.loads(text).get("compaction", {}).get("buffer")
+        except (ValueError, AttributeError) as exc:
+            logger.info("[HOOKS] context_window: OpenCode config unreadable: %s", exc)
+            continue
+        if isinstance(buffer, int):
+            return buffer
+    return None
+
+
+def _read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8") if path.is_file() else ""
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.info("[HOOKS] context_window: %s unreadable: %s", path, exc)
+        return ""
 
 
 def _codex_config_int(key: str) -> int | None:

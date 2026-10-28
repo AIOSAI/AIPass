@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: context_gauge.py
-# Version: 1.4.0
+# Version: 1.5.0
 # Description: Calm heads-up to run /prep ($prep on Codex) as auto-compact approaches, once per window (UserPromptSubmit)
 # Branch: hooks
 # Layer: apps/handlers/prompt
@@ -61,8 +61,9 @@ def _reading(hook_data: dict, session_id: str) -> tuple[int, int, int] | None:
     context_window = importlib.import_module("aipass.hooks.apps.modules.context_window")
     if hook_data.get("provider") == "opencode":
         fill = context_window.opencode_fill(session_id)
-        # OpenCode's own compact point is unmeasured: the gauge counts against the whole window.
-        return None if fill is None else (fill, context_window.OPENCODE_WINDOW, context_window.OPENCODE_WINDOW)
+        if fill is None:
+            return None
+        return (fill, *context_window.opencode_window(session_id, hook_data.get("cwd", "") or str(Path.cwd())))
     transcript_path = hook_data.get("transcript_path", "")
     usage = context_window.read_latest_usage(transcript_path) if transcript_path else None
     if usage is None:

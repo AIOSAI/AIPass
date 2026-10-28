@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: opencode.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: OpenCode bridge — the aipass.ts plugin's calls, mapped to Claude's protocol, answered in one JSON line
 # Branch: hooks
 # Layer: apps/handlers/bridges
@@ -12,7 +12,8 @@
 
 OpenCode has no shell-hook config: its plugin (opencode_plugin.ts, installed as aipass.ts) runs the
 manifest's cli.opencode rows, each a call of this file. Tool names and keys become Claude's here, once.
-The answer is one JSON object: {"deny": reason}, {"context": text} or {}. See docs/wiring.md.
+The answer is one JSON object: {"deny": reason}, {"context": text}, {"entry": {"key", "value"}} or {}.
+See docs/wiring.md.
 """
 
 import importlib.util
@@ -51,6 +52,14 @@ FILE_KEYS = {
 }
 
 CODE_TOOL = "execute"
+
+#: The grounding loaders: their text becomes a keyed instruction entry, which OpenCode keeps through a compaction.
+GROUNDING = {
+    "tier0_kernel": "aipass-kernel",
+    "navmap": "aipass-navmap",
+    "branch_prompt": "aipass-branch-prompt",
+    "identity_injector": "aipass-identity",
+}
 
 UNGATED = (
     "OpenCode's execute tool runs code no AIPass gate can read, so it does not run here. "
@@ -159,7 +168,12 @@ def run(arg: str, stdin_data: str) -> dict:
         output, exit_code = run_event(arg, json.dumps(claude_payload(payload)))
     except Exception as exc:  # fail closed on the guarded event, see _broken
         return _broken(event_type, exc)
-    return answer(output, exit_code)
+    result = answer(output, exit_code)
+    key = GROUNDING.get(arg.partition(":")[2]) if event_type == "UserPromptSubmit" else None
+    # Only a plugin that says it keeps entries gets one; an older installed copy would drop the text.
+    if key and "context" in result and payload.get("keeps_entries") is True:
+        return {"entry": {"key": key, "value": result["context"]}}
+    return result
 
 
 def main() -> None:
