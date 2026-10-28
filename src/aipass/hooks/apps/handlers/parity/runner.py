@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: runner.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Provider parity: the same scripted prompts headless on Claude, Codex and OpenCode, hook by hook
 # Branch: hooks
 # Layer: apps/handlers/parity
@@ -137,11 +137,18 @@ def launch_argv(provider: str, model: str = "") -> list[str]:
         binary = shutil.which("opencode") or str(Path.home() / ".opencode" / "bin" / "opencode")
         return [binary, "run", "--standalone", "--format", "json", "--auto", "-m", model or OPENCODE_MODELS[0]]
     if provider == "claude":
-        return ["claude", "-p", "--model", "sonnet", "--permission-mode", "bypassPermissions"] + [
+        return ["claude", "-p", "--model", model or "sonnet", "--permission-mode", "bypassPermissions"] + [
             "--output-format",
             "json",
         ]
-    return ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--json", "-"]
+    return [
+        "codex",
+        "exec",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--json",
+        *(["-m", model] if model else []),
+        "-",
+    ]
 
 
 def launch_env(branch: Path) -> dict:

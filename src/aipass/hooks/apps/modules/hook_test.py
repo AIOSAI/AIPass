@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: hook_test.py
-# Version: 1.4.0
-# Description: Portable hook test runner — every hook with mock data; provider parity with real sessions
+# Version: 1.5.0
+# Description: Portable hook test runner — every hook with mock data; provider parity and smoke with real sessions
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-10
@@ -33,16 +33,17 @@ from aipass.hooks.apps.handlers.config.loader import aipass_home, config_unavail
 from aipass.hooks.apps.handlers.config.trust_registry import read_registry
 from aipass.hooks.apps.handlers.json import files as json_files
 from aipass.hooks.apps.handlers.module_root import module_file
-from aipass.hooks.apps.handlers.parity import runner
+from aipass.hooks.apps.handlers.parity import runner, smoke
 from aipass.hooks.apps.modules.write_ownership import project_of
 from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import err_console
+from aipass.cli.apps.modules import console, err_console
 
 CONSOLE = err_console
 
 HELP_COMMANDS = [
     ("test [--verbose]", "Fire every hook with mock data and report results"),
     ("parity [--branch @x] [--lane A,..] [--json]", "Same prompts headless on Claude and Codex, hook by hook"),
+    ("smoke [--provider ..] [--branch @x] [--json]", "One live turn per provider: pass, fail or skip, and why"),
 ]
 
 REPORTS_DIR = module_file(__file__).parents[2] / "artifacts" / "reports"
@@ -385,6 +386,44 @@ def _parity_command(args: list) -> bool:
     return True
 
 
+def _smoke_line(result: smoke.SmokeResult) -> str:
+    if result.status == smoke.PASS:
+        return f"{result.provider} pass ({result.elapsed_ms / 1000:.1f} s, {result.session_id})"
+    return f"{result.provider} {result.status} ({result.why})"
+
+
+def _smoke_command(args: list) -> bool:
+    """drone @hooks smoke: one isolated live turn per provider; exit 1 on any fail, 0 on pass or skip."""
+    if wants_help(args):
+        CONSOLE.print("[bold cyan]smoke[/bold cyan] — one 'say ok' turn per provider, its hook nonce read back")
+        CONSOLE.print("  drone @hooks smoke [--provider claude,codex,opencode] [--branch @x|<path>] [--json]")
+        CONSOLE.print("  --branch defaults to the current directory; --model provider=model, comma-separated")
+        CONSOLE.print("  pass: the temporal hook's ack is in the provider's own record of that session")
+        CONSOLE.print("  skip: not installed, not logged in, rate or free limit, plugin not installed, no readback")
+        CONSOLE.print("  --json   one JSON array on stdout. Exit 1 on any fail.")
+        return True
+    parser = argparse.ArgumentParser(prog="drone @hooks smoke", add_help=False)
+    parser.add_argument("--branch", default=".")
+    parser.add_argument("--provider", default=",".join(runner.PROVIDERS))
+    parser.add_argument("--model", default="")
+    parser.add_argument("--json", action="store_true")
+    opts, _unknown = parser.parse_known_args(args)
+    branch = resolve_branch(opts.branch)
+    providers = list(dict.fromkeys(p for p in opts.provider.lower().split(",") if p in runner.PROVIDERS))
+    models = dict(pair.split("=", 1) for pair in opts.model.split(",") if "=" in pair)
+    if branch is None or not providers:
+        CONSOLE.print(f"[red]smoke: no branch {opts.branch!r}, or no provider[/red]")
+        sys.exit(1)
+    results = [smoke.smoke(p, branch, models.get(p, "")) for p in providers]
+    if opts.json:
+        console.print_json(json.dumps([r.__dict__ for r in results]))
+    else:
+        console.print("smoke: " + " · ".join(_smoke_line(r) for r in results), markup=False, highlight=False)
+    if any(r.status == smoke.FAIL for r in results):
+        sys.exit(1)
+    return True
+
+
 def print_introspection() -> None:
     """Print module introspection for drone discovery."""
     CONSOLE.print("[cyan]hook_test[/cyan] — Portable hook test runner")
@@ -392,9 +431,11 @@ def print_introspection() -> None:
 
 
 def handle_command(command: str, args: list) -> bool:
-    """Route the 'test' and 'parity' commands."""
+    """Route the 'test', 'parity' and 'smoke' commands."""
     if command == "parity":
         return _parity_command(args)
+    if command == "smoke":
+        return _smoke_command(args)
     if command != "test":
         return False
 

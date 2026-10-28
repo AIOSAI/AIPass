@@ -62,3 +62,19 @@ The settings gate (ask on Claude, deny on Codex), the status line and the Notifi
 ## Not observed here
 
 engine.jsonl carries no command, so a `refused` row cannot name the call it refused. `not refused` means the gate refused none of the session's calls: it allowed the probe, or the model never made it. A model that declines a step on its own instructions reads `not refused` when it made other tool calls and `not reached` when it made none; the rollout or transcript tells which. Rows that need a person or BAUD (skills, the switch, the cards) and mail and dispatch rows are run as a playbook, not by this runner.
+
+## Smoke
+
+`drone @hooks smoke [--provider claude,codex,opencode] [--branch @x|<path>] [--model provider=model,..] [--json]` runs one headless turn per provider on the branch (default: the current directory) and prints one line, `smoke: claude pass (10.2 s, <session>) · codex skip (<why>) · ...`. `--json` prints one array of `{provider, status, why, session_id, elapsed_ms}` on stdout. Exit 1 on any `fail`, 0 on `pass` and `skip`.
+
+The callable is `smoke.smoke(provider, branch, model="") -> SmokeResult` in `apps/handlers/parity/smoke.py`. Its prompt asks for `ok`, runs no tool, and carries `aipass-smoke:<nonce>`. The temporal row, wired on every provider, answers `smoke-ack:<nonce>`, a string the prompt does not carry. `pass` means that ack is in the provider's own record of the hook, read by the session id the CLI printed, never in the model's reply:
+
+| Provider | Record read |
+|---|---|
+| Claude | `~/.claude/projects/*/<session>.jsonl`, an `attachment` row whose `hookEvent` is UserPromptSubmit |
+| Codex | `~/.codex/sessions/*/*/*/rollout-*<thread>.jsonl`, a `response_item` message with role `developer` |
+| OpenCode | the store's `session_message` rows of type `user`: the plugin appends hook context to the prompt |
+
+`skip` names its reason: the CLI is not installed, the AIPass plugin is not installed for OpenCode, not logged in or no provider for the model, a rate or usage limit, the free limit on every free model, or no readback (no record of the session on disk). `fail` means the launch ran and the ack did not come back: no session id, a timeout (180 s), or a record without the ack. A `why` is a fixed sentence and never carries the CLI's output.
+
+The turn runs with `AIPASS_HOOK_PROBE=1`, so `auto_process` and `rollover` do not start @memory's archive of the branch's `.trinity/`. `.ai_mail.local/session.json` and `grounding.json` are restored byte for byte after the turn. Cost: one model turn per provider.

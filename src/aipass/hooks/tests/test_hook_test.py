@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_hook_test.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Description: Tests for the portable hook test runner
 # Branch: hooks
 # Layer: tests
@@ -8,7 +8,7 @@
 # Modified: 2026-10-28
 # =============================================
 
-"""Tests for apps/modules/hook_test.py and the parity handler it drives."""
+"""Tests for apps/modules/hook_test.py and the parity and smoke handlers it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — MOCK_EVENTS' sample payloads and HELP_COMMANDS' display strings
@@ -17,6 +17,7 @@
 
 import json
 import os
+import sqlite3
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -24,7 +25,8 @@ from unittest.mock import patch
 import pytest
 
 from aipass.hooks.apps.handlers.config import diagnostics
-from aipass.hooks.apps.handlers.parity import runner
+from aipass.hooks.apps.handlers.parity import runner, smoke
+from aipass.hooks.apps.handlers.prompt import temporal
 from aipass.hooks.apps.modules import hook_test
 
 _MOD = "aipass.hooks.apps.modules.hook_test"
@@ -518,3 +520,204 @@ class TestParity:
         assert exit_info.value.code == 1
         assert len([c for c in fake.calls if Path(c["argv"][0]).name == "opencode"]) == len(runner.OPENCODE_MODELS)
         assert [row[2:] for row in _table(capsys.readouterr().err).values()] == [["no data", "no data"]] * 4
+
+
+class FakeSmokeClis:
+    """Stands where the three CLIs run a smoke turn: the real temporal hook answers the prompt, and its
+    output lands where each provider records hook context (unless *hook_ran* is off)."""
+
+    def __init__(self, monkeypatch, tmp_path) -> None:
+        self.home = tmp_path / "home"
+        self.calls: list[dict] = []
+        self.hook_ran = True
+        self.stderr = ""
+        self.session = True
+        self.limited: set[str] = set()
+        self.during = None
+        # Path.home() reads HOME on POSIX and USERPROFILE on Windows.
+        monkeypatch.setenv("HOME", str(self.home))
+        monkeypatch.setenv("USERPROFILE", str(self.home))
+        monkeypatch.delenv("OPENCODE_DB", raising=False)
+        monkeypatch.delenv("OPENCODE_CONFIG_DIR", raising=False)
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+        plugin = tmp_path / "config" / "opencode" / "plugins" / "aipass.ts"
+        plugin.parent.mkdir(parents=True)
+        plugin.write_text("// plugin", encoding="utf-8")
+        self.bin = tmp_path / "bin"
+        self.bin.mkdir()
+        for name in runner.PROVIDERS:
+            self.install(name)
+        monkeypatch.setenv("PATH", str(self.bin))
+        monkeypatch.setattr(smoke.subprocess, "run", self._run)
+
+    def install(self, name: str) -> None:
+        """A stub on PATH; Windows' which wants a PATHEXT suffix, POSIX's the execute bit."""
+        for stub in (self.bin / name, self.bin / f"{name}.cmd"):
+            stub.write_text("", encoding="utf-8")
+            stub.chmod(0o755)
+
+    def _run(self, argv, **kwargs):
+        self.calls.append({"argv": argv, **kwargs})
+        provider = Path(argv[0]).stem
+        if self.during:
+            self.during(Path(kwargs["cwd"]))
+        if not self.session:
+            return subprocess.CompletedProcess(argv, 1, "", self.stderr)
+        hook = temporal.handle({"prompt": kwargs["input"]})["stdout"] if self.hook_ran else "Temporal: no hook"
+        # The model's reply carries the ack even when no hook ran: only the hook's own row may count.
+        reply = "ok smoke-ack:" + temporal.SMOKE_NONCE.search(kwargs["input"]).group(1)
+        getattr(self, f"_{provider}")(hook, reply, kwargs["input"])
+        if provider == "opencode" and argv[argv.index("-m") + 1] in self.limited:
+            refusal = {"type": "error", "sessionID": "ses_oc", "error": {"type": "provider.free-limit"}}
+            return subprocess.CompletedProcess(argv, 1, json.dumps(refusal), "")
+        stdout = {
+            "claude": {"type": "result", "session_id": "claude-sess"},
+            "codex": {"type": "thread.started", "thread_id": "codex-thread"},
+            "opencode": {"type": "step_start", "sessionID": "ses_oc"},
+        }[provider]
+        return subprocess.CompletedProcess(argv, 0, json.dumps(stdout), "")
+
+    def _jsonl(self, path: Path, records: list[dict]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+
+    def _claude(self, hook: str, reply: str, prompt: str) -> None:
+        attachment = {"type": "hook_success", "hookEvent": "UserPromptSubmit", "content": hook}
+        self._jsonl(
+            self.home / ".claude" / "projects" / "-branch" / "claude-sess.jsonl",
+            [
+                {"type": "user", "message": {"content": prompt}},
+                {"type": "attachment", "attachment": attachment},
+                {"type": "assistant", "message": {"content": reply}},
+            ],
+        )
+
+    def _codex(self, hook: str, reply: str, prompt: str) -> None:
+        def message(role: str, text: str) -> dict:
+            return {"type": "response_item", "payload": {"type": "message", "role": role, "content": [{"text": text}]}}
+
+        self._jsonl(
+            self.home / ".codex" / "sessions" / "2026" / "10" / "28" / "rollout-2026-10-28T13-00-00-codex-thread.jsonl",
+            [message("developer", hook), message("user", prompt), message("assistant", reply)],
+        )
+
+    def _opencode(self, hook: str, reply: str, prompt: str) -> None:
+        db = Path(os.environ["XDG_DATA_HOME"]) / "opencode" / "opencode.db"
+        db.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(db) as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS session_message (session_id text, type text, data text)")
+            conn.execute("INSERT INTO session_message VALUES ('ses_oc', 'user', ?)", (json.dumps(prompt + hook),))
+            conn.execute("INSERT INTO session_message VALUES ('ses_oc', 'assistant', ?)", (json.dumps(reply),))
+        conn.close()
+
+
+def _smoke(tmp_path, *flags: str) -> None:
+    branch = tmp_path / "canary"
+    branch.mkdir(exist_ok=True)
+    hook_test.handle_command("smoke", ["--branch", str(branch), *flags])
+
+
+class TestSmoke:
+    def test_each_provider_passes_on_the_hook_ack_in_its_own_record_and_exits_clean(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        fake = FakeSmokeClis(monkeypatch, tmp_path)
+        _smoke(tmp_path)
+        out = capsys.readouterr().out
+        assert out.startswith("smoke: claude pass (")
+        assert ", claude-sess) · codex pass (" in out and ", codex-thread) · opencode pass (" in out
+        assert [Path(c["argv"][0]).stem for c in fake.calls] == ["claude", "codex", "opencode"]
+        assert all(
+            "aipass-smoke:" in c["input"] and c["env"]["AIPASS_SESSION_TYPE"] == "dispatched" for c in fake.calls
+        )
+        # Unset, the turn's auto_process hook starts @memory's archive of the branch's .trinity.
+        assert all(c["env"]["AIPASS_HOOK_PROBE"] == "1" for c in fake.calls)
+
+    def test_the_ack_in_the_model_reply_alone_is_a_fail_and_exits_1(self, monkeypatch, tmp_path, capsys):
+        fake = FakeSmokeClis(monkeypatch, tmp_path)
+        fake.hook_ran = False
+        with pytest.raises(SystemExit) as exit_info:
+            _smoke(tmp_path, "--provider", "claude,codex")
+        assert exit_info.value.code == 1
+        assert capsys.readouterr().out.count("fail (the session ran but its record carries no hook nonce ack)") == 2
+
+    def test_opencode_with_no_hook_ack_in_the_user_message_fails(self, monkeypatch, tmp_path, capsys):
+        FakeSmokeClis(monkeypatch, tmp_path).hook_ran = False
+        with pytest.raises(SystemExit):
+            _smoke(tmp_path, "--provider", "opencode")
+        assert "opencode fail (" in capsys.readouterr().out
+
+    def test_a_cli_not_installed_is_a_skip_with_no_launch(self, monkeypatch, tmp_path, capsys):
+        fake = FakeSmokeClis(monkeypatch, tmp_path)
+        monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+        _smoke(tmp_path, "--provider", "codex")
+        assert capsys.readouterr().out.strip() == "smoke: codex skip (codex is not installed)"
+        assert fake.calls == []
+
+    def test_opencode_without_the_plugin_is_a_skip_with_no_launch(self, monkeypatch, tmp_path, capsys):
+        fake = FakeSmokeClis(monkeypatch, tmp_path)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "elsewhere"))
+        _smoke(tmp_path, "--provider", "opencode")
+        assert "opencode skip (the AIPass plugin is not installed for OpenCode)" in capsys.readouterr().out
+        assert fake.calls == []
+
+    def test_no_login_is_a_skip_whose_why_carries_none_of_the_cli_output(self, monkeypatch, tmp_path, capsys):
+        fake = FakeSmokeClis(monkeypatch, tmp_path)
+        fake.session = False
+        fake.stderr = "Not logged in. token sk-secret-123"
+        _smoke(tmp_path, "--provider", "claude")
+        out = capsys.readouterr().out
+        assert "claude skip (not logged in, or no provider for the model)" in out
+        assert "sk-secret" not in out
+
+    def test_an_unknown_launch_error_with_no_session_is_a_fail(self, monkeypatch, tmp_path, capsys):
+        FakeSmokeClis(monkeypatch, tmp_path).session = False
+        with pytest.raises(SystemExit):
+            _smoke(tmp_path, "--provider", "claude")
+        assert "claude fail (no session id (exit 1))" in capsys.readouterr().out
+
+    def test_free_limit_on_every_opencode_model_is_a_skip_after_one_run_each(self, monkeypatch, tmp_path, capsys):
+        fake = FakeSmokeClis(monkeypatch, tmp_path)
+        fake.limited.update(runner.OPENCODE_MODELS)
+        _smoke(tmp_path, "--provider", "opencode")
+        assert "opencode skip (free limit reached on every free model)" in capsys.readouterr().out
+        assert [c["argv"][-1] for c in fake.calls] == list(runner.OPENCODE_MODELS)
+
+    def test_a_named_model_runs_once_on_that_model_for_that_provider_only(self, monkeypatch, tmp_path, capsys):
+        fake = FakeSmokeClis(monkeypatch, tmp_path)
+        _smoke(tmp_path, "--provider", "opencode,codex", "--model", "opencode=openai/gpt-6.1-sol")
+        assert fake.calls[0]["argv"][-1] == "openai/gpt-6.1-sol"
+        assert "-m" not in fake.calls[1]["argv"]
+        assert "opencode pass (" in capsys.readouterr().out
+
+    def test_a_session_with_no_record_on_disk_is_a_skip_no_readback(self, monkeypatch, tmp_path, capsys):
+        fake = FakeSmokeClis(monkeypatch, tmp_path)
+        monkeypatch.setattr(fake, "_claude", lambda *_: None)
+        _smoke(tmp_path, "--provider", "claude")
+        assert "claude skip (no readback: the provider's record of the session is not found)" in capsys.readouterr().out
+
+    def test_the_branch_files_a_turn_writes_are_restored_byte_for_byte(self, monkeypatch, tmp_path):
+        mail = tmp_path / "canary" / ".ai_mail.local"
+        mail.mkdir(parents=True)
+        (mail / "session.json").write_text('{"before": 1}', encoding="utf-8")
+        fake = FakeSmokeClis(monkeypatch, tmp_path)
+
+        def turn_writes(branch: Path) -> None:
+            (branch / ".ai_mail.local" / "session.json").write_text('{"after": 2}', encoding="utf-8")
+            (branch / ".ai_mail.local" / "grounding.json").write_text("{}", encoding="utf-8")
+
+        fake.during = turn_writes
+        _smoke(tmp_path, "--provider", "claude")
+        assert (mail / "session.json").read_text(encoding="utf-8") == '{"before": 1}'
+        assert not (mail / "grounding.json").exists()
+
+    def test_json_prints_one_array_of_results_on_stdout(self, monkeypatch, tmp_path, capsys):
+        FakeSmokeClis(monkeypatch, tmp_path)
+        _smoke(tmp_path, "--provider", "claude,opencode", "--json")
+        results = json.loads(capsys.readouterr().out)
+        assert [(r["provider"], r["status"], r["session_id"]) for r in results] == [
+            ("claude", "pass", "claude-sess"),
+            ("opencode", "pass", "ses_oc"),
+        ]
+        assert set(results[0]) == {"provider", "status", "why", "session_id", "elapsed_ms"}
