@@ -78,7 +78,9 @@ the branch's resume target, with the CLI running it, to
 `.ai_mail.local/session.json`, so a resume reopens the right CLI. A switch
 (`/codex` on Claude Code, `$claude` on Codex) saves memories, writes
 `.ai_mail.local/handoff.md` and replaces the pane with the other CLI, greeted
-by that file.
+by that file. With the word `fresh`, or when the chat has nothing in it yet,
+the switch skips the memories and the handoff and the other CLI opens an empty
+chat in the same directory.
 
 ## Spelling a ritual on each CLI
 
@@ -89,6 +91,7 @@ by that file.
 | `/compass` | `$compass` | Record the decision just made, with a rating |
 | `/codex` | — | Switch this chat to Codex |
 | — | `$claude` | Switch this chat to Claude Code |
+| `/codex fresh` | `$claude fresh` | The same switch with no handoff: an empty chat in the other CLI |
 | `/compact` | `/compact` | Compact the context (built into both) |
 | `/clear` | `/new` | Start a fresh context |
 

@@ -13,6 +13,7 @@ PyPI version — not the changelog header.
 
 ### Added
 
+- **aipass**: `/codex fresh` and `$claude fresh` switch the pane to the other CLI with no handoff: no memory pass, no `handoff.md`, an empty chat in the same directory for the startup protocol to open as usual. A chat with nothing in it yet counts as fresh without the word. Both switch files come from `scaffold_content.py` 1.5.0, so every project gets the lane on its next `aipass init update` (`docs/two_clis.md`).
 - **spawn**: `drone @spawn update` reports a branch `.gitignore` against the citizen template (`matches`, `differs`, `absent` or `unreadable`, the `.md` lane's states) in the branch report and as `gitignore-drifted` in the fleet summary, and never writes an existing one, preview or `--apply` (`handlers/update_ops.py` 2.6.0, `modules/update.py` 1.3.0, `tests/test_update.py` 1.3.0, `docs/update_engine.md`; 5 pins red first, 5 mutants red).
 
 ### Fixed

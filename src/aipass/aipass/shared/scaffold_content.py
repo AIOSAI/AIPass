@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: scaffold_content.py
 # Description: Shared template content generators for project scaffolding
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-04-22
 # Modified: 2026-10-27
 # =============================================
@@ -489,6 +489,8 @@ Purpose: move this chat from Claude Code to Codex in one turn, in this same term
 
 **Workflow:** `/codex` → prep → handoff written → this pane becomes Codex, greeting it with the handoff.
 
+**Fresh switch, no handoff:** `/codex fresh` (arguments: `$ARGUMENTS`), or a chat with nothing in it yet (a greeting, nothing done, nothing in flight): skip steps 0 to 2 and run step 3 with the `"$(cat .ai_mail.local/handoff.md)"` argument dropped from both lines, so Codex opens an empty chat in this directory. There is no thread to carry; the user greets it and the startup protocol runs as on any fresh chat.
+
 ## Execution
 
 0. **Pin the live thread FIRST** — one sentence: what this chat was doing when `/codex` fired (the task, question or build mid-flight; "nothing in flight" counts). It becomes the Resuming line.
@@ -536,6 +538,8 @@ description: Switch this chat from Codex to Claude Code in one turn, in this sam
 # Switch to Claude Code
 
 Purpose: move this chat from Codex to Claude Code in one turn, in this same terminal. It is still you: memories saved, the live thread written down, Claude opens where you stood. Works like a compaction, except the next model reads the summary.
+
+**Fresh switch, no handoff:** `$claude fresh` (the word arrives after the skill name in the message), or a chat with nothing in it yet (a greeting, nothing done, nothing in flight): skip steps 0 to 2 and run step 3 with the `\"$(cat .ai_mail.local/handoff.md)\"` argument dropped from both lines, so Claude Code opens an empty chat in this directory. There is no thread to carry; the user greets it and the startup protocol runs as on any fresh chat.
 
 ## Execution
 
