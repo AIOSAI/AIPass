@@ -803,9 +803,9 @@ class TestTheOpenCodeStartupProbe:
         assert result == (0, False)
 
 
-def _run_opencode_main(monkeypatch, main_argv, tmp_path, lines, exit_code=0):
+def _run_opencode_main(monkeypatch, main_argv, tmp_path, lines, exit_code=0, flags=()):
     argv, lock_file, _ = main_argv
-    argv = [*argv[: argv.index("--")], "--provider=opencode", "--", *_opencode_cmd(OC_SESSION)]
+    argv = [*argv[: argv.index("--")], "--provider=opencode", *flags, "--", *_opencode_cmd(OC_SESSION)]
     runs = []
 
     def fake_run(cmd, stdout_log, stderr_fh, cwd, spawn_env, *args, **kwargs):
@@ -904,3 +904,21 @@ class TestTheOpenCodeMonitorRun:
             "opencode",
             "monitor-opencode",
         )
+
+    def test_the_callers_config_is_set_after_the_strip_and_a_parents_own_never_survives(
+        self, monkeypatch, main_argv, pointer_home, tmp_path
+    ):
+        monkeypatch.setenv("OPENCODE_CONFIG_CONTENT", '{"model": "parent/seat"}')
+        config = '{"compaction": {"buffer": 180000}}'
+
+        _, runs, _, _ = _run_opencode_main(
+            monkeypatch, main_argv, tmp_path, OPENCODE_STREAM, flags=(f"--opencode-config={config}",)
+        )
+        assert runs[0]["env"]["OPENCODE_CONFIG_CONTENT"] == config
+
+    def test_without_the_flag_a_parents_config_is_stripped(self, monkeypatch, main_argv, pointer_home, tmp_path):
+        monkeypatch.setenv("OPENCODE_CONFIG_CONTENT", '{"model": "parent/seat"}')
+
+        _, runs, _, _ = _run_opencode_main(monkeypatch, main_argv, tmp_path, OPENCODE_STREAM)
+
+        assert "OPENCODE_CONFIG_CONTENT" not in runs[0]["env"]

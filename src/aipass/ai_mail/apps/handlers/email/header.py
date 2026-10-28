@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: header.py
 # Description: Email Header Handler
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-02-04
-# Modified: 2026-10-17
+# Modified: 2026-10-28
 # =============================================
 
 """
@@ -21,9 +21,9 @@ BEFORE YOU REPLY, YOU MUST:
 2. ✅ UPDATE YOUR MEMORIES (.local.json) - this is NOT optional
 3. ✅ Then reply with your completion summary
 
-⚠️ Run sub-agents SYNCHRONOUSLY (run_in_background: false). This is a headless
-session: background tasks are killed shortly after your turn ends and you are
-never re-invoked — finish all work and send your reply BEFORE ending your turn.
+⚠️ Run sub-agents in the FOREGROUND and wait for them to finish. This is a headless
+session: background work is killed when your turn ends and you are never
+re-invoked — finish all work and send your reply BEFORE ending your turn.
 
 ⚠️ Found work in the tree you cannot explain? REPORT it — never invent an author.
 Unexplained changes are evidence: state what you found, attribute it to no one.
@@ -42,9 +42,9 @@ BEFORE YOU REPLY, YOU MUST:
 1. ✅ Complete the task below
 2. ✅ Then reply with your completion summary
 
-⚠️ Run sub-agents SYNCHRONOUSLY (run_in_background: false). This is a headless
-session: background tasks are killed shortly after your turn ends and you are
-never re-invoked — finish all work and send your reply BEFORE ending your turn.
+⚠️ Run sub-agents in the FOREGROUND and wait for them to finish. This is a headless
+session: background work is killed when your turn ends and you are never
+re-invoked — finish all work and send your reply BEFORE ending your turn.
 
 ⚠️ Found work in the tree you cannot explain? REPORT it — never invent an author.
 Unexplained changes are evidence: state what you found, attribute it to no one.

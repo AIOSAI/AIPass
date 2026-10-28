@@ -1392,3 +1392,69 @@ class TestOpenCodeWake:
         assert f' {config}opencode --standalone --auto --prompt "$(cat {prompt_file})" Enter' in line
         assert ("OPENCODE_CONFIG_CONTENT" in line) is bool(model)
         assert "--model" not in line and "-m " not in line
+
+
+class TestOpenCodeConfigDoor:
+    """opencode_config reaches OpenCode as OPENCODE_CONFIG_CONTENT in both lanes, --model winning on "model"."""
+
+    def test_the_headless_lane_hands_the_merged_config_to_the_monitor_and_says_it(self, tmp_path, monkeypatch):
+        _plant_opencode_store(tmp_path, monkeypatch, [])
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch, _find_opencode_bin=lambda: "opencode")
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch(
+            "@testbranch",
+            provider="opencode",
+            model="opencode/deepseek-v4.1-flash-free",
+            opencode_config={"compaction": {"buffer": 180000}, "model": "ignored/by-the-flag"},
+        )
+
+        assert ok is True
+        cmd = calls["popen"][0]["cmd"]
+        flags = cmd[: cmd.index("--")]
+        merged = '{"compaction": {"buffer": 180000}, "model": "opencode/deepseek-v4.1-flash-free"}'
+        assert f"--opencode-config={merged}" in flags
+        assert status.find_step("config") == ("ok", "config", f"OPENCODE_CONFIG_CONTENT {merged}")
+
+    def test_a_headless_wake_without_a_config_passes_no_config_flag(self, tmp_path, monkeypatch):
+        _plant_opencode_store(tmp_path, monkeypatch, [])
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch, _find_opencode_bin=lambda: "opencode")
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, _ = wake_branch("@testbranch", provider="opencode", model="opencode/deepseek-v4.1-flash-free")
+
+        cmd = calls["popen"][0]["cmd"]
+        assert not any(arg.startswith("--opencode-config") for arg in cmd)
+        assert status.find_step("config") is None
+
+    def test_the_tmux_lane_carries_the_callers_keys_and_the_model_inline(self, tmp_path, monkeypatch):
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch, _find_opencode_bin=lambda: "opencode")
+        calls = _record_spawn_routes(monkeypatch)
+
+        _, ok = wake_branch(
+            "@testbranch",
+            sender="@daemon",
+            provider="opencode",
+            model="opencode/glm-5.3-flash-free",
+            opencode_config={"compaction": {"buffer": 180000}},
+        )
+
+        assert ok is True
+        line = _tmux_line(calls, "send-keys")
+        expected = (
+            """OPENCODE_CONFIG_CONTENT='{"compaction": {"buffer": 180000}, "model": "opencode/glm-5.3-flash-free"}' """
+        )
+        assert f" {expected}opencode --standalone --auto --prompt" in line
+
+    def test_a_config_on_another_provider_fails_before_any_spawn(self, tmp_path, monkeypatch):
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", provider="claude", opencode_config={})
+
+        assert ok is False and calls["popen"] == []
+        assert status.find_step("config")[0] == "fail"

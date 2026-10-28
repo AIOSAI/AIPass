@@ -240,6 +240,13 @@ opencode run --standalone --format json --auto [-m <provider/model>] --session <
   .daemon/last_wake_prompt.txt)"`. `--standalone` keeps the TUI off the user's shared
   `opencode serve --service`, which keeps the env of whoever started it, so `AIPASS_HOME` would
   never reach the hooks. The TUI has no model flag; the inline config carries the slug.
+- **`--opencode-config '<json>'`** hands OpenCode a config at launch, for example
+  `{"compaction": {"buffer": 180000}}`. It must be a JSON object and applies to
+  `--provider opencode` only; anything else is refused before the mail is sent. It is merged with
+  `--model`, which wins on `"model"`. Headless, the merge rides to the monitor as
+  `--opencode-config=<json>` and is set as `OPENCODE_CONFIG_CONTENT` after the `OPENCODE*`
+  strip, so a parent seat's value never leaks. The tmux lane puts it in its inline prefix. The
+  status block and wake log print it.
 - **The monitor** is told `--provider=opencode` before `--`. Startup is the first stdout byte.
   The stream is one JSON object per line, `{type, timestamp, sessionID, part|error}`, with no
   closing event. The result is the LAST `text` part; `usage` and `total_cost_usd` sum every

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dispatch.py
 # Description: Dispatch Module
-# Version: 3.8.0
+# Version: 3.9.0
 # Created: 2026-02-02
 # Modified: 2026-10-28
 # =============================================
@@ -12,10 +12,11 @@ Dispatch Module
 Orchestrates dispatch commands; all business logic lives in handlers.
 """
 
+import json
 import os
 import sys
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List, Optional, Tuple
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, error, warning
@@ -70,6 +71,8 @@ PROVIDER OPTIONS:
   --provider opencode OpenCode (opencode run --standalone --format json --auto); --model is passed
                       verbatim as -m provider/model[#variant], absent means OpenCode's own default.
                       Same lanes as Codex; the @daemon tmux self-wake runs opencode --auto --prompt.
+  --opencode-config J A JSON object handed to OpenCode as OPENCODE_CONFIG_CONTENT, merged under
+                      --model (which wins on "model"); opencode only, anything not an object refused.
 """
     console.print(help_text)
 
@@ -171,12 +174,27 @@ def _provider_refusal(provider: str) -> str:
     return f"unknown provider {provider!r} — known: {', '.join(KNOWN_PROVIDERS)}"
 
 
+def _parse_opencode_config(raw: Optional[str], provider: str) -> Tuple[Optional[Dict[str, Any]], str]:
+    """The --opencode-config value as a JSON object, or (None, why it is refused). Absent is (None, "")."""
+    if raw is None:
+        return None, ""
+    if provider != "opencode":
+        return None, f"--opencode-config applies to --provider opencode only, not {provider!r}"
+    try:
+        config = json.loads(raw)
+    except json.JSONDecodeError as e:
+        return None, f"--opencode-config is not JSON ({e})"
+    if not isinstance(config, dict):
+        return None, f"--opencode-config must be a JSON object, got {type(config).__name__}"
+    return config, ""
+
+
 def _orchestrate_wake(args: List[str]) -> bool:
     """Orchestrate manual branch wake."""
     if not args or args[0] in ["--help", "-h", "help"]:
         console.print("\n[bold]Wake - Manual branch spawn[/bold]")
         console.print(
-            '  Usage: dispatch wake @branch ["custom message"] [--fresh] [--model M] [--provider claude|codex|opencode]'
+            '  Usage: dispatch wake @branch ["custom message"] [--fresh] [--model M] [--provider claude|codex|opencode] [--opencode-config JSON]'
         )
         console.print('  Or:    drone wake @branch ["custom message"]\n')
         return True
@@ -185,6 +203,7 @@ def _orchestrate_wake(args: List[str]) -> bool:
     use_sender = "@devpulse"
     use_model = None
     use_provider = "claude"
+    raw_opencode_config = None
     filtered = []
     i = 0
     while i < len(args):
@@ -203,6 +222,10 @@ def _orchestrate_wake(args: List[str]) -> bool:
             use_provider = args[i + 1]
             i += 2
             continue
+        if args[i] == "--opencode-config" and i + 1 < len(args):
+            raw_opencode_config = args[i + 1]
+            i += 2
+            continue
         filtered.append(args[i])
         i += 1
 
@@ -211,8 +234,9 @@ def _orchestrate_wake(args: List[str]) -> bool:
         return True
 
     provider_refusal = _provider_refusal(use_provider)
-    if provider_refusal:
-        error(f"Wake refused: {provider_refusal}")
+    opencode_config, config_refusal = _parse_opencode_config(raw_opencode_config, use_provider)
+    if provider_refusal or config_refusal:
+        error(f"Wake refused: {provider_refusal or config_refusal}")
         return True
 
     branch_email = filtered[0]
@@ -262,6 +286,7 @@ def _orchestrate_wake(args: List[str]) -> bool:
         model=use_model,
         admin=is_admin,
         provider=use_provider,
+        opencode_config=opencode_config,
     )
 
     console.print(dispatch_status.format())
@@ -282,6 +307,7 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
     from_branch = None
     use_model = None
     use_provider = "claude"
+    raw_opencode_config = None
     filtered = []
     i = 0
     while i < len(args):
@@ -308,12 +334,16 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
             use_provider = args[i + 1]
             i += 2
             continue
+        if args[i] == "--opencode-config" and i + 1 < len(args):
+            raw_opencode_config = args[i + 1]
+            i += 2
+            continue
         filtered.append(args[i])
         i += 1
 
     if len(filtered) < 3:
         error(
-            'Usage: dispatch @target "Subject" "Body" [--fresh] [--no-memory-save] [--model M] [--provider claude|codex|opencode]'
+            'Usage: dispatch @target "Subject" "Body" [--fresh] [--no-memory-save] [--model M] [--provider claude|codex|opencode] [--opencode-config JSON]'
         )
         return True
 
@@ -321,8 +351,9 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
 
     # Before the send: a typo'd provider must not deliver mail that no agent will be woken for.
     provider_refusal = _provider_refusal(use_provider)
-    if provider_refusal:
-        error(f"Dispatch to {target} not sent: {provider_refusal}")
+    opencode_config, config_refusal = _parse_opencode_config(raw_opencode_config, use_provider)
+    if provider_refusal or config_refusal:
+        error(f"Dispatch to {target} not sent: {provider_refusal or config_refusal}")
         return True
     subject = filtered[1]
     body = filtered[2]
@@ -398,6 +429,7 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
         admin=is_admin,
         subject=subject,
         provider=use_provider,
+        opencode_config=opencode_config,
     )
     console.print(dispatch_status.format())
 

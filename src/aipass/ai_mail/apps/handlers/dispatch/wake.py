@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.9.0
+# Version: 3.10.0
 # Created: 2026-03-02
 # Modified: 2026-10-28
 # =============================================
@@ -20,7 +20,7 @@ import sys
 import subprocess
 import time
 from pathlib import Path
-from typing import NamedTuple, Optional, Tuple, List
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
@@ -513,6 +513,7 @@ def _spawn_manager_interactive(
     status: "DispatchStatus",
     claude_bin: str,
     provider: str = PROVIDER_CLAUDE,
+    opencode_config: str = "",
 ) -> Tuple["DispatchStatus", bool]:
     """Spawn an interactive tmux session for a manager branch.
 
@@ -545,7 +546,7 @@ def _spawn_manager_interactive(
     if provider == PROVIDER_OPENCODE:
         # --standalone: the shared `serve --service` keeps its starter's env, so AIPASS_HOME never reaches
         # the hooks. The TUI has no model flag; OpenCode reads a config given inline instead.
-        config = f"OPENCODE_CONFIG_CONTENT={shlex.quote(json.dumps({'model': model}))} " if model else ""
+        config = f"OPENCODE_CONFIG_CONTENT={shlex.quote(opencode_config)} " if opencode_config else ""
         claude_line = (
             f'{config}{shlex.quote(claude_bin)} --standalone --auto --prompt "$(cat {shlex.quote(str(prompt_file))})"'
         )
@@ -658,6 +659,7 @@ def wake_branch(
     subject: Optional[str] = None,
     wake_back: bool = True,
     provider: str = PROVIDER_CLAUDE,
+    opencode_config: Optional[Dict[str, Any]] = None,
 ) -> Tuple[DispatchStatus, bool]:
     """
     Spawn an agent (Claude, or Codex / OpenCode by provider) at the target branch with step-by-step status.
@@ -696,6 +698,9 @@ def wake_branch(
         status.fail("provider", f"unknown provider {provider!r} — known: {', '.join(KNOWN_PROVIDERS)}")
         return status, False
     status.ok("provider", provider)
+    if opencode_config is not None and provider != PROVIDER_OPENCODE:
+        status.fail("config", f"an OpenCode config applies to provider opencode only, not {provider!r}")
+        return status, False
 
     # Before the passport read: an unreadable passport must never be why @devpulse is spawned.
     if (scheduled or admin) and is_wake_blocked(email):
@@ -801,9 +806,24 @@ def wake_branch(
 
     _refresh_recipient_dashboard(branch_path, email, status)
 
+    # --model wins on "model"; the TUI has no model flag, so it always carries the merge.
+    merged_config = {**(opencode_config or {}), **({"model": resolved_model} if resolved_model else {})}
+    tui_config = json.dumps(merged_config) if provider == PROVIDER_OPENCODE and merged_config else ""
+    headless_config = json.dumps(merged_config) if opencode_config is not None else ""
+    if headless_config:
+        status.ok("config", f"OPENCODE_CONFIG_CONTENT {headless_config}")
+        logger.info("[wake] %s opencode config: %s", email, headless_config)
+
     if manager_scheduled:
         return _spawn_manager_interactive(
-            branch_path, email, custom_message or DEFAULT_PROMPT, resolved_model, status, claude_bin, provider
+            branch_path,
+            email,
+            custom_message or DEFAULT_PROMPT,
+            resolved_model,
+            status,
+            claude_bin,
+            provider,
+            tui_config,
         )
 
     # An unreadable safety config refuses the wake: its max_turns may be lower than the default.
@@ -875,11 +895,13 @@ def wake_branch(
     # wake_back rides argv, never spawn_env, which becomes the agent's own environment.
     from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import NO_WAKE_BACK_FLAG
 
-    from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import PROVIDER_FLAG_PREFIX
+    from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import OPENCODE_CONFIG_FLAG_PREFIX, PROVIDER_FLAG_PREFIX
 
     monitor_flags = [] if wake_back else [NO_WAKE_BACK_FLAG]
     if provider != PROVIDER_CLAUDE:
         monitor_flags.append(f"{PROVIDER_FLAG_PREFIX}{provider}")
+    if headless_config:
+        monitor_flags.append(f"{OPENCODE_CONFIG_FLAG_PREFIX}{headless_config}")
     monitor_cmd = [
         sys.executable,
         str(MONITOR_SCRIPT),

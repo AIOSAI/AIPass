@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_module.py
 # Description: Tests for dispatch.py orchestrator functions
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-26
-# Modified: 2026-10-25
+# Modified: 2026-10-28
 # =============================================
 
 """Tests for apps/modules/dispatch.py."""
@@ -414,6 +414,16 @@ class TestOrchestrateWake:
         wake.assert_not_called()
         assert "unknown provider 'gemini'" in capsys.readouterr().err
 
+    def test_the_wake_verb_refuses_a_non_object_opencode_config(self, monkeypatch, capsys):
+        wake = MagicMock(return_value=(DispatchStatus(), True))
+        monkeypatch.setattr(f"{MOD}.console", _mock_console([]))
+
+        with patch(f"{_H_WAKE}.wake_branch", wake):
+            _wake(["@canary", "--provider", "opencode", "--opencode-config", '"buffer"'])
+
+        wake.assert_not_called()
+        assert "must be a JSON object, got str" in capsys.readouterr().err
+
     def _run_sender_flag(self, monkeypatch) -> list[dict]:
         """Run `wake @branch --sender @custom` and return the wake_branch calls."""
         wake_calls: list[dict] = []
@@ -712,6 +722,40 @@ class TestOrchestrateDispatchSend:
         wake.assert_not_called()
         err = capsys.readouterr().err
         assert "not sent" in err and "unknown provider 'gemini'" in err
+
+    def test_an_opencode_config_object_reaches_wake_branch_as_a_dict(self, monkeypatch):
+        wake = MagicMock(return_value=(DispatchStatus(), True))
+        monkeypatch.setattr(f"{MOD}.console", _mock_console([]))
+
+        with _send_patches({f"{_H_WAKE}.wake_branch": wake}):
+            _send(
+                ["@canary", "Subject", "Body", "--provider", "opencode"]
+                + ["--opencode-config", '{"compaction": {"buffer": 180000}}']
+            )
+
+        assert wake.call_args.kwargs["opencode_config"] == {"compaction": {"buffer": 180000}}
+
+    @pytest.mark.parametrize(
+        "extra, why",
+        [
+            (["--provider", "opencode", "--opencode-config", "[1, 2]"], "must be a JSON object, got list"),
+            (["--provider", "opencode", "--opencode-config", "{nope"], "is not JSON"),
+            (["--provider", "codex", "--opencode-config", "{}"], "applies to --provider opencode only"),
+        ],
+        ids=["array", "malformed", "wrong-provider"],
+    )
+    def test_a_bad_opencode_config_is_refused_before_any_mail_is_sent(self, monkeypatch, capsys, extra, why):
+        send = MagicMock(return_value=(True, None))
+        wake = MagicMock(return_value=(DispatchStatus(), True))
+        monkeypatch.setattr(f"{MOD}.console", _mock_console([]))
+
+        with _send_patches({f"{_ES}.send_to_single": send, f"{_H_WAKE}.wake_branch": wake}):
+            _send(["@canary", "Subject", "Body", *extra])
+
+        send.assert_not_called()
+        wake.assert_not_called()
+        err = capsys.readouterr().err
+        assert "not sent" in err and why in err
 
     def test_a_busy_target_sends_the_mail_then_fails_the_command_and_says_re_wake(self, monkeypatch, capsys):
         busy = DispatchStatus()

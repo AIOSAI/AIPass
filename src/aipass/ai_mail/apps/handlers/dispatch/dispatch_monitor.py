@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.12.0
+# Version: 2.13.0
 # Created: 2026-03-02
 # Modified: 2026-10-28
 # =============================================
@@ -77,6 +77,9 @@ MAX_WAKE_DEPTH = 3
 NO_WAKE_BACK_FLAG = "--no-wake-back"
 # `--provider=codex` before "--" picks the codex probe, parser and retry shape; absent means claude.
 PROVIDER_FLAG_PREFIX = "--provider="
+# `--opencode-config=<json>` before "--": the caller's OpenCode config, set in the child env after the strip.
+OPENCODE_CONFIG_FLAG_PREFIX = "--opencode-config="
+OPENCODE_CONFIG_ENV = "OPENCODE_CONFIG_CONTENT"
 CODEX = session_pointer.CODEX
 # Exit 0 whose stream shows an `error` event or no `turn.completed`: a failed Codex turn.
 CODEX_STREAM_FAILED = -5
@@ -893,7 +896,7 @@ def prepend_to_path(path_value: str, entry: str, sep: str = os.pathsep) -> str:
 def main():
     """
     Usage: dispatch_monitor.py <branch_email> <lock_file> <sender> <stderr_log> [--no-wake-back]
-           [--provider=codex|opencode] -- <agent_argv...>
+           [--provider=codex|opencode] [--opencode-config=<json>] -- <agent_argv...>
 
     --no-wake-back declines the completion wake-back; sender is still used for bounce mail.
     """
@@ -912,6 +915,14 @@ def main():
     provider = next(
         (flag[len(PROVIDER_FLAG_PREFIX) :] for flag in monitor_flags if flag.startswith(PROVIDER_FLAG_PREFIX)),
         "claude",
+    )
+    opencode_config = next(
+        (
+            flag[len(OPENCODE_CONFIG_FLAG_PREFIX) :]
+            for flag in monitor_flags
+            if flag.startswith(OPENCODE_CONFIG_FLAG_PREFIX)
+        ),
+        "",
     )
     claude_cmd = sys.argv[sep_idx + 1 :]
 
@@ -965,6 +976,9 @@ def main():
         # A parent OpenCode's session markers must not reach the child; the store both ends read stays.
         elif key.startswith("OPENCODE") and key != session_pointer.OPENCODE_DB_ENV:
             spawn_env.pop(key)
+    # After the strip, from argv only: a parent seat's own OPENCODE_CONFIG_CONTENT never reaches the child.
+    if opencode_config:
+        spawn_env[OPENCODE_CONFIG_ENV] = opencode_config
     # 350k for every model, else an agent inherits its native window (1M). After the CLAUDE* strip.
     spawn_env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = "350000"
     spawn_env.pop("AIPASS_CALLER_BRANCH", None)
