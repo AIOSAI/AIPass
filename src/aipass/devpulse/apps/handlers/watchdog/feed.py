@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: feed.py
 # Description: Watchdog Feed Handler — read completions off the push feed instead of polling for them
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-21
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
 # The cursor is a set of line digests, never wire.py's byte offset: @ai_mail's
@@ -20,6 +20,7 @@ from pathlib import Path
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from aipass.devpulse.apps.handlers.json import json_handler
+from aipass.devpulse.apps.handlers.watchdog import agent as _agent
 from aipass import ai_mail as _ai_mail
 
 
@@ -197,6 +198,37 @@ def format_feed_event(record: dict) -> str:
     title = " ".join(str(record.get("title") or "?").split()).replace('"', "'")
     body = " ".join(str(record.get("body") or "").split()).replace('"', "'")
     line = f'{kind.upper()} @{source} title="{title}"'
+    if kind == "dispatch":
+        reading = grounding_reading(_agent._resolve_branch_path(source))
+        body = f"{body} {reading}" if body else reading
     if body:
         line += f' detail="{body}"'
     return line
+
+
+def grounding_reading(branch_path: Path | None) -> str:
+    """The source branch's grounding receipt and run, read beside its session pointer; never raises."""
+    if branch_path is None:
+        return "grounding=no receipt"
+    pointer = _agent.read_pointer(branch_path) or {}
+    reading = "grounding=no receipt"
+    try:
+        current = json.loads((branch_path / ".ai_mail.local" / "grounding.json").read_text(encoding="utf-8"))["current"]
+        status, generation = current["status"], current["generation"]
+        receipt_id, pointer_id = str(current.get("session_id")), str(pointer.get("session_id"))
+        if receipt_id != pointer_id:
+            reading = f"grounding=stale (receipt {receipt_id[:12]}, pointer {pointer_id[:12]})"
+        else:
+            reading = f"grounding={status} gen{generation}"
+            if status == "ungrounded":
+                reading += f" missing={','.join(map(str, current.get('missing') or []))}"
+            elif status == "unverified":
+                reading += f" ({current.get('observation_boundary')})"
+    except (TypeError, OSError, ValueError, KeyError) as exc:
+        logger.info("[watchdog.feed] no usable grounding receipt for %s: %s", branch_path, exc)
+    observed = pointer.get("model_observed")
+    requested = pointer.get("model_requested")
+    model = observed if observed and observed != "pending" else (f"{requested}?" if requested else "")
+    if pointer.get("host_cli") and model:
+        reading += f" run={pointer['host_cli']}·{model}"
+    return reading
