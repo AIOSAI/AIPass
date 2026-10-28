@@ -1468,14 +1468,15 @@
       "file": "apps/modules/context_window.py",
       "standard": "logged_fallback",
       "lines": [
-        166,
-        169,
-        188,
-        191,
-        322,
-        367
+        168,
+        171,
+        190,
+        193,
+        326,
+        389,
+        408
       ],
-      "reason": "Fleet green leg 5: the context gauge's reading; None shows no gauge. Display only, guards no write. 166-191: an unreadable transcript (Claude's or a Codex rollout) reads as no usage / no model. 322: an unreadable OpenCode store reads as no usage, logged at INFO. 367: an unreadable OpenCode catalog reads as no limit, so the documented 200k stands, logged at INFO."
+      "reason": "Fleet green leg 5: the context gauge's reading; None shows no gauge. Display only, guards no write. 166-191: an unreadable transcript (Claude's or a Codex rollout) reads as no usage / no model. 322: an unreadable OpenCode store reads as no usage, logged at INFO. 389: an unreadable OpenCode catalog reads as no limit, so the documented 200k stands, logged at INFO. 408: an unreadable limit cache reads as empty, so the catalog is read, logged at INFO."
     },
     {
       "file": "apps/modules/cc_transcripts.py",

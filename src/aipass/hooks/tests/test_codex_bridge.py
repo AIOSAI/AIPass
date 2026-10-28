@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_codex_bridge.py
-# Version: 2.7.0
+# Version: 2.8.0
 # Description: Tests for the Codex and OpenCode bridges: payload mapping, output envelope, apply_patch, fail closed
 # Branch: hooks
 # Layer: tests
@@ -414,8 +414,22 @@ class TestOpenCodeAnswer:
 
     def test_silent_grounding_and_another_events_text_stay_as_they_are(self, oc):
         assert oc.run("UserPromptSubmit:navmap", {"session_id": "s1", "prompt": "hi", "keeps_entries": True}) == {}
-        oc.answer = ("culture", 0)
-        assert oc.run("SessionStart:navmap", {"session_id": "s1", "keeps_entries": True}) == {"context": "culture"}
+        oc.answer = ("pointer note", 0)
+        assert oc.run("SessionStart:session_pointer", {"session_id": "s1", "keeps_entries": True}) == {
+            "context": "pointer note"
+        }
+        assert oc.run("UserPromptSubmit:culture", {"session_id": "s1", "keeps_entries": True}) == {
+            "context": "pointer note"
+        }
+
+    def test_culture_at_session_start_is_the_aipass_culture_entry(self, oc):
+        oc.answer = ("# AIPass - Culture\n", 0)
+        assert oc.run("SessionStart:culture", {"session_id": "s1", "source": "startup", "keeps_entries": True}) == {
+            "entry": {"key": "aipass-culture", "value": "# AIPass - Culture\n"}
+        }
+        assert oc.run("SessionStart:culture", {"session_id": "s1", "source": "startup"}) == {
+            "context": "# AIPass - Culture\n"
+        }
 
 
 class TestOpenCodeBrokenEngine:

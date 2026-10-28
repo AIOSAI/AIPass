@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: opencode.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: OpenCode bridge — the aipass.ts plugin's calls, mapped to Claude's protocol, answered in one JSON line
 # Branch: hooks
 # Layer: apps/handlers/bridges
@@ -55,10 +55,11 @@ CODE_TOOL = "execute"
 
 #: The grounding loaders: their text becomes a keyed instruction entry, which OpenCode keeps through a compaction.
 GROUNDING = {
-    "tier0_kernel": "aipass-kernel",
-    "navmap": "aipass-navmap",
-    "branch_prompt": "aipass-branch-prompt",
-    "identity_injector": "aipass-identity",
+    "SessionStart:culture": "aipass-culture",
+    "UserPromptSubmit:tier0_kernel": "aipass-kernel",
+    "UserPromptSubmit:navmap": "aipass-navmap",
+    "UserPromptSubmit:branch_prompt": "aipass-branch-prompt",
+    "UserPromptSubmit:identity_injector": "aipass-identity",
 }
 
 UNGATED = (
@@ -169,7 +170,7 @@ def run(arg: str, stdin_data: str) -> dict:
     except Exception as exc:  # fail closed on the guarded event, see _broken
         return _broken(event_type, exc)
     result = answer(output, exit_code)
-    key = GROUNDING.get(arg.partition(":")[2]) if event_type == "UserPromptSubmit" else None
+    key = GROUNDING.get(arg)
     # Only a plugin that says it keeps entries gets one; an older installed copy would drop the text.
     if key and "context" in result and payload.get("keeps_entries") is True:
         return {"entry": {"key": key, "value": result["context"]}}

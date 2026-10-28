@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_context_gauge.py
-# Version: 1.5.0
+# Version: 1.6.0
 # Description: Tests for context_gauge prompt handler (guard per window; real model window; Codex; OpenCode's store and compact point)
 # Branch: hooks
 # Created: 2026-07-20
@@ -38,6 +38,7 @@ def no_user_settings(tmp_path, monkeypatch):
         context_window, "opencode_config_path", lambda: tmp_path / "home" / "opencode" / "opencode.json"
     )
     monkeypatch.delenv("OPENCODE_CONFIG_CONTENT", raising=False)
+    monkeypatch.setattr(context_window, "opencode_limit_cache_path", lambda: tmp_path / "home" / "limits.json")
 
 
 def _write_transcript(path, input_tokens=0, cache_read=0, cache_creation=0, model=""):
@@ -313,7 +314,7 @@ def _opencode_store(path, *messages: tuple[str, str, int, dict], model="deepseek
     with closing(sqlite3.connect(path)) as conn:
         conn.execute("CREATE TABLE session_message (id text, session_id text, type text, seq integer, data text)")
         conn.execute("CREATE TABLE session_v2 (id text, model text)")
-        conn.execute("CREATE TABLE kv (key text, value text)")
+        conn.execute("CREATE TABLE kv (key text, value text, time_updated integer)")
         for n, (session, kind, seq, tokens) in enumerate(messages):
             data = json.dumps({"model": {"id": model}, "tokens": tokens})
             conn.execute("INSERT INTO session_message VALUES (?, ?, ?, ?, ?)", (f"m{n}", session, kind, seq, data))
@@ -323,7 +324,7 @@ def _opencode_store(path, *messages: tuple[str, str, int, dict], model="deepseek
             )
         if catalog is not None:
             value = json.dumps({"updatedAt": 1, "body": json.dumps(catalog)})
-            conn.execute("INSERT INTO kv VALUES ('models-dev:v2:catalog', ?)", (value,))
+            conn.execute("INSERT INTO kv VALUES ('models-dev:v2:catalog', ?, 1)", (value,))
         conn.commit()
 
 
@@ -412,6 +413,44 @@ class TestOpenCodeStore:
     )
     def test_compact_point_is_the_buffer_else_fifteen_percent_with_a_16k_floor(self, limit, buffer, point):
         assert context_window.opencode_compact_point(limit, buffer) == point
+
+    def _window(self, tmp_path, monkeypatch, model="big-pickle"):
+        db = tmp_path / "opencode.db"
+        _opencode_store(db, ("ses_1", "assistant", 2, _tokens(read=1_000)), model=model)
+        monkeypatch.setenv("OPENCODE_DB", str(db))
+        (tmp_path / "home").mkdir(exist_ok=True)
+        return db
+
+    @staticmethod
+    def _catalog(db, limit, updated):
+        catalog = {"opencode": {"models": {"big-pickle": {"limit": {"context": 200_000, "input": limit}}}}}
+        value = json.dumps({"body": json.dumps(catalog)})
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("UPDATE kv SET value = ?, time_updated = ?", (value, updated))
+            conn.commit()
+
+    def test_a_read_limit_is_cached_until_the_catalog_row_changes(self, tmp_path, monkeypatch):
+        db = self._window(tmp_path, monkeypatch)
+        assert context_window.opencode_window("ses_1", str(tmp_path)) == (160_000, 136_000)
+        self._catalog(db, 100_000, 1)
+        assert context_window.opencode_window("ses_1", str(tmp_path)) == (160_000, 136_000)
+        self._catalog(db, 100_000, 2)
+        assert context_window.opencode_window("ses_1", str(tmp_path)) == (100_000, 84_000)
+
+    def test_a_cached_limit_older_than_a_day_is_read_again(self, tmp_path, monkeypatch):
+        db = self._window(tmp_path, monkeypatch)
+        context_window.opencode_window("ses_1", str(tmp_path))
+        self._catalog(db, 100_000, 1)
+        cache = context_window.opencode_limit_cache_path()
+        aged = json.loads(cache.read_text(encoding="utf-8"))
+        aged["opencode/big-pickle"]["at"] -= 24 * 60 * 60 + 5
+        cache.write_text(json.dumps(aged), encoding="utf-8")
+        assert context_window.opencode_window("ses_1", str(tmp_path)) == (100_000, 84_000)
+
+    def test_an_unreadable_cache_reads_the_catalog(self, tmp_path, monkeypatch):
+        self._window(tmp_path, monkeypatch)
+        context_window.opencode_limit_cache_path().write_text("{torn", encoding="utf-8")
+        assert context_window.opencode_window("ses_1", str(tmp_path)) == (160_000, 136_000)
 
     def test_no_store_or_no_session_row_is_silent(self, tmp_path, monkeypatch):
         monkeypatch.setenv("OPENCODE_DB", str(tmp_path / "absent.db"))

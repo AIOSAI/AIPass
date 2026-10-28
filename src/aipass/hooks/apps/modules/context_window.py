@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: context_window.py
-# Version: 1.8.0
+# Version: 1.9.0
 # Description: Context fill per CLI (Claude transcript, Codex rollout, OpenCode store) and the compact window
 # Branch: hooks
 # Layer: apps/modules
@@ -24,6 +24,8 @@ import json
 import os
 import re
 import sqlite3
+import tempfile
+import time
 from collections.abc import Callable
 from contextlib import closing
 from pathlib import Path
@@ -281,6 +283,8 @@ _OPENCODE_LIMIT = (
     "SELECT json_extract(json_extract(value, '$.body'), '$.' || json_quote(?) || '.models.' || json_quote(?) || '.limit')"
     " FROM kv WHERE key = 'models-dev:v2:catalog'"
 )
+_CATALOG_UPDATED = "SELECT time_updated FROM kv WHERE key = 'models-dev:v2:catalog'"
+_LIMIT_CACHE_SECONDS = 24 * 60 * 60
 _OPENCODE_HELD_BACK_PCT = 15
 _OPENCODE_HELD_BACK_FLOOR = 16_000
 _OPENCODE_FLOOR_FROM = 32_000
@@ -352,21 +356,57 @@ def opencode_window(session_id: str, cwd: str) -> tuple[int, int]:
     return limit, opencode_compact_point(limit, _opencode_buffer(cwd))
 
 
+def opencode_limit_cache_path() -> Path:
+    """Catalog limits already read, per model, so a prompt skips the 11 MB catalog."""
+    return Path(tempfile.gettempdir()) / "aipass-opencode-limits.json"
+
+
 def _opencode_limit(session_id: str) -> int:
-    """The session model's limit.input, else limit.context, from the models.dev catalog in the store; 0 when absent."""
+    """The session model's limit.input, else limit.context, from the models.dev catalog in the store; 0 when absent.
+
+    A limit is cached per model until the catalog row's time_updated changes, or for a day.
+    """
     if not session_id or not opencode_db_path().is_file():
         return 0
+    cache = _read_limit_cache()
     try:
         with closing(_opencode_store()) as conn:
             row = conn.execute(_OPENCODE_MODEL, (session_id,)).fetchone()
             model = json.loads(row[0]) if row and row[0] else {}
+            updated = (conn.execute(_CATALOG_UPDATED).fetchone() or [None])[0]
+            name = f"{model.get('providerID')}/{model.get('id')}"
+            hit = cache.get(name)
+            if (
+                isinstance(hit, dict)
+                and hit.get("catalog") == updated
+                and time.time() - hit.get("at", 0) < _LIMIT_CACHE_SECONDS
+            ):
+                return hit.get("limit", 0)
             found = conn.execute(_OPENCODE_LIMIT, (model.get("providerID"), model.get("id"))).fetchone()
         limit = json.loads(found[0]) if found and found[0] else {}
     except (sqlite3.Error, ValueError, AttributeError) as exc:
         logger.info("[HOOKS] context_window: OpenCode catalog unreadable for %s: %s", session_id, exc)
         return 0
     value = limit.get("input") or limit.get("context") if isinstance(limit, dict) else None
-    return value if isinstance(value, int) and value > 0 else 0
+    value = value if isinstance(value, int) and value > 0 else 0
+    cache[name] = {"limit": value, "catalog": updated, "at": time.time()}
+    try:
+        json_files.write_json_file(opencode_limit_cache_path(), cache)
+    except OSError as exc:
+        logger.info("[HOOKS] context_window: OpenCode limit cache not written: %s", exc)
+    return value
+
+
+def _read_limit_cache() -> dict:
+    path = opencode_limit_cache_path()
+    if not path.is_file():
+        return {}
+    try:
+        cache = json_files.read_json_file(path)
+    except (OSError, ValueError) as exc:
+        logger.info("[HOOKS] context_window: OpenCode limit cache unreadable, reading the catalog: %s", exc)
+        return {}
+    return cache if isinstance(cache, dict) else {}
 
 
 def _opencode_buffer(cwd: str) -> int | None:

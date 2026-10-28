@@ -1,24 +1,35 @@
 # =================== AIPass ====================
 # Name: rollover.py
-# Version: 2.3.0
+# Version: 2.4.0
 # Description: Triggers memory rollover via @memory when files are overdue (PreCompact), naming the compacting branch
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-10-17
+# Modified: 2026-10-28
 # =============================================
 
-"""Delegates rollover detection to @memory and triggers rollover if overdue."""
+"""Delegates rollover detection to @memory and triggers rollover if overdue.
 
+A clean check is trusted for CHECK_FRESH_SECONDS: the check is a 7-15 s drone subprocess, and OpenCode
+runs PreCompact inside its agent step, so an unthrottled check stalls the chat at every compaction.
+A ready verdict, a failed check or a timeout leaves no stamp, so the next compaction checks again."""
+
+import hashlib
 import importlib
 import os
 import subprocess
+import tempfile
+import time
 from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 # Contract with @memory's todo_report.READY_PHRASE: the one phrase this handler greps.
 READY_PHRASE = "ready for rollover"
+
+CHECK_FRESH_SECONDS = 30 * 60
+
+_GUARD_DIR = Path(tempfile.gettempdir())
 
 
 def _probe_run() -> bool:
@@ -64,6 +75,30 @@ def _branch_args(branch: str | None) -> list[str]:
     return ["--branch", f"@{branch}"] if branch else []
 
 
+def _clean_stamp(repo_root: Path, branch: str | None) -> Path:
+    """The file whose mtime is the last clean check for this project's branch (the fleet when None)."""
+    project = hashlib.sha256(str(repo_root).encode()).hexdigest()[:12]
+    return _GUARD_DIR / f"aipass-rollover-clean-{project}-{branch or 'fleet'}"
+
+
+def _recently_clean(repo_root: Path, branch: str | None) -> bool:
+    try:
+        age = time.time() - _clean_stamp(repo_root, branch).stat().st_mtime
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        logger.info("[HOOKS] rollover: clean stamp unreadable, checking: %s", exc)
+        return False
+    return 0 <= age < CHECK_FRESH_SECONDS
+
+
+def _mark_clean(repo_root: Path, branch: str | None) -> None:
+    try:
+        _clean_stamp(repo_root, branch).touch()
+    except OSError as exc:
+        logger.info("[HOOKS] rollover: clean stamp not written, the next compaction checks again: %s", exc)
+
+
 def _run_check(repo_root: Path, branch: str | None) -> tuple[bool, str]:
     try:
         result = subprocess.run(
@@ -75,6 +110,8 @@ def _run_check(repo_root: Path, branch: str | None) -> tuple[bool, str]:
         )
         stdout = result.stdout.strip()
         has_overdue = READY_PHRASE in stdout.lower()
+        if result.returncode == 0 and not has_overdue:
+            _mark_clean(repo_root, branch)
         return has_overdue, stdout
     except subprocess.TimeoutExpired:
         logger.warning("[HOOKS] rollover: check timed out (30s)")
@@ -111,6 +148,11 @@ def handle(hook_data: dict) -> dict:
         return {"stdout": "", "exit_code": 0}
 
     branch = _compacting_branch(hook_data)
+    if _recently_clean(repo_root, branch):
+        logger.info(
+            "[HOOKS] rollover: checked clean within %d min, skipped (branch=%s)", CHECK_FRESH_SECONDS // 60, branch
+        )
+        return {"stdout": "", "exit_code": 0}
     has_overdue, check_output = _run_check(repo_root, branch)
     if not has_overdue:
         return {"stdout": "", "exit_code": 0}

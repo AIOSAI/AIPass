@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_rollover.py
-# Version: 2.3.0
+# Version: 2.4.0
 # Description: Tests for rollover lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-10-16
+# Modified: 2026-10-28
 # =============================================
 
 """Tests for apps/handlers/lifecycle/rollover.py."""
@@ -15,7 +15,11 @@
 # seedgo: no-test-needed(documentation) — that the handler's functions carry docstrings
 
 from unittest.mock import patch, MagicMock
+import os
 import subprocess
+import time
+
+import pytest
 
 from aipass.hooks.apps.handlers.lifecycle import rollover
 from aipass.hooks.apps.handlers.lifecycle.rollover import handle
@@ -34,6 +38,13 @@ CHECK_OVERDUE_OUTPUT = (
 CHECK_CLEAN_OUTPUT = "No files need rollover.\n"
 
 
+@pytest.fixture(autouse=True)
+def stamps_in_tmp(tmp_path, monkeypatch):
+    """The clean-check stamps live under tmp_path, so no test reads another's or the live one."""
+    monkeypatch.setattr(rollover, "_GUARD_DIR", tmp_path / "guard")
+    (tmp_path / "guard").mkdir()
+
+
 def _mock_run(stdout="", returncode=0):
     m = MagicMock()
     m.stdout = stdout
@@ -42,7 +53,9 @@ def _mock_run(stdout="", returncode=0):
     return m
 
 
-def _rolled(monkeypatch, tmp_path, check_out=CHECK_OVERDUE_OUTPUT, run_out="done", run_rc=0, times_out=None):
+def _rolled(
+    monkeypatch, tmp_path, check_out=CHECK_OVERDUE_OUTPUT, run_out="done", run_rc=0, times_out=None, check_rc=0
+):
     """One PreCompact through handle() at a tmp repo root; (result, drone argvs, logger mock).
 
     subprocess.run is the sealed edge: `rollover check` answers *check_out*,
@@ -58,7 +71,7 @@ def _rolled(monkeypatch, tmp_path, check_out=CHECK_OVERDUE_OUTPUT, run_out="done
         if verb == times_out:
             raise subprocess.TimeoutExpired(argv, kwargs.get("timeout", 0))
         if verb == "check":
-            return _mock_run(stdout=check_out)
+            return _mock_run(stdout=check_out, returncode=check_rc)
         return _mock_run(stdout=run_out, returncode=run_rc)
 
     (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
@@ -144,6 +157,50 @@ class TestRolloverHandler:
         _result, _calls, log = _rolled(monkeypatch, tmp_path, times_out="run")
 
         log.warning.assert_any_call("[HOOKS] rollover: FAILED — %s", "Rollover timed out (110s)")
+
+
+class TestACleanCheckIsTrusted:
+    """A compaction within CHECK_FRESH_SECONDS of a clean check skips the 7-15 s drone check."""
+
+    def test_a_second_compaction_after_a_clean_check_runs_no_check(self, monkeypatch, tmp_path):
+        _rolled(monkeypatch, tmp_path, check_out=CHECK_CLEAN_OUTPUT)
+        result, calls, log = _rolled(monkeypatch, tmp_path, check_out=CHECK_CLEAN_OUTPUT)
+        assert calls == [] and result == {"stdout": "", "exit_code": 0}
+        log.info.assert_any_call("[HOOKS] rollover: checked clean within %d min, skipped (branch=%s)", 30, None)
+
+    def test_a_stale_stamp_checks_again(self, monkeypatch, tmp_path):
+        _rolled(monkeypatch, tmp_path, check_out=CHECK_CLEAN_OUTPUT)
+        (stamp,) = (tmp_path / "guard").iterdir()
+        old = time.time() - rollover.CHECK_FRESH_SECONDS - 5
+        os.utime(stamp, (old, old))
+        _result, calls, _log = _rolled(monkeypatch, tmp_path, check_out=CHECK_CLEAN_OUTPUT)
+        assert [argv[3] for argv in calls] == ["check"]
+
+    @pytest.mark.parametrize(
+        "how",
+        [{"check_out": CHECK_OVERDUE_OUTPUT}, {"times_out": "check"}, {"check_out": CHECK_CLEAN_OUTPUT, "check_rc": 1}],
+        ids=["ready", "timed out", "failed"],
+    )
+    def test_a_ready_failed_or_timed_out_check_is_never_trusted(self, monkeypatch, tmp_path, how):
+        _rolled(monkeypatch, tmp_path, **how)
+        _result, calls, _log = _rolled(monkeypatch, tmp_path, **how)
+        assert calls and calls[0][3] == "check"
+
+    def test_each_branch_keeps_its_own_stamp(self, monkeypatch, tmp_path):
+        module, calls = TestTheCompactingBranchIsNamed._spy(monkeypatch, CHECK_CLEAN_OUTPUT)
+        monkeypatch.setattr(module, "_find_repo_root", lambda: tmp_path)
+        for name in ("hooks", "canary"):
+            (tmp_path / "src" / "aipass" / name / "apps").mkdir(parents=True)
+        for name in ("hooks", "canary", "hooks"):
+            module.handle({"cwd": str(tmp_path / "src" / "aipass" / name / "apps")})
+        assert [argv[-1] for argv, _ in calls] == ["@hooks", "@canary"]
+
+    def test_another_project_is_checked_on_its_own(self, monkeypatch, tmp_path):
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        _rolled(monkeypatch, tmp_path / "a", check_out=CHECK_CLEAN_OUTPUT)
+        _result, calls, _log = _rolled(monkeypatch, tmp_path / "b", check_out=CHECK_CLEAN_OUTPUT)
+        assert [argv[3] for argv in calls] == ["check"]
 
 
 class TestTheCompactingBranchIsNamed:

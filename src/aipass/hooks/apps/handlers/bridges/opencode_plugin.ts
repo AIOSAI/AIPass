@@ -80,9 +80,12 @@ export default Plugin.define({
       const parts: string[] = []
       if (unwired) parts.push(unwired)
       else {
+        const entries: Entry[] = []
         if (!started.has(event.sessionID)) {
           started.add(event.sessionID)
-          parts.push(run("SessionStart", { ...base(event.sessionID), source: "startup" }).context ?? "")
+          const start = run("SessionStart", { ...base(event.sessionID), source: "startup", keeps_entries: true })
+          parts.push(start.context ?? "")
+          entries.push(...(start.entries ?? []))
         }
         const answer = run("UserPromptSubmit", {
           ...base(event.sessionID),
@@ -91,9 +94,10 @@ export default Plugin.define({
         })
         // OpenCode cannot withhold a prompt from a plugin: a refusal travels with it instead.
         parts.push(answer.deny ?? answer.context ?? "")
+        if (!answer.deny) entries.push(...(answer.entries ?? []))
         // Keyed entries sit in the instruction block of every model call and survive a compaction; one that
         // cannot be kept travels with the prompt, so the text arrives once either way.
-        for (const entry of answer.deny ? [] : answer.entries ?? []) {
+        for (const entry of entries) {
           try {
             await ctx.session.instructions.entry.put({ sessionID: event.sessionID, key: entry.key, value: entry.value })
           } catch (e) {
