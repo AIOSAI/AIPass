@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: context_gauge.py
-# Version: 1.6.0
+# Version: 1.6.1
 # Description: Heads-up to run /prep ($prep on Codex) before auto-compact, and the grounding receipt (UserPromptSubmit)
 # Branch: hooks
 # Layer: apps/handlers/prompt
@@ -65,13 +65,17 @@ def _reading(hook_data: dict, session_id: str) -> tuple[int, int, int] | None:
             return None
         return (fill, *context_window.opencode_window(session_id, hook_data.get("cwd", "") or str(Path.cwd())))
     transcript_path = hook_data.get("transcript_path", "")
-    usage = context_window.read_latest_usage(transcript_path) if transcript_path else None
+    # Turn 0 has no transcript yet; any other read error reaches _gauge's handler, logged.
+    if not transcript_path or not Path(transcript_path).is_file():
+        return None
+    provider = context_window.transcript_provider(transcript_path)
+    usage = context_window.read_latest_usage(transcript_path, provider=provider)
     if usage is None:
         return None
     cwd = hook_data.get("cwd", "") or str(Path.cwd())
-    model = context_window.read_latest_model(transcript_path)
-    window_size = context_window.resolve_compact_window(cwd, model, transcript_path)
-    trigger = context_window.compact_threshold(window_size, context_window.transcript_provider(transcript_path))
+    model = context_window.read_latest_model(transcript_path, provider=provider)
+    window_size = context_window.resolve_compact_window(cwd, model, transcript_path, provider)
+    trigger = context_window.compact_threshold(window_size, provider)
     return (context_window.context_fill_tokens(usage), window_size, trigger) if trigger > 0 else None
 
 

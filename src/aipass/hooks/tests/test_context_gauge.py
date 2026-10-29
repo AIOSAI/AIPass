@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_context_gauge.py
-# Version: 1.7.0
+# Version: 1.8.0
 # Description: Tests for context_gauge (per-window guard, real window, Codex, OpenCode store) and the grounding receipt
 # Branch: hooks
 # Created: 2026-07-20
@@ -270,6 +270,18 @@ class TestCodexRollout:
         )
         assert "$prep" in result["stdout"]
         assert "/prep" not in result["stdout"]
+
+    def test_a_prompt_reads_the_rollouts_first_line_once_and_still_nudges(self, tmp_path, monkeypatch):
+        rollout = tmp_path / "rollout.jsonl"
+        _codex_rollout(rollout, total_tokens=380_000)
+        reads = []
+        real = context_window.transcript_provider
+        monkeypatch.setattr(context_window, "transcript_provider", lambda path: reads.append(path) or real(path))
+        hook_data = {"session_id": "s-once", "transcript_path": str(rollout), "cwd": str(tmp_path), "provider": "codex"}
+        with patch(f"{MODULE}._GUARD_DIR", tmp_path):
+            result = handle(hook_data)
+        assert result["stdout"].startswith("CONTEXT GAUGE: ~380k of 475k context")
+        assert reads == [str(rollout)]
 
     def test_codex_config_lowers_the_compact_point(self, tmp_path):
         (tmp_path / "home").mkdir()

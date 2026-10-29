@@ -19,7 +19,6 @@ Invoked via: drone @hooks verify
 """
 
 import json
-import os
 import re
 import sys
 from pathlib import Path
@@ -27,6 +26,7 @@ from pathlib import Path
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config import gates
+from aipass.hooks.apps.handlers.config.opencode_paths import opencode_plugin_path
 from aipass.hooks.apps.handlers.config.loader import aipass_home, config_unavailable_reason, find_project_config
 from aipass.hooks.apps.modules.context_window import codex_hooks_path
 from aipass.hooks.apps.handlers.json import files as json_files
@@ -124,11 +124,6 @@ def _codex_wired(codex_path, errors) -> frozenset[str]:
             if arg:
                 wired.add(arg)
     return frozenset(wired)
-
-
-def opencode_plugin_path() -> Path:
-    """Where OpenCode loads the user-level plugin: $XDG_CONFIG_HOME, else the home's .config, then opencode/plugins."""
-    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "opencode" / "plugins" / "aipass.ts"
 
 
 def _manifest_path() -> Path | None:

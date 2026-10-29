@@ -40,27 +40,43 @@ export default Plugin.define({
       logError(unwired)
     }
 
-    const call = (row: Row, payload: object): Answer & { broken?: string } => {
+    // Async: a synchronous spawn holds the server's one JavaScript thread for the whole row. Stop is the
+    // exception: a standalone run exits on idle, before an awaited spawn finishes, and the turn is over anyway.
+    const call = async (row: Row, payload: object, sync: boolean): Promise<Answer & { broken?: string }> => {
       const argv = row.command.split(/\s+/).filter(Boolean).map((w) => w.replaceAll("$AIPASS_HOME", home))
+      const stdin = Buffer.from(JSON.stringify(payload))
+      const timeout = (row.timeout ?? 60) * 1000
       try {
-        const r = Bun.spawnSync(argv, {
+        if (sync) {
+          const r = Bun.spawnSync(argv, { cwd, stdin, timeout })
+          if (r.exitCode !== 0) return { broken: `${argv.at(-1)} exited ${r.exitCode}: ${r.stderr.toString().trim()}` }
+          return JSON.parse(r.stdout.toString())
+        }
+        const proc = Bun.spawn(argv, {
           cwd,
-          stdin: Buffer.from(JSON.stringify(payload)),
-          timeout: (row.timeout ?? 60) * 1000,
+          stdin,
+          stdout: "pipe",
+          stderr: "pipe",
+          timeout,
         })
-        if (r.exitCode !== 0) return { broken: `${argv.at(-1)} exited ${r.exitCode}: ${r.stderr.toString().trim()}` }
-        return JSON.parse(r.stdout.toString())
+        const [stdout, stderr, exitCode] = await Promise.all([
+          new Response(proc.stdout).text(),
+          new Response(proc.stderr).text(),
+          proc.exited,
+        ])
+        if (exitCode !== 0) return { broken: `${argv.at(-1)} exited ${exitCode}: ${stderr.trim()}` }
+        return JSON.parse(stdout)
       } catch (e) {
         return { broken: `${argv.at(-1)}: ${e}` }
       }
     }
 
     // Every row of the event in manifest order; the first deny answers, contexts join in order, entries collect.
-    const run = (event: string, payload: object): Answer => {
+    const run = async (event: string, payload: object): Promise<Answer> => {
       const contexts: string[] = []
       const entries: Entry[] = []
       for (const row of rows.filter((r) => r.event === event)) {
-        const answer = call(row, { ...payload, hook_event_name: event })
+        const answer = await call(row, { ...payload, hook_event_name: event }, event === "Stop")
         if (answer.broken) {
           logError(answer.broken)
           if (event === "PreToolUse") return { deny: BROKEN(answer.broken) }
@@ -83,11 +99,11 @@ export default Plugin.define({
         const entries: Entry[] = []
         if (!started.has(event.sessionID)) {
           started.add(event.sessionID)
-          const start = run("SessionStart", { ...base(event.sessionID), source: "startup", keeps_entries: true })
+          const start = await run("SessionStart", { ...base(event.sessionID), source: "startup", keeps_entries: true })
           parts.push(start.context ?? "")
           entries.push(...(start.entries ?? []))
         }
-        const answer = run("UserPromptSubmit", {
+        const answer = await run("UserPromptSubmit", {
           ...base(event.sessionID),
           prompt: event.prompt?.text ?? "",
           keeps_entries: true,
@@ -112,20 +128,31 @@ export default Plugin.define({
 
     await ctx.tool.hook("execute.before", async (event: any) => {
       if (unwired) throw new Error(BROKEN(unwired))
-      const answer = run("PreToolUse", { ...base(event.sessionID), tool: event.tool, input: event.input })
+      const call = { ...base(event.sessionID), tool: event.tool, input: event.input, tool_use_id: event.id }
+      const answer = await run("PreToolUse", call)
       if (answer.deny) throw new Error(answer.deny)
     })
 
     await ctx.tool.hook("execute.after", async (event: any) => {
       if (unwired) return
       const response = event.status === "error" ? { error: event.error } : event.result
-      run("PostToolUse", { ...base(event.sessionID), tool: event.tool, input: event.input, tool_response: response })
+      const answer = await run("PostToolUse", {
+        ...base(event.sessionID),
+        tool: event.tool,
+        input: event.input,
+        tool_use_id: event.id,
+        tool_response: response,
+      })
+      // OpenCode reads result.content after this hook returns: a report pushed there reaches the model.
+      if (answer.context && Array.isArray(event.result?.content)) {
+        event.result.content.push({ type: "text", text: answer.context })
+      }
     })
 
     try {
       await ctx.session.hook("compaction", async (event: any) => {
         // OpenCode 2.2's compaction event names no reason: auto, overflow and manual all read as auto.
-        if (!unwired) run("PreCompact", { ...base(event.sessionID), trigger: event.reason ?? "auto" })
+        if (!unwired) await run("PreCompact", { ...base(event.sessionID), trigger: event.reason ?? "auto" })
       })
     } catch (e) {
       logError(`compaction hook unavailable, PreCompact rows do not fire: ${e}`)
@@ -138,7 +165,7 @@ export default Plugin.define({
           const type = (ev as any).type
           const sessionID = (ev as any).data?.sessionID
           if (!unwired && sessionID && (type === "session.execution.succeeded" || type === "session.execution.failed")) {
-            run("Stop", { ...base(sessionID), stop_hook_active: false })
+            await run("Stop", { ...base(sessionID), stop_hook_active: false })
           }
         }
       } catch (e) {

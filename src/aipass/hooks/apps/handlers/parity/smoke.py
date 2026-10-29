@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: smoke.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Description: Smoke: one isolated live turn per provider; pass only when a hook's own nonce ack is read back
 # Branch: hooks
 # Layer: apps/handlers/parity
@@ -29,6 +29,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
+from aipass.hooks.apps.handlers.config.opencode_paths import opencode_db_path, opencode_plugin_path, opencode_store
 from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.handlers.parity import runner
 from aipass.prax.apps.modules.logger import system_logger as logger
@@ -100,12 +101,10 @@ def _codex_ack(session_id: str, ack: str) -> bool | None:
 
 def _opencode_ack(session_id: str, ack: str) -> bool | None:
     """A stored user message of the session carries the ack; None when the store is absent."""
-    data = os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share"
-    db = Path(os.environ.get("OPENCODE_DB") or Path(data) / "opencode" / "opencode.db")
-    if not db.is_file():
+    if not opencode_db_path().is_file():
         return None
     query = "SELECT data FROM session_message WHERE session_id = ? AND type = 'user'"
-    with closing(sqlite3.connect(f"{db.resolve().as_uri()}?mode=ro", uri=True, timeout=2)) as conn:
+    with closing(opencode_store()) as conn:
         rows = conn.execute(query, (session_id,)).fetchall()
     return any(ack in row[0] for row in rows)
 
@@ -115,9 +114,8 @@ ACK_READERS = {"claude": _claude_ack, "codex": _codex_ack, "opencode": _opencode
 
 def _plugin_wired() -> bool:
     """OpenCode loads aipass.ts from OPENCODE_CONFIG_DIR's plugins/, or the user-level config's."""
-    config = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "opencode"
-    dirs = [Path(os.environ["OPENCODE_CONFIG_DIR"])] if os.environ.get("OPENCODE_CONFIG_DIR") else []
-    return any((d / "plugins" / "aipass.ts").is_file() for d in [*dirs, config])
+    extra = os.environ.get("OPENCODE_CONFIG_DIR")
+    return opencode_plugin_path().is_file() or bool(extra and (Path(extra) / "plugins" / "aipass.ts").is_file())
 
 
 def _snapshot(branch: Path) -> dict[Path, bytes | None]:

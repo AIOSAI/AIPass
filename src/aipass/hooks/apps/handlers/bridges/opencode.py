@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: opencode.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: OpenCode bridge — the aipass.ts plugin's calls, mapped to Claude's protocol, answered in one JSON line
 # Branch: hooks
 # Layer: apps/handlers/bridges
@@ -52,6 +52,9 @@ FILE_KEYS = {
 }
 
 CODE_TOOL = "execute"
+
+#: OpenCode's file tool on gpt- models, which get no edit or write: a Codex-style patch in input.patchText.
+PATCH_TOOL = "patch"
 
 #: The grounding loaders: their text becomes a keyed instruction entry, which OpenCode keeps through a compaction.
 GROUNDING = {
@@ -127,13 +130,7 @@ def _mount() -> str:
         raise ImportError("mount.py has no import spec")
     mount = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mount)
-    try:
-        return mount.mount(mount.branch_root(__file__))
-    except Exception as exc:  # a bad promoted copy: the source still gates, and says so
-        from aipass.prax.apps.modules.logger import system_logger as logger
-
-        logger.error("[HOOKS:opencode] promoted copy unusable, serving the source tree: %s", exc)
-        return "source (fallback)"
+    return mount.mount_or_source(__file__, "opencode")
 
 
 def _broken(event_type: str, exc: BaseException) -> dict:
@@ -153,6 +150,18 @@ def _broken(event_type: str, exc: BaseException) -> dict:
     return result
 
 
+def _run_patch(arg: str, payload: dict) -> tuple[str, int]:
+    """A patch is judged as the Codex bridge judges apply_patch: one Claude call per file, the first exit 2 denies."""
+    from aipass.hooks.apps.handlers.bridges import codex
+
+    given = payload.get("input")
+    patch = given.get("patchText", "") if isinstance(given, dict) else ""
+    rest = claude_payload({key: value for key, value in payload.items() if key not in ("tool", "input")})
+    return codex._run_calls(
+        arg, json.dumps({**rest, "tool_name": codex.PATCH_TOOL, "tool_input": {"command": str(patch)}})
+    )
+
+
 def run(arg: str, stdin_data: str) -> dict:
     """One plugin call: the event *arg* (``Event`` or ``Event:hook``) on the plugin's payload, answered."""
     event_type = arg.split(":", 1)[0]
@@ -166,7 +175,10 @@ def run(arg: str, stdin_data: str) -> dict:
         _mount()
         from aipass.hooks.apps.modules.engine import run_event
 
-        output, exit_code = run_event(arg, json.dumps(claude_payload(payload)))
+        if payload.get("tool") == PATCH_TOOL:
+            output, exit_code = _run_patch(arg, payload)
+        else:
+            output, exit_code = run_event(arg, json.dumps(claude_payload(payload)))
     except Exception as exc:  # fail closed on the guarded event, see _broken
         return _broken(event_type, exc)
     result = answer(output, exit_code)

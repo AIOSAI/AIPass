@@ -8,6 +8,11 @@
   },
   "bypass": [
     {
+      "file": "apps/handlers/config/opencode_paths.py",
+      "standard": "json_structure",
+      "reason": "Path arithmetic and one read-only sqlite connect for OpenCode's store and plugin; no JSON operations to log."
+    },
+    {
       "file": "apps/handlers/bridges/claude.py",
       "standard": "dead_code",
       "reason": "Bridge called externally by provider settings subprocess — no internal import. Verified wired in ~/.claude/settings.json hook entries."
@@ -1468,15 +1473,15 @@
       "file": "apps/modules/context_window.py",
       "standard": "logged_fallback",
       "lines": [
-        168,
         171,
-        190,
+        174,
         193,
-        326,
-        389,
-        408
+        196,
+        317,
+        380,
+        399
       ],
-      "reason": "Fleet green leg 5: the context gauge's reading; None shows no gauge. Display only, guards no write. 166-191: an unreadable transcript (Claude's or a Codex rollout) reads as no usage / no model. 322: an unreadable OpenCode store reads as no usage, logged at INFO. 389: an unreadable OpenCode catalog reads as no limit, so the documented 200k stands, logged at INFO. 408: an unreadable limit cache reads as empty, so the catalog is read, logged at INFO."
+      "reason": "Fleet green leg 5: the context gauge's reading; None shows no gauge. Display only, guards no write. 169-196: an unreadable transcript (Claude's or a Codex rollout) reads as no usage / no model. 317: an unreadable OpenCode store reads as no usage, logged at INFO. 380: an unreadable OpenCode catalog reads as no limit, so the documented 200k stands, logged at INFO. 399: an unreadable limit cache reads as empty, so the catalog is read, logged at INFO."
     },
     {
       "file": "apps/modules/cc_transcripts.py",

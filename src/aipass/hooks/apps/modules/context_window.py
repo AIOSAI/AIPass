@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: context_window.py
-# Version: 1.9.0
+# Version: 1.10.0
 # Description: Context fill per CLI (Claude transcript, Codex rollout, OpenCode store) and the compact window
 # Branch: hooks
 # Layer: apps/modules
@@ -32,6 +32,7 @@ from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
+from aipass.hooks.apps.handlers.config.opencode_paths import opencode_db_path, opencode_store
 from aipass.hooks.apps.handlers.json import files as json_files
 from aipass.prax.apps.modules.logger import system_logger as logger
 
@@ -154,12 +155,14 @@ def _is_real_model(model: object) -> bool:
     return isinstance(model, str) and bool(model) and not model.startswith("<")
 
 
-def read_latest_usage(transcript_path: str, tail_bytes: int = _TAIL_BYTES) -> dict | None:
-    """The newest usage dict: Claude's assistant message.usage, or Codex's token_count last_token_usage."""
+def read_latest_usage(transcript_path: str, tail_bytes: int = _TAIL_BYTES, provider: str = "") -> dict | None:
+    """The newest usage dict: Claude's assistant message.usage, or Codex's token_count last_token_usage.
+
+    *provider* is the caller's transcript_provider() reading; empty reads it here."""
     if not transcript_path:
         return None
     try:
-        if transcript_provider(transcript_path) == "codex":
+        if (provider or transcript_provider(transcript_path)) == "codex":
             usage = _latest(transcript_path, lambda e: _codex_token_info(e, "last_token_usage"), tail_bytes)
         else:
             usage = _latest(transcript_path, lambda e: _claude_message(e, "usage", _is_dict), tail_bytes)
@@ -176,12 +179,12 @@ def _is_dict(value: object) -> bool:
     return isinstance(value, dict)
 
 
-def read_latest_model(transcript_path: str, tail_bytes: int = _TAIL_BYTES) -> str:
+def read_latest_model(transcript_path: str, tail_bytes: int = _TAIL_BYTES, provider: str = "") -> str:
     """The model id of the most recent turn (Codex: turn_context), or "" when the transcript names none."""
     if not transcript_path:
         return ""
     try:
-        if transcript_provider(transcript_path) == "codex":
+        if (provider or transcript_provider(transcript_path)) == "codex":
             model = _latest(transcript_path, _codex_model, tail_bytes)
         else:
             model = _latest(transcript_path, lambda e: _claude_message(e, "model", _is_real_model), tail_bytes)
@@ -290,22 +293,10 @@ _OPENCODE_HELD_BACK_FLOOR = 16_000
 _OPENCODE_FLOOR_FROM = 32_000
 
 
-def opencode_db_path() -> Path:
-    """OpenCode's store: $OPENCODE_DB, else opencode/opencode.db in the XDG data home."""
-    if os.environ.get("OPENCODE_DB"):
-        return Path(os.environ["OPENCODE_DB"])
-    data = os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share"
-    return Path(data) / "opencode" / "opencode.db"
-
-
 def opencode_config_path() -> Path:
     """OpenCode's user config: opencode/opencode.json in the XDG config home."""
     config = os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config"
     return Path(config) / "opencode" / "opencode.json"
-
-
-def _opencode_store() -> sqlite3.Connection:
-    return sqlite3.connect(f"{opencode_db_path().resolve().as_uri()}?mode=ro", uri=True, timeout=2)
 
 
 def opencode_fill(session_id: str) -> int | None:
@@ -318,7 +309,7 @@ def opencode_fill(session_id: str) -> int | None:
     if not session_id or not db.is_file():
         return None
     try:
-        with closing(_opencode_store()) as conn:
+        with closing(opencode_store()) as conn:
             row = conn.execute(_OPENCODE_LATEST, (session_id,)).fetchone()
         tokens = json.loads(row[0]).get("tokens") if row else None
     except (sqlite3.Error, ValueError, AttributeError) as exc:
@@ -370,7 +361,7 @@ def _opencode_limit(session_id: str) -> int:
         return 0
     cache = _read_limit_cache()
     try:
-        with closing(_opencode_store()) as conn:
+        with closing(opencode_store()) as conn:
             row = conn.execute(_OPENCODE_MODEL, (session_id,)).fetchone()
             model = json.loads(row[0]) if row and row[0] else {}
             updated = (conn.execute(_CATALOG_UPDATED).fetchone() or [None])[0]
@@ -470,12 +461,12 @@ def _codex_window(transcript_path: str) -> int:
     return configured * _CODEX_USABLE_PCT // 100 if configured else _DEFAULT_WINDOW
 
 
-def resolve_compact_window(cwd: str, model_id: str = "", transcript_path: str = "") -> int:
+def resolve_compact_window(cwd: str, model_id: str = "", transcript_path: str = "", provider: str = "") -> int:
     """The effective window. A Codex rollout: the window Codex counts against (_codex_window).
 
     Claude: min(model window, explicit) when explicit is set, else the model window; with no model id
     the explicit value (or the 200k default) stands, as before model awareness."""
-    if transcript_path and _provider_or_claude(transcript_path) == "codex":
+    if transcript_path and (provider or _provider_or_claude(transcript_path)) == "codex":
         return _codex_window(transcript_path)
     explicit = explicit_window(cwd)
     if not model_id:

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: mount.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Mounts the promoted copy of aipass.hooks.apps before a bridge imports anything from it
 # Branch: hooks
 # Layer: apps/handlers/bridges
 # Created: 2026-09-30
-# Modified: 2026-10-17
+# Modified: 2026-10-28
 # =============================================
 
 """The code a hook runs is the PROMOTED copy, never the tree being edited (DPLAN-0356 item 3).
@@ -82,3 +82,18 @@ def mount(root: str) -> str:
         raise
     aipass.hooks.apps = module  # type: ignore[attr-defined]
     return os.path.basename(snapshot)
+
+
+def mount_or_source(bridge_file: str, tag: str) -> str:
+    """A bridge's mount: a bad promoted copy serves the source tree and says so at ERROR, through prax or stderr."""
+    try:
+        return mount(branch_root(bridge_file))
+    except Exception as exc:  # a bad promoted copy: the source still gates, and says so
+        message = f"[HOOKS:{tag}] promoted copy unusable, serving the source tree: {exc}"
+        try:
+            from aipass.prax.apps.modules.logger import system_logger as logger
+
+            logger.error(message)
+        except Exception as err:
+            sys.stderr.write(f"{message} (prax unavailable: {err})\n")
+        return "source (fallback)"

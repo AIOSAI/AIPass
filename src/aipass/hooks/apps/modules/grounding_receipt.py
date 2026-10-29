@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: grounding_receipt.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Description: The grounding receipt, .ai_mail.local/grounding.json: did the five grounding entries reach the model
 # Branch: hooks
 # Layer: apps/modules
@@ -21,7 +21,6 @@ next prompt reads the store again.
 import hashlib
 import json
 import os
-import sqlite3
 import time
 from contextlib import closing
 from pathlib import Path
@@ -70,7 +69,7 @@ def _receipt_path(hook_data: dict) -> Path | None:
 
 def _read_store(session_id: str) -> tuple[dict, dict, int]:
     """(asked, in effect, completed compactions) for an OpenCode session, values as the store keeps them."""
-    with closing(sqlite3.connect(f"{context_window.opencode_db_path().resolve().as_uri()}?mode=ro", uri=True)) as conn:
+    with closing(context_window.opencode_store()) as conn:
         asked = {k: v for k, v in conn.execute(_ENTRIES, (session_id,)) if k in SOURCES}
         state = conn.execute(_STATE, (session_id,)).fetchone()
         hashes = json.loads(state[0]) if state else {}
