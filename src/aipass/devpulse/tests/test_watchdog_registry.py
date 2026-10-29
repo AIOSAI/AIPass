@@ -3,7 +3,7 @@
 # Description: Tests for the watchdog watch registry (Phase 4, FPLAN-0186)
 # Version: 1.4.1
 # Created: 2026-04-14
-# Modified: 2026-10-22
+# Modified: 2026-10-29
 # =============================================
 
 """Tests for apps/handlers/watchdog/registry.py and the handlers that register through it."""
@@ -32,6 +32,7 @@ from aipass.devpulse.apps.handlers.watchdog import registry as watch_registry
 from aipass.devpulse.apps.handlers.watchdog import schedule as schedule_handler
 from aipass.devpulse.apps.handlers.watchdog import timer as tmr
 from aipass.devpulse.apps.handlers.watchdog import timer as watch_timer
+from aipass.devpulse.apps.handlers.watchdog import wire
 
 
 @pytest.fixture
@@ -311,8 +312,6 @@ def test_kill_watch_happy_path(store_path):
 
 def test_kill_watch_leaves_a_non_watchdog_pid_alone(store_path, monkeypatch):
     """A recycled pid whose cmdline is not a watchdog is deregistered, never signalled."""
-    from aipass.devpulse.apps.handlers.watchdog import wire
-
     proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     try:
         handle = watch_registry.register("timer", {"duration": "30s"}, storage_path=store_path)

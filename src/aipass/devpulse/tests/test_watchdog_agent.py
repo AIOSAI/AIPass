@@ -3,7 +3,7 @@
 # Description: Tests for the watchdog agent handler
 # Version: 1.7.0
 # Created: 2026-04-14
-# Modified: 2026-10-28
+# Modified: 2026-10-29
 # =============================================
 
 """Tests for apps/handlers/watchdog/agent.py: watch_agent, TranscriptScanner and StallTracker."""
@@ -1041,20 +1041,31 @@ def test_opencode_pointer_watches_the_session_row(tmp_path, monkeypatch):
     assert s.last_entry_inflight() is True  # an unreadable store counts as in flight
 
 
-def test_bounce_older_than_the_dispatch_is_not_a_crash(tmp_path):
+@pytest.mark.parametrize(
+    ("bounce_ts", "state"), [("2026-04-01T09:00:00", "completed_silent"), ("2026-04-14T00:00:00", "crashed")]
+)
+def test_bounce_older_than_the_dispatch_is_not_a_crash(monkeypatch, tmp_path, bounce_ts, state):
     """Nothing deletes last_bounce.json; a past run's file must not mark this clean run crashed."""
-    (tmp_path / ".ai_mail.local").mkdir()
-    (tmp_path / ".ai_mail.local" / "last_bounce.json").write_text(
-        json.dumps({"timestamp": "2026-10-01T09:00:00"}), encoding="utf-8"
+    branch_path = _build_fake_branch(tmp_path)
+    lock_file = _write_lock(branch_path, pid=os.getpid())
+    (branch_path / ".ai_mail.local" / "last_bounce.json").write_text(
+        json.dumps({"timestamp": bounce_ts}), encoding="utf-8"
     )
-    stale = agent_handler._classify_exit(tmp_path, lock_existed=True, dispatch_ts="2026-10-28T09:00:00")
-    fresh = agent_handler._classify_exit(tmp_path, lock_existed=True, dispatch_ts="2026-09-28T09:00:00")
-    assert stale[0] == "completed_silent" and fresh[0] == "crashed"
+    monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
+    _exit_during_first_poll(monkeypatch, lambda: lock_file.unlink(missing_ok=True))
+
+    result = agent_handler.watch_agent("@fakebranch", timeout_seconds=5, poll_interval=0.01)
+
+    assert result["agent_state"] == state
 
 
-def test_null_email_row_does_not_stop_the_search(tmp_path):
+def test_null_email_row_does_not_stop_the_search(monkeypatch, tmp_path):
     """A row with "email": null is skipped by email and still matched by name."""
-    (tmp_path / "b").mkdir()
-    reg = tmp_path / "X_REGISTRY.json"
-    reg.write_text(json.dumps({"branches": [{"name": "B", "email": None, "path": "b"}]}), encoding="utf-8")
-    assert agent_handler._search_registry(reg, "@b") == tmp_path / "b"
+    (tmp_path / "b" / ".ai_mail.local").mkdir(parents=True)
+    rows = {"branches": [{"name": "B", "email": None, "path": "b"}]}
+    (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(rows), encoding="utf-8")
+    monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
+
+    result = agent_handler.watch_agent("@b", timeout_seconds=1, poll_interval=0.01)
+
+    assert result["reason"] != "agent not found" and result["woke"] is True

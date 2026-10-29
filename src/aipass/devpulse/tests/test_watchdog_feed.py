@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from aipass import ai_mail
+from aipass.devpulse.apps.handlers.watchdog import agent as agent_handler
 from aipass.devpulse.apps.handlers.watchdog import feed
 
 
@@ -47,7 +48,7 @@ def _mail_doors(hermetic_mail_doors):
 @pytest.fixture(autouse=True)
 def _no_live_branches(monkeypatch):
     """A DISPATCH line reads its source's receipt; no test reads the live tree's."""
-    monkeypatch.setattr(feed._agent, "_resolve_branch_path", lambda source: None)
+    monkeypatch.setattr(agent_handler, "_resolve_branch_path", lambda source: None)
 
 
 @pytest.fixture
@@ -356,12 +357,12 @@ class TestGroundingReading:
         def boom(source):
             raise AttributeError("bad registry row")
 
-        monkeypatch.setattr(feed._agent, "_resolve_branch_path", boom)
+        monkeypatch.setattr(agent_handler, "_resolve_branch_path", boom)
         line = feed.format_feed_event({"kind": "dispatch", "source": "canary", "title": "t", "body": "Duration: 1s"})
         assert line == 'DISPATCH @canary title="t" detail="Duration: 1s grounding=no receipt"'
 
     def test_dispatch_line_carries_the_reading(self, tmp_path, monkeypatch):
         branch = _branch(tmp_path, {}, host_cli="claude", model_observed="opus")
-        monkeypatch.setattr(feed._agent, "_resolve_branch_path", lambda source: branch)
+        monkeypatch.setattr(agent_handler, "_resolve_branch_path", lambda source: branch)
         line = feed.format_feed_event({"kind": "dispatch", "source": "canary", "title": "t", "body": "Duration: 1s"})
         assert line == 'DISPATCH @canary title="t" detail="Duration: 1s grounding=verified gen2 run=claude·opus"'

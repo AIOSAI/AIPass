@@ -3,7 +3,7 @@
 # Description: Tests for aipass new — project creation handler
 # Version: 1.5.0
 # Created: 2026-07-17
-# Modified: 2026-10-28
+# Modified: 2026-10-29
 # =============================================
 
 """Tests for apps/handlers/new_project/__init__.py and apps/modules/new_project.py."""
@@ -26,7 +26,6 @@ import pytest  # pyright: ignore[reportMissingImports]
 from aipass.aipass.apps import aipass as entry
 from aipass.aipass.apps.handlers.init.bootstrap import init_project, is_projects_child
 from aipass.aipass.apps.handlers.new_project import (
-    _git_init,
     create_project,
     find_host_root,
 )
@@ -1015,12 +1014,19 @@ def test_a_new_project_agent_imports_its_own_package_so_its_tests_and_modules_lo
     assert "ping" in entry_run.stdout, entry_run.stdout + entry_run.stderr
 
 
-def test_git_init_still_refuses_an_existing_repo(tmp_path):
-    """The re-init guard survives the R6 change — no branch work on a live repo."""
-    (tmp_path / ".git").mkdir()
+def test_git_init_still_refuses_an_existing_repo(host_env, monkeypatch):
+    """The re-init guard survives the R6 change — no branch work on a live repo; the half-born project rolls back."""
 
-    with pytest.raises(RuntimeError, match="already has a .git"):
-        _git_init(tmp_path, "demo", "empty")
+    def a_repo_appears(target, name):
+        (target / ".git").mkdir()
+        return [], []
+
+    with (
+        patch("aipass.aipass.apps.handlers.new_project._scaffold_aipass", side_effect=a_repo_appears),
+        pytest.raises(RuntimeError, match="already has a .git"),
+    ):
+        _born(host_env, monkeypatch)
+    assert not (host_env / "projects" / "demo").exists()
 
 
 def test_spawn_project_agent_passes_no_citizen_class(host_env, monkeypatch):

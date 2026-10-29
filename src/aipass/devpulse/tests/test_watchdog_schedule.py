@@ -3,7 +3,7 @@
 # Description: Tests for the watchdog schedule handler + router integration
 # Version: 1.1.0
 # Created: 2026-04-14
-# Modified: 2026-10-22
+# Modified: 2026-10-29
 # =============================================
 
 """Tests for apps/handlers/watchdog/schedule.py and the watchdog schedule command that drives it."""
@@ -213,11 +213,16 @@ def test_wake_at_nonexistent_command():
 
 
 def test_wake_at_unclosed_quote_fails_before_the_wait(monkeypatch):
-    """A broken quote raises at once, before registering or sleeping."""
-    monkeypatch.setattr(schedule_handler._registry, "register", lambda *a, **kw: pytest.fail("registered"))
-    monkeypatch.setattr(schedule_handler.time, "sleep", lambda s: pytest.fail("slept"))
+    """A broken quote raises at once: the clock is read for the target only, never by the wait loop."""
+    reads = []
+
+    def clock():
+        reads.append(1)
+        return datetime(2026, 4, 14, 10, 0, 0) + timedelta(hours=3 * (len(reads) - 1))
+
     with pytest.raises(ValueError, match="quotation"):
-        schedule_handler.wake_at("+2h", command='echo "oops')
+        schedule_handler.wake_at("+2h", command='echo "oops', now_fn=clock)
+    assert len(reads) == 1
 
 
 def test_wake_at_hung_command_times_out_in_the_exec_failure_shape(monkeypatch):

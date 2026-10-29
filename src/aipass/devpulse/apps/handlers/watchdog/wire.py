@@ -85,18 +85,18 @@ def _stdout_target_via_lsof(pid: int) -> Path | None:
 
     None on any failure: a wrong path would be read as a wrapper identity.
     """
+    stdout = ""
     try:
-        done = subprocess.run(
+        stdout = subprocess.run(
             ["lsof", "-p", str(pid), "-a", "-d", "1", "-Fn"],
             capture_output=True,
             text=True,
             timeout=_PROBE_TIMEOUT_SECONDS,
             check=False,
-        )
+        ).stdout
     except (OSError, subprocess.SubprocessError) as exc:
         logger.info("[watchdog.wire] lsof unusable for pid=%s: %s", pid, exc)
-        return None
-    for line in done.stdout.splitlines():
+    for line in stdout.splitlines():
         if line.startswith("n") and len(line) > 1:
             return Path(line[1:])
     logger.info("[watchdog.wire] lsof named no fd/1 for pid=%s", pid)

@@ -3,7 +3,7 @@
 # Description: The hook engine's safeguards: trust, timeouts, one document, the ledger, fail-closed gates, promote
 # Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-10-28
+# Modified: 2026-10-29
 # =============================================
 
 """Tests for apps/modules/engine.py: trust, timeouts, the ledger and the fail-closed gates."""
@@ -263,7 +263,8 @@ def ns_project(temp_test_dir, monkeypatch):
         patch.object(loader, "aipass_home", return_value=None),
         patch.object(loader, "logger") as log,
     ):
-        yield temp_test_dir, log
+        # resolved: the loader stamps realpaths, and macOS tmp is /var -> /private/var
+        yield temp_test_dir.resolve(), log
 
 
 def _warned(log) -> str:
@@ -277,6 +278,7 @@ class TestTrustedHandlerNamespace:
         project, _ = ns_project
         enroll(str(project))
         config = find_project_config()
+        assert config is not None
         assert config["_handler_namespace"] == _NS
         assert config["_project_src"] == str(project / "src")
         with patch("aipass.hooks.apps.modules.engine._log") as log:
@@ -304,7 +306,7 @@ class TestTrustedHandlerNamespace:
         hooks_json.write_text(json.dumps(config), encoding="utf-8")
         enroll(str(project))
         loaded = find_project_config()
-        assert "_handler_namespace" not in loaded
+        assert loaded is not None and "_handler_namespace" not in loaded
         result, entries, importer = _dispatch_handler(MagicMock(), handler=f"{_NS}.events.record")
         importer.assert_not_called()
         assert "namespace refused" in _hook_entry(entries)["stderr_preview"]
@@ -318,6 +320,7 @@ class TestTrustedHandlerNamespace:
         hooks_json.write_text(json.dumps(config), encoding="utf-8")
         enroll(str(project))
         loaded = find_project_config()
+        assert loaded is not None
         assert "_handler_namespace" not in loaded and "_project_src" not in loaded
 
     @pytest.mark.parametrize("namespace", ["aipass", "a.b", "", 7])
@@ -328,13 +331,15 @@ class TestTrustedHandlerNamespace:
         config["handler_namespace"] = namespace
         hooks_json.write_text(json.dumps(config), encoding="utf-8")
         enroll(str(project))
-        assert "_handler_namespace" not in find_project_config()
+        loaded = find_project_config()
+        assert loaded is not None and "_handler_namespace" not in loaded
         assert "refused" in _warned(log)
 
     def test_aipass_root_config_never_takes_a_namespace(self, ns_project):
         project, log = ns_project
         with patch.object(loader, "locate_config", return_value=(loader.AIPASS, project)):
-            assert "_handler_namespace" not in find_project_config()
+            loaded = find_project_config()
+        assert loaded is not None and "_handler_namespace" not in loaded
         assert "aipass.* only" in _warned(log)
 
     def test_src_is_appended_never_prepended(self, tmp_path, mock_logger):
