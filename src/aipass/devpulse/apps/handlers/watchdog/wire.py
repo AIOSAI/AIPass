@@ -3,7 +3,7 @@
 # Description: Watchdog Wire Handler — deliver MY dispatch completions into THIS session
 # Version: 2.8.0
 # Created: 2026-08-19
-# Modified: 2026-10-28
+# Modified: 2026-10-29
 # =============================================
 
 """Watchdog Wire Handler — deliver this seat's dispatch completions into THIS session."""
@@ -437,9 +437,7 @@ def arm_wire(
         _touch_heartbeat()
         last_heartbeat = time.monotonic()
 
-        feed_records, feed_state = _feed.drain_feed(
-            feed_cursor_file, feed_file_path=feed_source, state=feed_state
-        )
+        feed_records, feed_state = _feed.drain_feed(feed_cursor_file, feed_file_path=feed_source, state=feed_state)
         missed = _partition_mine(feed_records, seat)
         for record in missed:
             _stdout_event(f"MISSED {_feed.format_feed_event(record)} [completed while no wire was up]")
@@ -481,9 +479,7 @@ def arm_wire(
                 dead += _announce_dead(root, seat, announced)
                 last_dead_check = now
 
-            feed_records, feed_state = _feed.drain_feed(
-                feed_cursor_file, feed_file_path=feed_source, state=feed_state
-            )
+            feed_records, feed_state = _feed.drain_feed(feed_cursor_file, feed_file_path=feed_source, state=feed_state)
             fresh = _partition_mine(feed_records, seat)
             for record in fresh:
                 _stdout_event(_feed.format_feed_event(record))

@@ -3,7 +3,7 @@
 # Description: Tests for the watchdog feed handler (FPLAN-0451 P2 — push replaces poll)
 # Version: 1.1.0
 # Created: 2026-08-21
-# Modified: 2026-10-28
+# Modified: 2026-10-29
 # =============================================
 
 """Tests for apps/handlers/watchdog/feed.py, reading completions off @ai_mail's notification feed."""
@@ -306,8 +306,15 @@ def _branch(tmp_path: Path, receipt: dict | None = None, **pointer) -> Path:
     local.mkdir(parents=True)
     (local / "session.json").write_text(json.dumps({"session_id": "ses_aaaaaaaaaaaaaaaa", **pointer}), encoding="utf-8")
     if receipt is not None:
-        row = {"session_id": "ses_aaaaaaaaaaaaaaaa", "generation": 2, "observation_boundary": "opencode_store",
-               "status": "verified", "missing": [], "stale": [], **receipt}
+        row = {
+            "session_id": "ses_aaaaaaaaaaaaaaaa",
+            "generation": 2,
+            "observation_boundary": "opencode_store",
+            "status": "verified",
+            "missing": [],
+            "stale": [],
+            **receipt,
+        }
         (local / "grounding.json").write_text(json.dumps({"current": row, "history": []}), encoding="utf-8")
     return local.parent
 
@@ -348,6 +355,7 @@ class TestGroundingReading:
     def test_lookup_that_raises_still_renders_the_line(self, monkeypatch):
         def boom(source):
             raise AttributeError("bad registry row")
+
         monkeypatch.setattr(feed._agent, "_resolve_branch_path", boom)
         line = feed.format_feed_event({"kind": "dispatch", "source": "canary", "title": "t", "body": "Duration: 1s"})
         assert line == 'DISPATCH @canary title="t" detail="Duration: 1s grounding=no receipt"'
