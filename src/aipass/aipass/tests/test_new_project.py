@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_new_project.py
 # Description: Tests for aipass new — project creation handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-07-17
-# Modified: 2026-10-27
+# Modified: 2026-10-28
 # =============================================
 
 """Tests for apps/handlers/new_project/__init__.py and apps/modules/new_project.py."""
@@ -16,6 +16,7 @@ import io
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -445,6 +446,7 @@ def _built_with_agent(host_env, monkeypatch, name: str, spawn_answer: dict):
         patch("subprocess.run", side_effect=_mock_git_run),
         patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=None),
         patch("aipass.aipass.shared.project_home._enroll_project"),
+        patch("aipass.aipass.apps.handlers.new_project._localize_imports"),
         patch("aipass.aipass.apps.handlers.new_project.spawn_agent", return_value=spawn_answer) as mock_spawn,
     ):
         return create_project(name, no_agent=False), mock_spawn
@@ -521,6 +523,7 @@ def test_create_project_with_agent(host_env, monkeypatch):
             return_value=None,
         ),
         patch("aipass.aipass.shared.project_home._enroll_project"),
+        patch("aipass.aipass.apps.handlers.new_project._localize_imports"),
         patch(
             "aipass.aipass.apps.handlers.new_project.spawn_agent",
             return_value=spawn_ok,
@@ -796,6 +799,7 @@ def test_tty_auto_launches_agent(host_env, monkeypatch):
             return_value=None,
         ),
         patch("aipass.aipass.shared.project_home._enroll_project"),
+        patch("aipass.aipass.apps.handlers.new_project._localize_imports"),
         patch(
             "aipass.aipass.apps.handlers.new_project.spawn_agent",
             return_value=spawn_ok,
@@ -832,6 +836,7 @@ def test_no_tty_skips_auto_launch(host_env, monkeypatch, capsys: pytest.CaptureF
             return_value=None,
         ),
         patch("aipass.aipass.shared.project_home._enroll_project"),
+        patch("aipass.aipass.apps.handlers.new_project._localize_imports"),
         patch(
             "aipass.aipass.apps.handlers.new_project.spawn_agent",
             return_value=spawn_ok,
@@ -971,6 +976,43 @@ def test_git_init_birth_commit_carries_the_project_files(host_env, monkeypatch):
     repo = _born(host_env, monkeypatch)
 
     assert "README.md" in _run_git(["ls-tree", "--name-only", "dev"], repo).split()
+
+
+@requires_git
+@pytest.mark.parametrize("template", ["python", "empty"])
+def test_a_new_project_agent_imports_its_own_package_so_its_tests_and_modules_load(host_env, monkeypatch, template):
+    """Spawn's citizen template imports aipass.<name>, a package no project has: tests never collected."""
+    # The real spawn, not the stub: the defect is the text spawn's template writes.
+    _git_env(monkeypatch)
+    monkeypatch.chdir(host_env)
+    with (
+        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=None),
+        patch("aipass.aipass.shared.project_home._enroll_project"),
+    ):
+        result = create_project("my-app", template=template)
+    home = Path(result["agent_home"])
+    (home / "apps" / "modules" / "ping.py").write_text(
+        '"""Ping."""\n\n\ndef handle_command(command, args):\n    return False\n', encoding="utf-8"
+    )
+
+    tests = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", str(home / "tests")],
+        cwd=result["target"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=300,
+    )
+    entry_run = subprocess.run(
+        [sys.executable, str(home / "apps" / "my_app.py")],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+    )
+
+    assert tests.returncode == 0, tests.stdout[-2000:]
+    assert "ping" in entry_run.stdout, entry_run.stdout + entry_run.stderr
 
 
 def test_git_init_still_refuses_an_existing_repo(tmp_path):
