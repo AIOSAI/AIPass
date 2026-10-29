@@ -1,19 +1,22 @@
 # =================== AIPass ====================
 # Name: tracking.py
 # Description: Usage Tracking Handler
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2025-11-16
-# Modified: 2026-10-24
+# Modified: 2026-10-28
 # =============================================
 
 """Usage Tracking Handler"""
 
 import json
-import requests
 import time
 from datetime import datetime
+from http.client import HTTPException
 from pathlib import Path
 from typing import Dict, Any, Optional
+from urllib.error import HTTPError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from aipass.prax import logger
 
@@ -81,25 +84,24 @@ def get_generation_metrics(generation_id: str, api_key: str) -> Dict[str, Any]:
     """Query OpenRouter /generation endpoint for real usage metrics"""
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
+    url = f"{GENERATION_ENDPOINT}?{urlencode({'id': generation_id})}"
     try:
-        response = requests.get(  # type: ignore[attr-defined]
-            GENERATION_ENDPOINT, params={"id": generation_id}, headers=headers, timeout=DEFAULT_REQUEST_TIMEOUT
-        )
-    except requests.exceptions.Timeout as e:
-        logger.warning(f"[{MODULE_NAME}] Request timeout querying generation: {e}")
-        raise MetricsUnavailable(f"Request timeout querying generation {generation_id}: {e}") from e
-    except requests.exceptions.RequestException as e:
-        logger.error(f"[{MODULE_NAME}] Request error querying generation: {e}")
-        raise MetricsUnavailable(f"Request error querying generation {generation_id}: {e}") from e
-
-    if response.status_code != 200:
-        logger.warning(
-            f"[{MODULE_NAME}] OpenRouter API returned status {response.status_code} for generation {generation_id}"
-        )
-        raise MetricsUnavailable(f"OpenRouter answered status {response.status_code} for generation {generation_id}")
+        with urlopen(Request(url, headers=headers), timeout=DEFAULT_REQUEST_TIMEOUT) as response:
+            body = response.read()
+    except HTTPError as e:
+        logger.warning(f"[{MODULE_NAME}] OpenRouter API returned status {e.code} for generation {generation_id}")
+        raise MetricsUnavailable(f"OpenRouter answered status {e.code} for generation {generation_id}") from e
+    except (OSError, HTTPException) as e:
+        # A connect timeout arrives wrapped in URLError; a read timeout arrives bare.
+        reason = getattr(e, "reason", e)
+        if isinstance(reason, TimeoutError):
+            logger.warning(f"[{MODULE_NAME}] Request timeout querying generation: {reason}")
+            raise MetricsUnavailable(f"Request timeout querying generation {generation_id}: {reason}") from e
+        logger.error(f"[{MODULE_NAME}] Request error querying generation: {reason}")
+        raise MetricsUnavailable(f"Request error querying generation {generation_id}: {reason}") from e
 
     try:
-        data = response.json()
+        data = json.loads(body)
     except ValueError as e:
         logger.error(f"[{MODULE_NAME}] Error parsing metrics: {e}")
         raise MetricsUnavailable(f"OpenRouter answered unreadable JSON for generation {generation_id}: {e}") from e
