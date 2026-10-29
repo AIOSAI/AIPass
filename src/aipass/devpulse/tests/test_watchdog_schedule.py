@@ -212,6 +212,14 @@ def test_wake_at_nonexistent_command():
     assert result["command"] == "this-command-does-not-exist-xyz-123"
 
 
+def test_wake_at_unclosed_quote_fails_before_the_wait(monkeypatch):
+    """A broken quote raises at once, before registering or sleeping."""
+    monkeypatch.setattr(schedule_handler._registry, "register", lambda *a, **kw: pytest.fail("registered"))
+    monkeypatch.setattr(schedule_handler.time, "sleep", lambda s: pytest.fail("slept"))
+    with pytest.raises(ValueError, match="quotation"):
+        schedule_handler.wake_at("+2h", command='echo "oops')
+
+
 def test_wake_at_hung_command_times_out_in_the_exec_failure_shape(monkeypatch):
     """A hung command answers exit -1 and names the timeout, so the wake's report never waits on it forever."""
     monkeypatch.setattr(schedule_handler, "_COMMAND_TIMEOUT_SECONDS", 0.2)

@@ -52,7 +52,7 @@ A dispatch whose monitor died — host reboot, OOM, kill — can never report, s
 DEAD @prax [70da6e9c] dispatched 09-07 12:00 "..." — no completion by 09-07 14:00, the hard timeout. Nothing here checked whether its monitor is alive, and ai_mail retries a dispatch up to three times with a fresh timeout each attempt, so an overdue row is often a live monitor part way through attempt 2. Check the service and the dispatch log first: re-dispatching over a running retry doubles the work.
 ```
 
-Each death is announced once ever (cursor `devpulse_json/wire_dead_cursor.json`), so a re-sign-in never repeats one — and a one-shot does not exit on a death it already announced. `drone @devpulse watchdog status` shows the same rows on demand as "Dispatches overdue".
+Each death is announced once ever (cursor `devpulse_json/<seat>.wire_dead_cursor.json`), so a re-sign-in never repeats one — and a one-shot does not exit on a death it already announced. `drone @devpulse watchdog status` shows the same rows on demand as "Dispatches overdue".
 
 ## Two rules the receiver enforces
 

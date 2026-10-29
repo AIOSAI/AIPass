@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: feed.py
 # Description: Watchdog Feed Handler — read completions off the push feed instead of polling for them
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-08-21
 # Modified: 2026-10-28
 # =============================================
@@ -24,8 +24,8 @@ from aipass.devpulse.apps.handlers.watchdog import agent as _agent
 from aipass import ai_mail as _ai_mail
 
 
-# "mail" is excluded: every email writes one, and a wake per email gets the wire muted.
-FEED_KINDS = ("dispatch", "wake")
+# Completions only: "wake" is a start edge (a double wake), and a "mail" wake per email gets the wire muted.
+FEED_KINDS = ("dispatch",)
 
 # Matches @ai_mail's FEED_MAX_LINES, so no digest ages out while its line is on disk.
 CURSOR_KEEP_DIGESTS = 400
@@ -199,7 +199,13 @@ def format_feed_event(record: dict) -> str:
     body = " ".join(str(record.get("body") or "").split()).replace('"', "'")
     line = f'{kind.upper()} @{source} title="{title}"'
     if kind == "dispatch":
-        reading = grounding_reading(_agent._resolve_branch_path(source))
+        try:
+            branch_path = _agent._resolve_branch_path(source)
+        except Exception as exc:
+            # The cursor already marks this line seen; raising here loses the completion for good.
+            logger.warning("[watchdog.feed] branch lookup failed for @%s: %s", source, exc)
+            branch_path = None
+        reading = grounding_reading(branch_path)
         body = f"{body} {reading}" if body else reading
     if body:
         line += f' detail="{body}"'

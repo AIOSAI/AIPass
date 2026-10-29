@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wire.py
 # Description: Watchdog Wire Handler — deliver MY dispatch completions into THIS session
-# Version: 2.7.1
+# Version: 2.8.0
 # Created: 2026-08-19
-# Modified: 2026-10-27
+# Modified: 2026-10-28
 # =============================================
 
 """Watchdog Wire Handler — deliver this seat's dispatch completions into THIS session."""
@@ -24,6 +24,7 @@ from pathlib import Path
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from aipass.devpulse.apps.handlers.watchdog import dispatches as _dispatches
+from aipass.devpulse.apps.handlers.watchdog.agent import _find_repo_root as find_repo_root
 from aipass.devpulse.apps.handlers.watchdog import feed as _feed
 from aipass.devpulse.apps.handlers.watchdog import registry as _registry
 from aipass.devpulse.apps.handlers.json import json_handler
@@ -36,9 +37,6 @@ HEARTBEAT_FILE = Path(tempfile.gettempdir()) / "aipass-watchdog-active"
 HEARTBEAT_STALE_SECONDS = 15.0
 
 _HEARTBEAT_INTERVAL_SECONDS = 5.0
-
-# Completions only, passed explicitly: feed.FEED_KINDS also carries "wake" start edges.
-_DELIVER_KINDS = ("dispatch",)
 
 # A dead monitor pushes nothing, so the register is read through @ai_mail's door at this
 # cadence: no agent polled, no process armed, a stdout line only when a death is found.
@@ -54,15 +52,6 @@ _REGISTRY_FILENAME = "AIPASS_REGISTRY.json"
 
 # A wedged ps or lsof costs a tick, not the wire.
 _PROBE_TIMEOUT_SECONDS = 5.0
-
-
-def find_repo_root(start: Path | None = None) -> Path | None:
-    """Walk up from ``start`` (default CWD) to the dir holding the registry."""
-    here = (start or Path.cwd()).resolve()
-    for candidate in [here, *here.parents]:
-        if (candidate / _REGISTRY_FILENAME).exists():
-            return candidate
-    return None
 
 
 def _stderr(msg: str) -> None:
@@ -220,19 +209,12 @@ def _sweep_wires(storage_path: Path | None, seat: str) -> None:
             continue
 
         their_session = session_dir_of(stdout_target(pid))
-        if looks_like_ours(pid):
-            result = _registry.kill_watch(handle, storage_path=storage_path)
-            _stderr(
-                f"watchdog wire: took over stale wire {handle} (pid {pid}, "
-                f"session={their_session.name if their_session else 'unknown'}) — {result.get('reason', '')}"
-            )
-            logger.info("[watchdog.wire] took over stale wire handle=%s pid=%s", handle, pid)
-        else:
-            _registry.deregister(handle, storage_path=storage_path)
-            _stderr(
-                f"watchdog wire: {handle} records pid {pid} whose cmdline is not a watchdog "
-                f"— entry buried, process left alone (recycled pid)"
-            )
+        result = _registry.kill_watch(handle, storage_path=storage_path)
+        _stderr(
+            f"watchdog wire: took over stale wire {handle} (pid {pid}, "
+            f"session={their_session.name if their_session else 'unknown'}) — {result.get('reason', '')}"
+        )
+        logger.info("[watchdog.wire] took over stale wire handle=%s pid=%s", handle, pid)
 
 
 def _sweep_stale_daemons(storage_path: Path | None) -> int:
@@ -248,7 +230,7 @@ def _sweep_stale_daemons(storage_path: Path | None) -> int:
         pid = watch.get("pid")
         if not isinstance(handle, str):
             continue
-        if isinstance(pid, int) and _registry.is_pid_alive(pid) and looks_like_ours(pid):
+        if isinstance(pid, int) and _registry.is_pid_alive(pid):
             result = _registry.kill_watch(handle, storage_path=storage_path)
             _stderr(
                 f"watchdog wire: retired pre-r4 detection daemon {handle} (pid {pid}) "
@@ -456,7 +438,7 @@ def arm_wire(
         last_heartbeat = time.monotonic()
 
         feed_records, feed_state = _feed.drain_feed(
-            feed_cursor_file, kinds=_DELIVER_KINDS, feed_file_path=feed_source, state=feed_state
+            feed_cursor_file, feed_file_path=feed_source, state=feed_state
         )
         missed = _partition_mine(feed_records, seat)
         for record in missed:
@@ -500,7 +482,7 @@ def arm_wire(
                 last_dead_check = now
 
             feed_records, feed_state = _feed.drain_feed(
-                feed_cursor_file, kinds=_DELIVER_KINDS, feed_file_path=feed_source, state=feed_state
+                feed_cursor_file, feed_file_path=feed_source, state=feed_state
             )
             fresh = _partition_mine(feed_records, seat)
             for record in fresh:

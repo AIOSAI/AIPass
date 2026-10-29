@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: schedule.py
 # Description: Watchdog Schedule Handler — wall-clock + relative wake, optional command
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-04-14
-# Modified: 2026-10-22
+# Modified: 2026-10-28
 # =============================================
 
 # Naive local datetimes throughout: "02:00" means what a human means by it.
@@ -13,6 +13,7 @@ Watchdog Schedule Handler — wake at a wall-clock time or after a relative dela
 """
 
 import re
+import shlex
 import subprocess
 import time
 from collections.abc import Callable
@@ -90,13 +91,11 @@ def format_wait(target: datetime, now: datetime) -> str:
     return f"overdue by {body}" if overdue else f"in {body}"
 
 
-def _run_command(command: str) -> dict:
-    """Execute ``command`` as an argument list, no shell; an exec failure or a timeout answers exit -1."""
-    import shlex
-
+def _run_command(argv: list[str]) -> dict:
+    """Execute ``argv``, no shell; an exec failure or a timeout answers exit -1."""
     try:
         completed = subprocess.run(
-            shlex.split(command),
+            argv,
             capture_output=True,
             text=True,
             check=False,
@@ -108,14 +107,14 @@ def _run_command(command: str) -> dict:
             "command_stderr": completed.stderr,
         }
     except subprocess.TimeoutExpired as exc:
-        logger.warning("[watchdog.schedule] command timed out after %ss %r", _COMMAND_TIMEOUT_SECONDS, command)
+        logger.warning("[watchdog.schedule] command timed out after %ss %r", _COMMAND_TIMEOUT_SECONDS, argv)
         return {
             "command_exit_code": -1,
             "command_stdout": "",
             "command_stderr": f"timed out after {int(_COMMAND_TIMEOUT_SECONDS)}s: {exc}",
         }
     except OSError as exc:
-        logger.warning("[watchdog.schedule] command exec failed %r: %s", command, exc)
+        logger.warning("[watchdog.schedule] command exec failed %r: %s", argv, exc)
         return {
             "command_exit_code": -1,
             "command_stdout": "",
@@ -133,6 +132,8 @@ def wake_at(
     clock = now_fn if now_fn is not None else datetime.now
     start = clock()
     target = parse_schedule(time_str, now=start)
+    # Before the sleep: an unclosed quote must fail now, not after the whole wait.
+    argv = shlex.split(command) if command else None
     logger.info(
         "[watchdog.schedule] wake_at time=%s target=%s command=%s",
         time_str,
@@ -166,8 +167,8 @@ def wake_at(
             "command_stdout": None,
             "command_stderr": None,
         }
-        if command:
-            command_result = _run_command(command)
+        if argv:
+            command_result = _run_command(argv)
 
         return {
             "woke": True,

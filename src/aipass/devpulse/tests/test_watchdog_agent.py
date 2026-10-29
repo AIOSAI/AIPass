@@ -255,7 +255,9 @@ def test_watch_agent_crashed_via_bounce_file(monkeypatch, tmp_path):
 
     def crash_exit():
         """Drop a bounce file then remove the lock to simulate crash exit."""
-        bounce_file.write_text(json.dumps({"exit_code": 1, "reason": "test"}), encoding="utf-8")
+        bounce_file.write_text(
+            json.dumps({"exit_code": 1, "reason": "test", "timestamp": "2026-04-14T00:00:05"}), encoding="utf-8"
+        )
         lock_file.unlink(missing_ok=True)
 
     _exit_during_first_poll(monkeypatch, crash_exit)
@@ -1037,3 +1039,22 @@ def test_opencode_pointer_watches_the_session_row(tmp_path, monkeypatch):
 
     store.write_text("not a database", encoding="utf-8")
     assert s.last_entry_inflight() is True  # an unreadable store counts as in flight
+
+
+def test_bounce_older_than_the_dispatch_is_not_a_crash(tmp_path):
+    """Nothing deletes last_bounce.json; a past run's file must not mark this clean run crashed."""
+    (tmp_path / ".ai_mail.local").mkdir()
+    (tmp_path / ".ai_mail.local" / "last_bounce.json").write_text(
+        json.dumps({"timestamp": "2026-10-01T09:00:00"}), encoding="utf-8"
+    )
+    stale = agent_handler._classify_exit(tmp_path, lock_existed=True, dispatch_ts="2026-10-28T09:00:00")
+    fresh = agent_handler._classify_exit(tmp_path, lock_existed=True, dispatch_ts="2026-09-28T09:00:00")
+    assert stale[0] == "completed_silent" and fresh[0] == "crashed"
+
+
+def test_null_email_row_does_not_stop_the_search(tmp_path):
+    """A row with "email": null is skipped by email and still matched by name."""
+    (tmp_path / "b").mkdir()
+    reg = tmp_path / "X_REGISTRY.json"
+    reg.write_text(json.dumps({"branches": [{"name": "B", "email": None, "path": "b"}]}), encoding="utf-8")
+    assert agent_handler._search_registry(reg, "@b") == tmp_path / "b"

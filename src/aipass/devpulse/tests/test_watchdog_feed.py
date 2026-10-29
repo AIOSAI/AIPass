@@ -150,14 +150,14 @@ class TestKindFilter:
 
         assert records == []
 
-    def test_wake_is_in_the_default_set(self, feed_file, cursor):
+    def test_wake_is_dropped_by_the_default_set(self, feed_file, cursor):
         _write(feed_file, [_event(minute=0)])
         feed.drain_feed(cursor, feed_file_path=feed_file)
 
         _write(feed_file, [_event(minute=0), _event(kind="wake", minute=1)])
         records, _ = feed.drain_feed(cursor, feed_file_path=feed_file)
 
-        assert len(records) == 1
+        assert records == []
 
 
 class TestTrim:
@@ -344,6 +344,13 @@ class TestGroundingReading:
 
     def test_old_pointer_without_run_fields_omits_run(self, tmp_path):
         assert "run=" not in feed.grounding_reading(_branch(tmp_path, {}))
+
+    def test_lookup_that_raises_still_renders_the_line(self, monkeypatch):
+        def boom(source):
+            raise AttributeError("bad registry row")
+        monkeypatch.setattr(feed._agent, "_resolve_branch_path", boom)
+        line = feed.format_feed_event({"kind": "dispatch", "source": "canary", "title": "t", "body": "Duration: 1s"})
+        assert line == 'DISPATCH @canary title="t" detail="Duration: 1s grounding=no receipt"'
 
     def test_dispatch_line_carries_the_reading(self, tmp_path, monkeypatch):
         branch = _branch(tmp_path, {}, host_cli="claude", model_observed="opus")

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: agent.py
 # Description: Watchdog Agent Handler — block until dispatched agent exits
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-04-14
 # Modified: 2026-10-28
 # =============================================
@@ -84,14 +84,9 @@ def _search_registry(registry_file: Path, target_email: str, strict: bool = Fals
     if isinstance(raw_branches, dict):
         raw_branches = list(raw_branches.values())
     for branch in raw_branches:
-        if branch.get("email", "").lower() == target_email:
-            raw_path = branch.get("path", "")
-            path = Path(raw_path)
-            if not path.is_absolute():
-                path = registry_dir / path
-            return path if path.exists() else None
-        name = branch.get("name", "").lower()
-        if f"@{name}" == target_email:
+        email = str(branch.get("email") or "").lower()
+        name = str(branch.get("name") or "").lower()
+        if email == target_email or f"@{name}" == target_email:
             raw_path = branch.get("path", "")
             path = Path(raw_path)
             if not path.is_absolute():
@@ -501,15 +496,17 @@ def _classify_exit(
     if bounce_file.exists():
         try:
             data = json.loads(bounce_file.read_text(encoding="utf-8"))
-            exit_code = data.get("exit_code")
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("[watchdog.agent] bounce file unreadable: %s", exc)
+            return ("crashed", "agent crashed (bounce file present, unreadable)", None)
+        exit_code = data.get("exit_code")
+        # Nothing deletes the bounce file, so one older than this dispatch is a past run's.
+        if not dispatch_ts or str(data.get("timestamp") or "") >= dispatch_ts:
             return (
                 "crashed",
                 f"agent crashed (last_bounce.json exit_code={exit_code})",
                 exit_code if isinstance(exit_code, int) else None,
             )
-        except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("[watchdog.agent] bounce file unreadable: %s", exc)
-            return ("crashed", "agent crashed (bounce file present, unreadable)", None)
 
     replied = _check_sent_for_reply(branch_path, dispatch_ts)
     if replied:
