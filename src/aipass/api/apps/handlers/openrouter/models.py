@@ -1,16 +1,18 @@
 # =================== AIPass ====================
 # Name: models.py
 # Description: OpenRouter Model Management
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2025-11-16
-# Modified: 2026-10-17
+# Modified: 2026-10-28
 # =============================================
 
 """OpenRouter Model Management Handler"""
 
+import json
+from http.client import HTTPException
 from typing import Dict, List
-
-import requests
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 from aipass.prax import logger
 
@@ -35,22 +37,22 @@ def fetch_models_from_api(api_key: str) -> List[Dict]:
 
     logger.info(f"[{MODULE_NAME}] Requesting models from OpenRouter API")
     try:
-        response = requests.get(  # type: ignore[attr-defined]
-            OPENROUTER_API_URL, headers=headers, timeout=DEFAULT_TIMEOUT
-        )
-    except requests.exceptions.Timeout as e:
-        logger.error(f"[{MODULE_NAME}] Request timeout - OpenRouter API not responding")
-        raise ModelsUnavailable(f"no answer within {DEFAULT_TIMEOUT}s") from e
-    except requests.exceptions.RequestException as e:
-        logger.error(f"[{MODULE_NAME}] Network error: {e}")
-        raise ModelsUnavailable(f"network error: {e}") from e
-
-    if response.status_code != 200:
-        logger.error(f"[{MODULE_NAME}] OpenRouter API error: {response.status_code}")
-        raise ModelsUnavailable(f"status {response.status_code}")
+        with urlopen(Request(OPENROUTER_API_URL, headers=headers), timeout=DEFAULT_TIMEOUT) as response:
+            body = response.read()
+    except HTTPError as e:
+        logger.error(f"[{MODULE_NAME}] OpenRouter API error: {e.code}")
+        raise ModelsUnavailable(f"status {e.code}") from e
+    except (OSError, HTTPException) as e:
+        # A connect timeout arrives wrapped in URLError; a read timeout arrives bare.
+        reason = getattr(e, "reason", e)
+        if isinstance(reason, TimeoutError):
+            logger.error(f"[{MODULE_NAME}] Request timeout - OpenRouter API not responding")
+            raise ModelsUnavailable(f"no answer within {DEFAULT_TIMEOUT}s") from e
+        logger.error(f"[{MODULE_NAME}] Network error: {reason}")
+        raise ModelsUnavailable(f"network error: {reason}") from e
 
     try:
-        data = response.json()
+        data = json.loads(body)
     except ValueError as e:
         logger.error(f"[{MODULE_NAME}] Invalid JSON response from API")
         raise ModelsUnavailable("the answer is not JSON") from e

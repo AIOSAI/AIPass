@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: bootstrap.py
 # Description: Init handler — bootstrap an AIPass project in any directory
-# Version: 2.5.0
+# Version: 2.6.1
 # Created: 2026-03-14
-# Modified: 2026-10-27
+# Modified: 2026-10-28
 # =============================================
 
 """
@@ -52,6 +52,13 @@ _MANIFEST_TRACKED: tuple = (
     ".agents/skills/prep/SKILL.md",
     ".claude/commands/codex.md",
     ".codex/skills/claude/SKILL.md",
+    ".claude/commands/opencode.md",
+    ".codex/skills/opencode/SKILL.md",
+    ".opencode/commands/claude.md",
+    ".opencode/commands/codex.md",
+    ".opencode/commands/memo.md",
+    ".opencode/commands/prep.md",
+    ".opencode/commands/compass.md",
     "AGENTS.md",
 )
 
@@ -63,10 +70,17 @@ OWNER_SEEDS: tuple = (
 )
 PREP_SKILL_REL = ".agents/skills/prep/SKILL.md"
 LEGACY_PREP_REL = ".claude/commands/prep.md"
-#: The provider switch pair, one file per CLI so neither offers its own switch.
+#: The provider switch set: each CLI's switches to the other two (no CLI offers its own), plus OpenCode's rituals.
 SWITCH_PAIR: tuple = (
     (".claude/commands/codex.md", sc.codex_command_md),
     (".codex/skills/claude/SKILL.md", sc.claude_skill_md),
+    (".claude/commands/opencode.md", sc.opencode_command_md),
+    (".codex/skills/opencode/SKILL.md", sc.opencode_skill_md),
+    (".opencode/commands/claude.md", sc.opencode_claude_md),
+    (".opencode/commands/codex.md", sc.opencode_codex_md),
+    (".opencode/commands/memo.md", sc.opencode_memo_md),
+    (".opencode/commands/prep.md", sc.opencode_prep_md),
+    (".opencode/commands/compass.md", sc.opencode_compass_md),
 )
 SKILLS_REL = ".agents/skills"
 SKILLS_LINK_REL = ".claude/skills"
@@ -153,15 +167,14 @@ def shared_skills_state(target: Path) -> dict:
 
 
 def repair_shared_skills(target: Path) -> list[str]:
-    """Make a missing .claude/skills link, write a missing switch file, retire an unedited legacy prep command.
+    """Make a missing .claude/skills link, retire an unedited legacy prep command.
 
-    Returns one line per change. A copy, a foreign link, an edited prep.md and an existing switch file are the
-    owner's: left."""
+    Returns one line per change. A copy, a foreign link and an edited prep.md are the owner's: left. Switch files
+    are not written here: 'aipass init update' writes them and records their hash in the manifest."""
     actions: list[str] = []
     if shared_skills_state(target)["link"] == LINK_STATE_MISSING:
         note = link_skills(target)
         actions.append(note or f"Linked {SKILLS_LINK_REL} -> {_SKILLS_LINK_TARGET.as_posix()}")
-    actions.extend(f"Wrote {rel}" for rel in write_switch_pair(target))
     legacy = target / LEGACY_PREP_REL
     if legacy.is_file() and (target / PREP_SKILL_REL).is_file() and _is_managed_legacy_prep(target, legacy):
         disabled = sm.disabled_path(legacy)

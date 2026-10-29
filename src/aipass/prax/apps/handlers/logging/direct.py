@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: direct.py
 # Description: Direct Logger (Event Pipeline Bypass)
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-02-27
-# Modified: 2026-10-24
+# Modified: 2026-10-28
 # =============================================
 
 """PRAX Direct Logger

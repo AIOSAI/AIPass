@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: setup.py
 # Description: Logger Setup & Management
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2025-11-10
-# Modified: 2026-10-24
+# Modified: 2026-10-28
 # =============================================
 
 """PRAX Logger Setup"""

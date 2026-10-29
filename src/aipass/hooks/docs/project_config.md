@@ -21,6 +21,26 @@
 
 `drone @hooks status` explains why a project's own config is not running, and always ends "The AIPass gate set still runs."
 
+### A project's own handlers — `handler_namespace`
+
+A handler row names a dotted function the engine imports. By default only `aipass.*` is imported; anything else is refused before import and logged `handler namespace refused`. A trusted project can declare one package of its own:
+
+```json
+{
+  "handler_namespace": "hark",
+  "Stop": {"record": {"enabled": true, "handler": "hark.hark.apps.modules.hook_events.record", "matcher": ""}}
+}
+```
+
+Name a function under the project's `apps/modules/`, not `apps/handlers/`: the scaffold's handlers fence refuses every importer outside the branch, the hook engine included, so a handler row pointing into `handlers/` is refused whatever the trust state. A one-function module that calls the handler is the shape.
+
+- **Trust first.** The key is honoured only when the config itself loads, which means the project is enrolled and its hooks.json hash still matches. An unenrolled or edited config does not load at all, so none of its handlers are imported. The refusal line names the cure: `aipass trust <path>`. Adding the key changes the hash, so enroll after the edit.
+- **One name.** The value must be a single Python identifier, and it may not be `aipass`. Any other value is refused with a WARNING, and the config runs `aipass.*` only.
+- **The root config never takes it.** AIPass's own `.aipass/hooks.json` runs `aipass.*` only, and a key there is refused with a WARNING.
+- **`<project>/src` is appended to `sys.path` for that import only**, then removed. It is appended, never prepended, so an `aipass.*` module always resolves to AIPass's copy and a project cannot shadow one.
+- **Command rows stay refused** for every project config, namespaced or not. Nothing about the gates changes.
+- The loader stamps the trusted name as `_handler_namespace`, with `_project_src`, and it drops either key if the file supplies it, so a config cannot forge them. `drone @hooks status` prints the declared namespace, and says when it was refused.
+
 ## The template ruling — what a project gets, and what stays framework-only
 
 `.aipass/project_hooks.json` is the base config `aipass init` copies into a new project. It is not a
@@ -32,7 +52,7 @@ template into a project by union, so anything ruled *project* below reaches Vera
 | Handler | Event | Ruling | Why |
 |---|---|---|---|
 | `temporal` | UserPromptSubmit | **project** | One line off the host clock. No AIPass state, no project assumptions, no dependency. |
-| `context_gauge` | UserPromptSubmit | **project** | Reads the session's transcript on either CLI and nudges the memory call (`/prep` on Claude Code, `$prep` on Codex) before the compact ceiling. That is a CLI fact, not an AIPass one — every project manager compacts. The first line decides the shape: a Codex rollout opens with `session_meta`. **Claude Code:** the fill is the newest assistant turn's input + cache read + cache creation; the window is the one Claude Code runs for the transcript's model (`[1m]` or a native-1M id: 1M, else 200k), capped by `CLAUDE_CODE_AUTO_COMPACT_WINDOW` or `autoCompactWindow` (branch, then user settings); the trigger is window − 33k. **Codex:** the fill is the newest `token_count`'s `last_token_usage.total_tokens`; the window is that event's `model_context_window` (the usable 95% of the model's window), else 95% of `model_context_window` in `~/.codex/config.toml` (`$CODEX_HOME`); the trigger is 90% of the full window, lowered by `model_auto_compact_token_limit` when set, as codex-rs computes it. The line prints fill over window as the status line does (`context_window.py`). |
+| `context_gauge` | UserPromptSubmit | **project** | Reads the session's record on each of the three CLIs and nudges the memory call (`/prep` on Claude Code and OpenCode, `$prep` on Codex) before the compact ceiling. **OpenCode:** the newest assistant message in `opencode.db`, read-only, against a 200k window. That is a CLI fact, not an AIPass one — every project manager compacts. The first line decides the shape: a Codex rollout opens with `session_meta`. **Claude Code:** the fill is the newest assistant turn's input + cache read + cache creation; the window is the one Claude Code runs for the transcript's model (`[1m]` or a native-1M id: 1M, else 200k), capped by `CLAUDE_CODE_AUTO_COMPACT_WINDOW` or `autoCompactWindow` (branch, then user settings); the trigger is window − 33k. **Codex:** the fill is the newest `token_count`'s `last_token_usage.total_tokens`; the window is that event's `model_context_window` (the usable 95% of the model's window), else 95% of `model_context_window` in `~/.codex/config.toml` (`$CODEX_HOME`); the trigger is 90% of the full window, lowered by `model_auto_compact_token_limit` when set, as codex-rs computes it. The line prints fill over window as the status line does (`context_window.py`). |
 | `persistent_alert` | UserPromptSubmit | **project** | Reads the project's *own* `.aipass/alerts.json`; the walk-up stops at the project root. No file means silent, so it costs nothing and hands projects an alert channel they currently cannot use. |
 | `pre_compact_prep` | PreCompact | **project** | Stamps the compacting branch's own `.trinity/local.json`. Memory that survives compaction is the platform's headline promise, and it is not AIPass-specific. |
 | `post_compact_regrounding` | PostToolUse | **project** | Re-injects branch/identity/kernel/navmap after a compact — the four files `init` scaffolds into every project — in parts of at most 9,000 chars, one per tool call, branch first. Claude Code shows the agent only a 2,000-char preview of a hook context over 10,000 (issue #752); every part logs `[HOOKS] regroup fired loader=… part=k/N bytes=… chars=…` to `hooks_cadence.log`. Also the carrier for the `release_notice` compact path. |
@@ -40,7 +60,7 @@ template into a project by union, so anything ruled *project* below reaches Vera
 | `feedback_pulse` | UserPromptSubmit | **project**, ships `enabled: false` | Its own docstring scopes it to "external user projects (not the AIPass host)" — it belongs here more than in the framework file. Off by default, same as in the framework, so a project opts in. |
 | `culture` | SessionStart | **project** | Injects the host's `$AIPASS_HOME/.claude/AGENTS.md`, not the project's, on purpose: AIPass culture is every citizen's, and a project's own voice lives in its `AGENTS.md`. Claude Code reads that file natively only inside `AIPASS_HOME`, so the handler is silent for a Claude seat there and injects everywhere else; Codex never reads it natively. Wired per handler (`SessionStart:culture`) on both CLIs. |
 | `session_pointer` | SessionStart | **project** | Records an interactive session as its branch's resume target (`.ai_mail.local/session.json`), so a resume reopens the chat the owner just had, on the CLI that ran it. Without it a project's pointer is only ever written by a dispatch. Wired per handler on both CLIs. |
-| `settings_gate` | PreToolUse | **project** | The owner's accept on every provider-settings change, Claude's and Codex's. Those files are per user, not per project: a project seat reaches them the same way a fleet seat does. |
+| `settings_gate` | PreToolUse | **project** | The owner's accept on every provider-settings change, Claude's, Codex's and OpenCode's (`~/.config/opencode` and its auth file). Those files are per user, not per project: a project seat reaches them the same way a fleet seat does. |
 | `settings_backup` | PreToolUse | **project** | The copy and receipt in `~/.claude/.backup/settings/` before any tool writes a Claude settings file. Same reach as `settings_gate`. |
 | `navmap_cap` | PostToolUse | **project** | `prompt/navmap.handle_edit`: after an Edit, Write or shell write of a `.aipass/tier1_navmap.md`, says when the file is over `NAVMAP_CHAR_CAP` (8,000 chars), with the count and the overage. Injection cuts near 10,000; this tells the editor at edit time instead of the reader finding a cut prompt. Never blocks. |
 | `comment_budget` | PostToolUse | framework-only | Measures AIPass's house comment standard (under 10% comment lines). A project has its own. |

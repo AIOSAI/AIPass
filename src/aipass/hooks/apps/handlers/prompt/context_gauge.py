@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: context_gauge.py
-# Version: 1.3.0
-# Description: Calm heads-up to run /prep ($prep on Codex) as auto-compact approaches (UserPromptSubmit, DPLAN-0253), once per window
+# Version: 1.6.1
+# Description: Heads-up to run /prep ($prep on Codex) before auto-compact, and the grounding receipt (UserPromptSubmit)
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-20
-# Modified: 2026-10-25
+# Modified: 2026-10-28
 # =============================================
 
 """Heads-up so the model banks memories via /prep before the compact ceiling.
@@ -56,26 +56,55 @@ def _mark_fired(session_id: str, window: str, threshold: str) -> None:
             logger.info("[HOOKS] context_gauge: guard write failed: %s", exc)
 
 
+def _reading(hook_data: dict, session_id: str) -> tuple[int, int, int] | None:
+    """(fill, window, compact point) for this session, or None when there is nothing to read."""
+    context_window = importlib.import_module("aipass.hooks.apps.modules.context_window")
+    if hook_data.get("provider") == "opencode":
+        fill = context_window.opencode_fill(session_id)
+        if fill is None:
+            return None
+        return (fill, *context_window.opencode_window(session_id, hook_data.get("cwd", "") or str(Path.cwd())))
+    transcript_path = hook_data.get("transcript_path", "")
+    # Turn 0 has no transcript yet; any other read error reaches _gauge's handler, logged.
+    if not transcript_path or not Path(transcript_path).is_file():
+        return None
+    provider = context_window.transcript_provider(transcript_path)
+    usage = context_window.read_latest_usage(transcript_path, provider=provider)
+    if usage is None:
+        return None
+    cwd = hook_data.get("cwd", "") or str(Path.cwd())
+    model = context_window.read_latest_model(transcript_path, provider=provider)
+    window_size = context_window.resolve_compact_window(cwd, model, transcript_path, provider)
+    trigger = context_window.compact_threshold(window_size, provider)
+    return (context_window.context_fill_tokens(usage), window_size, trigger) if trigger > 0 else None
+
+
+def _receipt_line(hook_data: dict) -> str:
+    """Write the grounding receipt (modules/grounding_receipt.py); its line when the last call lost grounding."""
+    try:
+        return importlib.import_module("aipass.hooks.apps.modules.grounding_receipt").observe(hook_data)
+    except Exception as exc:
+        logger.error("[HOOKS] context_gauge: grounding receipt not written: %s", exc)
+        return ""
+
+
 def handle(hook_data: dict) -> dict:
+    """The context-fill nudge, then the grounding receipt's line when there is one."""
+    result = _gauge(hook_data)
+    line = _receipt_line(hook_data)
+    if line:
+        result = {**result, "stdout": "\n\n".join(part for part in (result["stdout"], line) if part)}
+    return result
+
+
+def _gauge(hook_data: dict) -> dict:
     """Inject a context-fill nudge once per threshold per session."""
     try:
         session_id = hook_data.get("session_id", "") or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
-        transcript_path = hook_data.get("transcript_path", "")
-        if not transcript_path:
+        reading = _reading(hook_data, session_id)
+        if reading is None:
             return {"stdout": "", "exit_code": 0}
-
-        context_window = importlib.import_module("aipass.hooks.apps.modules.context_window")
-        usage = context_window.read_latest_usage(transcript_path)
-        if usage is None:
-            return {"stdout": "", "exit_code": 0}
-
-        fill = context_window.context_fill_tokens(usage)
-        cwd = hook_data.get("cwd", "") or str(Path.cwd())
-        model = context_window.read_latest_model(transcript_path)
-        window_size = context_window.resolve_compact_window(cwd, model, transcript_path)
-        trigger = context_window.compact_threshold(window_size, context_window.transcript_provider(transcript_path))
-        if trigger <= 0:
-            return {"stdout": "", "exit_code": 0}
+        fill, window_size, trigger = reading
 
         pct = fill / trigger * 100
         used = round(fill / window_size * 100)

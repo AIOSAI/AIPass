@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: New project handler — create projects inside AIPass
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-07-17
-# Modified: 2026-10-27
+# Modified: 2026-10-28
 # =============================================
 
 """
@@ -249,6 +249,47 @@ def _agent_home(project_root: Path, name: str) -> Path:
     return project_root / "src" / pkg / pkg
 
 
+def _replace_once(path: Path, old: str, new: str) -> None:
+    """Replace the first *old* in *path*; a missing *old* means spawn's citizen template moved."""
+    content = path.read_text(encoding="utf-8")
+    if old not in content:
+        raise RuntimeError(f"{path.name}: {old.strip()!r} not found; the citizen template changed")
+    sm.write_text_lf(path, content.replace(old, new, 1))
+
+
+def _localize_imports(home: Path, pkg: str) -> None:
+    """Re-root spawn's citizen template from ``aipass.<pkg>`` to ``<pkg>.<pkg>``, the package the project declares.
+
+    The project is not installed in the venv, so the entry point and the fence probe's subprocess put src/ on
+    the path themselves.
+    """
+    # The empty template ships no src/<pkg>/__init__.py; without it pytest roots the agent's tests at src/<pkg>.
+    if not (home.parent / "__init__.py").exists():
+        sm.write_text_lf(home.parent / "__init__.py", "")
+    # shortcut: a project named after a core branch (cli, prax) also rewrites that branch's imports; refuse such
+    # names if one is ever wanted.
+    own = re.compile(rf"\baipass([./])(?={pkg}\b|\{{BRANCH\}}|\{{MY_BRANCH\}}|\"\s*\+\s*MY_BRANCH)")
+    for path in home.rglob("*"):
+        if path.suffix in (".py", ".md") and path.is_file():
+            text = path.read_text(encoding="utf-8")
+            if own.search(text):
+                sm.write_text_lf(path, own.sub(rf"{pkg}\1", text))
+    entry_anchor = f'os.environ.setdefault("AIPASS_BRANCH_NAME", "{pkg}")\n'
+    _replace_once(
+        home / "apps" / f"{pkg}.py",
+        entry_anchor,
+        entry_anchor + f"\n# This project is not installed in the venv: src/ on the path makes {pkg}.{pkg}.* resolve.\n"
+        "sys.path.insert(0, str(Path(__file__).resolve().parents[3]))\n",
+    )
+    fence = home / "tests" / "test_handlers_fence.py"
+    _replace_once(fence, "\nimport shutil\n", "\nimport os\nimport shutil\n")
+    _replace_once(
+        fence,
+        "        cwd=str(cwd),\n",
+        '        cwd=str(cwd),\n        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[3])},\n',
+    )
+
+
 def _spawn_project_agent(project_root: Path, name: str) -> dict:
     """Create the project agent via spawn_agent().
 
@@ -264,6 +305,7 @@ def _spawn_project_agent(project_root: Path, name: str) -> dict:
     )
     if not result.get("success"):
         raise RuntimeError(f"spawn_agent failed: {result.get('error', 'unknown')}")
+    _localize_imports(home, home.name)
     logger.info(
         "[aipass new] agent spawned via @spawn: %s (%d files)",
         result["branch_name"],

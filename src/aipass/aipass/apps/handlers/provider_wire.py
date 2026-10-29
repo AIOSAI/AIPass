@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: provider_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.9.1
+# Version: 1.11.0
 # Created: 2026-07-11
-# Modified: 2026-10-27
+# Modified: 2026-10-28
 # =============================================
 
 """provider_wire — auto-wire provider settings.
@@ -14,6 +14,7 @@ never overwritten. The manifest is the single source; this file holds no default
 ``cli.codex`` hooks merge into the user-level Codex hooks.json, AIPass groups first. Both
 doors (setup.sh, doctor --fix) back up before the write, receipt after. setup.sh alone
 also sets the Codex config pins, line by line, keeping every other line of config.toml.
+Both doors copy the OpenCode plugin byte-equal into opencode_plugin_path(), backup and receipt the same.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from typing import Any, Dict, List, Mapping, NamedTuple, Optional
 
 from aipass.prax import logger
 from aipass.aipass.apps.handlers.json import json_handler
+from aipass.aipass.apps.handlers.opencode_cli import opencode_binary
 from aipass.aipass.apps.handlers.settings_backup import (
     DOOR_DOCTOR_FIX,
     DOOR_SETUP_SH,
@@ -673,4 +675,68 @@ def refresh_provider_hooks(manifest_path: Path, settings_path: Optional[Path] = 
         settings_path, settings, record, actions, "Updated ~/.claude/settings.json (hooks, env, permissions, settings)"
     )
     json_handler.log_operation("refresh_provider_hooks", {"actions": len(actions)})
+    return actions
+
+
+OPENCODE_BRIDGE_MARK = "src/aipass/hooks/apps/handlers/bridges/opencode.py"
+OPENCODE_PLUGIN_REL = Path("src") / "aipass" / "hooks" / "apps" / "handlers" / "bridges" / "opencode_plugin.ts"
+
+
+def opencode_config_dir() -> Path:
+    """Where OpenCode reads its config and plugins: $XDG_CONFIG_HOME/opencode, else ~/.config/opencode."""
+    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "opencode"
+
+
+def opencode_plugin_path() -> Path:
+    """The installed plugin OpenCode loads for every project: opencode_config_dir()/plugins/aipass.ts."""
+    return opencode_config_dir() / "plugins" / "aipass.ts"
+
+
+def opencode_plugin_source(manifest_path: Path) -> Path:
+    """The hooks branch's plugin source in the repo the manifest sits in."""
+    return manifest_path.parent.parent / OPENCODE_PLUGIN_REL
+
+
+def opencode_plugin_state(manifest_path: Path) -> Optional[str]:
+    """STATE_SET when the installed plugin is byte-equal to the source, else MISSING or DIFFERENT.
+
+    None when the manifest has no cli.opencode bridge rows or the source is absent: nothing to install."""
+    manifest = json_handler.read_json(manifest_path)
+    rows = manifest.get("cli", {}).get("opencode", {}).get("hooks", []) if isinstance(manifest, dict) else []
+    if not any(OPENCODE_BRIDGE_MARK in str(row.get("command", "")) for row in rows if isinstance(row, dict)):
+        return None
+    source = opencode_plugin_source(manifest_path)
+    if not source.is_file():
+        logger.warning("[provider_wire] OpenCode plugin source missing at %s", source)
+        return None
+    plugin = opencode_plugin_path()
+    if not plugin.is_file():
+        return STATE_MISSING
+    return STATE_SET if plugin.read_bytes() == source.read_bytes() else STATE_DIFFERENT
+
+
+def opencode_plugin_plan(manifest_path: Optional[Path]) -> List[str]:
+    """The planned line for a missing or stale OpenCode plugin; [] when it matches, is not wanted, or no opencode."""
+    if manifest_path is None or not opencode_binary() or opencode_plugin_state(manifest_path) in (None, STATE_SET):
+        return []
+    return [f"Install the OpenCode plugin: cp {opencode_plugin_source(manifest_path)} {opencode_plugin_path()}"]
+
+
+def install_opencode_plugin(manifest_path: Path, door: str = DOOR_SETUP_SH, consent: Optional[str] = None) -> List[str]:
+    """Copy the plugin byte-equal into opencode_plugin_path(): backup first, receipt after. [] when it matches."""
+    if opencode_plugin_state(manifest_path) in (None, STATE_SET):
+        return []
+    plugin = opencode_plugin_path()
+    plugin.parent.mkdir(parents=True, exist_ok=True)
+    record = backup_before_write(plugin, door)
+    actions = [f"Backed up the OpenCode plugin to {record.backup}"] if record.backup else []
+    try:
+        plugin.write_bytes(opencode_plugin_source(manifest_path).read_bytes())
+    except OSError as exc:
+        logger.error("[provider_wire] OpenCode plugin write failed at %s: %s", plugin, exc)
+        raise SettingsBackupError(f"OpenCode plugin write failed at {plugin}; no receipt written") from exc
+    actions.append(f"Installed the OpenCode plugin at {plugin}")
+    summary = ([f"consent: {consent}"] if consent else []) + actions
+    actions.append(f"Receipt: {write_receipt(record, sha256_of(plugin), summary)}")
+    json_handler.log_operation("install_opencode_plugin", {"door": door, "actions": len(actions)})
     return actions

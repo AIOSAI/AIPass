@@ -3,7 +3,7 @@
 # Description: Tests for the watchdog watch registry (Phase 4, FPLAN-0186)
 # Version: 1.4.1
 # Created: 2026-04-14
-# Modified: 2026-10-22
+# Modified: 2026-10-29
 # =============================================
 
 """Tests for apps/handlers/watchdog/registry.py and the handlers that register through it."""
@@ -32,6 +32,7 @@ from aipass.devpulse.apps.handlers.watchdog import registry as watch_registry
 from aipass.devpulse.apps.handlers.watchdog import schedule as schedule_handler
 from aipass.devpulse.apps.handlers.watchdog import timer as tmr
 from aipass.devpulse.apps.handlers.watchdog import timer as watch_timer
+from aipass.devpulse.apps.handlers.watchdog import wire
 
 
 @pytest.fixture
@@ -287,7 +288,7 @@ def test_kill_watch_already_dead_pid(store_path):
 
 def test_kill_watch_happy_path(store_path):
     """Spawn a sleep subprocess, register it, kill via registry — verify dead."""
-    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", "watchdog"])
     try:
         handle = watch_registry.register("timer", {"duration": "30s"}, storage_path=store_path)
         raw = json.loads(store_path.read_text(encoding="utf-8"))
@@ -309,6 +310,27 @@ def test_kill_watch_happy_path(store_path):
             proc.wait(timeout=5)
 
 
+def test_kill_watch_leaves_a_non_watchdog_pid_alone(store_path, monkeypatch):
+    """A recycled pid whose cmdline is not a watchdog is deregistered, never signalled."""
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        handle = watch_registry.register("timer", {"duration": "30s"}, storage_path=store_path)
+        raw = json.loads(store_path.read_text(encoding="utf-8"))
+        for watch in raw["watches"]:
+            if watch["handle"] == handle:
+                watch["pid"] = proc.pid
+        store_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+        monkeypatch.setattr(wire, "cmdline", lambda pid: "vim notes.txt")
+
+        result = watch_registry.kill_watch(handle, storage_path=store_path)
+        assert result["killed"] is False and "left alone" in result["reason"]
+        assert proc.poll() is None
+        assert json.loads(store_path.read_text(encoding="utf-8"))["watches"] == []
+    finally:
+        proc.kill()
+        proc.wait(timeout=5)
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only signal semantics (SIG_IGN)")
 def test_kill_watch_reports_failure_when_pid_survives_sigterm(store_path):
     """A pid that ignores SIGTERM must come back killed=False, not a KILLED lie; the handle is still freed."""
@@ -318,6 +340,7 @@ def test_kill_watch_reports_failure_when_pid_survives_sigterm(store_path):
             "-c",
             "import signal, sys, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
             "print('armed', flush=True); time.sleep(30)",
+            "watchdog",
         ],
         stdout=subprocess.PIPE,
     )

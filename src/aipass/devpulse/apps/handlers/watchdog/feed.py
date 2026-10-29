@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: feed.py
 # Description: Watchdog Feed Handler — read completions off the push feed instead of polling for them
-# Version: 1.2.0
+# Version: 1.4.0
 # Created: 2026-08-21
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
 # The cursor is a set of line digests, never wire.py's byte offset: @ai_mail's
@@ -20,11 +20,12 @@ from pathlib import Path
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from aipass.devpulse.apps.handlers.json import json_handler
+from aipass.devpulse.apps.handlers.watchdog import agent as _agent
 from aipass import ai_mail as _ai_mail
 
 
-# "mail" is excluded: every email writes one, and a wake per email gets the wire muted.
-FEED_KINDS = ("dispatch", "wake")
+# Completions only: "wake" is a start edge (a double wake), and a "mail" wake per email gets the wire muted.
+FEED_KINDS = ("dispatch",)
 
 # Matches @ai_mail's FEED_MAX_LINES, so no digest ages out while its line is on disk.
 CURSOR_KEEP_DIGESTS = 400
@@ -197,6 +198,43 @@ def format_feed_event(record: dict) -> str:
     title = " ".join(str(record.get("title") or "?").split()).replace('"', "'")
     body = " ".join(str(record.get("body") or "").split()).replace('"', "'")
     line = f'{kind.upper()} @{source} title="{title}"'
+    if kind == "dispatch":
+        try:
+            branch_path = _agent._resolve_branch_path(source)
+        except Exception as exc:
+            # The cursor already marks this line seen; raising here loses the completion for good.
+            logger.warning("[watchdog.feed] branch lookup failed for @%s: %s", source, exc)
+            branch_path = None
+        reading = grounding_reading(branch_path)
+        body = f"{body} {reading}" if body else reading
     if body:
         line += f' detail="{body}"'
     return line
+
+
+def grounding_reading(branch_path: Path | None) -> str:
+    """The source branch's grounding receipt and run, read beside its session pointer; never raises."""
+    if branch_path is None:
+        return "grounding=no receipt"
+    pointer = _agent.read_pointer(branch_path) or {}
+    reading = "grounding=no receipt"
+    try:
+        current = json.loads((branch_path / ".ai_mail.local" / "grounding.json").read_text(encoding="utf-8"))["current"]
+        status, generation = current["status"], current["generation"]
+        receipt_id, pointer_id = str(current.get("session_id")), str(pointer.get("session_id"))
+        if receipt_id != pointer_id:
+            reading = f"grounding=stale (receipt {receipt_id[:12]}, pointer {pointer_id[:12]})"
+        else:
+            reading = f"grounding={status} gen{generation}"
+            if status == "ungrounded":
+                reading += f" missing={','.join(map(str, current.get('missing') or []))}"
+            elif status == "unverified":
+                reading += f" ({current.get('observation_boundary')})"
+    except (TypeError, OSError, ValueError, KeyError) as exc:
+        logger.info("[watchdog.feed] no usable grounding receipt for %s: %s", branch_path, exc)
+    observed = pointer.get("model_observed")
+    requested = pointer.get("model_requested")
+    model = observed if observed and observed != "pending" else (f"{requested}?" if requested else "")
+    if pointer.get("host_cli") and model:
+        reading += f" run={pointer['host_cli']}·{model}"
+    return reading

@@ -3,7 +3,7 @@
 # Description: Tests for the dispatch monitor's wake-back - the sender wake, its log, the manager mail and the decline
 # Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-16
+# Modified: 2026-10-28
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's wake-back: wake_sender, log_wake_result, main()'s wake."""
@@ -177,9 +177,10 @@ class TestWakeSender:
             mock_wake,
         )
 
-        wake_sender("@prax", "@target", 1)
+        wake_sender("@prax", "@target", 1, run_line="run: claude · m (observed; flag) session s")
         _, kwargs = mock_wake.call_args
         assert "@target" in kwargs["custom_message"]
+        assert kwargs["custom_message"].endswith("\nrun: claude · m (observed; flag) session s")
         assert "1" in kwargs["custom_message"]
         log.info.assert_called_once_with(
             "[monitor] Wake-back: %s woken after %s completed (exit %d)", "@prax", "@target", 1
@@ -357,7 +358,7 @@ class TestWakeBackIntegration:
 
         wake_calls = []
 
-        def track_wake(sender, branch_email, exit_code, target_home):
+        def track_wake(sender, branch_email, exit_code, target_home, run_line=""):
             wake_calls.append((sender, branch_email, exit_code, target_home))
             return "success"
 
@@ -390,7 +391,7 @@ class TestWakeBackIntegration:
         wake_calls = []
         mock_bounce = MagicMock()
 
-        def track_wake(sender, branch_email, exit_code, target_home):
+        def track_wake(sender, branch_email, exit_code, target_home, run_line=""):
             wake_calls.append((sender, branch_email, exit_code, target_home))
             return "success"
 
@@ -583,6 +584,15 @@ class TestWakeBackManagerHonesty:
         log.info.assert_called_once_with(
             "[monitor] Wake-back mailed to manager %s (%s exit %d)", "@devpulse", "@ai_mail", 3
         )
+
+    def test_manager_mail_carries_the_run_line(self, monkeypatch, tmp_path):
+        self._patch_wake(monkeypatch, self._manager_gate_status(), True)
+        sent = MagicMock(return_value=MagicMock(returncode=0, stdout="", stderr=""))
+        monkeypatch.setattr(mod.subprocess, "run", sent)
+
+        wake_sender("@devpulse", "@ai_mail", 0, run_line="run: codex · gpt-6.1-sol (observed; flag) session t1")
+
+        assert " ".join(sent.call_args.args[0][4:]).endswith("run: codex · gpt-6.1-sol (observed; flag) session t1")
 
     def test_manager_mail_failure_is_not_reported_as_delivered(self, monkeypatch, tmp_path):
         """If the send fails the manager still learns nothing — that must not wear

@@ -4,6 +4,8 @@ Purpose: move this chat from Claude Code to Codex in one turn, in this same term
 
 **Workflow:** `/codex` → prep → handoff written → this pane becomes Codex, greeting it with the handoff.
 
+**Fresh switch, no handoff:** `/codex fresh` (arguments: `$ARGUMENTS`), or a chat with nothing in it yet (a greeting, nothing done, nothing in flight): skip steps 0 to 2 and run step 3 with the `"$(cat .ai_mail.local/handoff.md)"` argument dropped from both lines, so Codex opens an empty chat in this directory. There is no thread to carry; the user greets it and the startup protocol runs as on any fresh chat.
+
 ## Execution
 
 0. **Pin the live thread FIRST** — one sentence: what this chat was doing when `/codex` fired (the task, question or build mid-flight; "nothing in flight" counts). It becomes the Resuming line.

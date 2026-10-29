@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_engine_safeguards.py
 # Description: The hook engine's safeguards: trust, timeouts, one document, the ledger, fail-closed gates, promote
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-10-25
+# Modified: 2026-10-29
 # =============================================
 
 """Tests for apps/modules/engine.py: trust, timeouts, the ledger and the fail-closed gates."""
@@ -19,6 +19,7 @@
 
 import importlib
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -30,8 +31,9 @@ from aipass.hooks.apps.modules.engine import dispatch
 from aipass.hooks.apps.handlers.config.diagnostics import LOG_FILE
 from aipass.hooks.apps.handlers.config.output_merge import CONTEXT_LIMIT
 from aipass.hooks.apps.handlers.config.gates import FAIL_CLOSED
+from aipass.hooks.apps.handlers.config import loader
 from aipass.hooks.apps.handlers.config.loader import find_project_config
-from aipass.hooks.apps.handlers.config.trust_registry import enroll
+from aipass.hooks.apps.handlers.config.trust_registry import REGISTRY_ENV, enroll
 from aipass.hooks.tests.support_engine import _GATE, _one
 
 pytestmark = pytest.mark.usefixtures("_no_real_trust_banners")
@@ -235,6 +237,148 @@ class TestLayerATrustEnforcement:
         mock_run.assert_called_once()
         assert mock_run.call_args.args[:2] == ("echo ok", "{}")
         assert "ok" in result[0]
+
+
+_NS = "fplan_ns_probe"
+
+
+@pytest.fixture
+def ns_project(temp_test_dir, monkeypatch):
+    """A project outside AIPASS_HOME declaring handler_namespace, its package in src/, a fixture trust registry."""
+    package = temp_test_dir / "src" / _NS
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "events.py").write_text(
+        "def record(hook_data):\n    return {'exit_code': 0, 'stdout': 'from the project'}\n", encoding="utf-8"
+    )
+    hook = {"enabled": True, "handler": f"{_NS}.events.record", "matcher": ""}
+    config = {"hooks_enabled": True, "handler_namespace": _NS, "Stop": {"record": hook}}
+    (temp_test_dir / ".aipass").mkdir()
+    (temp_test_dir / ".aipass" / "hooks.json").write_text(json.dumps(config), encoding="utf-8")
+    monkeypatch.setenv(REGISTRY_ENV, str(temp_test_dir / "registry.json"))
+    monkeypatch.delitem(sys.modules, _NS, raising=False)
+    monkeypatch.delitem(sys.modules, f"{_NS}.events", raising=False)
+    with (
+        patch.object(loader, "_search_bounds", return_value=(temp_test_dir, temp_test_dir.parent)),
+        patch.object(loader, "aipass_home", return_value=None),
+        patch.object(loader, "logger") as log,
+    ):
+        # resolved: the loader stamps realpaths, and macOS tmp is /var -> /private/var
+        yield temp_test_dir.resolve(), log
+
+
+def _warned(log) -> str:
+    return " ".join(c.args[0] % c.args[1:] for c in log.warning.call_args_list)
+
+
+class TestTrustedHandlerNamespace:
+    """A trusted project's own handler package: enrolled + hash match, src/ appended for the import only."""
+
+    def test_accepted_when_enrolled_and_the_hash_matches(self, ns_project, mock_logger):
+        project, _ = ns_project
+        enroll(str(project))
+        config = find_project_config()
+        assert config is not None
+        assert config["_handler_namespace"] == _NS
+        assert config["_project_src"] == str(project / "src")
+        with patch("aipass.hooks.apps.modules.engine._log") as log:
+            assert dispatch("Stop", "{}", config) == ("from the project", 0)
+        assert [e["exit_code"] for e in (c.args[0] for c in log.call_args_list) if e.get("hook") == "record"] == [0]
+        assert str(project / "src") not in sys.path
+
+    def test_refused_when_unenrolled_naming_the_cure(self, ns_project):
+        project, log = ns_project
+        assert find_project_config() is None
+        assert f"aipass trust {project}" in _warned(log)
+
+    def test_refused_when_the_hash_is_stale(self, ns_project):
+        project, _ = ns_project
+        enroll(str(project))
+        hooks_json = project / ".aipass" / "hooks.json"
+        hooks_json.write_text(hooks_json.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+        assert find_project_config() is None
+
+    def test_no_key_means_aipass_only(self, ns_project, mock_logger):
+        project, _ = ns_project
+        hooks_json = project / ".aipass" / "hooks.json"
+        config = json.loads(hooks_json.read_text(encoding="utf-8"))
+        del config["handler_namespace"]
+        hooks_json.write_text(json.dumps(config), encoding="utf-8")
+        enroll(str(project))
+        loaded = find_project_config()
+        assert loaded is not None and "_handler_namespace" not in loaded
+        result, entries, importer = _dispatch_handler(MagicMock(), handler=f"{_NS}.events.record")
+        importer.assert_not_called()
+        assert "namespace refused" in _hook_entry(entries)["stderr_preview"]
+
+    def test_a_config_cannot_forge_the_stamps(self, ns_project):
+        project, _ = ns_project
+        hooks_json = project / ".aipass" / "hooks.json"
+        config = json.loads(hooks_json.read_text(encoding="utf-8"))
+        del config["handler_namespace"]
+        config.update({"_handler_namespace": "evil", "_project_src": "/evil"})
+        hooks_json.write_text(json.dumps(config), encoding="utf-8")
+        enroll(str(project))
+        loaded = find_project_config()
+        assert loaded is not None
+        assert "_handler_namespace" not in loaded and "_project_src" not in loaded
+
+    @pytest.mark.parametrize("namespace", ["aipass", "a.b", "", 7])
+    def test_a_namespace_that_could_shadow_is_refused(self, ns_project, namespace):
+        project, log = ns_project
+        hooks_json = project / ".aipass" / "hooks.json"
+        config = json.loads(hooks_json.read_text(encoding="utf-8"))
+        config["handler_namespace"] = namespace
+        hooks_json.write_text(json.dumps(config), encoding="utf-8")
+        enroll(str(project))
+        loaded = find_project_config()
+        assert loaded is not None and "_handler_namespace" not in loaded
+        assert "refused" in _warned(log)
+
+    def test_aipass_root_config_never_takes_a_namespace(self, ns_project):
+        project, log = ns_project
+        with patch.object(loader, "locate_config", return_value=(loader.AIPASS, project)):
+            loaded = find_project_config()
+        assert loaded is not None and "_handler_namespace" not in loaded
+        assert "aipass.* only" in _warned(log)
+
+    def test_src_is_appended_never_prepended(self, tmp_path, mock_logger):
+        src = str(tmp_path / "src")
+        seen = []
+        module = MagicMock()
+        module.record = MagicMock(return_value={"exit_code": 0, "stdout": "ok"})
+        with patch.object(engine, "_import_handler_module", side_effect=lambda _: seen.append(sys.path[-1]) or module):
+            result, _ = _dispatch_stamped(f"{_NS}.events.record", src)
+        assert (result, seen) == ("ok", [src])
+        assert src not in sys.path
+
+    def test_another_namespace_is_refused(self, tmp_path, mock_logger):
+        with patch.object(engine, "_import_handler_module") as importer:
+            _, entries = _dispatch_stamped("other.events.record", str(tmp_path / "src"))
+        importer.assert_not_called()
+        assert "namespace refused" in _hook_entry(entries)["stderr_preview"]
+
+    def test_command_rows_still_refused(self, tmp_path, mock_logger):
+        row = {"enabled": True, "command": "echo PWNED", "matcher": ""}
+        with patch.object(engine, "_run_hook") as run_hook:
+            result, entries = _dispatch_stamped("", str(tmp_path / "src"), row=row)
+        assert result == ""
+        run_hook.assert_not_called()
+        assert [e["action"] for e in entries if e.get("hook") == "h"] == ["refused_command_type"]
+
+
+def _dispatch_stamped(handler: str, src: str, row: dict | None = None):
+    """Dispatch one Stop row under a trusted project's stamps; answer (stdout, logged entries)."""
+    config = {
+        "hooks_enabled": True,
+        "_source": "project",
+        "_handler_namespace": _NS,
+        "_project_src": src,
+        "Stop": {"h": row or {"enabled": True, "handler": handler, "matcher": ""}},
+    }
+    with patch.object(engine, "_log") as log:
+        result, _ = dispatch("Stop", "{}", config)
+    return result, [c.args[0] for c in log.call_args_list]
 
 
 class TestRunHandlerTimeout:

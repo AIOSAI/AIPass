@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: hookstatus.py
-# Version: 1.1.1
+# Version: 1.2.0
 # Description: Hook status — read-only view of per-project hook config
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-28
-# Modified: 2026-10-01
+# Modified: 2026-10-28
 # =============================================
 
 """Hook status — read-only view of per-project hook configuration via drone @hooks status."""
@@ -49,6 +49,11 @@ def _render_status(config: dict) -> None:
         CONSOLE.print("[bold green]hooks_enabled: ON[/bold green]")
     else:
         CONSOLE.print("[bold red]hooks_enabled: OFF — injectors disabled, the gates still run[/bold red]")
+    declared = config.get("handler_namespace")
+    if config.get("_handler_namespace"):
+        CONSOLE.print(f"handler_namespace: {config['_handler_namespace']}.* (trusted; {config.get('_project_src')})")
+    elif declared is not None:
+        CONSOLE.print(f"[yellow]handler_namespace: {declared!r} refused — aipass.* only[/yellow]")
     CONSOLE.print()
 
     total = 0

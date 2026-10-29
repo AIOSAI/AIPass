@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: codex.py
-# Version: 2.5.1
+# Version: 2.5.2
 # Description: Codex bridge — mounts the promoted hook code, maps apply_patch, fails closed on PreToolUse
 # Branch: hooks
 # Layer: apps/handlers/bridges
 # Created: 2026-07-10
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
 """Codex bridge.
@@ -224,11 +224,7 @@ def _mount() -> str:
         raise ImportError("mount.py has no import spec")
     mount = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mount)
-    try:
-        return mount.mount(mount.branch_root(__file__))
-    except Exception as exc:  # a bad promoted copy: the source still gates, and says so
-        _log("error", "[HOOKS:codex] promoted copy unusable, serving the source tree: %s", exc)
-        return "source (fallback)"
+    return mount.mount_or_source(__file__, "codex")
 
 
 def _broken_output(event_type: str, exc: BaseException) -> str:

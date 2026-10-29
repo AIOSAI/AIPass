@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.8.0
+# Version: 3.11.1
 # Created: 2026-03-02
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
 """
@@ -20,7 +20,7 @@ import sys
 import subprocess
 import time
 from pathlib import Path
-from typing import NamedTuple, Optional, Tuple, List
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
@@ -38,7 +38,7 @@ from aipass.ai_mail.apps.handlers.dispatch.wake_dashboard import (
 )
 
 
-def _find_bin(name: str) -> str:
+def _find_bin(name: str, extra_dirs: Tuple[Path, ...] = ()) -> str:
     """Locate an agent CLI binary, checking known install locations if not on PATH.
 
     Resolved per wake, not at import, so a binary installed after load is found.
@@ -48,6 +48,7 @@ def _find_bin(name: str) -> str:
     if found:
         return found
     candidates = [
+        *(directory / name for directory in extra_dirs),
         Path.home() / ".local" / "bin" / name,
         Path("/usr/local/bin") / name,
         Path("/usr/bin") / name,
@@ -67,6 +68,11 @@ def _find_claude_bin() -> str:
 def _find_codex_bin() -> str:
     """Locate the codex binary."""
     return _find_bin("codex")
+
+
+def _find_opencode_bin() -> str:
+    """Locate the opencode binary; its installer puts it in ~/.opencode/bin."""
+    return _find_bin("opencode", (Path.home() / ".opencode" / "bin",))
 
 
 _REPO_ROOT = find_repo_root()
@@ -90,7 +96,8 @@ BUSY_STEP = "lock"
 
 PROVIDER_CLAUDE = session_pointer.CLAUDE
 PROVIDER_CODEX = session_pointer.CODEX
-KNOWN_PROVIDERS: Tuple[str, ...] = (PROVIDER_CLAUDE, PROVIDER_CODEX)
+PROVIDER_OPENCODE = session_pointer.OPENCODE
+KNOWN_PROVIDERS: Tuple[str, ...] = (PROVIDER_CLAUDE, PROVIDER_CODEX, PROVIDER_OPENCODE)
 CODEX_LAST_MESSAGE_FILE = "dispatch_last_message.txt"
 
 # Fable is granted by name, not class. Only the fallback: the live grant is read from CONFIG_FILE.
@@ -506,6 +513,7 @@ def _spawn_manager_interactive(
     status: "DispatchStatus",
     claude_bin: str,
     provider: str = PROVIDER_CLAUDE,
+    opencode_config: str = "",
 ) -> Tuple["DispatchStatus", bool]:
     """Spawn an interactive tmux session for a manager branch.
 
@@ -534,6 +542,13 @@ def _spawn_manager_interactive(
         claude_line = (
             f"{shlex.quote(claude_bin)} {model_flag}--dangerously-bypass-approvals-and-sandbox "
             f'"$(cat {shlex.quote(str(prompt_file))})"'
+        )
+    if provider == PROVIDER_OPENCODE:
+        # --standalone: the shared `serve --service` keeps its starter's env, so AIPASS_HOME never reaches
+        # the hooks. The TUI has no model flag; OpenCode reads a config given inline instead.
+        config = f"OPENCODE_CONFIG_CONTENT={shlex.quote(opencode_config)} " if opencode_config else ""
+        claude_line = (
+            f'{config}{shlex.quote(claude_bin)} --standalone --auto --prompt "$(cat {shlex.quote(str(prompt_file))})"'
         )
     try:
         subprocess.run(
@@ -600,6 +615,37 @@ def _codex_cmd(
     return [codex_bin, "exec", *tail]
 
 
+def _opencode_cmd(
+    opencode_bin: str,
+    branch_path: Path,
+    email: str,
+    prompt: str,
+    model: str,
+    fresh: bool,
+    status: "DispatchStatus",
+) -> List[str]:
+    """The opencode argv: `run --session <id>` on a resume of the pointer's id, else `run` with no session.
+
+    OpenCode mints every fresh id: its free tier refuses an id not in its own undocumented shape.
+    The monitor points the branch at the stream's sessionID. `--standalone` gives the wake its own
+    server child; `--auto` approves what the hooks do not deny.
+    """
+    head = [opencode_bin, "run", "--standalone", "--format", "json", "--auto", *(["-m", model] if model else [])]
+    resume_id = None
+    if fresh:
+        status_detail = "(--fresh)"
+    else:
+        resume_id, reason = session_pointer.resolve_resume_target(branch_path, provider=PROVIDER_OPENCODE)
+        logger.info("[wake] %s session decision: %s", email, reason)
+        status_detail = f"({reason})"
+    if resume_id:
+        status.ok("session", f"resuming {resume_id} (pointer)")
+        return [*head, "--session", resume_id, prompt]
+    logger.info("[wake] %s fresh opencode session — OpenCode mints the id", email)
+    status.ok("session", f"fresh, OpenCode mints the id {status_detail}")
+    return [*head, prompt]
+
+
 def wake_branch(
     branch_email: str,
     custom_message: Optional[str] = None,
@@ -613,9 +659,10 @@ def wake_branch(
     subject: Optional[str] = None,
     wake_back: bool = True,
     provider: str = PROVIDER_CLAUDE,
+    opencode_config: Optional[Dict[str, Any]] = None,
 ) -> Tuple[DispatchStatus, bool]:
     """
-    Spawn an agent (Claude, or Codex with provider="codex") at the target branch with step-by-step status.
+    Spawn an agent (Claude, or Codex / OpenCode by provider) at the target branch with step-by-step status.
 
     admin is an ALREADY-DECIDED verdict (dispatch.py ran the grant check), never a request.
     True means "did what it should", not "woke an agent": check status.find_step("manager").
@@ -651,6 +698,9 @@ def wake_branch(
         status.fail("provider", f"unknown provider {provider!r} — known: {', '.join(KNOWN_PROVIDERS)}")
         return status, False
     status.ok("provider", provider)
+    if opencode_config is not None and provider != PROVIDER_OPENCODE:
+        status.fail("config", f"an OpenCode config applies to provider opencode only, not {provider!r}")
+        return status, False
 
     # Before the passport read: an unreadable passport must never be why @devpulse is spawned.
     if (scheduled or admin) and is_wake_blocked(email):
@@ -700,10 +750,10 @@ def wake_branch(
         logger.warning("[wake] %s passport unreadable, waking in a lane that wakes managers too: %s", email, exc)
 
     # Decided ONCE for both spawn lanes; a second site would let the rule drift.
-    if provider == PROVIDER_CODEX:
-        # The Claude default and the Fable grant are Claude's; Codex takes the slug verbatim or its config.
+    if provider in (PROVIDER_CODEX, PROVIDER_OPENCODE):
+        # The Claude default and the Fable grant are Claude's; these take the slug verbatim or their own default.
         resolved_model = model or ""
-        status.ok("model", model or "codex config default")
+        status.ok("model", model or ("codex config default" if provider == PROVIDER_CODEX else "opencode default"))
     else:
         decision = resolve_wake_model(email, model)
         resolved_model = decision.model
@@ -747,7 +797,8 @@ def wake_branch(
 
     # The binary, then the dashboard: after every gate that can refuse, before any lock or spawn.
     try:
-        claude_bin = _find_codex_bin() if provider == PROVIDER_CODEX else _find_claude_bin()
+        finders = {PROVIDER_CODEX: _find_codex_bin, PROVIDER_OPENCODE: _find_opencode_bin}
+        claude_bin = finders.get(provider, _find_claude_bin)()
     except FileNotFoundError as e:
         status.fail(provider, str(e))
         logger.warning("[wake] %s not woken: %s", email, e)
@@ -755,9 +806,24 @@ def wake_branch(
 
     _refresh_recipient_dashboard(branch_path, email, status)
 
+    # --model wins on "model"; the TUI has no model flag, so it always carries the merge.
+    merged_config = {**(opencode_config or {}), **({"model": resolved_model} if resolved_model else {})}
+    tui_config = json.dumps(merged_config) if provider == PROVIDER_OPENCODE and merged_config else ""
+    headless_config = json.dumps(merged_config) if opencode_config is not None else ""
+    if headless_config:
+        status.ok("config", f"OPENCODE_CONFIG_CONTENT {headless_config}")
+        logger.info("[wake] %s opencode config: %s", email, headless_config)
+
     if manager_scheduled:
         return _spawn_manager_interactive(
-            branch_path, email, custom_message or DEFAULT_PROMPT, resolved_model, status, claude_bin, provider
+            branch_path,
+            email,
+            custom_message or DEFAULT_PROMPT,
+            resolved_model,
+            status,
+            claude_bin,
+            provider,
+            tui_config,
         )
 
     # An unreadable safety config refuses the wake: its max_turns may be lower than the default.
@@ -799,8 +865,11 @@ def wake_branch(
 
     if provider == PROVIDER_CODEX:
         claude_cmd = _codex_cmd(claude_bin, branch_path, email, prompt, resolved_model, fresh, status)
+    elif provider == PROVIDER_OPENCODE:
+        claude_cmd = _opencode_cmd(claude_bin, branch_path, email, prompt, resolved_model, fresh, status)
     # The session comes from session_pointer, not -c's file mtime; -c is the no-pointer fallback.
-    elif fresh:
+    # Another host's pointer names a session Claude cannot resume, and -c would leave it in place.
+    elif fresh or (session_pointer.read_pointer(branch_path) or {}).get("provider", PROVIDER_CLAUDE) != PROVIDER_CLAUDE:
         session_id = session_pointer.mint_session_id()
         # Before the spawn, so no crash leaves a live session nobody recorded.
         if not session_pointer.write_pointer(branch_path, session_id, "wake-fresh"):
@@ -827,11 +896,22 @@ def wake_branch(
     # wake_back rides argv, never spawn_env, which becomes the agent's own environment.
     from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import NO_WAKE_BACK_FLAG
 
-    from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import PROVIDER_FLAG_PREFIX
+    from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import OPENCODE_CONFIG_FLAG_PREFIX, PROVIDER_FLAG_PREFIX
+
+    from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import requested_run
+
+    run = requested_run(claude_cmd, provider, headless_config)
+    session_flags = ("--session-id", "--resume", "--session", "resume")
+    run["session_id"] = next(
+        (claude_cmd[i + 1] for i, arg in enumerate(claude_cmd[:-1]) if arg in session_flags), session_pointer.PENDING
+    )
+    status.info("run", session_pointer.format_run_line(run))
 
     monitor_flags = [] if wake_back else [NO_WAKE_BACK_FLAG]
     if provider != PROVIDER_CLAUDE:
         monitor_flags.append(f"{PROVIDER_FLAG_PREFIX}{provider}")
+    if headless_config:
+        monitor_flags.append(f"{OPENCODE_CONFIG_FLAG_PREFIX}{headless_config}")
     monitor_cmd = [
         sys.executable,
         str(MONITOR_SCRIPT),

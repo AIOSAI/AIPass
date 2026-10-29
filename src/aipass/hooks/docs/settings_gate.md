@@ -2,7 +2,7 @@
 
 # Provider-settings gate
 
-**Branch** hooks · **Code** `apps/handlers/security/settings_gate.py`, `apps/handlers/bridges/codex.py`, `apps/modules/bash_writes.py` (`changed_paths`)
+**Branch** hooks · **Code** `apps/handlers/security/settings_gate.py`, `apps/handlers/bridges/codex.py`, `apps/handlers/bridges/opencode.py`, `apps/modules/bash_writes.py` (`changed_paths`)
 
 No AI changes a provider's settings alone, on either CLI, from any seat. The owner accepts every change. `settings_gate` is the PreToolUse gate that enforces it. It is fail-closed (`handlers/config/gates.py`), runs on Bash, Edit, Write, MultiEdit and NotebookEdit, and sits just before `settings_backup`, so a Claude settings write it lets through is still copied and receipted.
 
@@ -11,6 +11,7 @@ No AI changes a provider's settings alone, on either CLI, from any seat. The own
 | Class | Files |
 |---|---|
 | Codex settings | `~/.codex/*.toml` (`config.toml`, profiles, requirements), `~/.codex/hooks.json`, `~/.codex/auth.json`, `~/.codex/rules/**`; the same under `$CODEX_HOME` |
+| OpenCode settings | `~/.config/opencode/` (`opencode.json`, `opencode.jsonc`, `AGENTS.md`, `plugins/**`, `commands/**`), `~/.local/share/opencode/auth.json`; `$XDG_CONFIG_HOME` and `$XDG_DATA_HOME` replace those homes when set. The store (`opencode.db`) is not a setting |
 | Claude settings | `~/.claude/settings.json`, `~/.claude/settings.local.json` |
 | AIPass provider wiring | `$AIPASS_HOME/.claude/provider_manifest.json`; `$AIPASS_HOME/.codex/hooks.json`, retired: Codex's rows live in its user-level `hooks.json`, and the repo path stays protected so the file never returns unnoticed (Codex loads both and would fire every hook twice) |
 | Provider installer | `aipass doctor --fix`, `setup.sh`, `provider_wire.py`, run from Bash |
@@ -25,13 +26,13 @@ Directories: `~/.codex`, `$CODEX_HOME`, `~/.claude` and `~/.codex/rules` are pro
 |---|---|---|---|
 | Claude Code | Codex settings, wiring, an installer | `ask`: the owner sees the file and the call | deny |
 | Claude Code | Claude settings | allowed: Claude Code prompts on its own settings file natively | deny |
-| Codex | any protected file | deny; the reason names the file and says to mail @devpulse, who asks Patrick | deny |
+| Codex, OpenCode | any protected file | deny; the reason names the file and says to mail @devpulse, who asks the owner | deny |
 
-The caller CLI is the payload's `provider` (the Codex bridge sets `codex`; a payload without it is Claude's). A seat is headless when `AIPASS_SESSION_TYPE` is `dispatched` or `headless`, or when no interactive `claude` process runs the call: there is no `claude` ancestor, or it was started with `-p`/`--print` (`cc_sessions.cli_ancestor`). Every ask and every deny is a prax WARNING line: `settings_gate: <ask|deny> caller=<branch> cli=<cli> path=<file> tool=<tool>`.
+The caller CLI is the payload's `provider` (the Codex bridge sets `codex`, the OpenCode bridge `opencode`; a payload without it is Claude's). A seat is headless when `AIPASS_SESSION_TYPE` is `dispatched` or `headless`, or when no interactive `claude` process runs the call: there is no `claude` ancestor, or it was started with `-p`/`--print` (`cc_sessions.cli_ancestor`). Every ask and every deny is a prax WARNING line: `settings_gate: <ask|deny> caller=<branch> cli=<cli> path=<file> tool=<tool>`.
 
 ## Why Codex is deny-only
 
-Codex 0.164 parses `permissionDecision: "ask"` but does not support it. It marks the hook run failed and runs the call, and under `--dangerously-bypass-approvals-and-sandbox` nothing is shown. An ask reaching Codex is therefore an allow. `codex.py` turns any PreToolUse `ask`, from any handler, into a `deny` with the same reason before Codex reads it. `deny` holds under bypass mode.
+Codex 0.164 parses `permissionDecision: "ask"` but does not support it. It marks the hook run failed and runs the call, and under `--dangerously-bypass-approvals-and-sandbox` nothing is shown. An ask reaching Codex is therefore an allow. `codex.py` turns any PreToolUse `ask`, from any handler, into a `deny` with the same reason before Codex reads it. `deny` holds under bypass mode. OpenCode's plugin has no ask either: `opencode.py` turns an ask into a deny the same way.
 
 ## Installers
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_header.py
 # Description: Tests for email header handler
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-10-17
+# Modified: 2026-10-28
 # =============================================
 
 """Tests for apps/handlers/email/header.py -- get_dispatch_header, prepend_dispatch_header."""
@@ -120,17 +120,12 @@ def test_prepend_dispatch_header_result_is_header_plus_message():
     assert result == mod.DISPATCH_HEADER + message
 
 
-def test_dispatch_header_instructs_synchronous_subagents():
-    """Standard header tells agents to run sub-agents synchronously (headless sessions are never re-invoked)."""
-    assert "SYNCHRONOUSLY" in mod.DISPATCH_HEADER
-    assert "run_in_background: false" in mod.DISPATCH_HEADER
-    assert "BEFORE ending your turn" in mod.DISPATCH_HEADER
-
-
-def test_no_memory_save_header_instructs_synchronous_subagents():
-    """No-memory-save variant carries the same sync sub-agents warning."""
-    assert "SYNCHRONOUSLY" in mod.NO_MEMORY_SAVE_HEADER
-    assert "run_in_background: false" in mod.NO_MEMORY_SAVE_HEADER
+@pytest.mark.parametrize("header", [mod.DISPATCH_HEADER, mod.NO_MEMORY_SAVE_HEADER], ids=["standard", "no-memory-save"])
+def test_both_headers_say_the_foreground_rule_without_one_clis_parameter_name(header):
+    """An OpenCode reader flagged run_in_background: Claude Code's parameter, absent from its subagent tool."""
+    assert "Run sub-agents in the FOREGROUND and wait for them to finish" in header
+    assert "BEFORE ending your turn" in header
+    assert "run_in_background" not in header
 
 
 def test_dispatch_header_carries_culture_fence():

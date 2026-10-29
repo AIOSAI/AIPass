@@ -1,24 +1,25 @@
 [<- Back to the README](../README.md)
 
-# One citizen, two CLIs — Claude Code and Codex
+# One citizen, three CLIs — Claude Code, Codex and OpenCode
 
 *What each CLI reads, how the rituals are spelled on each, how a compaction
-runs on each, and where the two differ.*
+runs, and where the three differ.*
 
-A citizen is the same citizen on Claude Code and on Codex: the same branch,
-`.trinity/` memories, mailbox and identity. The CLI changes, so does what it
-reads at startup and how a ritual is typed. This page is the map of both.
+A citizen is the same citizen on Claude Code, Codex and OpenCode: the same
+branch, `.trinity/` memories, mailbox and identity. The CLI changes, so does
+what it reads at startup and how a ritual is typed. This page is the map of
+all three. (The file keeps its old name, `two_clis.md`, so links stay good.)
 
 ## What each CLI reads
 
-| | Claude Code | Codex |
-|---|---|---|
-| Instructions | `AGENTS.md`, natively | `AGENTS.md`, natively |
-| Shared skills | `.claude/skills/`, a symlink to `../.agents/skills` | `.agents/skills/`, natively |
-| CLI-only skills | `.claude/commands/codex.md` (the switch to Codex), in the AIPass tree and every project | `.codex/skills/claude/SKILL.md` (the switch back), in the AIPass tree and every project |
-| Hooks | `~/.claude/settings.json` | `$CODEX_HOME/hooks.json`, else `~/.codex/hooks.json` |
-| Session pointer | `.ai_mail.local/session.json` in the branch | the same file |
-| Handoff on a switch | `.ai_mail.local/handoff.md` in the branch | the same file |
+| | Claude Code | Codex | OpenCode |
+|---|---|---|---|
+| Instructions | `AGENTS.md`, natively | `AGENTS.md`, natively | `AGENTS.md`, natively |
+| Shared skills | `.claude/skills/`, a symlink to `../.agents/skills` | `.agents/skills/`, natively | loaded by name with its skill tool |
+| CLI-only switches | `.claude/commands/codex.md`, `.claude/commands/opencode.md` | `.codex/skills/claude/SKILL.md`, `.codex/skills/opencode/SKILL.md` | `.opencode/commands/claude.md`, `.opencode/commands/codex.md` |
+| Rituals | `/prep`, `/memo`, `/compass` | `$prep`, `$memo`, `$compass` | `.opencode/commands/{prep,memo,compass}.md`, each loading the shared skill |
+| Hooks | `~/.claude/settings.json` | `$CODEX_HOME/hooks.json`, else `~/.codex/hooks.json` | the plugin `$XDG_CONFIG_HOME/opencode/plugins/aipass.ts`, else under `~/.config` |
+| Handoff on a switch | `.ai_mail.local/handoff.md` in the branch | the same file | the same file |
 
 **Skills.** `.agents/skills/` holds one copy of each shared skill: a folder with
 a `SKILL.md` whose frontmatter has `name` and `description`. Codex scans it
@@ -27,22 +28,24 @@ so both CLIs see the one file. `aipass init`, `aipass new` and `aipass adopt`
 write a project's prep skill at `.agents/skills/prep/SKILL.md` and make the
 link; `aipass doctor` checks both (see [`doctor.md`](doctor.md)).
 
-**The switch pair.** `/codex` and `$claude` are CLI-only on purpose:
-`.claude/commands/` is read by Claude Code alone, `.codex/skills/` by Codex
-alone, so neither CLI offers a switch to itself. Codex finds `.codex/skills`
-walking up from the working directory to the git root, so a branch inside a
-project sees the project's copy. The same three doors write both files into a
-project as managed files; `aipass doctor` names a missing one and `--fix` writes
-it, and `aipass init update` adds them to an older project.
+**The switch files.** Each CLI carries a switch to each of the other two and
+none to itself: `.claude/commands/` is read by Claude Code alone,
+`.codex/skills/` by Codex alone, `.opencode/commands/` by OpenCode alone. Codex
+finds `.codex/skills` walking up from the working directory to the git root, so
+a branch inside a project sees the project's copy. OpenCode's `/memo`, `/prep`
+and `/compass` are commands in `.opencode/commands/` that load the shared skill
+of that name. `aipass init`, `aipass new` and `aipass adopt` write all nine
+files into a project as managed files; `aipass doctor` names a missing one and
+`--fix` writes it, and `aipass init update` adds them to an older project.
 
-**Hooks.** `.claude/provider_manifest.json` holds the hook rows for both CLIs:
-`cli.claude` and `cli.codex`. `aipass doctor --fix` and `setup.sh` write the
-first into `~/.claude/settings.json` and the second into the user-level
-`$CODEX_HOME/hooks.json` (`~/.codex/hooks.json` when `CODEX_HOME` is unset),
-which Codex reads from every directory. Codex reads the same hook shape as
-Claude Code. The file is the user's, so the write is a merge: rows running the
-AIPass Codex bridge are replaced, every other row is kept, and the AIPass groups
-come first in each event. Codex keys its trust by
+**Hooks.** `.claude/provider_manifest.json` holds the hook rows for every CLI:
+`cli.claude`, `cli.codex` and `cli.opencode`. `aipass doctor --fix` and
+`setup.sh` write the first into `~/.claude/settings.json` and the second into
+the user-level `$CODEX_HOME/hooks.json` (`~/.codex/hooks.json` when `CODEX_HOME`
+is unset), which Codex reads from every directory. Codex reads the same hook
+shape as Claude Code. The file is the user's, so the write is a merge: rows
+running the AIPass Codex bridge are replaced, every other row is kept, and the
+AIPass groups come first in each event. Codex keys its trust by
 `<file>:<event>:<group>:<index>`, with no directory in it, so one trust of the
 file covers every project, and a foreign group ahead of the AIPass ones would
 shift their keys and untrust them. Codex loads a repo's `.codex/hooks.json`
@@ -52,8 +55,14 @@ also sets the four config pins in `config.toml` (see the Codex rows below), one
 line each, keeping every other line, the `model` line among them. It refuses a
 file it cannot edit that way, such as a pin set by a dotted key, and writes
 nothing. Codex then asks once to trust the hooks: run `codex` and choose 'Trust
-all and continue'. A headless run skips untrusted hooks silently. The event
-table lives in @hooks' `docs/wiring.md`.
+all and continue'. A headless run skips untrusted hooks silently.
+
+OpenCode has no hook file. Its plugin, the hooks branch's
+`apps/handlers/bridges/opencode_plugin.ts`, reads the `cli.opencode` rows from
+the manifest under `$AIPASS_HOME` and runs them; the installed copy must be
+byte-equal to the source. `aipass doctor --fix` copies it into the OpenCode
+config folder, backup first and a receipt after, like the Codex merge. The
+event table for every CLI lives in @hooks' `docs/wiring.md`.
 
 **Doctor's Codex rows.** Beside `codex hooks`, `aipass doctor` reads the Codex
 side and never writes it. `codex binary` prints the version, or passes as
@@ -67,33 +76,53 @@ for this login. `codex pins` checks four settings that must read `false`:
 `[tools.experimental_request_user_input]`. Each missing or wrong pin is a
 warning naming the line to add by hand. `--fix` never touches `config.toml`.
 
-**Handing off to either CLI.** `aipass handoff launch --cli codex` and an init
-run that chose Codex start `codex --dangerously-bypass-approvals-and-sandbox`,
-the posture dispatch uses, because the hooks are the gates on both CLIs. The way
+**Doctor's OpenCode rows.** `opencode plugin` measures the installed plugin
+against the source. `opencode binary` finds `opencode` on PATH or in
+`~/.opencode/bin` and prints its version, or passes as optional and skips the
+rest. `opencode login` names the providers `opencode auth list` prints, or
+`none (free models only)`: the free models need no login. `opencode model`
+reads `model` from `opencode.json` (or `.jsonc`) in the config folder, or says
+OpenCode picks its own default. OpenCode needs no config pins: AIPass launches
+it with `--auto`. Doctor never runs `opencode run`, which spends free quota and
+starts a server.
+
+**Handing off to a CLI.** `aipass handoff launch --cli codex` and an init run
+that chose Codex start `codex --dangerously-bypass-approvals-and-sandbox`, the
+posture dispatch uses, because the hooks are the gates on every CLI. The way
 back printed after the session is `codex resume --last` from the agent's
-directory; Claude Code's is `claude --continue`.
+directory; Claude Code's is `claude --continue`. `aipass handoff launch --cli
+opencode` runs `PATH="$HOME/.opencode/bin:$PATH" opencode --standalone --auto
+--prompt "<prompt>"`, the shape of BAUD's rooms: the PATH prefix because the
+curl installer's bin is on PATH only through `~/.bashrc`, and `--standalone` so
+the seat gets a private server with its own environment. Without it the TUI
+joins the user's shared server, which keeps the environment of whoever started
+it, and `AIPASS_HOME` never reaches the hooks.
 
 **The session pointer and the handoff.** Each interactive session start writes
 the branch's resume target, with the CLI running it, to
 `.ai_mail.local/session.json`, so a resume reopens the right CLI. A switch
-(`/codex` on Claude Code, `$claude` on Codex) saves memories, writes
-`.ai_mail.local/handoff.md` and replaces the pane with the other CLI, greeted
-by that file.
+saves memories, writes `.ai_mail.local/handoff.md` and replaces the pane with
+the other CLI, greeted by that file. With the word `fresh`, or when the chat has
+nothing in it yet, the switch skips the memories and the handoff and the other
+CLI opens an empty chat in the same directory. A switch into OpenCode takes a
+model as a word with a slash in it (`opencode/<model>`), passed as inline config.
 
 ## Spelling a ritual on each CLI
 
-| Claude Code | Codex | What it does |
-|---|---|---|
-| `/prep` | `$prep` | Session wrap-up before a close or a compaction |
-| `/memo` | `$memo` | Memory update |
-| `/compass` | `$compass` | Record the decision just made, with a rating |
-| `/codex` | — | Switch this chat to Codex |
-| — | `$claude` | Switch this chat to Claude Code |
-| `/compact` | `/compact` | Compact the context (built into both) |
-| `/clear` | `/new` | Start a fresh context |
+| Claude Code | Codex | OpenCode | What it does |
+|---|---|---|---|
+| `/prep` | `$prep` | `/prep` | Session wrap-up before a close or a compaction |
+| `/memo` | `$memo` | `/memo` | Memory update |
+| `/compass` | `$compass` | `/compass` | Record the decision just made, with a rating |
+| `/codex` | — | `/codex` | Switch this chat to Codex |
+| — | `$claude` | `/claude` | Switch this chat to Claude Code |
+| `/opencode` | `$opencode` | — | Switch this chat to OpenCode |
+| `/codex fresh` | `$claude fresh` | `/claude fresh` | The same switch with no handoff: an empty chat in the other CLI |
+| `/compact` | `/compact` | built in | Compact the context |
+| `/clear` | `/new` | built in | Start a fresh context |
 
 Codex has no `$ARGUMENTS`. A shared skill that takes input says "the words
-after the command", which both CLIs understand.
+after the command", which every CLI understands.
 
 ## A compaction, on each CLI
 
@@ -103,6 +132,7 @@ after the command", which both CLIs understand.
    event's `last_token_usage`, with the window the rollout reports). At 80% of
    the compact point it asks for prep at the next natural breakpoint, at 95%
    now, once per context window, spelled `/prep` or `$prep` for the CLI.
+   OpenCode keeps no transcript file, so the gauge stays silent there.
 2. **Prep runs as a model turn.** The model updates memories, plans and inbox,
    and ends on a Resuming line, the thread the next context picks up.
 3. **The compact fires.** Auto or by `/compact`, the PreCompact hooks stamp an
@@ -126,13 +156,16 @@ after the command", which both CLIs understand.
 - Codex runs hooks and tool shells from its app-server daemon, with the
   daemon's environment, not the terminal's. `AIPASS_HOME` therefore comes from
   `~/.profile`, which `setup.sh` writes.
+- OpenCode's plugin runs inside the OpenCode server. A shared server keeps the
+  environment it started with; `--standalone` gives a seat its own.
 - Only the portable frontmatter fields of the Agent Skills standard travel:
   `name`, `description`, `license`, `compatibility`, `metadata`,
   `allowed-tools`. A Claude-only field makes a skill unusable elsewhere.
 
 Code: the scaffold doors in
 [`apps/handlers/init/bootstrap.py`](../apps/handlers/init/bootstrap.py), the
-hook writer in [`apps/handlers/provider_wire.py`](../apps/handlers/provider_wire.py),
+hook and plugin writer in [`apps/handlers/provider_wire.py`](../apps/handlers/provider_wire.py),
+OpenCode's read-only rows in [`apps/handlers/opencode_cli.py`](../apps/handlers/opencode_cli.py),
 the skills rows in [`apps/modules/doctor.py`](../apps/modules/doctor.py).
 
 ---

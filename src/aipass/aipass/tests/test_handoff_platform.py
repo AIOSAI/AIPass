@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_handoff_platform.py
 # Description: Tests for handoff_platform handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-05-12
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
 """Tests for apps/handlers/handoff_platform/__init__.py and the handoff module it drives."""
@@ -31,7 +31,7 @@ from aipass.aipass.apps.handlers.handoff_platform import (
     launch_wt,
     return_path_breadcrumb,
 )
-from aipass.aipass.apps.modules.handoff import handle_command
+from aipass.aipass.apps.modules.handoff import INIT_PROMPT, handle_command
 
 # Ensure encoding='utf-8' appears (PATTERN check)
 _ENCODING = "utf-8"
@@ -313,6 +313,15 @@ class TestLaunchTmux:
         out, _err = capsys.readouterr()
         assert "tmux attach -t" in out
 
+    def test_opencode_types_baud_s_standalone_auto_launch_with_the_prompt_flag(self, tmp_path, monkeypatch) -> None:
+        _path_with(monkeypatch, tmp_path, "tmux")
+        with patch("aipass.aipass.apps.handlers.handoff_platform.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            assert launch_tmux("opencode", "pick up the handoff", str(tmp_path)) is True
+
+        typed = mock_run.call_args_list[-1][0][0][4]
+        assert typed == "PATH=\"$HOME/.opencode/bin:$PATH\" opencode --standalone --auto --prompt 'pick up the handoff'"
+
     def test_called_process_error_returns_false(self, tmp_path, monkeypatch) -> None:
         """Returns False when tmux new-session fails."""
         _path_with(monkeypatch, tmp_path, "tmux")
@@ -580,3 +589,14 @@ class TestHandoffCommandRefusal:
             assert handle_command("handoff", argv) is True
 
         did.assert_called_once_with(cli="claude", cwd=str(tmp_path), flag_variant="skip-permissions")
+
+    def test_launch_cli_opencode_is_accepted_and_offers_the_opencode_command(self, tmp_path, capsys) -> None:
+        with patch("aipass.aipass.apps.handlers.handoff_platform.launch_terminal", return_value=False):
+            with patch("aipass.aipass.apps.handlers.handoff_platform.launch_tmux", return_value=False):
+                assert handle_command("handoff", ["launch", "--cli", "opencode", "--cwd", str(tmp_path)]) is True
+
+        out, _err = capsys.readouterr()
+        want = build_manual_command("opencode", INIT_PROMPT, str(tmp_path))
+        launch = 'PATH="$HOME/.opencode/bin:$PATH" opencode --standalone --auto --prompt'
+        assert want == f"cd {tmp_path} && {launch} {shlex.quote(INIT_PROMPT)}"
+        assert " ".join(want.split()) in " ".join(out.split())

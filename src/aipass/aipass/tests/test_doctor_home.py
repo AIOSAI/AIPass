@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_doctor_home.py
-# Description: Tests for doctor's home, owner-seating, preflight, citizen-count, shared-skills and shadow rows
-# Version: 1.5.0
+# Description: Tests for doctor's home, owner-seating, preflight, citizen-count, shared-skills, shadow and smoke rows
+# Version: 1.6.1
 # Created: 2026-10-08
-# Modified: 2026-10-27
+# Modified: 2026-10-28
 # =============================================
 
-"""Tests for apps/modules/doctor.py: AIPASS_HOME rows, seating, preflight, drone count, skills, shadows, gitignore."""
+"""Tests for apps/modules/doctor.py and _doctor_smoke.py: home, seating, preflight, drone, skills, shadows, gitignore, smoke."""
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
 
@@ -28,6 +28,7 @@ from aipass.aipass.apps.handlers.structure_scan.structure_scanner import check_g
 from aipass.aipass.apps.modules.doctor import (
     CheckResult,
     check_identity,
+    handle_command,
     run_doctor,
     run_doctor_preflight,
 )
@@ -665,8 +666,6 @@ class TestSharedSkillsRows:
         fixes = [r.detail for r in self.printed["Scaffold"] if r.label == "skills fix"]
         assert fixes == [
             "Linked .claude/skills -> ../.agents/skills",
-            "Wrote .claude/commands/codex.md",
-            "Wrote .codex/skills/claude/SKILL.md",
             "Retired .claude/commands/prep.md -> prep(disabled).md: .agents/skills/prep/SKILL.md replaces it",
         ]
 
@@ -690,19 +689,29 @@ class TestSharedSkillsRows:
         row = self._rows()["provider switch"]
 
         assert row.glyph == GLYPH_WARN
-        assert row.detail == "missing .codex/skills/claude/SKILL.md: the chat cannot switch CLI here"
-        assert row.remediation == f"Run: aipass doctor --fix, or 'aipass init update {self.root}'"
+        missing = ".codex/skills/claude/SKILL.md, .claude/commands/opencode.md, .codex/skills/opencode/SKILL.md, "
+        missing += ".opencode/commands/claude.md, .opencode/commands/codex.md, .opencode/commands/memo.md, "
+        missing += ".opencode/commands/prep.md, .opencode/commands/compass.md"
+        assert row.detail == f"missing {missing}: the chat cannot switch CLI here"
+        assert row.remediation == f"Run 'aipass init update {self.root}'"
 
-    def test_fix_writes_the_missing_switch_file_and_leaves_an_edited_one(self) -> None:
+    def test_fix_writes_no_switch_file_and_still_links_the_skills(self) -> None:
+        self._skill("prep", "name: prep\ndescription: wrap up\n")
         skill = self.root / ".codex" / "skills" / "claude" / "SKILL.md"
         skill.parent.mkdir(parents=True)
         skill.write_text("# my own switch\n", encoding="utf-8")
 
         rows = self._rows(fix=True)
 
-        assert (self.root / ".claude" / "commands" / "codex.md").read_text(encoding="utf-8") == sc.codex_command_md()
+        assert not (self.root / ".claude" / "commands" / "codex.md").exists()
+        assert not (self.root / ".opencode").exists()
         assert skill.read_text(encoding="utf-8") == "# my own switch\n"
-        assert rows["provider switch"].glyph == GLYPH_PASS
+        assert (self.root / ".claude" / "skills").resolve() == (self.root / ".agents" / "skills").resolve()
+        assert rows["skills link"].glyph == GLYPH_PASS
+        assert rows["provider switch"].glyph == GLYPH_WARN
+        assert rows["provider switch"].detail.startswith(
+            "missing .claude/commands/codex.md, .claude/commands/opencode.md"
+        )
 
 
 class TestInstructionShadowRows:
@@ -915,3 +924,94 @@ class TestGitignoreCoverageRows:
         assert check_gitignore_coverage(self.root) == [
             ("gitignore coverage", GLYPH_PASS, "not a git repository: nothing tracked", "")
         ]
+
+
+class TestDoctorSmoke:
+    """aipass doctor --smoke through handle_command: hooks' smoke door is the edge, the groups answer nothing."""
+
+    PAYLOAD = [
+        {"provider": "claude", "status": "pass", "why": "ack read", "session_id": "s1", "elapsed_ms": 2400},
+        {"provider": "codex", "status": "skip", "why": "not logged in", "session_id": "", "elapsed_ms": 0},
+    ]
+
+    @pytest.fixture(autouse=True)
+    def _edges(self, monkeypatch) -> None:
+        mod = "aipass.aipass.apps.modules.doctor"
+        self.calls: list = []
+        self.printed: dict = {}
+        self.answer = MagicMock(returncode=0, stdout=json.dumps(self.PAYLOAD), stderr="")
+
+        def _run(argv, **_kw):
+            self.calls.append(argv)
+            return self.answer
+
+        def _record(groups):
+            self.printed.update(groups)
+            return 0, 0, sum(r.glyph == GLYPH_FAIL for rows in groups.values() for r in rows)
+
+        monkeypatch.setattr("aipass.aipass.apps.modules._doctor_smoke.subprocess.run", _run)
+        monkeypatch.setattr(f"{mod}._compute_doctor_groups", lambda **_kw: {"Services": []})
+        monkeypatch.setattr(f"{mod}._print_doctor_groups", _record)
+
+    def _smoke_rows(self) -> dict:
+        return {r.label: r for r in self.printed["Services"] if r.label.startswith("smoke")}
+
+    def test_the_default_run_never_calls_hooks_smoke(self) -> None:
+        assert handle_command("doctor", []) is True
+
+        assert self.calls == []
+        assert self._smoke_rows() == {}
+
+    def test_pass_and_skip_are_check_rows_with_the_time_and_the_reason(self) -> None:
+        assert handle_command("doctor", ["--smoke"]) is True
+
+        assert self.calls == [["drone", "@hooks", "smoke", "--json"]]
+        rows = self._smoke_rows()
+        assert (rows["smoke claude"].glyph, rows["smoke claude"].detail) == (GLYPH_PASS, "pass (2.4 s)")
+        assert (rows["smoke codex"].glyph, rows["smoke codex"].detail) == (GLYPH_PASS, "skip (not logged in)")
+
+    def test_a_fail_is_a_cross_row_with_hooks_why_and_exits_one(self) -> None:
+        failed = {"provider": "opencode", "status": "fail", "why": "no hook nonce ack", "session_id": "s3"}
+        self.answer = MagicMock(returncode=1, stdout=json.dumps([failed]), stderr="")
+
+        with pytest.raises(SystemExit) as exit_info:
+            handle_command("doctor", ["--smoke", "--model", "opencode=openai/gpt-6.1-sol"])
+
+        assert exit_info.value.code == 1
+        assert self.calls == [["drone", "@hooks", "smoke", "--json", "--model", "opencode=openai/gpt-6.1-sol"]]
+        row = self._smoke_rows()["smoke opencode"]
+        assert (row.glyph, row.detail) == (GLYPH_FAIL, "fail: no hook nonce ack")
+        assert row.remediation == "Run: drone @hooks smoke --provider opencode"
+
+    def test_unreadable_hooks_output_is_one_cross_row_not_a_pass(self) -> None:
+        self.answer = MagicMock(returncode=2, stdout="Traceback", stderr="")
+
+        with pytest.raises(SystemExit):
+            handle_command("doctor", ["--smoke"])
+
+        assert [(r.label, r.glyph, r.detail) for r in self._smoke_rows().values()] == [
+            ("smoke", GLYPH_FAIL, "no result array (exit 2)")
+        ]
+
+    def test_json_prints_hooks_objects_as_given_and_runs_no_group(self, capsys) -> None:
+        assert handle_command("doctor", ["--smoke", "--json"]) is True
+
+        out, _err = capsys.readouterr()
+        assert json.loads(out) == self.PAYLOAD
+        assert self.printed == {}
+
+    def test_json_exits_one_when_a_provider_fails(self) -> None:
+        self.answer = MagicMock(returncode=1, stdout=json.dumps([{"provider": "codex", "status": "fail"}]), stderr="")
+
+        with pytest.raises(SystemExit) as exit_info:
+            handle_command("doctor", ["--smoke", "--json"])
+
+        assert exit_info.value.code == 1
+
+    def test_smoke_never_runs_with_fix(self, capsys) -> None:
+        with pytest.raises(SystemExit):
+            handle_command("doctor", ["--smoke", "--fix"])
+
+        _out, err = capsys.readouterr()
+        assert "never runs with --fix" in err
+        assert self.calls == [] and self.printed == {}

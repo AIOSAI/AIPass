@@ -79,6 +79,7 @@ line per file: `matches`, `differs`, `absent` (it was missing, so it was added),
 `unreadable` when either side cannot be decoded as text. Unreadable is its own answer rather
 than a guessed `differs`. The template is rendered with the branch passport's own purpose and
 class; `{{DATE}}` renders as today, so a README stamped on an earlier day still reads `differs`.
+A branch `.gitignore` is compared and reported the same way, one state per branch, and never written.
 
 Nothing is written. A README or branch-prompt diet is the owner's judgment about what to
 keep and what to move into `docs/`, not something a template overwrite can perform: every

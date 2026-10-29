@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: loader.py
-# Version: 2.1.0
+# Version: 2.2.0
 # Description: Hook config loader — the AIPass config from AIPASS_HOME, a project's own behind trust, gates always
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-05-19
-# Modified: 2026-10-17
+# Modified: 2026-10-28
 # =============================================
 
 """Which hook config a session runs. Security never depends on trust (DPLAN-0356 item 1).
@@ -28,6 +28,10 @@ _CONFIG = Path(".aipass") / "hooks.json"
 _PROJECT_MARKER = "*_REGISTRY.json"
 
 AIPASS = "aipass"
+#: A project's hooks.json key naming its own handler package; honoured only on an enrolled, hash-matching config.
+NAMESPACE_KEY = "handler_namespace"
+#: The loader's stamps for the engine. A config file never sets them: _read_config drops them.
+NAMESPACE_STAMP, SRC_STAMP = "_handler_namespace", "_project_src"
 EXTERNAL = "external"
 NONE = "none"
 
@@ -112,7 +116,26 @@ def _read_config(config_file: Path) -> dict:
     if not isinstance(parsed, dict):
         raise ValueError(f"{config_file} is not a JSON object")
     parsed["_source"] = "project"
+    parsed.pop(NAMESPACE_STAMP, None)
+    parsed.pop(SRC_STAMP, None)
     return parsed
+
+
+def _stamp_namespace(config: dict, kind: str, where: Path) -> None:
+    """A trusted external config's handler_namespace, stamped with its src/ for the engine; anywhere else refused."""
+    namespace = config.get(NAMESPACE_KEY)
+    if namespace is None:
+        return
+    if kind != EXTERNAL:
+        logger.warning("[HOOKS] loader: %s refused in %s: AIPass's own config runs aipass.* only", NAMESPACE_KEY, where)
+        return
+    if not isinstance(namespace, str) or not namespace.isidentifier() or namespace == "aipass":
+        logger.warning(
+            "[HOOKS] loader: %s %r refused in %s: one package name, not aipass", NAMESPACE_KEY, namespace, where
+        )
+        return
+    config[NAMESPACE_STAMP] = namespace
+    config[SRC_STAMP] = str(where / "src")
 
 
 def gate_set() -> dict:
@@ -149,8 +172,11 @@ def find_project_config() -> dict | None:
         if not registry_path().exists():
             bootstrap()
         if not is_trusted(str(where)):
+            # Its handler_namespace with it: no handler of an untrusted config is imported.
             logger.warning(
-                "[HOOKS] project not enrolled in trust registry: %s (its own hooks are off; the AIPass gates run)",
+                "[HOOKS] project not enrolled, or its hooks.json changed since enrollment: %s (its own hooks are off;"
+                " the AIPass gates run; cure: aipass trust %s)",
+                where,
                 where,
             )
             return None
@@ -161,6 +187,7 @@ def find_project_config() -> dict | None:
         logger.error("[HOOKS] bad config %s: %s", config_file, exc)
     if config is None:
         return None
+    _stamp_namespace(config, kind, where)
     home = aipass_home()
     if kind == EXTERNAL and home is not None and _inside(where, home):
         return gates.enforce(config, gate_set())

@@ -3,7 +3,7 @@
 # HOOKS
 
 **Purpose:** Hook infrastructure for AIPass. One dispatch engine routes every hook event across
-platforms (Claude Code, Codex) with per-project configuration, full logging and gates that fail closed. On
+platforms (Claude Code, Codex, OpenCode) with per-project configuration, full logging and gates that fail closed. On
 one side it injects the grounding an agent wakes up with; on the other it fences the writes an agent
 makes.
 **Module:** `aipass.hooks`
@@ -84,10 +84,8 @@ here and cannot go stale:
 
 ## Commands
 
-There is no command list on this page, deliberately: a hand-typed copy of the branch's own help output
-rots the next time a verb is added or renamed. The generated surface above under **Live Inventory** is
-always current, and the depth behind each verb is in the documentation index below. When a verb exists
-and `--help` does not name it, the bug is in `--help`.
+No command list here: a hand-typed copy of `--help` rots when a verb changes. **Live Inventory** above
+is always current; depth is in the docs below. A verb `--help` does not name is a bug in `--help`.
 
 ---
 
@@ -98,7 +96,7 @@ command to the one that claims it. `apps/modules/` holds one business-logic modu
 `engine` (the dispatcher itself), `engine_closure` (the files the engine imports, and the edit
 check that keeps a NameError out of them), `door_trust_registry` (the one modules file aipass may
 import for the trust registry), `cadence` (which turn a loader fires on), `injection_ledger` (what a
-seat was told, per turn), `grounding_content` (the
+seat was told, per turn), `grounding_receipt` (whether the grounding reached the model), `grounding_content` (the
 injected blocks and their budgets), `write_ownership` (whose file a write lands in, read from the registries),
 `bash_writes`, `shell_reader`, `shell_programs` and `testwrite_targets` (what a shell command can be
 seen to write, the programs it runs, and which writes are new tests), `admin_seat` and `testgate_policy` (who is exempt,
@@ -141,7 +139,7 @@ Depth lives in [docs/](docs/), one file per gate or module group:
 | [docs/sandbox.md](docs/sandbox.md) | The kernel filesystem boundary: policy per role, what is writable, launch seam |
 | [docs/boot_shim.md](docs/boot_shim.md) | The one script here that writes outside the repo |
 | [docs/cadence_investigation.md](docs/cadence_investigation.md) | The per-turn injection counter and why it is keyed per session |
-| [docs/provider_parity.md](docs/provider_parity.md) | `parity`: the same prompts headless on both CLIs, compared hook by hook |
+| [docs/provider_parity.md](docs/provider_parity.md) | `parity`: the same prompts headless on both CLIs, compared hook by hook; `smoke`: one live turn per provider |
 
 ---
 
@@ -160,7 +158,7 @@ Depth lives in [docs/](docs/), one file per gate or module group:
 
 ### Provides To
 
-- Every Claude Code and Codex session in the fleet — grounding injection, the security gates, and the
+- Every Claude Code, Codex and OpenCode session in the fleet — grounding injection, the security gates, and the
   record of every hook that fired.
 - `aipass.ai_mail` — `build_policy`, `build_srt_config` and `resolve_bwrap_command` at the agent
   launch boundary.
@@ -168,7 +166,7 @@ Depth lives in [docs/](docs/), one file per gate or module group:
 
 ---
 
-**Last Updated:** 2026-10-17
+**Last Updated:** 2026-10-29
 
 ---
 [← Back to AIPass](../../../README.md)

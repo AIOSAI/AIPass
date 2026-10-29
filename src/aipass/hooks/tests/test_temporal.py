@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_temporal.py
-# Version: 1.0.1
+# Version: 1.1.0
 # Description: Tests for temporal prompt handler
 # Branch: hooks
 # Created: 2026-07-21
-# Modified: 2026-10-17
+# Modified: 2026-10-28
 # =============================================
 
 """Tests for apps/handlers/prompt/temporal.py."""
@@ -107,6 +107,18 @@ class TestHandle:
         monkeypatch.setattr(temporal, "_format_line", _boom)
         result = temporal.handle({"session_id": "s-err"})
         assert result == {"stdout": "", "exit_code": 0}
+
+    def test_a_smoke_nonce_in_the_prompt_comes_back_as_an_ack_the_prompt_does_not_carry(self):
+        prompt = "Reply ok. aipass-smoke:0123456789abcdef"
+        line = handle({"prompt": prompt})["stdout"]
+        assert line.startswith("Temporal: ")
+        assert line.endswith(" · smoke-ack:0123456789abcdef")
+        assert "smoke-ack:" not in prompt
+
+    def test_a_prompt_without_the_nonce_or_with_a_short_one_gets_no_ack(self):
+        assert "smoke-ack" not in handle({"prompt": "aipass-smoke:abc"})["stdout"]
+        assert "smoke-ack" not in handle({"prompt": "hello"})["stdout"]
+        assert "smoke-ack" not in handle({"prompt": None})["stdout"]
 
 
 if __name__ == "__main__":

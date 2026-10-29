@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_agent.py
 # Description: Tests for the watchdog agent handler
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-04-14
-# Modified: 2026-10-26
+# Modified: 2026-10-29
 # =============================================
 
 """Tests for apps/handlers/watchdog/agent.py: watch_agent, TranscriptScanner and StallTracker."""
@@ -15,6 +15,7 @@
 
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import time
@@ -254,7 +255,9 @@ def test_watch_agent_crashed_via_bounce_file(monkeypatch, tmp_path):
 
     def crash_exit():
         """Drop a bounce file then remove the lock to simulate crash exit."""
-        bounce_file.write_text(json.dumps({"exit_code": 1, "reason": "test"}), encoding="utf-8")
+        bounce_file.write_text(
+            json.dumps({"exit_code": 1, "reason": "test", "timestamp": "2026-04-14T00:00:05"}), encoding="utf-8"
+        )
         lock_file.unlink(missing_ok=True)
 
     _exit_during_first_poll(monkeypatch, crash_exit)
@@ -993,3 +996,76 @@ def test_codex_rollout_tail_decides_inflight(tmp_path, monkeypatch, tail, inflig
     s = agent_handler.TranscriptScanner(tmp_path / "proj", now=0.0, branch_path=branch)
 
     assert s.last_entry_inflight() is inflight
+
+
+def _opencode_store(path: Path, session_id: str, updated: int, idle: int | None, outcome: str | None) -> None:
+    """One session_v2 row in a scratch OpenCode store, the three columns the scanner reads."""
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "create table if not exists session_v2 "
+            "(id text primary key, time_updated int, time_idle int, idle_outcome text)"
+        )
+        conn.execute(
+            "insert or replace into session_v2 values (?, ?, ?, ?)",
+            (session_id, updated, idle, outcome),
+        )
+
+
+def test_opencode_pointer_watches_the_session_row(tmp_path, monkeypatch):
+    """An opencode pointer watches no file: the row's time_updated is growth, idle after update is done."""
+    branch = tmp_path / "branch"
+    branch.mkdir()
+    store = tmp_path / "opencode.db"
+    _opencode_store(store, "ses_1", updated=1000, idle=None, outcome=None)
+    monkeypatch.setattr(agent_handler, "opencode_db", lambda: store)
+    _write_pointer(branch, "opencode", "ses_1")
+
+    s = agent_handler.TranscriptScanner(tmp_path / "proj", now=0.0, branch_path=branch)
+    assert s.provider == "opencode" and s._paths == []
+    assert s.last_entry_inflight() is True  # never idled
+    assert s.tick(1.0) is False  # nothing changed since the watch started
+
+    _opencode_store(store, "ses_1", updated=2000, idle=1500, outcome="succeeded")
+    assert s.tick(2.0) is True  # time_updated grew
+    assert s.last_entry_inflight() is True  # idled before its last update: a turn is running
+
+    _opencode_store(store, "ses_1", updated=2000, idle=2001, outcome="succeeded")
+    assert s.tick(3.0) is False
+    assert s.last_entry_inflight() is False
+
+    _write_pointer(branch, "opencode", "ses_missing")
+    s.refresh(4.0)
+    assert s.last_entry_inflight() is False  # no row is no agent, not a stall
+
+    store.write_text("not a database", encoding="utf-8")
+    assert s.last_entry_inflight() is True  # an unreadable store counts as in flight
+
+
+@pytest.mark.parametrize(
+    ("bounce_ts", "state"), [("2026-04-01T09:00:00", "completed_silent"), ("2026-04-14T00:00:00", "crashed")]
+)
+def test_bounce_older_than_the_dispatch_is_not_a_crash(monkeypatch, tmp_path, bounce_ts, state):
+    """Nothing deletes last_bounce.json; a past run's file must not mark this clean run crashed."""
+    branch_path = _build_fake_branch(tmp_path)
+    lock_file = _write_lock(branch_path, pid=os.getpid())
+    (branch_path / ".ai_mail.local" / "last_bounce.json").write_text(
+        json.dumps({"timestamp": bounce_ts}), encoding="utf-8"
+    )
+    monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
+    _exit_during_first_poll(monkeypatch, lambda: lock_file.unlink(missing_ok=True))
+
+    result = agent_handler.watch_agent("@fakebranch", timeout_seconds=5, poll_interval=0.01)
+
+    assert result["agent_state"] == state
+
+
+def test_null_email_row_does_not_stop_the_search(monkeypatch, tmp_path):
+    """A row with "email": null is skipped by email and still matched by name."""
+    (tmp_path / "b" / ".ai_mail.local").mkdir(parents=True)
+    rows = {"branches": [{"name": "B", "email": None, "path": "b"}]}
+    (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(rows), encoding="utf-8")
+    monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
+
+    result = agent_handler.watch_agent("@b", timeout_seconds=1, poll_interval=0.01)
+
+    assert result["reason"] != "agent not found" and result["woke"] is True

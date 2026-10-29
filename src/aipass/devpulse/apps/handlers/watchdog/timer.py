@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: timer.py
 # Description: Watchdog Timer Handler — wake-in-N + named duration tracking
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-14
-# Modified: 2026-10-17
+# Modified: 2026-10-28
 # =============================================
 
 # Operational state lives in .watchdog/, never .trinity/ (identity and memory only).
@@ -13,7 +13,6 @@ Watchdog Timer Handler — wake-in-N and named duration tracking.
 """
 
 import json
-import os
 import re
 import sys
 import time
@@ -39,18 +38,9 @@ def _stderr(msg: str) -> None:
     sys.stderr.flush()
 
 
-def _devpulse_root() -> Path:
-    """The devpulse package dir, derived from ``__file__`` — never from cwd.
-
-    The default IS reachable from tests (agent.watch names no store), and a cwd
-    answer plants ``.watchdog/`` wherever a child stands.
-    """
-    return Path(__file__).resolve().parents[3]
-
-
 def default_storage_path() -> Path:
     """Resolve `.watchdog/watchdog_timers.json` relative to the devpulse root."""
-    return _devpulse_root() / ".watchdog" / _STORAGE_FILENAME
+    return _registry._devpulse_root() / ".watchdog" / _STORAGE_FILENAME
 
 
 def _empty_store() -> dict:
@@ -78,21 +68,6 @@ def _load_store(storage_path: Path) -> dict:
     if not isinstance(data["history"], list):
         data["history"] = []
     return data
-
-
-def _atomic_write(storage_path: Path, data: dict) -> None:
-    """Write to a .tmp sibling then rename so concurrent readers never see a half-write."""
-    storage_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = storage_path.with_suffix(storage_path.suffix + ".tmp")
-    try:
-        tmp_path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
-        os.replace(tmp_path, storage_path)
-    finally:
-        if tmp_path.exists():
-            try:
-                tmp_path.unlink()
-            except OSError as exc:
-                logger.warning("[watchdog.timer] leftover tmp %s: %s", tmp_path, exc)
 
 
 def parse_duration(duration: str) -> int:
@@ -193,7 +168,7 @@ def timer_start(name: str, storage_path: Path | None = None) -> dict:
     now = time.time()
     started_iso = datetime.fromtimestamp(now).isoformat()
     store["active"][name] = {"started_at": started_iso, "started_epoch": now}
-    _atomic_write(path, store)
+    _registry._atomic_write_unlocked(path, store)
     logger.info("[watchdog.timer] start name=%s", name)
     return {"name": name, "started_at": started_iso, "state": "started"}
 
@@ -223,7 +198,7 @@ def timer_stop(name: str, storage_path: Path | None = None) -> dict:
         "elapsed_seconds": elapsed_seconds,
     }
     store["history"].append(history_entry)
-    _atomic_write(path, store)
+    _registry._atomic_write_unlocked(path, store)
     logger.info("[watchdog.timer] stop name=%s elapsed=%s", name, elapsed_seconds)
 
     return {
@@ -284,7 +259,7 @@ def timer_report(storage_path: Path | None = None) -> str:
         lines.append("  (none)")
 
     lines.append("")
-    lines.append("History (this session):")
+    lines.append("History:")
     if snapshot["history"]:
         for item in snapshot["history"]:
             started = _short_time(item.get("started_at"))

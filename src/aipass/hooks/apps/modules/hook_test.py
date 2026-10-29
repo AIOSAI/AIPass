@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: hook_test.py
-# Version: 1.3.0
-# Description: Portable hook test runner — every hook with mock data; provider parity with real sessions
+# Version: 1.5.0
+# Description: Portable hook test runner — every hook with mock data; provider parity and smoke with real sessions
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-10
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
 """Portable hook test runner.
@@ -33,16 +33,17 @@ from aipass.hooks.apps.handlers.config.loader import aipass_home, config_unavail
 from aipass.hooks.apps.handlers.config.trust_registry import read_registry
 from aipass.hooks.apps.handlers.json import files as json_files
 from aipass.hooks.apps.handlers.module_root import module_file
-from aipass.hooks.apps.handlers.parity import runner
+from aipass.hooks.apps.handlers.parity import runner, smoke
 from aipass.hooks.apps.modules.write_ownership import project_of
 from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import err_console
+from aipass.cli.apps.modules import console, err_console
 
 CONSOLE = err_console
 
 HELP_COMMANDS = [
     ("test [--verbose]", "Fire every hook with mock data and report results"),
     ("parity [--branch @x] [--lane A,..] [--json]", "Same prompts headless on Claude and Codex, hook by hook"),
+    ("smoke [--provider ..] [--branch @x] [--json]", "One live turn per provider: pass, fail or skip, and why"),
 ]
 
 REPORTS_DIR = module_file(__file__).parents[2] / "artifacts" / "reports"
@@ -328,18 +329,18 @@ def run_parity(branch: Path, lanes: list[str], providers: list[str]) -> dict:
                 readings[provider] = runner.observe(row, entries, moved) if session_id and entries else runner.NO_DATA
             rows.append({**row.__dict__, "readings": readings, "verdict": runner.verdict(row, readings)})
     ok = not [r for r in rows if r["verdict"] in runner.FAILING]
-    return {"branch": str(branch), "rows": rows, "notes": notes, "ok": ok}
+    return {"branch": str(branch), "providers": providers, "rows": rows, "notes": notes, "ok": ok}
 
 
 def print_parity(results: dict) -> None:
-    """One table: row, Claude, Codex, verdict; accepted differences carry their reason."""
+    """One table: row, one column per provider run, verdict; accepted differences carry their reason."""
     table = Table(title=f"parity @ {results['branch']}")
-    for column in ("Lane", "Row", *runner.PROVIDERS, "Verdict"):
+    for column in ("Lane", "Row", *results["providers"], "Verdict"):
         table.add_column(column)
     styles = {runner.SAME: "green", runner.ACCEPTED: "yellow"}
     for row in results["rows"]:
         mark = f"{row['verdict']} ({row['accepted']})" if row["verdict"] == runner.ACCEPTED else row["verdict"]
-        cells = [row["readings"].get(p, "-") for p in runner.PROVIDERS]
+        cells = [row["readings"][p] for p in results["providers"]]
         style = styles.get(row["verdict"], "bold red")
         table.add_row(row["lane"], row["label"], *cells, f"[{style}]{mark}[/{style}]")
     CONSOLE.print(table)
@@ -350,15 +351,20 @@ def print_parity(results: dict) -> None:
 def _parity_command(args: list) -> bool:
     """drone @hooks parity: exit 1 on a real difference, so a merge train can gate on it."""
     if wants_help(args):
-        CONSOLE.print("[bold cyan]parity[/bold cyan] — the same scripted prompts on Claude and Codex, compared")
-        CONSOLE.print("  drone @hooks parity [--branch @canary|<path>] [--lane A,B,C,D,E,F] [--provider claude,codex]")
+        CONSOLE.print("[bold cyan]parity[/bold cyan] — the same scripted prompts on Claude, Codex, OpenCode, compared")
+        CONSOLE.print(
+            "  drone @hooks parity [--branch @canary|<path>] [--lane A,B,C,D,E,F] [--provider claude,codex,opencode]"
+        )
+        CONSOLE.print(
+            "  --provider defaults to claude,codex; opencode loads its plugin from OPENCODE_CONFIG_DIR when set"
+        )
         CONSOLE.print("  --json   also write artifacts/reports/parity_<date>.json")
         CONSOLE.print("Lane J is A,B,C with --branch at an external project's citizen. Exit 1 on DIFFERENT or no data.")
         return True
     parser = argparse.ArgumentParser(prog="drone @hooks parity", add_help=False)
     parser.add_argument("--branch", default="@canary")
     parser.add_argument("--lane", default=",".join(runner.LANES))
-    parser.add_argument("--provider", default=",".join(runner.PROVIDERS))
+    parser.add_argument("--provider", default=",".join(runner.DEFAULT_PROVIDERS))
     parser.add_argument("--json", action="store_true")
     opts, _unknown = parser.parse_known_args(args)
     branch = resolve_branch(opts.branch)
@@ -380,6 +386,44 @@ def _parity_command(args: list) -> bool:
     return True
 
 
+def _smoke_line(result: smoke.SmokeResult) -> str:
+    if result.status == smoke.PASS:
+        return f"{result.provider} pass ({result.elapsed_ms / 1000:.1f} s, {result.session_id})"
+    return f"{result.provider} {result.status} ({result.why})"
+
+
+def _smoke_command(args: list) -> bool:
+    """drone @hooks smoke: one isolated live turn per provider; exit 1 on any fail, 0 on pass or skip."""
+    if wants_help(args):
+        CONSOLE.print("[bold cyan]smoke[/bold cyan] — one 'say ok' turn per provider, its hook nonce read back")
+        CONSOLE.print("  drone @hooks smoke [--provider claude,codex,opencode] [--branch @x|<path>] [--json]")
+        CONSOLE.print("  --branch defaults to the current directory; --model provider=model, comma-separated")
+        CONSOLE.print("  pass: the temporal hook's ack is in the provider's own record of that session")
+        CONSOLE.print("  skip: not installed, not logged in, rate or free limit, plugin not installed, no readback")
+        CONSOLE.print("  --json   one JSON array on stdout. Exit 1 on any fail.")
+        return True
+    parser = argparse.ArgumentParser(prog="drone @hooks smoke", add_help=False)
+    parser.add_argument("--branch", default=".")
+    parser.add_argument("--provider", default=",".join(runner.PROVIDERS))
+    parser.add_argument("--model", default="")
+    parser.add_argument("--json", action="store_true")
+    opts, _unknown = parser.parse_known_args(args)
+    branch = resolve_branch(opts.branch)
+    providers = list(dict.fromkeys(p for p in opts.provider.lower().split(",") if p in runner.PROVIDERS))
+    models = dict(pair.split("=", 1) for pair in opts.model.split(",") if "=" in pair)
+    if branch is None or not providers:
+        CONSOLE.print(f"[red]smoke: no branch {opts.branch!r}, or no provider[/red]")
+        sys.exit(1)
+    results = [smoke.smoke(p, branch, models.get(p, "")) for p in providers]
+    if opts.json:
+        console.print_json(json.dumps([r.__dict__ for r in results]))
+    else:
+        console.print("smoke: " + " · ".join(_smoke_line(r) for r in results), markup=False, highlight=False)
+    if any(r.status == smoke.FAIL for r in results):
+        sys.exit(1)
+    return True
+
+
 def print_introspection() -> None:
     """Print module introspection for drone discovery."""
     CONSOLE.print("[cyan]hook_test[/cyan] — Portable hook test runner")
@@ -387,9 +431,11 @@ def print_introspection() -> None:
 
 
 def handle_command(command: str, args: list) -> bool:
-    """Route the 'test' and 'parity' commands."""
+    """Route the 'test', 'parity' and 'smoke' commands."""
     if command == "parity":
         return _parity_command(args)
+    if command == "smoke":
+        return _smoke_command(args)
     if command != "test":
         return False
 

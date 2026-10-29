@@ -1,19 +1,25 @@
 # =================== AIPass ====================
 # Name: temporal.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Every-turn local date/time/weekday/part-of-day injection (UserPromptSubmit)
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-21
-# Modified: 2026-10-17
+# Modified: 2026-10-28
 # =============================================
 
 """Tiny always-on temporal grounding line — no cadence gating, fires every
-turn. Timezone comes from the host (astimezone()), never hardcoded; one line, every-turn cost matters."""
+turn. Timezone comes from the host (astimezone()), never hardcoded; one line, every-turn cost matters.
 
+A prompt carrying the smoke nonce gets it back as smoke-ack: the smoke probe reads that ack off the
+provider's own record of the hook, a string the prompt itself does not contain."""
+
+import re
 from datetime import datetime
 
 from aipass.prax.apps.modules.logger import system_logger as logger
+
+SMOKE_NONCE = re.compile(r"aipass-smoke:([0-9a-f]{12,32})")
 
 
 def _part_of_day(hour: int) -> str:
@@ -41,6 +47,9 @@ def handle(hook_data: dict) -> dict:
     """Inject the current local temporal line — every turn, no cadence."""
     try:
         line = _format_line(datetime.now().astimezone())
+        nonce = SMOKE_NONCE.search(str(hook_data.get("prompt") or ""))
+        if nonce:
+            line += f" · smoke-ack:{nonce.group(1)}"
         return {"stdout": line, "exit_code": 0, "sound": "temporal"}
     except Exception as exc:
         logger.info("[HOOKS] temporal: unexpected error: %s", exc)

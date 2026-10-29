@@ -1,21 +1,22 @@
 # =================== AIPass ====================
 # Name: test_tracking.py
 # Description: Tests for usage tracking handler
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-10-24
+# Modified: 2026-10-28
 # =============================================
 
 """Tests for apps/handlers/usage/tracking.py, the usage tracking handler."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — the live OpenRouter generation endpoint; requests.get is mocked, no network
+# seedgo: no-test-needed(external) — the live OpenRouter generation endpoint; urlopen is mocked, no network
 # seedgo: no-test-needed(constant) — DEFAULT_REQUEST_TIMEOUT's value
 
 import json
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch, MagicMock
+from urllib.error import HTTPError, URLError
 
 import pytest
 
@@ -30,22 +31,32 @@ from aipass.api.apps.handlers.usage.tracking import (
 _TRACKING_MOD = "aipass.api.apps.handlers.usage.tracking"
 
 
-@patch(f"{_TRACKING_MOD}.requests")
-def test_get_generation_metrics_success(mock_requests: MagicMock):
+def _answer(mock_urlopen: MagicMock, payload: object) -> None:
+    """Make the patched urlopen answer with *payload* as JSON."""
+    mock_urlopen.return_value.__enter__.return_value.read.return_value = json.dumps(payload).encode()
+
+
+def _refuse(mock_urlopen: MagicMock, status: int) -> None:
+    """Make the patched urlopen raise the HTTPError urllib raises for *status*."""
+    mock_urlopen.side_effect = HTTPError(tracking.GENERATION_ENDPOINT, status, "refused", None, None)  # type: ignore[arg-type]
+
+
+@patch(f"{_TRACKING_MOD}.urlopen")
+def test_get_generation_metrics_success(mock_urlopen: MagicMock):
     """Returns metrics dict when API returns 200 with valid structure."""
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {
-        "data": {
-            "total_cost": 0.0042,
-            "tokens_prompt": 150,
-            "tokens_completion": 80,
-            "generation_time": 1200,
-            "latency": 1500,
-            "provider_name": "anthropic",
-        }
-    }
-    mock_requests.get.return_value = mock_response
+    _answer(
+        mock_urlopen,
+        {
+            "data": {
+                "total_cost": 0.0042,
+                "tokens_prompt": 150,
+                "tokens_completion": 80,
+                "generation_time": 1200,
+                "latency": 1500,
+                "provider_name": "anthropic",
+            }
+        },
+    )
 
     result = get_generation_metrics("gen-abc-123", "FAKE-sk-or-testkey")
 
@@ -57,19 +68,18 @@ def test_get_generation_metrics_success(mock_requests: MagicMock):
     assert result["latency"] == 1500
     assert result["provider_name"] == "anthropic"
 
-    mock_requests.get.assert_called_once()
-    call_kwargs = mock_requests.get.call_args
-    assert call_kwargs[1]["params"] == {"id": "gen-abc-123"}
-    assert "Bearer FAKE-sk-or-testkey" in call_kwargs[1]["headers"]["Authorization"]
+    mock_urlopen.assert_called_once()
+    request = mock_urlopen.call_args[0][0]
+    assert request.full_url == f"{tracking.GENERATION_ENDPOINT}?id=gen-abc-123"
+    assert "Bearer FAKE-sk-or-testkey" in request.get_header("Authorization")
+    assert mock_urlopen.call_args.kwargs["timeout"] == tracking.DEFAULT_REQUEST_TIMEOUT
 
 
-@patch(f"{_TRACKING_MOD}.requests")
-def test_get_generation_metrics_non_200(mock_requests: MagicMock):
+@patch(f"{_TRACKING_MOD}.urlopen")
+def test_get_generation_metrics_non_200(mock_urlopen: MagicMock):
     """A non-200 raises MetricsUnavailable naming the status and the generation."""
     # The reason travels in str(exc) so track_usage can say which of five failures happened.
-    mock_response = MagicMock()
-    mock_response.status_code = 404
-    mock_requests.get.return_value = mock_response
+    _refuse(mock_urlopen, 404)
 
     with pytest.raises(MetricsUnavailable) as refusal:
         get_generation_metrics("gen-missing", "FAKE-sk-or-key")
@@ -77,13 +87,10 @@ def test_get_generation_metrics_non_200(mock_requests: MagicMock):
     assert str(refusal.value) == "OpenRouter answered status 404 for generation gen-missing"
 
 
-@patch(f"{_TRACKING_MOD}.requests")
-def test_get_generation_metrics_invalid_structure_no_data_key(mock_requests: MagicMock):
+@patch(f"{_TRACKING_MOD}.urlopen")
+def test_get_generation_metrics_invalid_structure_no_data_key(mock_urlopen: MagicMock):
     """A 200 whose JSON lacks 'data' raises, naming the generation."""
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"error": "not found"}
-    mock_requests.get.return_value = mock_response
+    _answer(mock_urlopen, {"error": "not found"})
 
     with pytest.raises(MetricsUnavailable) as refusal:
         get_generation_metrics("gen-bad", "FAKE-sk-or-key")
@@ -91,13 +98,10 @@ def test_get_generation_metrics_invalid_structure_no_data_key(mock_requests: Mag
     assert str(refusal.value) == "OpenRouter answered without a data block for generation gen-bad"
 
 
-@patch(f"{_TRACKING_MOD}.requests")
-def test_get_generation_metrics_invalid_structure_empty_response(mock_requests: MagicMock):
+@patch(f"{_TRACKING_MOD}.urlopen")
+def test_get_generation_metrics_invalid_structure_empty_response(mock_urlopen: MagicMock):
     """A 200 whose JSON is empty raises the same refusal as one without 'data'."""
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = None
-    mock_requests.get.return_value = mock_response
+    _answer(mock_urlopen, None)
 
     with pytest.raises(MetricsUnavailable) as refusal:
         get_generation_metrics("gen-empty", "FAKE-sk-or-key")
@@ -105,13 +109,10 @@ def test_get_generation_metrics_invalid_structure_empty_response(mock_requests: 
     assert str(refusal.value) == "OpenRouter answered without a data block for generation gen-empty"
 
 
-@patch(f"{_TRACKING_MOD}.requests")
-def test_get_generation_metrics_request_exception(mock_requests: MagicMock):
+@patch(f"{_TRACKING_MOD}.urlopen")
+def test_get_generation_metrics_request_exception(mock_urlopen: MagicMock):
     """A request error raises with the request's own sentence in it."""
-    import requests as real_requests
-
-    mock_requests.get.side_effect = real_requests.exceptions.ConnectionError("refused")
-    mock_requests.exceptions = real_requests.exceptions
+    mock_urlopen.side_effect = URLError("refused")
 
     with pytest.raises(MetricsUnavailable) as refusal:
         get_generation_metrics("gen-fail", "FAKE-sk-or-key")
@@ -119,13 +120,11 @@ def test_get_generation_metrics_request_exception(mock_requests: MagicMock):
     assert str(refusal.value) == "Request error querying generation gen-fail: refused"
 
 
-@patch(f"{_TRACKING_MOD}.requests")
-def test_get_generation_metrics_timeout(mock_requests: MagicMock):
-    """A timeout raises, and says it was a timeout rather than any request error."""
-    import requests as real_requests
-
-    mock_requests.get.side_effect = real_requests.exceptions.Timeout("timed out")
-    mock_requests.exceptions = real_requests.exceptions
+@pytest.mark.parametrize("timeout", [TimeoutError("timed out"), URLError(TimeoutError("timed out"))])
+@patch(f"{_TRACKING_MOD}.urlopen")
+def test_get_generation_metrics_timeout(mock_urlopen: MagicMock, timeout: Exception):
+    """A timeout raises, and says it was a timeout rather than any request error: bare on a read, wrapped on a connect."""
+    mock_urlopen.side_effect = timeout
 
     with pytest.raises(MetricsUnavailable) as refusal:
         get_generation_metrics("gen-timeout", "FAKE-sk-or-key")
@@ -134,13 +133,13 @@ def test_get_generation_metrics_timeout(mock_requests: MagicMock):
 
 
 @patch(f"{_TRACKING_MOD}.store_usage_data")
-@patch(f"{_TRACKING_MOD}.requests")
+@patch(f"{_TRACKING_MOD}.urlopen")
 def test_track_usage_reports_why_the_metrics_were_unavailable(
-    mock_requests: MagicMock, mock_store: MagicMock, monkeypatch: pytest.MonkeyPatch
+    mock_urlopen: MagicMock, mock_store: MagicMock, monkeypatch: pytest.MonkeyPatch
 ):
     """The caller-facing half: track_usage hands the reason on and stores nothing."""
     monkeypatch.setattr(tracking, "DEFAULT_GENERATION_CHECK_DELAY", 0)
-    mock_requests.get.return_value = MagicMock(status_code=404)
+    _refuse(mock_urlopen, 404)
 
     result = track_usage("gen-missing", "flow_mbank", api_key="FAKE-sk-or-key")
 
@@ -148,13 +147,10 @@ def test_track_usage_reports_why_the_metrics_were_unavailable(
     mock_store.assert_not_called()
 
 
-@patch(f"{_TRACKING_MOD}.requests")
-def test_get_generation_metrics_defaults_missing_fields(mock_requests: MagicMock):
+@patch(f"{_TRACKING_MOD}.urlopen")
+def test_get_generation_metrics_defaults_missing_fields(mock_urlopen: MagicMock):
     """Missing fields in metrics default to 0 / 'unknown'."""
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"data": {}}
-    mock_requests.get.return_value = mock_response
+    _answer(mock_urlopen, {"data": {}})
 
     result = get_generation_metrics("gen-sparse", "FAKE-sk-or-key")
 

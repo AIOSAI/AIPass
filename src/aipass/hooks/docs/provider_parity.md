@@ -2,17 +2,17 @@
 
 # Provider parity
 
-`drone @hooks parity` runs the same scripted prompts headless on Claude Code and on Codex from one branch's cwd and compares what the hooks did in each session, row by row. Exit 0 when every row is the same or an accepted difference; exit 1 on a real difference or a session that left no record, so a merge train can gate on it.
+`drone @hooks parity` runs the same scripted prompts headless on Claude Code, Codex and OpenCode from one branch's cwd and compares what the hooks did in each session, row by row. Exit 0 when every row is the same or an accepted difference; exit 1 on a real difference or a session that left no record, so a merge train can gate on it.
 
 ```
-drone @hooks parity [--branch @canary|<path>] [--lane A,B,C,D,E,F] [--provider claude,codex] [--json]
+drone @hooks parity [--branch @canary|<path>] [--lane A,B,C,D,E,F] [--provider claude,codex,opencode] [--json]
 ```
 
 `--branch` takes a path or `@name`, looked up in AIPass's registry, then in each project enrolled with `aipass trust`. Lane `J` expands to `A,B,C`; point `--branch` at an external project's citizen for it. `--json` also writes `artifacts/reports/parity_<date>.json`.
 
 ## The oracle
 
-`logs/engine.jsonl`. Every per-hook line carries the payload's `session_id`, and each CLI prints its session's id (Claude's result JSON `session_id`; Codex's first `--json` event, `thread.started`, `thread_id`). The runner reads both log generations for that id right after the session ends. engine.jsonl keeps two generations of about 500 KB, about 25 minutes on a busy fleet, so a session is read back before the next starts.
+`logs/engine.jsonl`. Every per-hook line carries the payload's `session_id`, and each CLI prints its session's id (Claude's result JSON `session_id`; Codex's first `--json` event, `thread.started`, `thread_id`; OpenCode's `sessionID` on every stream line, minted by OpenCode). The runner reads both log generations for that id right after the session ends. engine.jsonl keeps two generations of about 500 KB, about 25 minutes on a busy fleet, so a session is read back before the next starts.
 
 A row reads one hook in one session:
 
@@ -27,10 +27,11 @@ A provider whose session printed no id, or whose id has no lines, reads `no data
 
 ## Launch shapes
 
-Both run from `cwd = <branch>`, with the prompt on stdin (the edit gate refuses a long prompt as an argument), and with the env `dispatch_monitor` gives a headless wake: `AIPASS_SESSION_TYPE=dispatched`, every `CLAUDE*` and `CODEX*` variable stripped, `AIPASS_CALLER_BRANCH`, `AIPASS_CALLER_CWD` and `AIPASS_BOT_ID` dropped.
+Each runs from `cwd = <branch>`, with the prompt on stdin (the edit gate refuses a long prompt as an argument), and with the env `dispatch_monitor` gives a headless wake: `AIPASS_SESSION_TYPE=dispatched`, every `CLAUDE*` and `CODEX*` variable stripped, `AIPASS_CALLER_BRANCH`, `AIPASS_CALLER_CWD`, `AIPASS_BOT_ID` and `OPENCODE_SESSION_ID` dropped. `PWD` is set to the branch: OpenCode takes its directory from `$PWD` before its real cwd, so an inherited one runs the lane as the caller. `--provider` defaults to `claude,codex`; `opencode` is named to run.
 
 - Claude: `claude -p --model sonnet --permission-mode bypassPermissions --output-format json`
 - Codex: `codex exec --dangerously-bypass-approvals-and-sandbox --json -` (the model is the Codex config default)
+- OpenCode: `opencode run --standalone --format json --auto -m opencode/deepseek-v4.1-flash-free` (`opencode` on PATH, else `~/.opencode/bin/opencode`). The free tier's quota is per model and per day: a stream carrying `provider.free-limit` reruns the lane once on `opencode/nemotron-3.5-lightning-free`, and a second refusal reads `no data`. The run never passes `--session`: the free tier answers an id not in OpenCode's own shape with a false 429. The plugin loads from the user-level install or from `OPENCODE_CONFIG_DIR` when the caller sets it; a session the plugin never reached has no engine lines and reads `no data`.
 
 A session that runs past 600 seconds reads `no data`.
 
@@ -56,8 +57,24 @@ Marked `accepted (<reason>)`, never counted:
 - `start: culture`: a SessionStart row on both CLIs; on Claude inside `AIPASS_HOME` it is silent, since the CLI reads `.claude/AGENTS.md` natively there.
 - `subagent stop`: the sub-agent mechanism differs (the Agent tool on Claude, multi-agent on Codex).
 
-The settings gate (ask on Claude, deny on Codex), the status line and the Notification hook are accepted differences in the parity matrix, and no lane probes them. PreCompact is not probed: a headless session does not reach compaction.
+The settings gate (ask on Claude, deny on Codex), the status line and the Notification hook are accepted differences in the parity matrix, and no lane probes them. PreCompact is not probed by a lane: a parity session does not reach compaction. On OpenCode, a dispatch with `--opencode-config '{"compaction":{"buffer":180000}}'` compacts at 20k on deepseek-v4.1-flash-free, and the measured order of events is in [wiring.md](wiring.md#opencode).
 
 ## Not observed here
 
 engine.jsonl carries no command, so a `refused` row cannot name the call it refused. `not refused` means the gate refused none of the session's calls: it allowed the probe, or the model never made it. A model that declines a step on its own instructions reads `not refused` when it made other tool calls and `not reached` when it made none; the rollout or transcript tells which. Rows that need a person or BAUD (skills, the switch, the cards) and mail and dispatch rows are run as a playbook, not by this runner.
+
+## Smoke
+
+`drone @hooks smoke [--provider claude,codex,opencode] [--branch @x|<path>] [--model provider=model,..] [--json]` runs one headless turn per provider on the branch (default: the current directory) and prints one line, `smoke: claude pass (10.2 s, <session>) · codex skip (<why>) · ...`. `--json` prints one array of `{provider, status, why, session_id, elapsed_ms}` on stdout. Exit 1 on any `fail`, 0 on `pass` and `skip`.
+
+The callable is `smoke.smoke(provider, branch, model="") -> SmokeResult` in `apps/handlers/parity/smoke.py`. Its prompt asks for `ok`, runs no tool, and carries `aipass-smoke:<nonce>`. The temporal row, wired on every provider, answers `smoke-ack:<nonce>`, a string the prompt does not carry. `pass` means that ack is in the provider's own record of the hook, read by the session id the CLI printed, never in the model's reply:
+
+| Provider | Record read |
+|---|---|
+| Claude | `~/.claude/projects/*/<session>.jsonl`, an `attachment` row whose `hookEvent` is UserPromptSubmit |
+| Codex | `~/.codex/sessions/*/*/*/rollout-*<thread>.jsonl`, a `response_item` message with role `developer` |
+| OpenCode | the store's `session_message` rows of type `user`: the plugin appends hook context to the prompt |
+
+`skip` names its reason: the CLI is not installed, the AIPass plugin is not installed for OpenCode, not logged in or no provider for the model, a rate or usage limit, the free limit on every free model, or no readback (no record of the session on disk). `fail` means the launch ran and the ack did not come back: no session id, a timeout (180 s), or a record without the ack. A `why` is a fixed sentence and never carries the CLI's output.
+
+The turn runs with `AIPASS_HOOK_PROBE=1`, so `auto_process` and `rollover` do not start @memory's archive of the branch's `.trinity/`. `.ai_mail.local/session.json` and `grounding.json` are restored byte for byte after the turn. Cost: one model turn per provider.

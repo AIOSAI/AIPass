@@ -1,30 +1,33 @@
 # =================== AIPass ====================
 # Name: test_codex_bridge.py
-# Version: 2.5.0
-# Description: Tests for the Codex bridge: stdin normalization, output envelope, apply_patch mapping
+# Version: 2.8.0
+# Description: Tests for the Codex and OpenCode bridges: payload mapping, output envelope, apply_patch, fail closed
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-10
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
-"""Tests for apps/handlers/bridges/codex.py."""
+"""Tests for apps/handlers/bridges/codex.py, apps/handlers/bridges/opencode.py and its plugin, opencode_plugin.ts."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that handlers/bridges/codex.py parses and imports its engine and loader
 # seedgo: no-test-needed(documentation) — the Codex protocol notes in the bridge's module docstring
+# seedgo: no-test-needed(generated) — opencode_plugin.ts inside a real OpenCode server: a live run (Node runs it here)
 # seedgo: no-test-needed(stdlib) — json.loads and json.dumps round-tripping a payload
 
 import importlib.util
 import io
 import json
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from aipass.hooks.apps.handlers.bridges import codex
+from aipass.hooks.apps.handlers.bridges import codex, opencode
 from aipass.hooks.apps.modules import engine
 from aipass.prax.apps.modules import logger as prax_logger
 
@@ -254,6 +257,7 @@ class TestBrokenEngine:
     def test_with_prax_unimportable_a_broken_engine_still_denies_pretooluse(self, monkeypatch, capsys, tmp_path):
         monkeypatch.delattr(prax_logger, "system_logger")
         spec = importlib.util.spec_from_file_location("_codex_bridge_fresh", codex.__file__)
+        assert spec is not None and spec.loader is not None
         fresh = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(fresh)
 
@@ -285,3 +289,318 @@ class TestBrokenEngine:
         codex.main()
         assert "HOOKS BROKEN" in capsys.readouterr().err, "the break must happen for the pin to mean anything"
         assert (live.read_bytes() if live.exists() else b"") == before, "medic reads that log as a real break"
+
+
+class OpenCodeBridge:
+    """Runs opencode.main() as the aipass.ts plugin does: argv event, payload on stdin, one JSON answer on stdout."""
+
+    def __init__(self, monkeypatch, capsys) -> None:
+        self.received: list[dict] = []
+        self.sessions: list[str | None] = []
+        self.answer = ("", 0)
+        self.answers: dict[str, tuple[str, int]] = {}
+        self._monkeypatch = monkeypatch
+        self._capsys = capsys
+        monkeypatch.setenv(opencode.SESSION_ENV, "server-session")
+        monkeypatch.setattr(opencode, "_mount", lambda: "test")
+        monkeypatch.setattr(engine, "run_event", self._run_event)
+
+    def _run_event(self, arg: str, stdin_data: str) -> tuple[str, int]:
+        self.received.append(json.loads(stdin_data))
+        self.sessions.append(os.environ.get(opencode.SESSION_ENV))
+        return self.answers.get(self.received[-1].get("tool_name", ""), self.answer)
+
+    def run(self, event: str, payload: dict) -> dict:
+        self._monkeypatch.setattr(sys, "argv", ["opencode.py", event])
+        self._monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+        opencode.main()
+        return json.loads(self._capsys.readouterr().out)
+
+
+@pytest.fixture
+def oc(monkeypatch, capsys) -> OpenCodeBridge:
+    return OpenCodeBridge(monkeypatch, capsys)
+
+
+class TestOpenCodeToolMap:
+    @pytest.mark.parametrize(
+        ("tool", "given", "name", "expected"),
+        [
+            ("shell", {"command": "ls"}, "Bash", {"command": "ls"}),
+            (
+                "edit",
+                {"path": "a.py", "oldString": "x", "newString": "y", "replaceAll": True},
+                "Edit",
+                {"file_path": "a.py", "old_string": "x", "new_string": "y", "replace_all": True},
+            ),
+            ("write", {"path": "a.py", "content": "x"}, "Write", {"file_path": "a.py", "content": "x"}),
+            ("read", {"path": "a.py", "offset": 1}, "Read", {"file_path": "a.py", "offset": 1}),
+            ("grep", {"pattern": "x", "path": "src"}, "Grep", {"pattern": "x", "path": "src"}),
+            ("subagent", {"prompt": "go"}, "Task", {"prompt": "go"}),
+            ("question", {"text": "ok?"}, "question", {"text": "ok?"}),
+        ],
+    )
+    def test_each_tool_reaches_the_gates_under_its_claude_name_and_keys(self, oc, tool, given, name, expected):
+        oc.run("PreToolUse", {"session_id": "s1", "cwd": "/w", "tool": tool, "input": given})
+        sent = oc.received[0]
+        assert (sent["tool_name"], sent["tool_input"], sent["provider"], sent["cwd"]) == (
+            name,
+            expected,
+            "opencode",
+            "/w",
+        )
+        assert "tool" not in sent and "input" not in sent
+
+    def test_execute_is_refused_and_never_reaches_the_engine(self, oc):
+        answer = oc.run("PreToolUse", {"session_id": "s1", "tool": "execute", "input": {"code": "x"}})
+        assert answer == {"deny": opencode.UNGATED}
+        assert "shell tool" in answer["deny"]
+        assert oc.received == []
+
+    def test_a_patch_into_another_branch_is_judged_per_file_and_the_refused_write_denies_it(self, oc, tmp_path):
+        oc.answers["Write"] = (json.dumps({"decision": "block", "reason": "Cross-branch write blocked"}), 2)
+        other = tmp_path / "other_branch" / "x.md"
+        patch = f"*** Begin Patch\n*** Update File: own.md\n@@\n-a\n+b\n*** Add File: {other}\n+probe\n*** End Patch"
+        payload = {"session_id": "s1", "cwd": str(tmp_path), "tool": "patch", "input": {"patchText": patch}}
+        assert oc.run("PreToolUse", payload) == {"deny": "Cross-branch write blocked"}
+        assert [(c["tool_name"], c["tool_input"]["file_path"], c["provider"]) for c in oc.received] == [
+            ("MultiEdit", str(tmp_path / "own.md"), "opencode"),
+            ("Write", str(other), "opencode"),
+        ]
+
+    def test_a_patch_naming_no_file_is_denied_before_the_engine(self, oc):
+        payload = {"session_id": "s1", "cwd": "/w", "tool": "patch", "input": {"patchText": "no header here"}}
+        assert oc.run("PreToolUse", payload) == {"deny": codex.UNJUDGED}
+        assert oc.received == []
+
+    def test_the_opencode_session_id_replaces_the_servers_for_the_engine(self, oc):
+        oc.run("UserPromptSubmit:temporal", {"session_id": "ses_1", "prompt": "hi"})
+        assert oc.sessions == ["ses_1"]
+
+
+class TestOpenCodeAnswer:
+    @pytest.mark.parametrize(
+        ("event", "output", "code", "reason"),
+        [
+            ("PreToolUse", json.dumps({"decision": "block", "reason": "not yours"}), 2, "not yours"),
+            ("PreToolUse", "plain refusal", 2, "plain refusal"),
+            ("PreToolUse", "", 2, "Blocked by AIPass hook"),
+            (
+                "PreToolUse",
+                json.dumps({"hookSpecificOutput": {"permissionDecision": "ask", "permissionDecisionReason": "ask me"}}),
+                0,
+                "ask me",
+            ),
+            ("UserPromptSubmit:presence_gate", json.dumps({"decision": "block", "reason": "who?"}), 2, "who?"),
+        ],
+    )
+    def test_a_refusal_in_any_form_is_a_deny_carrying_its_reason(self, oc, event, output, code, reason):
+        oc.answer = (output, code)
+        assert oc.run(event, {"tool": "shell", "input": {"command": "ls"}}) == {"deny": reason}
+
+    @pytest.mark.parametrize(
+        ("output", "expected"),
+        [
+            ("# Kernel\n", {"context": "# Kernel\n"}),
+            (json.dumps({"hookSpecificOutput": {"additionalContext": "navmap"}}), {"context": "navmap"}),
+            ("", {}),
+            ("{}", {}),
+        ],
+    )
+    def test_context_arrives_as_text_and_silence_as_nothing(self, oc, output, expected):
+        oc.answer = (output, 0)
+        assert oc.run("UserPromptSubmit:temporal", {"session_id": "s1", "prompt": "hi"}) == expected
+
+    @pytest.mark.parametrize(
+        ("hook", "key"),
+        [
+            ("tier0_kernel", "aipass-kernel"),
+            ("navmap", "aipass-navmap"),
+            ("branch_prompt", "aipass-branch-prompt"),
+            ("identity_injector", "aipass-identity"),
+        ],
+    )
+    def test_grounding_text_is_a_keyed_instruction_entry_that_outlives_a_compaction(self, oc, hook, key):
+        oc.answer = ("# Kernel\n", 0)
+        assert oc.run(f"UserPromptSubmit:{hook}", {"session_id": "s1", "prompt": "hi", "keeps_entries": True}) == {
+            "entry": {"key": key, "value": "# Kernel\n"}
+        }
+
+    def test_a_plugin_that_does_not_keep_entries_gets_the_grounding_as_text(self, oc):
+        oc.answer = ("# Kernel\n", 0)
+        assert oc.run("UserPromptSubmit:tier0_kernel", {"session_id": "s1", "prompt": "hi"}) == {
+            "context": "# Kernel\n"
+        }
+
+    def test_silent_grounding_and_another_events_text_stay_as_they_are(self, oc):
+        assert oc.run("UserPromptSubmit:navmap", {"session_id": "s1", "prompt": "hi", "keeps_entries": True}) == {}
+        oc.answer = ("pointer note", 0)
+        assert oc.run("SessionStart:session_pointer", {"session_id": "s1", "keeps_entries": True}) == {
+            "context": "pointer note"
+        }
+        assert oc.run("UserPromptSubmit:culture", {"session_id": "s1", "keeps_entries": True}) == {
+            "context": "pointer note"
+        }
+
+    def test_culture_at_session_start_is_the_aipass_culture_entry(self, oc):
+        oc.answer = ("# AIPass - Culture\n", 0)
+        assert oc.run("SessionStart:culture", {"session_id": "s1", "source": "startup", "keeps_entries": True}) == {
+            "entry": {"key": "aipass-culture", "value": "# AIPass - Culture\n"}
+        }
+        assert oc.run("SessionStart:culture", {"session_id": "s1", "source": "startup"}) == {
+            "context": "# AIPass - Culture\n"
+        }
+
+
+class TestMountOrSource:
+    def test_a_missing_promoted_copy_serves_the_source_and_says_so_with_prax_down(self, monkeypatch, capsys, tmp_path):
+        monkeypatch.delenv("AIPASS_HOOKS_LIVE", raising=False)
+        monkeypatch.delattr(prax_logger, "system_logger")
+        spec = importlib.util.spec_from_file_location("_mount_fresh", Path(codex.__file__).with_name("mount.py"))
+        assert spec is not None and spec.loader is not None
+        mount = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mount)
+        (tmp_path / ".live-current").write_text(".live-gone", encoding="utf-8")
+        bridge_file = tmp_path / "apps" / "handlers" / "bridges" / "codex.py"
+        assert mount.mount_or_source(str(bridge_file), "codex") == "source (fallback)"
+        err = capsys.readouterr().err
+        assert "[HOOKS:codex] promoted copy unusable, serving the source tree:" in err
+        assert "missing" in err and "prax unavailable" in err
+
+
+class TestOpenCodeBrokenEngine:
+    def test_a_broken_engine_denies_pretooluse_records_it_and_answers_nothing_elsewhere(
+        self, monkeypatch, capsys, tmp_path
+    ):
+        def _engine_gone():
+            raise ImportError("engine gone")
+
+        monkeypatch.setattr(opencode, "_mount", _engine_gone)
+        monkeypatch.setattr(opencode, "BREAK_LOG", str(tmp_path / "bridge.log"))
+        for event, expected in (("PreToolUse", True), ("UserPromptSubmit:temporal", False)):
+            monkeypatch.setattr(sys, "argv", ["opencode.py", event])
+            monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"tool": "shell", "input": {"command": "ls"}})))
+            opencode.main()
+            out, err = capsys.readouterr()
+            assert ("HOOKS BROKEN" in json.loads(out).get("deny", "")) is expected, event
+            assert "HOOKS BROKEN" in err
+        assert "bridges.opencode | ERROR" in (tmp_path / "bridge.log").read_text(encoding="utf-8")
+
+
+# Runs opencode_plugin.ts under Node: @opencode/plugin resolves to a stub, Bun.spawn answers by the row's mode.
+_PLUGIN_HARNESS = r"""
+import { register } from "node:module"
+import { mkdirSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
+import { pathToFileURL } from "node:url"
+const [plugin, home] = process.argv.slice(2)
+const stub = "data:text/javascript,export const Plugin = { define: (p) => p }"
+const resolver = `export async function resolve(s, c, next) {
+  return s === "@opencode/plugin" ? { url: "${stub}", shortCircuit: true } : next(s, c)
+}`
+register("data:text/javascript," + encodeURIComponent(resolver))
+const seen = []
+const answers = { deny: '{"deny":"x"}', exit1: "", context: '{"context":"lint fixed"}' }
+globalThis.Bun = {
+  spawn(argv, opts) {
+    const mode = argv.at(-1)
+    seen.push({ mode, sync: false, payload: JSON.parse(opts.stdin.toString()) })
+    const code = mode === "exit1" ? 1 : 0
+    return {
+      stdout: new Response(answers[mode]).body,
+      stderr: new Response(code ? "boom" : "").body,
+      exited: Promise.resolve(code),
+    }
+  },
+  spawnSync(argv, opts) {
+    seen.push({ mode: argv.at(-1), sync: true, payload: JSON.parse(opts.stdin.toString()) })
+    return { exitCode: 0, stdout: Buffer.from("{}"), stderr: Buffer.from("") }
+  },
+}
+const { default: def } = await import(pathToFileURL(plugin).href)
+mkdirSync(join(home, ".claude"), { recursive: true })
+mkdirSync(join(home, "src", "aipass", "hooks", "logs"), { recursive: true })
+process.env.AIPASS_HOME = home
+const results = {}
+const cases = [
+  ["deny", "PreToolUse", "execute.before"],
+  ["exit1", "PreToolUse", "execute.before"],
+  ["context", "PostToolUse", "execute.after"],
+]
+for (const [mode, event, hook] of cases) {
+  const rows = [{ event, command: `py bridge ${mode}` }]
+  writeFileSync(join(home, ".claude", "provider_manifest.json"), JSON.stringify({ cli: { opencode: { hooks: rows } } }))
+  const hooks = {}
+  const ctx = {
+    location: { directory: home },
+    session: { hook: async () => {} },
+    tool: { hook: async (name, fn) => { hooks[name] = fn } },
+    event: { subscribe: async function* () {} },
+  }
+  const stop = await def.setup(ctx)
+  const ev = {
+    tool: "shell",
+    sessionID: "s1",
+    id: "call_1",
+    input: { command: "ls" },
+    status: "completed",
+    result: { content: [{ type: "text", text: "out" }] },
+  }
+  try {
+    await hooks[hook](ev)
+    results[mode] = { threw: false, content: ev.result.content }
+  } catch (e) {
+    results[mode] = { threw: true, message: String(e.message) }
+  }
+  stop?.()
+}
+const stopRows = [{ event: "Stop", command: "py bridge stop" }]
+writeFileSync(join(home, ".claude", "provider_manifest.json"), JSON.stringify({ cli: { opencode: { hooks: stopRows } } }))
+const ended = { type: "session.execution.succeeded", data: { sessionID: "s1" } }
+const ctx = {
+  location: { directory: home },
+  session: { hook: async () => {} },
+  tool: { hook: async () => {} },
+  event: { subscribe: async function* () { yield ended } },
+}
+const stop = await def.setup(ctx)
+await new Promise((resolve) => setTimeout(resolve, 50))
+stop?.()
+process.stdout.write(JSON.stringify({ results, seen }) + "\n")
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="the plugin runs under Node; a host without it cannot load it")
+class TestOpenCodePlugin:
+    def test_a_deny_or_a_broken_row_throws_before_the_tool_and_a_report_reaches_its_result(self, tmp_path):
+        harness = tmp_path / "harness.mjs"
+        harness.write_text(_PLUGIN_HARNESS, encoding="utf-8")
+        plugin = Path(opencode.__file__).with_name("opencode_plugin.ts")
+        argv = [
+            "node",
+            "--no-warnings",
+            "--experimental-strip-types",
+            str(harness),
+            str(plugin),
+            str(tmp_path / "home"),
+        ]
+        done = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", timeout=60)
+        assert done.returncode == 0, done.stderr
+        doc = json.loads(done.stdout.splitlines()[-1])
+        results = doc["results"]
+        assert results["deny"] == {"threw": True, "message": "x"}
+        assert results["exit1"]["threw"] is True
+        assert (
+            results["exit1"]["message"].startswith("HOOKS BROKEN") and "exited 1: boom" in results["exit1"]["message"]
+        )
+        assert results["context"] == {
+            "threw": False,
+            "content": [{"type": "text", "text": "out"}, {"type": "text", "text": "lint fixed"}],
+        }
+        tool_calls = [s for s in doc["seen"] if s["mode"] != "stop"]
+        # The memory tripwire pairs a call's PreToolUse snapshot with its PostToolUse check by this id.
+        assert [(s["payload"]["tool_use_id"], s["sync"]) for s in tool_calls] == [("call_1", False)] * 3
+        # A standalone run exits on idle before an awaited spawn finishes: Stop must run synchronously.
+        assert [(s["mode"], s["sync"], s["payload"]["hook_event_name"]) for s in doc["seen"][3:]] == [
+            ("stop", True, "Stop")
+        ]

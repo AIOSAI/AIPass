@@ -7,7 +7,7 @@ description: Record the decision just made into compass, the rated decision stor
 
 Purpose: Capture the decision just made into compass (the rated decision engine) with the user's rating and note. The user fires this when they notice a decision worth recording — they supply the judgement, you supply the decision text from the conversation. This is the human-triggered answer to the "noticing" problem: the user notices, you describe and store.
 
-Usage: `/compass <rating> <note>` in Claude Code, `$compass <rating> <note>` in Codex — rating is one of: `good`, `bad`, `impressive`, `interesting`.
+Usage: `/compass <rating> <note>` in Claude Code and OpenCode, `$compass <rating> <note>` in Codex — rating is one of: `good`, `bad`, `impressive`, `interesting`.
 
 Examples:
 - `/compass good chose to continue the dead agent instead of starting fresh`

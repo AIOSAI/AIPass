@@ -1,16 +1,16 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for aipass tests — json and profile redirects, console width, command state
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-05-04
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.7.0 (2026-10-28): no_real_opencode keeps doctor's OpenCode rows off the real binary and config (FPLAN-0721)
 #   - v1.6.0 (2026-10-26): no_live_shadow_fix keeps doctor --fix from renaming the live repo's CLAUDE files
 #   - v1.5.0 (2026-10-26): no_real_codex keeps doctor's Codex rows off the real binary and ~/.codex
 #   - v1.4.0 (2026-10-10): temp_test_dir, sample_test_data retired - requested only by the .archive scaffold (PR #774)
 #   - v1.3.0 (2026-10-05): tools_on_path writes PATH so shutil.which answers for real (DPLAN-0354 leg 8)
-#   - v1.2.0 (2026-09-28): header_events recorder keeps cli's header off the real trigger bus (DPLAN-0354 leg 3)
 # =============================================
 
 """Shared pytest fixtures for aipass tests."""
@@ -92,6 +92,13 @@ def no_real_codex(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     CODEX_HOME is tmp_path/codex_home, so no test reads or writes the real ~/.codex."""
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex_home"))
     monkeypatch.setattr("aipass.aipass.apps.modules._doctor_wire._codex_which", lambda name: None)
+
+
+@pytest.fixture(autouse=True)
+def no_real_opencode(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Codex's twin: no opencode binary unless a test hands a fake, and the OpenCode config under tmp_path."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg_config"))
+    monkeypatch.setattr("aipass.aipass.apps.handlers.opencode_cli._which", lambda name, path=None: None)
 
 
 @pytest.fixture(autouse=True)

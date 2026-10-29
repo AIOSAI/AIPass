@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: session_pointer.py
 # Description: Durable per-branch "current session" pointer for dispatch
-# Version: 1.1.0
+# Version: 1.3.1
 # Created: 2026-08-20
-# Modified: 2026-10-25
+# Modified: 2026-10-28
 # =============================================
 
 """Durable per-branch current-session pointer.
@@ -14,11 +14,14 @@ Nothing here raises: a bad pointer degrades the dispatch to ``-c``.
 
 import json
 import os
+import re
+import sqlite3
+from contextlib import closing
 import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Iterator, Optional, Tuple
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
@@ -28,6 +31,8 @@ POINTER_FILE_NAME = "session.json"
 
 CLAUDE = "claude"
 CODEX = "codex"
+OPENCODE = "opencode"
+OPENCODE_DB_ENV = "OPENCODE_DB"
 
 # MiB, to match what `ls -lh` and `du -h` show.
 _BYTES_PER_MB = 1024 * 1024
@@ -75,7 +80,7 @@ def transcript_dir(cwd: str | Path) -> Optional[Path]:
 
     The fleet's only copy of Claude's cwd encoding. None when the home cannot be named.
     """
-    encoded = str(cwd).replace("\\", "-").replace("/", "-").replace(":", "-").replace("_", "-").replace(".", "-")
+    encoded = re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
     home = _claude_home()
     if home is None:
         return None
@@ -99,6 +104,35 @@ def codex_thread_file(thread_id: str) -> Optional[Path]:
         return None
     matches = sorted((home / ".codex" / "sessions").glob(f"*/*/*/rollout-*-{thread_id}.jsonl"))
     return matches[0] if matches else None
+
+
+def opencode_db() -> Optional[Path]:
+    """OpenCode's session store: OPENCODE_DB, else ~/.local/share/opencode/opencode.db; None without a home."""
+    override = os.environ.get(OPENCODE_DB_ENV)
+    if override:
+        return Path(override)
+    home = _claude_home()
+    if home is None:
+        return None
+    return home / ".local" / "share" / "opencode" / "opencode.db"
+
+
+def opencode_session_directory(session_id: str) -> Tuple[Optional[str], str]:
+    """The `directory` OpenCode recorded for a session, or (None, why it is not there). Read-only."""
+    db = opencode_db()
+    if db is None:
+        return None, "cannot determine this machine's home directory, so there is no opencode store to search"
+    if not db.is_file():
+        return None, f"opencode store {db} does not exist"
+    try:
+        with closing(sqlite3.connect(f"file:{db}?mode=ro", uri=True)) as conn:
+            row = conn.execute("select directory from session_v2 where id=?", (session_id,)).fetchone()
+    except sqlite3.Error as e:
+        logger.warning("[session_pointer] Cannot read opencode store %s: %s", db, e)
+        return None, f"opencode store {db} unreadable ({e})"
+    if row is None:
+        return None, f"session {session_id} not found in {db}"
+    return str(row[0]), ""
 
 
 def pointer_path(branch_path: Path) -> Path:
@@ -136,8 +170,17 @@ def read_pointer(branch_path: Path) -> Optional[dict]:
     return data
 
 
-def write_pointer(branch_path: Path, session_id: str, set_by: str, provider: str = CLAUDE) -> bool:
-    """Record `session_id` as the branch's current session. Returns success.
+PENDING = "pending"
+CLI_DEFAULT = "cli_default"
+RUN_KEYS = ("host_cli", "model_provider", "model_requested", "model_observed", "selection_source", "observed_at")
+
+
+def write_pointer(
+    branch_path: Path, session_id: str, set_by: str, provider: str = CLAUDE, *, run: Optional[dict] = None
+) -> bool:
+    """Record `session_id` as the branch's current session, with its run record. Returns success.
+
+    `run` sets any of RUN_KEYS; the rest default to host_cli=provider, pending and cli_default.
 
     Atomic (temp + fsync + os.replace): a half-written id would fail the next ``--resume``. Never raises.
     """
@@ -150,7 +193,14 @@ def write_pointer(branch_path: Path, session_id: str, set_by: str, provider: str
         "cwd": str(Path(branch_path).resolve()),
         # A pointer without the key is a Claude pointer: every pointer written before the key existed.
         "provider": provider,
+        "host_cli": provider,
+        "model_provider": PENDING,
+        "model_requested": CLI_DEFAULT,
+        "model_observed": PENDING,
+        "selection_source": CLI_DEFAULT,
+        "observed_at": None,
     }
+    payload.update({key: value for key, value in (run or {}).items() if key in RUN_KEYS})
 
     tmp_name = None
     try:
@@ -175,6 +225,110 @@ def write_pointer(branch_path: Path, session_id: str, set_by: str, provider: str
                 os.unlink(tmp_name)
             except OSError as e:
                 logger.info("[session_pointer] Could not remove temp file %s: %s", tmp_name, e)
+
+
+def record_run(branch_path: Path, run: dict) -> bool:
+    """Stamp this run's record onto the branch's current pointer.
+
+    False when there is no pointer, or when the run's host is not the pointer's: that session is
+    not this run's, so the record is reset to pending rather than pairing one host with another's id.
+    """
+    pointer = read_pointer(branch_path)
+    if pointer is None:
+        return False
+    provider = pointer.get("provider", CLAUDE)
+    set_by = pointer.get("set_by", "unknown")
+    host = run.get("host_cli", provider)
+    if host != provider:
+        logger.warning(
+            "[session_pointer] run on %s but pointer %s is %s's - run record left pending",
+            host,
+            pointer["session_id"],
+            provider,
+        )
+        write_pointer(branch_path, pointer["session_id"], set_by, provider)
+        return False
+    return write_pointer(branch_path, pointer["session_id"], set_by, provider, run=run)
+
+
+def observe_model(branch_path: Path, session_id: str, provider: str) -> Tuple[Optional[str], Optional[str]]:
+    """(vendor, model id) from the runtime's own newest assistant row for the session, or (None, None) unseen."""
+    try:
+        if provider == OPENCODE:
+            return _observe_opencode(session_id)
+        if provider == CODEX:
+            return _observe_codex(session_id)
+        return _observe_claude(branch_path, session_id)
+    except (OSError, sqlite3.Error, ValueError) as e:
+        logger.info("[session_pointer] %s model for %s not observable: %s", provider, session_id, e)
+        return None, None
+
+
+def _observe_opencode(session_id: str) -> Tuple[Optional[str], Optional[str]]:
+    db = opencode_db()
+    if db is None or not db.is_file():
+        return None, None
+    with closing(sqlite3.connect(f"file:{db}?mode=ro", uri=True)) as conn:
+        row = conn.execute(
+            "select data from session_message where session_id=? and type='assistant' order by seq desc limit 1",
+            (session_id,),
+        ).fetchone()
+    model = json.loads(row[0]).get("model") if row else None
+    if not isinstance(model, dict) or not model.get("id"):
+        return None, None
+    return model.get("providerID"), model["id"]
+
+
+def _jsonl_rows(path: Optional[Path]) -> Iterator:
+    # Line by line: a long-lived transcript runs past 100 MB.
+    if path is None or not path.is_file():
+        return
+    with path.open(encoding="utf-8") as fh:
+        for line in fh:
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as e:
+                logger.info("[session_pointer] skipping a non-JSON line in %s: %s", path, e)
+                continue
+            if isinstance(row, dict):
+                yield row
+
+
+def _observe_codex(thread_id: str) -> Tuple[Optional[str], Optional[str]]:
+    vendor, model = None, None
+    for row in _jsonl_rows(codex_thread_file(thread_id)):
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        if row.get("type") == "session_meta":
+            vendor = payload.get("model_provider") or vendor
+        elif row.get("type") == "turn_context" and payload.get("model"):
+            model = payload["model"]
+    return (vendor, model) if model else (None, None)
+
+
+def _observe_claude(branch_path: Path, session_id: str) -> Tuple[Optional[str], Optional[str]]:
+    model = None
+    for row in _jsonl_rows(transcript_file(branch_path, session_id)):
+        message = row.get("message") if isinstance(row.get("message"), dict) else {}
+        if row.get("type") == "assistant" and message.get("model"):
+            model = message["model"]
+    # Claude Code names Anthropic's models only; the transcript row carries no vendor field.
+    return ("anthropic", model) if model else (None, None)
+
+
+def format_run_line(record: Optional[dict]) -> str:
+    """One line from a run record: observed when seen, else requested and said so. Never a config's contents."""
+    if not record:
+        return "run: no pointer recorded"
+    host = record.get("host_cli") or record.get("provider", CLAUDE)
+    source = record.get("selection_source", CLI_DEFAULT)
+    session = record.get("session_id", "?")
+    observed = record.get("model_observed", PENDING)
+    if observed and observed != PENDING:
+        vendor = record.get("model_provider")
+        shown = observed if "/" in observed or not vendor or vendor == PENDING else f"{vendor}/{observed}"
+        return f"run: {host} · {shown} (observed; {source}) session {session}"
+    requested = record.get("model_requested", CLI_DEFAULT)
+    return f"run: {host} · {requested} (requested, observed pending; {source}) session {session}"
 
 
 def _transcript_candidates(branch_path: Path, session_id: str) -> Optional[list[Path]]:
@@ -209,7 +363,7 @@ def resolve_resume_target(
     """Decide which session a dispatch to `branch_path` should resume.
 
     An id only when the pointer parses, names this provider, its cwd matches this branch, and the
-    transcript exists; never raises. Codex has no -c, so its fallback is a fresh thread.
+    transcript (OpenCode: its session_v2 row) exists; never raises. Codex and OpenCode fall back to fresh.
     """
     fallback = "falling back to -c" if provider == CLAUDE else "starting fresh"
     try:
@@ -240,6 +394,17 @@ def resolve_resume_target(
             f"pointer cwd mismatch - pointer says {_quote_path(pointer_cwd)} but this branch resolves to "
             f"{_quote_path(expected_cwd)} (moved or copied branch?) - {fallback}"
         )
+
+    if provider == OPENCODE:
+        directory, why = opencode_session_directory(session_id)
+        if directory is None:
+            return None, f"{why} - {fallback}"
+        if directory != expected_cwd:
+            return None, (
+                f"opencode session {session_id} belongs to {_quote_path(directory)}, not "
+                f"{_quote_path(expected_cwd)} - {fallback}"
+            )
+        return session_id, f"pointer valid - resuming opencode session {session_id}"
 
     if provider == CODEX:
         candidates = None if _claude_home() is None else [codex_thread_file(session_id)]

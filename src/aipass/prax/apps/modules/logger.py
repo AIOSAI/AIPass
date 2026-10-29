@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: logger.py
 # Description: PRAX Public API
-# Version: 1.4.1
+# Version: 1.5.0
 # Created: 2025-11-15
-# Modified: 2026-10-24
+# Modified: 2026-10-28
 # =============================================
 
 """

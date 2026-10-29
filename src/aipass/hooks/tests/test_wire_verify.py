@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_wire_verify.py
-# Version: 1.4.0
+# Version: 1.5.0
 # Description: Tests for wire_verify module — provider ↔ project hook wiring checker
 # Branch: hooks
 # Created: 2026-07-09
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
 """Tests for apps/modules/wire_verify.py."""
@@ -405,16 +405,73 @@ class TestCodexOnlyHandlers:
         assert "aipass doctor --fix" in absent and "Trust all and continue" in absent
 
 
+def _manifest(tmp_path, *event_args: str):
+    rows = [{"event": a.split(":", 1)[0], "command": f"py $AIPASS_HOME/x/bridges/opencode.py {a}"} for a in event_args]
+    rows.append({"event": "SessionStart", "command": f"{_BRIDGE_CMD} SessionStart:cadence_reset"})
+    path = tmp_path / "provider_manifest.json"
+    path.write_text(json.dumps({"cli": {"opencode": {"hooks": rows}}}), encoding="utf-8")
+    return path
+
+
+class TestOpenCodePlugin:
+    def _verify(self, tmp_path, plugin, manifest):
+        settings = tmp_path / "settings.json"
+        provider = {**_PRETOOL, "SessionStart": [_provider_entry("SessionStart:cadence_reset")]}
+        settings.write_text(json.dumps({"hooks": provider}), encoding="utf-8")
+        project = {"hooks_enabled": True, "SessionStart": {"cadence_reset": _ENABLED, "culture": _ENABLED}}
+        return wire_verify.verify_wiring(
+            provider_path=settings, project_config=project, opencode_plugin=plugin, manifest_path=manifest
+        )
+
+    def _installed(self, tmp_path):
+        plugin = tmp_path / "aipass.ts"
+        plugin.write_bytes(wire_verify.OPENCODE_PLUGIN_SOURCE.read_bytes())
+        return plugin
+
+    def test_a_handler_wired_only_in_the_opencode_rows_is_wired_not_an_error(self, tmp_path):
+        result = self._verify(tmp_path, self._installed(tmp_path), _manifest(tmp_path, "SessionStart:culture"))
+        assert result["errors"] == []
+        assert "SessionStart:culture: wired for OpenCode only" in result["info"]
+
+    def test_a_claude_row_under_cli_opencode_does_not_count(self, tmp_path):
+        result = self._verify(tmp_path, self._installed(tmp_path), _manifest(tmp_path, "Stop"))
+        assert result["errors"] == [_never_fires("SessionStart", "culture")]
+
+    def test_a_missing_plugin_is_an_error_naming_the_cure(self, tmp_path):
+        missing = tmp_path / "aipass.ts"
+        result = self._verify(tmp_path, missing, _manifest(tmp_path, "SessionStart:culture"))
+        (absent,) = [e for e in result["errors"] if str(missing) in e]
+        assert "runs ungated" in absent and f"cp {wire_verify.OPENCODE_PLUGIN_SOURCE} {missing}" in absent
+
+    def test_a_plugin_that_differs_from_the_branch_copy_is_an_error(self, tmp_path):
+        plugin = self._installed(tmp_path)
+        plugin.write_text("// edited\n", encoding="utf-8")
+        result = self._verify(tmp_path, plugin, _manifest(tmp_path, "SessionStart:culture"))
+        assert [e for e in result["errors"] if e.startswith("OpenCode plugin stale") and str(plugin) in e]
+
+    def test_no_opencode_rows_is_an_error(self, tmp_path):
+        manifest = tmp_path / "provider_manifest.json"
+        manifest.write_text(json.dumps({"cli": {"claude": {"hooks": []}}}), encoding="utf-8")
+        result = self._verify(tmp_path, self._installed(tmp_path), manifest)
+        assert [e for e in result["errors"] if e.startswith("No cli.opencode rows") and str(manifest) in e]
+
+
 class TestHandleCommand:
     def test_returns_false_for_non_verify(self):
         assert wire_verify.handle_command("status", []) is False
 
     def test_routes_verify_with_the_codex_home_hooks_file(self, capsys, tmp_path, monkeypatch):
         monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex_home"))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+        monkeypatch.setenv("AIPASS_HOME", str(tmp_path / "home"))
         mock_result = {"ok": True, "errors": [], "warnings": [], "info": []}
         with patch.object(wire_verify, "verify_wiring", return_value=mock_result) as mock_verify:
             assert wire_verify.handle_command("verify", []) is True
-        mock_verify.assert_called_once_with(codex_path=tmp_path / "codex_home" / "hooks.json")
+        mock_verify.assert_called_once_with(
+            codex_path=tmp_path / "codex_home" / "hooks.json",
+            opencode_plugin=tmp_path / "cfg" / "opencode" / "plugins" / "aipass.ts",
+            manifest_path=tmp_path / "home" / ".claude" / "provider_manifest.json",
+        )
         err = capsys.readouterr().err
         assert "Wire check passed" in err
         assert "0 errors, 0 warnings" in err
@@ -451,10 +508,16 @@ class TestHandleCommand:
         monkeypatch.delenv("CODEX_HOME", raising=False)
         monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+        monkeypatch.setenv("AIPASS_HOME", str(tmp_path / "home"))
         mock_result = {"ok": True, "errors": [], "warnings": ["cosmetic"], "info": []}
         with patch.object(wire_verify, "verify_wiring", return_value=mock_result) as mock_verify:
             assert wire_verify.handle_command("verify", []) is True
-        mock_verify.assert_called_once_with(codex_path=tmp_path / ".codex" / "hooks.json")
+        mock_verify.assert_called_once_with(
+            codex_path=tmp_path / ".codex" / "hooks.json",
+            opencode_plugin=tmp_path / ".config" / "opencode" / "plugins" / "aipass.ts",
+            manifest_path=tmp_path / "home" / ".claude" / "provider_manifest.json",
+        )
         err = capsys.readouterr().err
         assert "Wire check passed" in err
         assert "cosmetic" in err

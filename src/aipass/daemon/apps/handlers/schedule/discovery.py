@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discovery.py
 # Description: Decentralized .daemon/ schedule file discovery
-# Version: 2.6.0
+# Version: 2.6.1
 # Created: 2026-06-15
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
 """
@@ -44,7 +44,7 @@ REQUIRED_JOB_KEYS = {"id", "schedule"}
 JOB_ACTION_KEYS = ("prompt", "command")
 VALID_SCHEDULE_TYPES = {"daily", "hourly", "interval", "once", "rotation"}
 # The providers ai_mail's wake_branch runs; an absent wake.provider leaves its default (claude).
-VALID_WAKE_PROVIDERS = ("claude", "codex")
+VALID_WAKE_PROVIDERS = ("claude", "codex", "opencode")
 
 SOURCE_AIPASS = "aipass"
 SOURCE_EXTERNAL = "external"

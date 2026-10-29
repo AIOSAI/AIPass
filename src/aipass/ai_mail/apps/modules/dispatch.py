@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch.py
 # Description: Dispatch Module
-# Version: 3.7.0
+# Version: 3.9.0
 # Created: 2026-02-02
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
 """
@@ -12,10 +12,11 @@ Dispatch Module
 Orchestrates dispatch commands; all business logic lives in handlers.
 """
 
+import json
 import os
 import sys
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List, Optional, Tuple
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, error, warning
@@ -45,6 +46,7 @@ DISPATCH (send + wake):
   drone @ai_mail dispatch @branch "Subject" "Body" --fresh            # Send + fresh wake
   drone @ai_mail dispatch @branch "Subject" "Body" --model opus       # Send + wake with Opus
   drone @ai_mail dispatch @branch "Subject" "Body" --provider codex --model gpt-6.1-sol  # Wake on Codex
+  drone @ai_mail dispatch @branch "Subject" "Body" --provider opencode --model opencode/glm-5.3-flash-free  # Wake on OpenCode
   drone @ai_mail dispatch @branch "Subject" "Body" --no-memory-save
 
 WAKE ONLY:
@@ -66,6 +68,11 @@ PROVIDER OPTIONS:
   --provider claude   Claude Code (default)
   --provider codex    Codex CLI; --model is passed verbatim as -m, absent means ~/.codex/config.toml.
                       Managers wake on Codex in the same lanes as on Claude.
+  --provider opencode OpenCode (opencode run --standalone --format json --auto); --model is passed
+                      verbatim as -m provider/model[#variant], absent means OpenCode's own default.
+                      Same lanes as Codex; the @daemon tmux self-wake runs opencode --auto --prompt.
+  --opencode-config J A JSON object handed to OpenCode as OPENCODE_CONFIG_CONTENT, merged under
+                      --model (which wins on "model"); opencode only, anything not an object refused.
 """
     console.print(help_text)
 
@@ -167,48 +174,87 @@ def _provider_refusal(provider: str) -> str:
     return f"unknown provider {provider!r} — known: {', '.join(KNOWN_PROVIDERS)}"
 
 
+def _parse_opencode_config(raw: Optional[str], provider: str) -> Tuple[Optional[Dict[str, Any]], str]:
+    """The --opencode-config value as a JSON object, or (None, why it is refused). Absent is (None, "")."""
+    if raw is None:
+        return None, ""
+    if provider != "opencode":
+        return None, f"--opencode-config applies to --provider opencode only, not {provider!r}"
+    try:
+        config = json.loads(raw)
+    except json.JSONDecodeError as e:
+        return None, f"--opencode-config is not JSON ({e})"
+    if not isinstance(config, dict):
+        return None, f"--opencode-config must be a JSON object, got {type(config).__name__}"
+    return config, ""
+
+
+# The run's own flags, shared by both verbs: a flag added to one and not the other would become message text.
+_RUN_FLAGS = ("--model", "--provider", "--opencode-config")
+
+
+def _parse_flags(
+    args: List[str], value_flags: Tuple[str, ...], bool_flags: Tuple[str, ...]
+) -> Tuple[Dict[str, Any], List[str]]:
+    """Split args into {flag: value or True} and the positional rest; a value flag with no value stays positional."""
+    flags: Dict[str, Any] = {}
+    rest = []
+    i = 0
+    while i < len(args):
+        if args[i] in bool_flags:
+            flags[args[i]] = True
+            i += 1
+        elif args[i] in value_flags and i + 1 < len(args):
+            flags[args[i]] = args[i + 1]
+            i += 2
+        else:
+            rest.append(args[i])
+            i += 1
+    return flags, rest
+
+
+def _admin_lane() -> bool:
+    """The 5-leg admin grant, verified here where the caller env lives. A raising verifier means no grant."""
+    from aipass.ai_mail.apps.handlers.users import verified_caller
+
+    # The rail pre-check is noise control, not security.
+    is_admin = False
+    if verified_caller.resolve_verified_caller() == verified_caller.ADMIN_HOLDER:
+        try:
+            is_admin, admin_reason = verified_caller.verify_admin_caller()
+        except Exception as exc:
+            logger.warning("[dispatch] admin verification failed unexpectedly: %s", exc)
+            is_admin, admin_reason = False, f"admin verification error: {exc}"
+        if not is_admin:
+            console.print(f"[dim]Admin lane closed: {admin_reason}[/dim]")
+    return is_admin
+
+
 def _orchestrate_wake(args: List[str]) -> bool:
     """Orchestrate manual branch wake."""
     if not args or args[0] in ["--help", "-h", "help"]:
         console.print("\n[bold]Wake - Manual branch spawn[/bold]")
         console.print(
-            '  Usage: dispatch wake @branch ["custom message"] [--fresh] [--model M] [--provider claude|codex]'
+            '  Usage: dispatch wake @branch ["custom message"] [--fresh] [--model M] [--provider claude|codex|opencode] [--opencode-config JSON]'
         )
         console.print('  Or:    drone wake @branch ["custom message"]\n')
         return True
 
-    use_fresh = "--fresh" in args
-    use_sender = "@devpulse"
-    use_model = None
-    use_provider = "claude"
-    filtered = []
-    i = 0
-    while i < len(args):
-        if args[i] == "--fresh":
-            i += 1
-            continue
-        if args[i] == "--sender" and i + 1 < len(args):
-            use_sender = args[i + 1]
-            i += 2
-            continue
-        if args[i] == "--model" and i + 1 < len(args):
-            use_model = args[i + 1]
-            i += 2
-            continue
-        if args[i] == "--provider" and i + 1 < len(args):
-            use_provider = args[i + 1]
-            i += 2
-            continue
-        filtered.append(args[i])
-        i += 1
+    flags, filtered = _parse_flags(args, ("--sender",) + _RUN_FLAGS, ("--fresh",))
+    use_fresh = flags.get("--fresh", False)
+    use_sender = flags.get("--sender", "@devpulse")
+    use_model = flags.get("--model")
+    use_provider = flags.get("--provider", "claude")
+    raw_opencode_config = flags.get("--opencode-config")
 
     if not filtered:
         error("Missing branch argument")
         return True
 
     provider_refusal = _provider_refusal(use_provider)
-    if provider_refusal:
-        error(f"Wake refused: {provider_refusal}")
+    opencode_config, config_refusal = _parse_opencode_config(raw_opencode_config, use_provider)
+    if provider_refusal or config_refusal:
+        error(f"Wake refused: {provider_refusal or config_refusal}")
         return True
 
     branch_email = filtered[0]
@@ -231,19 +277,7 @@ def _orchestrate_wake(args: List[str]) -> bool:
         error(f"Wake refused: {refusal}")
         return True
 
-    # Admin lane: the same 5-leg grant as send+wake, verified here where the caller env lives.
-    # A raising verifier means no grant; the wake still proceeds.
-    from aipass.ai_mail.apps.handlers.users import verified_caller
-
-    is_admin = False
-    if verified_caller.resolve_verified_caller() == verified_caller.ADMIN_HOLDER:
-        try:
-            is_admin, admin_reason = verified_caller.verify_admin_caller()
-        except Exception as exc:
-            logger.warning("[dispatch] admin verification failed unexpectedly: %s", exc)
-            is_admin, admin_reason = False, f"admin verification error: {exc}"
-        if not is_admin:
-            console.print(f"[dim]Admin lane closed: {admin_reason}[/dim]")
+    is_admin = _admin_lane()
 
     logger.info(f"[dispatch] Manual wake requested for {branch_email}")
     console.print(f"\n⏳ Waking {branch_email}...")
@@ -258,6 +292,7 @@ def _orchestrate_wake(args: List[str]) -> bool:
         model=use_model,
         admin=is_admin,
         provider=use_provider,
+        opencode_config=opencode_config,
     )
 
     console.print(dispatch_status.format())
@@ -273,43 +308,17 @@ def _orchestrate_wake(args: List[str]) -> bool:
 
 def _orchestrate_dispatch_send(args: List[str]) -> bool:
     """Orchestrate combined dispatch: send email with --dispatch flag + wake branch."""
-    use_fresh = False
-    no_memory_save = False
-    from_branch = None
-    use_model = None
-    use_provider = "claude"
-    filtered = []
-    i = 0
-    while i < len(args):
-        if args[i] == "--fresh":
-            use_fresh = True
-            i += 1
-            continue
-        if args[i] == "--no-memory-save":
-            no_memory_save = True
-            i += 1
-            continue
-        if args[i] == "--no-watchdog":
-            i += 1
-            continue
-        if args[i] == "--from" and i + 1 < len(args):
-            from_branch = args[i + 1]
-            i += 2
-            continue
-        if args[i] == "--model" and i + 1 < len(args):
-            use_model = args[i + 1]
-            i += 2
-            continue
-        if args[i] == "--provider" and i + 1 < len(args):
-            use_provider = args[i + 1]
-            i += 2
-            continue
-        filtered.append(args[i])
-        i += 1
+    flags, filtered = _parse_flags(args, ("--from",) + _RUN_FLAGS, ("--fresh", "--no-memory-save", "--no-watchdog"))
+    use_fresh = flags.get("--fresh", False)
+    no_memory_save = flags.get("--no-memory-save", False)
+    from_branch = flags.get("--from")
+    use_model = flags.get("--model")
+    use_provider = flags.get("--provider", "claude")
+    raw_opencode_config = flags.get("--opencode-config")
 
     if len(filtered) < 3:
         error(
-            'Usage: dispatch @target "Subject" "Body" [--fresh] [--no-memory-save] [--model M] [--provider claude|codex]'
+            'Usage: dispatch @target "Subject" "Body" [--fresh] [--no-memory-save] [--model M] [--provider claude|codex|opencode] [--opencode-config JSON]'
         )
         return True
 
@@ -317,8 +326,9 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
 
     # Before the send: a typo'd provider must not deliver mail that no agent will be woken for.
     provider_refusal = _provider_refusal(use_provider)
-    if provider_refusal:
-        error(f"Dispatch to {target} not sent: {provider_refusal}")
+    opencode_config, config_refusal = _parse_opencode_config(raw_opencode_config, use_provider)
+    if provider_refusal or config_refusal:
+        error(f"Dispatch to {target} not sent: {provider_refusal or config_refusal}")
         return True
     subject = filtered[1]
     body = filtered[2]
@@ -331,16 +341,7 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
         error(f"Dispatch to {target} refused: {refusal}")
         return True
 
-    # Admin lane: verified here where the caller env lives. The rail pre-check is noise control, not security.
-    is_admin = False
-    if verified_caller.resolve_verified_caller() == verified_caller.ADMIN_HOLDER:
-        try:
-            is_admin, admin_reason = verified_caller.verify_admin_caller()
-        except Exception as exc:
-            logger.warning("[dispatch] admin verification failed unexpectedly: %s", exc)
-            is_admin, admin_reason = False, f"admin verification error: {exc}"
-        if not is_admin:
-            console.print(f"[dim]Admin lane closed: {admin_reason}[/dim]")
+    is_admin = _admin_lane()
 
     logger.info(f"[dispatch] Combined dispatch: send + wake for {target}")
     json_handler.log_operation("dispatch_send_and_wake", {"target": target, "subject": subject, "fresh": use_fresh})
@@ -394,6 +395,7 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
         admin=is_admin,
         subject=subject,
         provider=use_provider,
+        opencode_config=opencode_config,
     )
     console.print(dispatch_status.format())
 

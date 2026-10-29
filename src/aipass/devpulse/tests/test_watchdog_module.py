@@ -3,7 +3,7 @@
 # Description: Tests for the watchdog module router
 # Version: 1.1.2
 # Created: 2026-04-14
-# Modified: 2026-10-26
+# Modified: 2026-10-29
 # =============================================
 
 """Tests for apps/modules/watchdog.py, the watchdog module router (Phase 1, FPLAN-0186)."""
@@ -448,6 +448,19 @@ def test_agent_subcommand_invokes_handler(capsys, monkeypatch):
     combined = captured.out + captured.err
     assert "completed" in combined
     assert "@drone" in combined
+
+
+def test_silent_finish_hint_replies_to_the_callers_seat(capsys, monkeypatch):
+    """In another project the seat is not @devpulse; the pasted dispatch must reply to the real seat."""
+    fake_module = type(sys)("fake_agent_mod")
+    fake_module.watch_agent = lambda agent_id, timeout_seconds=1800: {"agent_state": "completed_silent"}
+    _serve_agent_handler(monkeypatch, fake_module)
+    monkeypatch.setattr(wd_dispatches, "seat_email", lambda repo_root=None: "@vera")
+
+    wd_mod.handle_command("watchdog", ["agent", "@writer"])
+
+    out = capsys.readouterr().out
+    assert "email @vera" in out and "email @devpulse" not in out
 
 
 def test_agent_subcommand_parses_timeout_flag(monkeypatch):

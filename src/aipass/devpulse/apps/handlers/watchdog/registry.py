@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: Watchdog Watch Registry — multi-watch tracking + lifecycle
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-14
-# Modified: 2026-10-22
+# Modified: 2026-10-28
 # =============================================
 
 # Operational state lives in .watchdog/, never .trinity/ (identity and memory only).
@@ -340,6 +340,18 @@ def kill_watch(handle: str, storage_path: Path | None = None) -> dict:
             "killed": True,
             "was_alive": False,
             "reason": "pid already dead — deregistered",
+        }
+
+    # Lazy: wire imports this module. A pid recycled to a non-watchdog process is never signalled.
+    from aipass.devpulse.apps.handlers.watchdog import wire as _wire
+
+    if not _wire.looks_like_ours(pid):
+        deregister(handle, storage_path=path)
+        return {
+            "handle": handle,
+            "killed": False,
+            "was_alive": True,
+            "reason": f"pid {pid} cmdline is not a watchdog — deregistered, process left alone (recycled pid)",
         }
 
     killed = False

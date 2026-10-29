@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_adopt.py
 # Description: Tests for aipass adopt — project adoption handler
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-07-20
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
 """Tests for apps/handlers/new_project/adopt.py and apps/modules/adopt.py."""
@@ -292,6 +292,7 @@ def test_adopt_with_agent_spawns(host_env):
     with (
         _no_home(),
         patch("aipass.aipass.apps.handlers.new_project.adopt._enroll_project"),
+        patch("aipass.aipass.apps.handlers.new_project._localize_imports"),
         patch(
             "aipass.aipass.apps.handlers.new_project.spawn_agent",
             return_value=spawn_ok,
@@ -322,6 +323,7 @@ def test_adopt_registry_minted_before_spawn(host_env):
     with (
         _no_home(),
         patch("aipass.aipass.apps.handlers.new_project.adopt._enroll_project"),
+        patch("aipass.aipass.apps.handlers.new_project._localize_imports"),
         patch(
             "aipass.aipass.apps.handlers.new_project.spawn_agent",
             side_effect=_check_registry_exists,

@@ -1,23 +1,25 @@
 # =================== AIPass ====================
 # Name: runner.py
-# Version: 1.0.0
-# Description: Provider parity: the same scripted prompts headless on Claude and Codex, compared hook by hook
+# Version: 1.2.0
+# Description: Provider parity: the same scripted prompts headless on Claude, Codex and OpenCode, hook by hook
 # Branch: hooks
 # Layer: apps/handlers/parity
 # Created: 2026-10-26
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
 """Provider parity runner.
 
-Each lane is one scripted prompt, sent the same on both providers from the branch's cwd. The oracle is
+Each lane is one scripted prompt, sent the same on every provider from the branch's cwd. The oracle is
 engine.jsonl: every per-hook line carries the payload's session_id, so a session's hook record is read
 back by the id each CLI prints. A row reads one hook's record in that session and the two readings are
-compared; an accepted difference is marked, not counted.
+compared; an accepted difference is marked, not counted. OpenCode runs on a free model: a free-limit
+answer reruns the lane once on the next model, never in a loop.
 """
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -27,7 +29,10 @@ from aipass.hooks.apps.handlers.config import diagnostics
 from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-PROVIDERS = ("claude", "codex")
+PROVIDERS = ("claude", "codex", "opencode")
+DEFAULT_PROVIDERS = ("claude", "codex")
+OPENCODE_MODELS = ("opencode/deepseek-v4.1-flash-free", "opencode/nemotron-3.5-lightning-free")
+FREE_LIMIT = "provider.free-limit"
 RUN_TIMEOUT = 600
 
 SAME, ACCEPTED, DIFFERENT, NO_DATA, NOT_COMPARED = "same", "accepted", "DIFFERENT", "no data", "not compared"
@@ -124,27 +129,41 @@ def lane_prompt(lane: str, branch: Path, other: Path) -> str:
     raise ValueError(f"unknown lane {lane}")
 
 
-def launch_argv(provider: str) -> list[str]:
-    """The headless launch; the prompt goes on stdin for both (the edit gate refuses a long argv prompt)."""
+def launch_argv(provider: str, model: str = "") -> list[str]:
+    """The headless launch; the prompt goes on stdin for all (the edit gate refuses a long argv prompt).
+
+    OpenCode mints its own session id: one of ours is refused by the free tier as a false 429."""
+    if provider == "opencode":
+        binary = shutil.which("opencode") or str(Path.home() / ".opencode" / "bin" / "opencode")
+        return [binary, "run", "--standalone", "--format", "json", "--auto", "-m", model or OPENCODE_MODELS[0]]
     if provider == "claude":
-        return ["claude", "-p", "--model", "sonnet", "--permission-mode", "bypassPermissions"] + [
+        return ["claude", "-p", "--model", model or "sonnet", "--permission-mode", "bypassPermissions"] + [
             "--output-format",
             "json",
         ]
-    return ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--json", "-"]
+    return [
+        "codex",
+        "exec",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--json",
+        *(["-m", model] if model else []),
+        "-",
+    ]
 
 
-def launch_env() -> dict:
-    """dispatch_monitor's headless env: dispatched, no inherited CLI session."""
+def launch_env(branch: Path) -> dict:
+    """dispatch_monitor's headless env: dispatched, no inherited CLI session, PWD at the branch."""
     env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "CODEX"))}
-    for key in ("AIPASS_CALLER_BRANCH", "AIPASS_CALLER_CWD", "AIPASS_BOT_ID"):
+    for key in ("AIPASS_CALLER_BRANCH", "AIPASS_CALLER_CWD", "AIPASS_BOT_ID", "OPENCODE_SESSION_ID"):
         env.pop(key, None)
     env["AIPASS_SESSION_TYPE"] = "dispatched"
+    # OpenCode takes its directory from $PWD before its real cwd.
+    env["PWD"] = str(branch)
     return env
 
 
 def session_id_of(provider: str, stdout: str) -> str:
-    """Claude's result JSON names the session; Codex's first --json event names the thread."""
+    """Claude's result JSON names the session; Codex's first --json event names the thread; OpenCode's every line."""
     for line in stdout.splitlines():
         try:
             doc = json.loads(line)
@@ -157,6 +176,8 @@ def session_id_of(provider: str, stdout: str) -> str:
             return str(doc["session_id"])
         if provider == "codex" and doc.get("type") == "thread.started":
             return str(doc.get("thread_id", ""))
+        if provider == "opencode" and doc.get("sessionID"):
+            return str(doc["sessionID"])
     return ""
 
 
@@ -196,14 +217,28 @@ def observe(row: Row, entries: list[dict], pointer_moved: bool) -> str:
 
 
 def verdict(row: Row, readings: dict) -> str:
-    """same / accepted / DIFFERENT, or no data when a provider's session left no record."""
-    if len(readings) < len(PROVIDERS):
+    """same / accepted / DIFFERENT across the providers run, or no data when a session left no record."""
+    if len(readings) < 2:
         return NOT_COMPARED
     if any(value == NO_DATA for value in readings.values()):
         return NO_DATA
     if len(set(readings.values())) == 1:
         return SAME
     return ACCEPTED if row.accepted else DIFFERENT
+
+
+def free_limited(stdout: str) -> bool:
+    """True when an OpenCode stream carries the free tier's usage-limit error."""
+    for line in stdout.splitlines():
+        try:
+            doc = json.loads(line)
+        except json.JSONDecodeError as exc:
+            logger.debug("[HOOKS] parity: opencode printed a non-JSON line: %s", exc)
+            continue
+        error = doc.get("error") if isinstance(doc, dict) else None
+        if isinstance(error, dict) and error.get("type") == FREE_LIMIT:
+            return True
+    return False
 
 
 def _pointer_stamp(branch: Path) -> float:
@@ -216,21 +251,29 @@ def _pointer_stamp(branch: Path) -> float:
 def run_session(provider: str, prompt: str, branch: Path) -> tuple[str, list[dict], bool]:
     """One headless session: its id, its hook record, whether it moved the session pointer."""
     before = _pointer_stamp(branch)
-    try:
-        done = subprocess.run(
-            launch_argv(provider),
-            input=prompt,
-            cwd=str(branch),
-            env=launch_env(),
-            capture_output=True,
-            text=True,
-            timeout=RUN_TIMEOUT,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        logger.warning("[HOOKS] parity: %s session did not finish: %s", provider, exc)
+    for model in OPENCODE_MODELS if provider == "opencode" else ("",):
+        try:
+            done = subprocess.run(
+                launch_argv(provider, model),
+                input=prompt,
+                cwd=str(branch),
+                env=launch_env(branch),
+                capture_output=True,
+                text=True,
+                timeout=RUN_TIMEOUT,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            logger.warning("[HOOKS] parity: %s session did not finish: %s", provider, exc)
+            return "", [], False
+        if not free_limited(done.stdout):
+            break
+        logger.warning("[HOOKS] parity: %s answered the free limit (429)", model)
+    else:
         return "", [], False
     session_id = session_id_of(provider, done.stdout)
-    json_handler.log_operation("parity_session", {"provider": provider, "session": session_id, "exit": done.returncode})
+    json_handler.log_operation(
+        "parity_session", {"provider": provider, "model": model, "session": session_id, "exit": done.returncode}
+    )
     if not session_id:
         logger.warning("[HOOKS] parity: %s printed no session id (exit %s)", provider, done.returncode)
         return "", [], False

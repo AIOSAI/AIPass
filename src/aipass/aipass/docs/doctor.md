@@ -64,6 +64,8 @@ It observes presence only and never errors —
 | `doctor --fix` | A remediation report: the repair command for each failing row. A settings change is shown and asked first |
 | `doctor --fix --yes` | The same, writing the settings change without the question |
 | `doctor --fix --json` | That report as JSON, with the planned settings change under `provider_settings`; written only with `--yes`. `--json` alone falls through to the normal report |
+| `doctor --smoke` | Adds one Services row per provider from one live model turn each, through `drone @hooks smoke`: pass shows the time, skip the reason (not installed, no login, a spent quota), both ✓; fail is ✗ with hooks' reason. Spends one turn per installed provider; never runs with `--fix` |
+| `doctor --smoke --json` | hooks' result objects as given (`provider`, `status`, `why`, `session_id`, `elapsed_ms`), no other check. `--model provider=model,...` picks a model, either form |
 | `doctor --cross-os` | Cross-OS pre-flight — OS-gap cross-reference plus routing, versions and hook status |
 | `doctor --cross-os --e2e` | ...also runs the real e2e wiring suite. Heavy, opt-in |
 | `doctor --cross-os --record [PATH]` | Write a machine-filled Run Record for the human acceptance pass |
@@ -95,7 +97,7 @@ Codex reads the same hook shape from the user-level `$CODEX_HOME/hooks.json`
 doors merge the manifest's `cli.codex.hooks` rows into it: rows running the
 AIPass Codex bridge are replaced, every other row is kept, and the AIPass groups
 come first in each event. A manifest with no `cli.codex` rows leaves the file
-as it is. The `codex hooks` row passes when the AIPass rows match the manifest,
+as it is, and so does a machine with no `codex` on PATH: no row, no write. The `codex hooks` row passes when the AIPass rows match the manifest,
 and warns, naming `aipass doctor --fix`, when they are missing or differ. Once
 they match, `codex trust` checks that `~/.codex/config.toml` holds a
 `trusted_hash` under `[hooks.state."<file>:<event>:<group>:<index>"]` for each
@@ -106,6 +108,23 @@ runs every hook twice; `--fix` leaves that file to the project.
 Next to it, the `codex binary`, `codex login`, `codex model` and `codex pins`
 rows read the Codex side and never write `~/.codex/config.toml`; see
 [`two_clis.md`](two_clis.md).
+
+OpenCode has no hook file: its hooks run through one plugin, the hooks branch's
+`apps/handlers/bridges/opencode_plugin.ts`, installed byte-equal as
+`$XDG_CONFIG_HOME/opencode/plugins/aipass.ts` (`~/.config/opencode/plugins/aipass.ts`
+when `XDG_CONFIG_HOME` is unset). With no `opencode` installed there is no row and
+no write. When the manifest has `cli.opencode` rows, the
+`opencode plugin` row passes on a byte-equal copy and warns on a missing or stale
+one, naming `aipass doctor --fix` and the `cp` that does the same by hand: the
+verdict `drone @hooks verify` gives, in doctor's words. `--fix` copies it, with
+the backup and receipt below. Then `opencode binary` looks for `opencode` on
+PATH and in `~/.opencode/bin` (the curl installer's bin, on PATH only through
+`~/.bashrc`): absent, it passes as optional and the rest is skipped; found, it
+prints `opencode --version`. `opencode login` names the providers
+`opencode auth list --format json` prints, or `none (free models only)`.
+`opencode model` reads `model` from `opencode.json` (or `.jsonc`) in the same
+config folder, or says OpenCode picks its own default. Doctor never runs
+`opencode run`: it spends free quota and starts a server.
 
 Nothing is written before you see it. `doctor --fix` and plain `doctor` print
 the planned changes, one line each, then a unified diff per file, and ask
@@ -123,8 +142,8 @@ and [`apps/modules/_doctor_wire.py`](../apps/modules/_doctor_wire.py).
 Before any of these doors writes the personal settings file (`doctor --fix`,
 the install tail's doctor run, setup.sh's settings refresh, the stale-deny cleanup),
 it copies the file into `~/.claude/.backup/settings/` as
-`settings.json.<date>T<time>.<door>`. A write to Codex's `hooks.json` backs up
-to `.backup/settings/` beside it the same way. Then, after the write, it adds one line to
+`settings.json.<date>T<time>.<door>`. A write to Codex's `hooks.json`, or of
+the OpenCode plugin, backs up to `.backup/settings/` beside that file the same way. Then, after the write, it adds one line to
 `receipts.jsonl` in the same folder: when, which door, who, the backup's name,
 and the file's sha256 before and after. `doctor --fix` prints both paths. The
 backups are never pruned or rotated. If the backup or the receipt cannot be
@@ -142,12 +161,15 @@ its frontmatter. `skills link` passes when `.claude/skills` is a symlink
 resolving to `.agents/skills`, and warns when it is missing, a copy, or points
 elsewhere. `legacy prep` warns when an old `.claude/commands/prep.md` sits
 beside the skill, so `/prep` is offered twice. `provider switch` passes when
-the project holds both `.claude/commands/codex.md` (`/codex`) and
-`.codex/skills/claude/SKILL.md` (`$claude`), and names a missing one.
-`doctor --fix` makes a missing link, writes a missing switch file and renames an
-unedited legacy `prep.md` to `prep(disabled).md`, one `skills fix` row per
-change; a copy, a foreign link, an existing switch file and an edited `prep.md`
-are left for you. On Windows the link needs `git config core.symlinks true` and the
+the project holds every switch file: `.claude/commands/codex.md` (`/codex`) and
+`.claude/commands/opencode.md` (`/opencode`) for Claude Code,
+`.codex/skills/claude/SKILL.md` (`$claude`) and `.codex/skills/opencode/SKILL.md`
+(`$opencode`) for Codex, and `.opencode/commands/` `claude.md`, `codex.md`,
+`memo.md`, `prep.md` and `compass.md` for OpenCode. It names each missing one,
+and the cure is `aipass init update`, which writes them and records their hash.
+`doctor --fix` makes a missing link and renames an unedited legacy `prep.md` to
+`prep(disabled).md`, one `skills fix` row per change; it writes no switch file,
+and a copy, a foreign link and an edited `prep.md` are left for you. On Windows the link needs `git config core.symlinks true` and the
 right to make links; without them `--fix` writes a copy that will not follow
 `.agents/skills`, and the row says so.
 
@@ -162,6 +184,7 @@ update: neither overwrites a file.
 Code: [`apps/modules/doctor.py`](../apps/modules/doctor.py), with the
 remediation report in [`apps/modules/_doctor_fix.py`](../apps/modules/_doctor_fix.py),
 the wiring rows in [`apps/modules/_doctor_wire.py`](../apps/modules/_doctor_wire.py),
+the live smoke rows in [`apps/modules/_doctor_smoke.py`](../apps/modules/_doctor_smoke.py),
 the cross-OS lane in [`apps/handlers/cross_os/`](../apps/handlers/cross_os) and
 the admin-lane reader in [`apps/handlers/admin_lane.py`](../apps/handlers/admin_lane.py).
 

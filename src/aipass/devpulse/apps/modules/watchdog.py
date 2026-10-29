@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: watchdog.py
 # Description: Watchdog Module — directed wake system for devpulse
-# Version: 2.2.0
+# Version: 2.2.1
 # Created: 2026-04-14
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
 """Watchdog Module — devpulse's personal directed-wake system.
@@ -356,11 +356,16 @@ def _handle_agent(sub_args: List[str]) -> bool:
     elapsed = result.get("elapsed", 0)
     console.print(f"[bold]watchdog agent[/bold] {agent_id} -> state={state} elapsed={elapsed}s reason={reason}")
     if state == "completed_silent":
+        try:
+            seat = _dispatches.seat_email()
+        except _dispatches.RegisterUnavailable as exc:
+            logger.info("[watchdog] no sealed seat for the reply hint: %s", exc)
+            seat = "@devpulse"
         console.print(
             f"watchdog: {agent_id} stopped (state={state}) -- CHECK DELIVERABLES. "
             f'Next: drone @ai_mail dispatch {agent_id} "check in" '
             '"You finished your last task but did not send a reply. '
-            f'Please reply with your results now via drone @ai_mail email @devpulse."'
+            f'Please reply with your results now via drone @ai_mail email {seat}."'
         )
     elif state == "completed_replied":
         console.print(f"watchdog: {agent_id} stopped (state={state}). Reply detected — check inbox.")

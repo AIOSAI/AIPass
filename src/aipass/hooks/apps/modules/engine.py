@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: engine.py
-# Version: 2.3.0
+# Version: 2.4.0
 # Description: Hook engine — unified dispatcher; gates fail closed, injectors skip on error
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-18
-# Modified: 2026-10-26
+# Modified: 2026-10-28
 # =============================================
 
 """Hook engine — dispatches hook events to handlers, logs via prax + JSONL.
@@ -18,6 +18,7 @@ import importlib
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -92,18 +93,37 @@ def _import_handler_module(module_path: str):
     return importlib.import_module(module_path)
 
 
-def _run_handler(handler_path: str, hook_data: dict, timeout_s: int = 30) -> dict:
+def _import_project_handler(module_path: str, project_src: str):
+    """Import a trusted project's handler with its src/ appended to sys.path for this import only.
+
+    Appended, never prepended: an aipass.* module always resolves first, so a project cannot shadow one.
+    """
+    added = project_src not in sys.path
+    if added:
+        sys.path.append(project_src)
+    try:
+        return _import_handler_module(module_path)
+    finally:
+        if added and project_src in sys.path:
+            sys.path.remove(project_src)
+
+
+def _run_handler(
+    handler_path: str, hook_data: dict, timeout_s: int = 30, namespace: str = "", project_src: str = ""
+) -> dict:
     """Call a handler function directly (no subprocess). Module imports handler.
 
+    *namespace* and *project_src* are the loader's stamps for a trusted project config (loader._stamp_namespace).
     A daemon thread joined with a timeout: a hung handler never stalls the event nor blocks exit.
     """
     start = time.monotonic()
     try:
         module_path, func_name = handler_path.rsplit(".", 1)
-        if not module_path.startswith("aipass."):
+        own = bool(namespace) and module_path.startswith(namespace + ".")
+        if not module_path.startswith("aipass.") and not own:
             elapsed_ms = (time.monotonic() - start) * 1000
             logger.warning(
-                "[HOOKS] handler path refused (not in aipass.* namespace): %s",
+                "[HOOKS] handler path refused (not in aipass.* or a trusted project's namespace): %s",
                 handler_path,
             )
             return {
@@ -112,7 +132,7 @@ def _run_handler(handler_path: str, hook_data: dict, timeout_s: int = 30) -> dic
                 "stderr": f"handler namespace refused: {handler_path}",
                 "elapsed_ms": round(elapsed_ms, 1),
             }
-        module = _import_handler_module(module_path)
+        module = _import_project_handler(module_path, project_src) if own else _import_handler_module(module_path)
         handler_func = getattr(module, func_name)
 
         outcome = {}
@@ -380,7 +400,13 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
 
         hook_timeout = hook_def.get("timeout", 30)
         if handler:
-            result = _run_handler(handler, parsed, timeout_s=hook_timeout)
+            # Only a trusted project's config carries the stamps; every other call keeps aipass.* alone.
+            own = (
+                {"namespace": config["_handler_namespace"], "project_src": config.get("_project_src", "")}
+                if config.get("_handler_namespace")
+                else {}
+            )
+            result = _run_handler(handler, parsed, timeout_s=hook_timeout, **own)
         else:
             result = _run_hook(command, stdin_data, timeout_s=hook_timeout)
 

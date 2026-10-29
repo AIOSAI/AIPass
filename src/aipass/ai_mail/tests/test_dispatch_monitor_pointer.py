@@ -1,17 +1,18 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_pointer.py
 # Description: Tests for the dispatch monitor's session-pointer aware retry loop
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-10-08
-# Modified: 2026-10-25
+# Modified: 2026-10-28
 # =============================================
 
-"""Tests for apps/handlers/dispatch/dispatch_monitor.py's session-pointer aware retry loop and reconciliation, Claude and Codex."""
+"""Tests for apps/handlers/dispatch/dispatch_monitor.py's session-pointer aware retry loop and reconciliation, Claude, Codex and OpenCode."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(shared) — main()'s attempts and the bounce: tests/test_dispatch_monitor.py
 
 import json
+import sqlite3
 import time
 import pytest
 from pathlib import Path
@@ -22,6 +23,7 @@ from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import (
     cmd_for_attempt,
     main,
     parse_codex_stream,
+    parse_opencode_stream,
     reconcile_pointer,
     run_with_startup_check,
 )
@@ -653,3 +655,372 @@ class TestTheCodexMonitorRun:
         bounce.assert_called_once()
         assert CODEX_ERROR in bounce.call_args.args[1]
         assert mod.session_pointer.read_pointer(branch_path) is None
+
+    def test_a_crashing_run_record_still_writes_the_report_and_closes_the_register(
+        self, monkeypatch, main_argv, pointer_home, tmp_path
+    ):
+        """Shipped defect: an OpenCode row with NULL data raised TypeError out of stamp_run and killed main()."""
+        monkeypatch.setattr(mod.session_pointer, "observe_model", MagicMock(side_effect=TypeError("NoneType")))
+
+        code, _, _, _ = _run_codex_main(monkeypatch, main_argv, tmp_path, CODEX_STREAM)
+
+        root = tmp_path / ".dispatch_register_root" / ".aipass"
+        assert code == 0
+        assert (root / "dispatch_reports" / "dsp-codex.json").is_file()
+        rows = [
+            json.loads(line) for line in (root / "dispatch_register.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        assert [r["status"] for r in rows if r["dispatch_id"] == "dsp-codex"] == ["completed"]
+
+    def test_a_failed_fresh_codex_run_stamps_no_model_onto_the_previous_thread(
+        self, monkeypatch, main_argv, pointer_home, tmp_path
+    ):
+        branch_path = main_argv[1].parent.parent
+        mod.session_pointer.write_pointer(branch_path, "old-thread", "monitor-codex", provider="codex")
+        monkeypatch.setattr(mod.session_pointer, "observe_model", MagicMock(return_value=("openai", "gpt-OLD")))
+
+        code, _, bounce, _ = _run_codex_main(monkeypatch, main_argv, tmp_path, [*CODEX_STREAM[:-1], CODEX_ERROR])
+
+        assert code == 1
+        assert bounce.call_args.args[1].endswith(
+            "run: codex · gpt-6.1-sol (requested, observed pending; flag) session pending"
+        )
+        pointer = mod.session_pointer.read_pointer(branch_path) or {}
+        assert (pointer["session_id"], pointer["model_observed"]) == ("old-thread", "pending")
+
+
+# Trimmed from the three `opencode run --format json` captures of 2026-10-28; every field the parser reads is kept.
+OC_SESSION = "ses_e7e57a92affeZUOP0zXJKK1vns"
+OPENCODE_STREAM = [
+    json.dumps({"type": "step_start", "sessionID": OC_SESSION, "part": {"type": "step-start"}}),
+    json.dumps(
+        {
+            "type": "tool_use",
+            "sessionID": OC_SESSION,
+            "part": {"tool": "shell", "state": {"status": "completed", "output": "aipass-allowed-probe\n"}},
+        }
+    ),
+    json.dumps(
+        {
+            "type": "step_finish",
+            "sessionID": OC_SESSION,
+            "part": {
+                "cost": 0.25,
+                "tokens": {"input": 7143, "output": 70, "reasoning": 208, "cache": {"read": 70, "write": 0}},
+            },
+        }
+    ),
+    json.dumps({"type": "text", "sessionID": OC_SESSION, "part": {"type": "text", "text": "first part"}}),
+    json.dumps({"type": "step_start", "sessionID": OC_SESSION, "part": {"type": "step-start"}}),
+    json.dumps(
+        {
+            "type": "step_finish",
+            "sessionID": OC_SESSION,
+            "part": {
+                "cost": 0.5,
+                "tokens": {"input": 10, "output": 5, "reasoning": 0, "cache": {"read": 0, "write": 3}},
+            },
+        }
+    ),
+    json.dumps(
+        {"type": "text", "sessionID": OC_SESSION, "part": {"type": "text", "text": "THROW-OK\n\ndone  \nPINEAPPLE"}}
+    ),
+]
+OPENCODE_NO_ROUTE = json.dumps(
+    {
+        "type": "error",
+        "sessionID": "ses_e7e564578ffewyEQdwsPIW6u2I",
+        "error": {"type": "provider.no-route", "message": "Model unavailable: opencode/no-such-model"},
+    }
+)
+OPENCODE_FREE_LIMIT = [
+    json.dumps({"type": "step_start", "sessionID": "ses_aipass1793176766", "part": {"type": "step-start"}}),
+    json.dumps(
+        {
+            "type": "error",
+            "sessionID": "ses_aipass1793176766",
+            "error": {
+                "type": "provider.free-limit",
+                "message": "Free usage limit reached.",
+                "status": 429,
+                "retryAfterMs": 55232000,
+            },
+        }
+    ),
+]
+
+
+def _opencode_cmd(session_id="ses_aipass_built"):
+    return ["opencode", "run", "--standalone", "--format", "json", "--auto", "--session", session_id, "Hi."]
+
+
+class TestTheOpenCodeStream:
+    def test_a_text_run_yields_its_session_the_last_text_part_and_summed_usage_and_cost(self, tmp_path):
+        log = tmp_path / "stdout.log"
+        _write_stream(log, OPENCODE_STREAM)
+
+        parsed = parse_opencode_stream(str(log))
+
+        assert parsed["session_id"] == OC_SESSION
+        assert parsed["result"] == "THROW-OK\n\ndone  \nPINEAPPLE"
+        assert parsed["usage"] == {
+            "input_tokens": 7153,
+            "output_tokens": 75,
+            "reasoning_tokens": 208,
+            "cache_read_input_tokens": 70,
+            "cache_creation_input_tokens": 3,
+        }
+        assert parsed["total_cost_usd"] == 0.75 and parsed["num_turns"] == 2
+        assert parsed["succeeded"] is True and parsed["error"] == "" and parsed["rate_limited"] is False
+
+    def test_the_no_route_error_is_a_failure_carried_verbatim_and_not_a_rate_limit(self, tmp_path):
+        log = tmp_path / "stdout.log"
+        _write_stream(log, [OPENCODE_NO_ROUTE])
+
+        parsed = parse_opencode_stream(str(log))
+
+        assert parsed["succeeded"] is False and parsed["error"] == OPENCODE_NO_ROUTE
+        assert parsed["rate_limited"] is False and parsed["retry_after_s"] is None
+
+    def test_the_free_limit_429_is_a_rate_limit_with_its_retry_after_in_seconds(self, tmp_path):
+        log = tmp_path / "stdout.log"
+        _write_stream(log, OPENCODE_FREE_LIMIT)
+
+        parsed = parse_opencode_stream(str(log))
+
+        assert parsed["succeeded"] is False and parsed["error"] == OPENCODE_FREE_LIMIT[1]
+        assert parsed["rate_limited"] is True and parsed["retry_after_s"] == 55232
+
+    def test_text_followed_by_an_error_event_is_still_a_failure(self, tmp_path):
+        log = tmp_path / "stdout.log"
+        _write_stream(log, [*OPENCODE_STREAM, OPENCODE_NO_ROUTE])
+
+        assert parse_opencode_stream(str(log))["succeeded"] is False
+
+
+class TestTheOpenCodeRetryLadder:
+    def test_attempts_1_and_2_rerun_a_resume_as_built(self, tmp_path):
+        for attempt in (1, 2):
+            assert cmd_for_attempt(_opencode_cmd(), attempt, tmp_path, "opencode") == (_opencode_cmd(), "resume")
+
+    def test_strike_3_of_a_resume_drops_the_session_pair_and_keeps_the_prompt(self, tmp_path, pointer_home):
+        cmd, mode = cmd_for_attempt(_opencode_cmd(), 3, tmp_path, "opencode")
+
+        assert (cmd, mode) == (["opencode", "run", "--standalone", "--format", "json", "--auto", "Hi."], "fresh")
+        assert mod.session_pointer.read_pointer(tmp_path) is None, "OpenCode mints the id: no pointer is guessed"
+
+    def test_a_fresh_run_stays_fresh_on_every_attempt(self, tmp_path):
+        fresh = ["opencode", "run", "--standalone", "--format", "json", "--auto", "Hi."]
+        for attempt in (1, 2, 3):
+            assert cmd_for_attempt(fresh, attempt, tmp_path, "opencode") == (fresh, "fresh")
+
+
+class TestTheOpenCodeStartupProbe:
+    def test_a_first_stdout_line_counts_as_started_and_claudes_probe_is_never_consulted(self, tmp_path, monkeypatch):
+        import os
+        import subprocess
+        import sys
+
+        monkeypatch.setattr(mod, "STARTUP_TIMEOUT", 3)
+        monkeypatch.setattr(mod, "POLL_INTERVAL", 0.1)
+        monkeypatch.setattr(mod.session_pointer, "transcript_dir", MagicMock(side_effect=AssertionError("probed")))
+        result = run_with_startup_check(
+            [sys.executable, "-c", "import time; print('{}', flush=True); time.sleep(1)"],
+            str(tmp_path / "stdout.log"),
+            subprocess.DEVNULL,
+            str(tmp_path),
+            dict(os.environ),
+            "@canary",
+            provider="opencode",
+        )
+        assert result == (0, False)
+
+
+def _run_opencode_main(monkeypatch, main_argv, tmp_path, lines, exit_code=0, flags=()):
+    argv, lock_file, _ = main_argv
+    argv = [*argv[: argv.index("--")], "--provider=opencode", *flags, "--", *_opencode_cmd(OC_SESSION)]
+    runs = []
+
+    def fake_run(cmd, stdout_log, stderr_fh, cwd, spawn_env, *args, **kwargs):
+        runs.append({"provider": kwargs.get("provider"), "env": dict(spawn_env)})
+        _write_stream(stdout_log, lines)
+        return exit_code, False
+
+    bounce = MagicMock(return_value=True)
+    monkeypatch.setenv("AIPASS_DISPATCH_ID", "dsp-opencode")
+    monkeypatch.setattr("sys.argv", argv)
+    monkeypatch.setattr(mod, "run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
+    monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))
+    monkeypatch.setattr("aipass.ai_mail.apps.handlers.paths.find_repo_root", MagicMock(return_value=tmp_path / "repo"))
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+    return exc_info.value.code, runs, bounce, lock_file.parent.parent
+
+
+class TestTheOpenCodeMonitorRun:
+    def test_a_clean_run_points_the_branch_at_its_session_and_reports_text_tokens_and_cost(
+        self, monkeypatch, main_argv, pointer_home, tmp_path
+    ):
+        code, runs, bounce, branch_path = _run_opencode_main(monkeypatch, main_argv, tmp_path, OPENCODE_STREAM)
+
+        assert code == 0 and [run["provider"] for run in runs] == ["opencode"]
+        bounce.assert_not_called()
+        pointer = mod.session_pointer.read_pointer(branch_path)
+        assert (pointer["session_id"], pointer["provider"]) == (OC_SESSION, "opencode")
+        report = tmp_path / ".dispatch_register_root" / ".aipass" / "dispatch_reports" / "dsp-opencode.json"
+        data = json.loads(report.read_text(encoding="utf-8"))
+        assert data["result_excerpt"].startswith("THROW-OK")
+        assert (data["output_tokens"], data["total_cost_usd"], data["num_turns"]) == (75, 0.75, 2)
+
+    def test_exit_0_without_a_text_part_fails_once_and_never_reruns(
+        self, monkeypatch, main_argv, pointer_home, tmp_path
+    ):
+        code, runs, bounce, _ = _run_opencode_main(monkeypatch, main_argv, tmp_path, OPENCODE_STREAM[:3])
+
+        assert code == 1 and len(runs) == 1
+        bounce.assert_called_once()
+        assert "without a text part" in bounce.call_args.args[1]
+
+    def test_the_no_route_error_bounces_its_message_verbatim_after_one_attempt(
+        self, monkeypatch, main_argv, pointer_home, tmp_path
+    ):
+        code, runs, bounce, branch_path = _run_opencode_main(
+            monkeypatch, main_argv, tmp_path, [OPENCODE_NO_ROUTE], exit_code=1
+        )
+
+        assert code == 1 and len(runs) == 1, "the stream named the failure; a re-run meets the same answer"
+        assert OPENCODE_NO_ROUTE in bounce.call_args.args[1]
+
+    def test_the_free_limit_429_bounces_as_a_rate_limit_naming_retry_after(
+        self, monkeypatch, main_argv, pointer_home, tmp_path
+    ):
+        code, runs, bounce, _ = _run_opencode_main(monkeypatch, main_argv, tmp_path, OPENCODE_FREE_LIMIT, exit_code=1)
+
+        reason = bounce.call_args.args[1]
+        assert code == 1 and len(runs) == 1
+        assert reason.startswith("API rate limit (opencode 429, retryAfter 55232s")
+        assert "provider.free-limit" in reason
+
+    def test_a_parents_opencode_markers_are_stripped_and_the_store_override_is_kept(
+        self, monkeypatch, main_argv, pointer_home, tmp_path
+    ):
+        monkeypatch.setenv("OPENCODE", "1")
+        monkeypatch.setenv("OPENCODE_SESSION_ID", "ses_parent")
+        monkeypatch.setenv("OPENCODE_DB", str(tmp_path / "store.db"))
+
+        _, runs, _, _ = _run_opencode_main(monkeypatch, main_argv, tmp_path, OPENCODE_STREAM)
+
+        env = runs[0]["env"]
+        assert "OPENCODE" not in env and "OPENCODE_SESSION_ID" not in env
+        assert env["OPENCODE_DB"] == str(tmp_path / "store.db")
+
+    def test_the_agent_env_names_the_branch_as_pwd_because_opencode_reads_pwd_not_the_cwd(
+        self, monkeypatch, main_argv, pointer_home, tmp_path
+    ):
+        """02:03 canary proof: an inherited PWD filed four canary sessions under the dispatcher's directory."""
+        monkeypatch.setenv("PWD", str(tmp_path / "dispatcher"))
+
+        _, runs, _, branch_path = _run_opencode_main(monkeypatch, main_argv, tmp_path, OPENCODE_STREAM)
+
+        assert runs[0]["env"]["PWD"] == str(branch_path.resolve())
+
+    def test_a_failed_first_attempt_still_points_the_branch_at_the_session_opencode_minted(
+        self, monkeypatch, main_argv, pointer_home, tmp_path
+    ):
+        """02:16: a 429 on a fresh run left no pointer, so the next resume could not find the session."""
+        _, _, _, branch_path = _run_opencode_main(monkeypatch, main_argv, tmp_path, OPENCODE_FREE_LIMIT, exit_code=1)
+
+        pointer = mod.session_pointer.read_pointer(branch_path)
+        assert (pointer["session_id"], pointer["provider"], pointer["set_by"]) == (
+            "ses_aipass1793176766",
+            "opencode",
+            "monitor-opencode",
+        )
+
+    def test_the_callers_config_is_set_after_the_strip_and_a_parents_own_never_survives(
+        self, monkeypatch, main_argv, pointer_home, tmp_path
+    ):
+        monkeypatch.setenv("OPENCODE_CONFIG_CONTENT", '{"model": "parent/seat"}')
+        config = '{"compaction": {"buffer": 180000}}'
+
+        _, runs, _, _ = _run_opencode_main(
+            monkeypatch, main_argv, tmp_path, OPENCODE_STREAM, flags=(f"--opencode-config={config}",)
+        )
+        assert runs[0]["env"]["OPENCODE_CONFIG_CONTENT"] == config
+
+    def test_without_the_flag_a_parents_config_is_stripped(self, monkeypatch, main_argv, pointer_home, tmp_path):
+        monkeypatch.setenv("OPENCODE_CONFIG_CONTENT", '{"model": "parent/seat"}')
+
+        _, runs, _, _ = _run_opencode_main(monkeypatch, main_argv, tmp_path, OPENCODE_STREAM)
+
+        assert "OPENCODE_CONFIG_CONTENT" not in runs[0]["env"]
+
+
+class TestTheRunRecordAfterTheRun:
+    def _plant_store(self, tmp_path, monkeypatch, model):
+        db = tmp_path / "opencode.db"
+        with sqlite3.connect(db) as conn:
+            conn.execute("create table session_message (session_id text, type text, seq int, data text)")
+            conn.execute("insert into session_message values (?, 'assistant', 1, ?)", (OC_SESSION, json.dumps(model)))
+        conn.close()
+        monkeypatch.setenv("OPENCODE_DB", str(db))
+
+    def test_the_observed_model_comes_from_the_runtime_row_not_the_request(
+        self, monkeypatch, main_argv, pointer_home, tmp_path
+    ):
+        self._plant_store(tmp_path, monkeypatch, {"model": {"id": "gpt-6.1-sol", "providerID": "openai"}})
+        config = '--opencode-config={"model": "opencode/asked", "provider": {"secret": "k"}}'
+
+        _, _, _, branch_path = _run_opencode_main(monkeypatch, main_argv, tmp_path, OPENCODE_STREAM, flags=(config,))
+
+        pointer = mod.session_pointer.read_pointer(branch_path) or {}
+        assert (pointer["model_requested"], pointer["selection_source"]) == ("opencode/asked", "inline_config")
+        assert (pointer["model_provider"], pointer["model_observed"]) == ("openai", "gpt-6.1-sol")
+        assert pointer["observed_at"] and "secret" not in json.dumps(pointer)
+        wake_back = mod.wake_sender
+        assert isinstance(wake_back, MagicMock)
+        assert wake_back.call_args.kwargs["run_line"] == (
+            f"run: opencode · openai/gpt-6.1-sol (observed; inline_config) session {OC_SESSION}"
+        )
+
+    def test_an_unseen_model_stays_pending_and_the_bounce_says_so(self, monkeypatch, main_argv, pointer_home, tmp_path):
+        monkeypatch.setenv("OPENCODE_DB", str(tmp_path / "missing.db"))
+
+        _, _, bounce, branch_path = _run_opencode_main(
+            monkeypatch, main_argv, tmp_path, OPENCODE_FREE_LIMIT, exit_code=1
+        )
+
+        pointer = mod.session_pointer.read_pointer(branch_path) or {}
+        assert (pointer["model_observed"], pointer["observed_at"]) == ("pending", None)
+        assert bounce.call_args.args[1].endswith(
+            f"run: opencode · cli_default (requested, observed pending; cli_default) session {pointer['session_id']}"
+        )
+
+
+@pytest.mark.parametrize(
+    "cmd, provider, config, expected",
+    [
+        (["claude", "-p", "Hi", "--model", "claude-opus-5-5"], "claude", "", ("claude-opus-5-5", "flag")),
+        (["codex", "exec", "-m", "gpt-6.1-sol", "--json", "Hi"], "codex", "", ("gpt-6.1-sol", "flag")),
+        (["opencode", "run", "-m", "openai/x", "Hi"], "opencode", '{"model": "y"}', ("openai/x", "flag")),
+        (["opencode", "run", "Hi"], "opencode", '{"model": "y"}', ("y", "inline_config")),
+        (["opencode", "run", "Hi"], "opencode", "not json", ("cli_default", "cli_default")),
+        (["codex", "exec", "-m"], "codex", "", ("cli_default", "cli_default")),
+    ],
+)
+def test_the_requested_model_and_its_source_come_from_the_argv(cmd, provider, config, expected):
+    run = mod.requested_run(cmd, provider, config)
+
+    assert (run["host_cli"], run["model_requested"], run["selection_source"]) == (provider, *expected)
+
+
+def test_a_run_over_another_hosts_pointer_prints_its_own_host_and_no_foreign_session(tmp_path, pointer_home):
+    branch_path = tmp_path / "branch"
+    branch_path.mkdir()
+    mod.session_pointer.write_pointer(branch_path, "ses_x", "monitor-opencode", provider="opencode")
+
+    line = mod.stamp_run(branch_path, ["claude", "-c", "--model", "opus"], "claude")
+
+    assert line == "run: claude · opus (requested, observed pending; flag) session pending"
+    assert (mod.session_pointer.read_pointer(branch_path) or {})["host_cli"] == "opencode"

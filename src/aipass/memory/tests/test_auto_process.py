@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests/test_auto_process.py
 # Description: Tests for the intake auto_process handler and the pool module
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-06-06
-# Modified: 2026-10-17
+# Modified: 2026-10-27
 # Category: memory/tests
 # =============================================
 
@@ -16,9 +16,12 @@
 
 import json
 import sys
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+from aipass.cli.apps.modules import resolve_exit
 
 from aipass.memory.apps.handlers.intake import auto_process
 from aipass.memory.apps.handlers.monitor import detector
@@ -443,3 +446,37 @@ class TestPoolHandleCommand:
         mod = pool
 
         assert mod.handle_command("search", []) is False
+
+
+class TestPoolProcessHonoursTheLock:
+    """pool process shares the background run's lock: a held lane refuses loudly."""
+
+    def test_a_held_lock_refuses_with_the_holder_pid_and_never_processes(self, monkeypatch, tmp_path, capsys):
+        lock = tmp_path / "auto-process.lock"
+        lock.write_text(json.dumps({"pid": 4242, "started": time.time()}), encoding="utf-8")
+        monkeypatch.setattr(auto_process, "_LOCK_PATH", lock)
+        ran = MagicMock(return_value={"success": True, "pool": {}, "rollover": {}})
+        monkeypatch.setattr(auto_process, "auto_process", ran)
+
+        pool.handle_command("pool", ["process"])
+
+        out, err = capsys.readouterr()
+        assert ran.call_count == 0
+        assert "pid 4242" in err
+        assert resolve_exit(True) == 2
+        assert lock.exists()
+
+    def test_a_free_lane_takes_the_lock_for_the_run_and_gives_it_back(self, monkeypatch, tmp_path, capsys):
+        lock = tmp_path / "auto-process.lock"
+        monkeypatch.setattr(auto_process, "_LOCK_PATH", lock)
+        held_during = []
+        ran = MagicMock(
+            side_effect=lambda: held_during.append(lock.exists()) or {"success": True, "pool": {}, "rollover": {}}
+        )
+        monkeypatch.setattr(auto_process, "auto_process", ran)
+
+        pool.handle_command("pool", ["process"])
+
+        assert held_during == [True]
+        assert not lock.exists()
+        assert resolve_exit(True) == 0

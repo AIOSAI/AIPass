@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: update_ops.py
 # Description: Update handler — path-based template sync engine (P1 rewrite, TDPLAN-0006)
-# Version: 2.5.0
+# Version: 2.6.0
 # Created: 2026-03-07
-# Modified: 2026-10-26
+# Modified: 2026-10-27
 # =============================================
 
 """Update handler — path-based template sync engine.
@@ -104,6 +104,7 @@ def update_branch(
     updates_detail: list[dict] = []
     ignored_detail: list[dict] = []
     md_detail: list[dict] = []
+    gitignore_state: str | None = None
 
     registry_path = Path(registry_path) if registry_path else find_registry()
     branch_dir = _resolve_branch_path(branch_name, registry_path) if registry_path else None
@@ -228,6 +229,8 @@ def update_branch(
             counts["additions"] += 1
             if dest.suffix == ".md":
                 md_detail.append({"branch_path": resolved_path, "state": "absent"})
+            elif dest.name == ".gitignore":
+                gitignore_state = "absent"
             if trace:
                 logger.info("[update] Added: %s", resolved_path)
 
@@ -243,6 +246,12 @@ def update_branch(
             md_detail.append({"branch_path": resolved_path, "state": state})
             if trace:
                 logger.info("[update] .md %s: %s", state, resolved_path)
+
+        elif dest.name == ".gitignore":
+            # Read-only too: the root .gitignore covers every citizen, so a branch copy is the owner's own.
+            gitignore_state = _md_state(template_file, dest, md_replacements)
+            if trace:
+                logger.info("[update] .gitignore %s: %s", gitignore_state, resolved_path)
 
         elif dest.suffix == ".py":
             counts["skipped_py"] += 1
@@ -289,6 +298,7 @@ def update_branch(
         _pruned_detail=[],
         _ignored_detail=ignored_detail,
         _md_detail=md_detail,
+        gitignore=gitignore_state,
     )
 
 
@@ -483,14 +493,14 @@ def _grow_template_owned_lists(merged: dict, template_data: dict, dotted_keys: t
 
 
 def _md_state(template_file: Path, dest: Path, replacements: dict) -> str:
-    """Compare a branch .md against what the template would render, writing nothing.
+    """Compare a branch text file (.md, .gitignore) against what the template would render, writing nothing.
 
     Returns "matches", "differs", or "unreadable" (its own answer, never a guessed "differs")."""
     try:
         rendered = replace_placeholders(template_file.read_text(encoding="utf-8"), replacements)
         current = dest.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
-        logger.info("[update] .md unreadable, not compared: %s (%s)", dest, exc)
+        logger.info("[update] unreadable, not compared: %s (%s)", dest, exc)
         return "unreadable"
     return "matches" if rendered == current else "differs"
 

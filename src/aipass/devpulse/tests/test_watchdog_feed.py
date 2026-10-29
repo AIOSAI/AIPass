@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_feed.py
 # Description: Tests for the watchdog feed handler (FPLAN-0451 P2 — push replaces poll)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-21
-# Modified: 2026-09-27
+# Modified: 2026-10-29
 # =============================================
 
 """Tests for apps/handlers/watchdog/feed.py, reading completions off @ai_mail's notification feed."""
@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from aipass import ai_mail
+from aipass.devpulse.apps.handlers.watchdog import agent as agent_handler
 from aipass.devpulse.apps.handlers.watchdog import feed
 
 
@@ -42,6 +43,12 @@ def _mail_doors(hermetic_mail_doors):
     depend on this machine's live registry marker (the CI fresh-checkout
     failure, PR #739)."""
     return hermetic_mail_doors
+
+
+@pytest.fixture(autouse=True)
+def _no_live_branches(monkeypatch):
+    """A DISPATCH line reads its source's receipt; no test reads the live tree's."""
+    monkeypatch.setattr(agent_handler, "_resolve_branch_path", lambda source: None)
 
 
 @pytest.fixture
@@ -144,14 +151,14 @@ class TestKindFilter:
 
         assert records == []
 
-    def test_wake_is_in_the_default_set(self, feed_file, cursor):
+    def test_wake_is_dropped_by_the_default_set(self, feed_file, cursor):
         _write(feed_file, [_event(minute=0)])
         feed.drain_feed(cursor, feed_file_path=feed_file)
 
         _write(feed_file, [_event(minute=0), _event(kind="wake", minute=1)])
         records, _ = feed.drain_feed(cursor, feed_file_path=feed_file)
 
-        assert len(records) == 1
+        assert records == []
 
 
 class TestTrim:
@@ -273,7 +280,7 @@ class TestFormat:
             {"kind": "dispatch", "source": "canary", "title": "@canary completed", "body": "Duration: 42s"}
         )
 
-        assert line == 'DISPATCH @canary title="@canary completed" detail="Duration: 42s"'
+        assert line == 'DISPATCH @canary title="@canary completed" detail="Duration: 42s grounding=no receipt"'
         assert "\n" not in line
 
     def test_multiline_body_is_collapsed(self):
@@ -292,3 +299,70 @@ class TestFormat:
     def test_missing_fields_do_not_raise(self):
         """A malformed event still renders — a formatter that raises kills the wire."""
         assert feed.format_feed_event({}) == '? @? title="?"'
+
+
+def _branch(tmp_path: Path, receipt: dict | None = None, **pointer) -> Path:
+    """A tmp branch with a session pointer and, optionally, a grounding receipt as current."""
+    local = tmp_path / "canary" / ".ai_mail.local"
+    local.mkdir(parents=True)
+    (local / "session.json").write_text(json.dumps({"session_id": "ses_aaaaaaaaaaaaaaaa", **pointer}), encoding="utf-8")
+    if receipt is not None:
+        row = {
+            "session_id": "ses_aaaaaaaaaaaaaaaa",
+            "generation": 2,
+            "observation_boundary": "opencode_store",
+            "status": "verified",
+            "missing": [],
+            "stale": [],
+            **receipt,
+        }
+        (local / "grounding.json").write_text(json.dumps({"current": row, "history": []}), encoding="utf-8")
+    return local.parent
+
+
+class TestGroundingReading:
+    def test_absent_receipt(self, tmp_path):
+        assert feed.grounding_reading(_branch(tmp_path)) == "grounding=no receipt"
+
+    def test_unreadable_receipt_does_not_raise(self, tmp_path):
+        branch = _branch(tmp_path)
+        (branch / ".ai_mail.local" / "grounding.json").write_text("{not json", encoding="utf-8")
+        assert feed.grounding_reading(branch) == "grounding=no receipt"
+
+    def test_stale_receipt(self, tmp_path):
+        reading = feed.grounding_reading(_branch(tmp_path, {"session_id": "ses_bbbbbbbbbbbbbbbb"}))
+        assert reading == "grounding=stale (receipt ses_bbbbbbbb, pointer ses_aaaaaaaa)"
+
+    def test_verified(self, tmp_path):
+        assert feed.grounding_reading(_branch(tmp_path, {})) == "grounding=verified gen2"
+
+    def test_ungrounded_names_missing_keys(self, tmp_path):
+        reading = feed.grounding_reading(_branch(tmp_path, {"status": "ungrounded", "missing": ["identity", "rules"]}))
+        assert reading == "grounding=ungrounded gen2 missing=identity,rules"
+
+    def test_unverified_names_boundary(self, tmp_path):
+        reading = feed.grounding_reading(_branch(tmp_path, {"status": "unverified", "observation_boundary": "none"}))
+        assert reading == "grounding=unverified gen2 (none)"
+
+    def test_run_prefers_observed_then_requested(self, tmp_path):
+        observed = _branch(tmp_path / "a", {}, host_cli="opencode", model_requested="m1", model_observed="m2")
+        requested = _branch(tmp_path / "b", {}, host_cli="opencode", model_requested="m1")
+        assert feed.grounding_reading(observed) == "grounding=verified gen2 run=opencode·m2"
+        assert feed.grounding_reading(requested) == "grounding=verified gen2 run=opencode·m1?"
+
+    def test_old_pointer_without_run_fields_omits_run(self, tmp_path):
+        assert "run=" not in feed.grounding_reading(_branch(tmp_path, {}))
+
+    def test_lookup_that_raises_still_renders_the_line(self, monkeypatch):
+        def boom(source):
+            raise AttributeError("bad registry row")
+
+        monkeypatch.setattr(agent_handler, "_resolve_branch_path", boom)
+        line = feed.format_feed_event({"kind": "dispatch", "source": "canary", "title": "t", "body": "Duration: 1s"})
+        assert line == 'DISPATCH @canary title="t" detail="Duration: 1s grounding=no receipt"'
+
+    def test_dispatch_line_carries_the_reading(self, tmp_path, monkeypatch):
+        branch = _branch(tmp_path, {}, host_cli="claude", model_observed="opus")
+        monkeypatch.setattr(agent_handler, "_resolve_branch_path", lambda source: branch)
+        line = feed.format_feed_event({"kind": "dispatch", "source": "canary", "title": "t", "body": "Duration: 1s"})
+        assert line == 'DISPATCH @canary title="t" detail="Duration: 1s grounding=verified gen2 run=claude·opus"'

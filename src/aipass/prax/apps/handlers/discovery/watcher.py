@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: watcher.py
 # Description: File System Watching
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2025-11-26
-# Modified: 2026-10-24
+# Modified: 2026-10-28
 # =============================================
 
 """PRAX File Watcher (Handler)
