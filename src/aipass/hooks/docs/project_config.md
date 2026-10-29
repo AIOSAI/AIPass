@@ -21,6 +21,26 @@
 
 `drone @hooks status` explains why a project's own config is not running, and always ends "The AIPass gate set still runs."
 
+### A project's own handlers — `handler_namespace`
+
+A handler row names a dotted function the engine imports. By default only `aipass.*` is imported; anything else is refused before import and logged `handler namespace refused`. A trusted project can declare one package of its own:
+
+```json
+{
+  "handler_namespace": "hark",
+  "Stop": {"record": {"enabled": true, "handler": "hark.hark.apps.modules.hook_events.record", "matcher": ""}}
+}
+```
+
+Name a function under the project's `apps/modules/`, not `apps/handlers/`: the scaffold's handlers fence refuses every importer outside the branch, the hook engine included, so a handler row pointing into `handlers/` is refused whatever the trust state. A one-function module that calls the handler is the shape.
+
+- **Trust first.** The key is honoured only when the config itself loads, which means the project is enrolled and its hooks.json hash still matches. An unenrolled or edited config does not load at all, so none of its handlers are imported. The refusal line names the cure: `aipass trust <path>`. Adding the key changes the hash, so enroll after the edit.
+- **One name.** The value must be a single Python identifier, and it may not be `aipass`. Any other value is refused with a WARNING, and the config runs `aipass.*` only.
+- **The root config never takes it.** AIPass's own `.aipass/hooks.json` runs `aipass.*` only, and a key there is refused with a WARNING.
+- **`<project>/src` is appended to `sys.path` for that import only**, then removed. It is appended, never prepended, so an `aipass.*` module always resolves to AIPass's copy and a project cannot shadow one.
+- **Command rows stay refused** for every project config, namespaced or not. Nothing about the gates changes.
+- The loader stamps the trusted name as `_handler_namespace`, with `_project_src`, and it drops either key if the file supplies it, so a config cannot forge them. `drone @hooks status` prints the declared namespace, and says when it was refused.
+
 ## The template ruling — what a project gets, and what stays framework-only
 
 `.aipass/project_hooks.json` is the base config `aipass init` copies into a new project. It is not a
