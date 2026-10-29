@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-10-29] — v2.8.30: OpenCode 2 as the third provider (plugin, bridge, parity, doctor rows), a run record and grounding receipt on every host, five ponytail audits fixed
 
 ### Added
 
