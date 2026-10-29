@@ -17,6 +17,7 @@ the same content. We do **not** keep separate prompts per CLI. Only the *deliver
 |---|---|
 | **Claude Code** | **Tiered**: `tier0_kernel.md` + `tier1_navmap.md` at every fresh context and post-compaction, no periodic beat |
 | **Codex CLI** | The same: the user-level `~/.codex/hooks.json` calls the same bridge, engine and handlers, so the tiers reach a Codex session on the same cadence |
+| **OpenCode** | The plugin `~/.config/opencode/plugins/aipass.ts` runs the same handlers; the tiers, branch prompt, identity and culture land as keyed instruction entries that every model call carries and a compaction keeps |
 
 ## Files
 
@@ -58,7 +59,7 @@ drone @flow create . "What changed" prompt_change
 Golden rule: **live ≠ seeded.** Editing this folder fixes *this* repo only. New projects
 come from the `project_*` templates + `bootstrap.py`; fresh clones get their machine-local
 wiring from `setup.sh` + `.claude/provider_manifest.json` + `cadence.py` defaults. And
-**every runtime** (Claude Code + Codex) must point at the same tier content.
+**every runtime** (Claude Code, Codex, OpenCode) must point at the same tier content.
 
 ## Archive & recovery
 

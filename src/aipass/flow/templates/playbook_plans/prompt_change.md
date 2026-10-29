@@ -45,6 +45,7 @@ Any change to an injected prompt — the kernel, the navmap, a branch-local prom
 - [ ] **Cadence** — `cadence_config.json` loaders: correct `period`/`offset` (tier0 `period:1` = every turn; navmap `period:5`). New loader → add it.
 - [ ] **Bridge (Claude Code)** — `~/.claude/settings.json`: a `UserPromptSubmit:<handler>` bridge line exists (machine-local — edit directly for the live machine). Retiring → remove the stale line.
 - [ ] **Codex runtime** — the same handlers run through the Codex bridge (`~/.codex/hooks.json`, written by `aipass doctor --fix` from `.claude/provider_manifest.json`). A new prompt handler needs its `cli.codex` manifest row next to the `cli.claude` one; retiring one removes both. Same content, same cadence, two bridges. **@hooks owns — dispatch.**
+- [ ] **OpenCode runtime** — the plugin (`~/.config/opencode/plugins/aipass.ts`) runs the manifest's `cli.opencode` rows; a new prompt handler needs that row too, and a grounding loader lands as a keyed instruction entry. **@hooks owns — dispatch.**
 - [ ] New handler file lives at `src/aipass/hooks/apps/handlers/prompt/<name>.py` — **@hooks owns it; dispatch them to build it.**
 
 ## 4. Seed propagation — so FRESH installs get it (the step that's always forgotten)
