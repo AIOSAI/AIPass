@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: direct.py
 # Description: Direct Logger (Event Pipeline Bypass)
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-02-27
-# Modified: 2026-10-28
+# Modified: 2026-10-29
 # =============================================
 
 """PRAX Direct Logger
@@ -101,7 +101,9 @@ def _create_direct_logger(module_name: str, branch_name: str, branch_path: Optio
     sys_handler.setLevel(system_level)
     logger.addHandler(sys_handler)
 
-    local_handler = _tier_handler(lambda: get_module_logs_dir(target), f"{module_name}.log", config["local_logs"])
+    local_handler = _tier_handler(
+        lambda: get_module_logs_dir(target, branch_path), f"{module_name}.log", config["local_logs"]
+    )
     local_handler.setFormatter(formatter)
     local_handler.setLevel(local_level)
     logger.addHandler(local_handler)

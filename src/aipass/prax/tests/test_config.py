@@ -3,7 +3,7 @@
 # Description: Tests for prax config handlers (load + ignore_patterns)
 # Version: 1.5.0
 # Created: 2026-03-29
-# Modified: 2026-10-24
+# Modified: 2026-10-29
 # =============================================
 
 """Tests for apps/handlers/config/load.py and apps/handlers/config/ignore_patterns.py."""
@@ -57,6 +57,8 @@ def _patch_load_world(monkeypatch, tmp_path):
     # every consultation is recorded, so a test can show the product asked.
     consulted: list = []
     monkeypatch.setattr(load_mod, "_is_pytest_session", lambda: consulted.append(True) or False)
+    # With detection off, the routing warning's direct logger resolves the live prax/logs by branch dir.
+    monkeypatch.setattr(load_mod, "_warn_routing", lambda *a: None)
     return consulted
 
 
@@ -183,6 +185,21 @@ class TestGetModuleLogsDir:
         # Should use the src_root fallback since commons isn't under tmp_path
         assert result.name == "logs"
         assert result.exists()
+
+    def test_a_branch_dir_is_its_own_logs_home_without_a_routing_warning(
+        self, mock_prax_infrastructure, monkeypatch, tmp_path
+    ):
+        _patch_load_world(monkeypatch, tmp_path)
+        monkeypatch.setattr(load_mod, "_find_repo_root", lambda: tmp_path)
+        # The warning goes to a non-propagating direct logger, out of caplog's reach.
+        warned = []
+        monkeypatch.setattr(load_mod, "_warn_routing", lambda *a: warned.append(a))
+        branch = tmp_path / "projects" / "hark" / "src" / "hark" / "hark"
+        result = load_mod.get_module_logs_dir("hark", branch)
+        assert result == branch / "logs"
+        assert result.is_dir()
+        assert not (tmp_path / "system_logs" / "external" / "hark").exists()
+        assert warned == []
 
     def test_unknown_module_routes_to_system_logs_external(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Unknown modules must NOT create dirs in ECOSYSTEM_ROOT (log-leak regression)."""

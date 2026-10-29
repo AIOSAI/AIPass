@@ -9,6 +9,12 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **prax**: a citizen's logs land in its own `logs/` wherever it lives. A branch is the nearest ancestor of the calling file that holds `.trinity/passport.json`, after the two source roots; `detect_branch_from_path` returns that directory and `get_module_logs_dir(name, branch_dir)` goes straight to `<branch>/logs` with no lookup and no warning. A project under `projects/` (hark) used to resolve by name against `src/aipass` and `src` only, miss both, and route by the caller's cwd to `<project>/logs/<name>` with a WARNING on every line (73 of them, escalated by @trigger as a repeat). No root list, no env var, no registry read.
+
 ## [2026-10-29] — v2.8.30: OpenCode 2 as the third provider (plugin, bridge, parity, doctor rows), a run record and grounding receipt on every host, five ponytail audits fixed
 
 ### Added

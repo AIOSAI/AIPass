@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: load.py
 # Description: Load Logging Configuration Handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2025-11-07
-# Modified: 2026-10-28
+# Modified: 2026-10-29
 # =============================================
 
 """
@@ -16,7 +16,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 
 from aipass.prax.apps.handlers.repo_root import find_repo_root
 from aipass.prax.apps.handlers.repo_root import resolved_file
@@ -123,11 +123,12 @@ def _get_caller_module_name(depth: int = 1) -> str:
     return _module_name_from_filename(frame.f_code.co_filename)
 
 
-def get_module_logs_dir(module_name: Optional[str] = None) -> Path:
+def get_module_logs_dir(module_name: Optional[str] = None, branch_dir: Optional[Union[str, Path]] = None) -> Path:
     """Get the branch-root logs directory for a module.
 
-    Unknown modules fall back to system_logs/external/: never create new
-    directories inside the AIPass source tree.
+    A known ``branch_dir`` is its own ``logs/``. A name alone is looked up under the
+    two source roots; unknown modules fall back to system_logs/external/, never
+    creating new directories inside the AIPass source tree.
     """
     if module_name is None:
         module_name = _get_caller_module_name(depth=2)
@@ -142,9 +143,14 @@ def get_module_logs_dir(module_name: Optional[str] = None) -> Path:
         p.mkdir(parents=True, exist_ok=True)
         return p
 
-    branch_dir = ECOSYSTEM_ROOT / module_name
-    if branch_dir.exists():
-        logs_dir = branch_dir / "logs"
+    if branch_dir:
+        logs_dir = Path(branch_dir) / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        return logs_dir
+
+    named_dir = ECOSYSTEM_ROOT / module_name
+    if named_dir.exists():
+        logs_dir = named_dir / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
         return logs_dir
 

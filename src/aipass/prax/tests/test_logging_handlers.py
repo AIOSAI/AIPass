@@ -3,7 +3,7 @@
 # Description: Tests for prax logging handler modules
 # Version: 1.5.0
 # Created: 2026-04-25
-# Modified: 2026-10-24
+# Modified: 2026-10-29
 # =============================================
 
 """Tests for apps/handlers/logging/direct.py and its sibling modules under apps/handlers/logging/."""
@@ -432,7 +432,7 @@ class TestSetupWindowsSafeRotatingHandlerDoRollover:
     def system_handler(self, monkeypatch, tmp_path):
         """The system-log handler of a freshly built logger, its file holding 'data'."""
         monkeypatch.setattr(logging_setup, "get_system_logs_dir", lambda: tmp_path)
-        monkeypatch.setattr(logging_setup, "get_module_logs_dir", lambda branch: tmp_path / "local")
+        monkeypatch.setattr(logging_setup, "get_module_logs_dir", lambda branch, branch_dir=None: tmp_path / "local")
         monkeypatch.setattr(
             logging_setup,
             "load_log_config",

@@ -3,7 +3,7 @@
 # Description: Tests for prax logging subsystem
 # Version: 1.4.1
 # Created: 2026-03-29
-# Modified: 2026-10-24
+# Modified: 2026-10-29
 # =============================================
 
 """Tests for apps/handlers/logging/introspection.py and setup.py."""
@@ -105,27 +105,27 @@ def _aipass_package_root() -> Path:
 
 
 class TestDetectBranchFromPath:
-    """Tests for detect_branch_from_path() — extracts branch name from file paths."""
+    """Tests for detect_branch_from_path() — the branch directory a file lives in."""
 
     def test_cli_branch(self, mock_prax_infrastructure):
         """CLI branch is detected from aipass/cli/apps/cli.py."""
         cli_path = str(_aipass_package_root() / "cli" / "apps" / "cli.py")
-        assert detect_branch_from_path(cli_path) == "cli"
+        assert detect_branch_from_path(cli_path) == str(_aipass_package_root() / "cli")
 
     def test_flow_branch(self, mock_prax_infrastructure):
         """Flow branch is detected from aipass/flow/apps/flow.py."""
         flow_path = str(_aipass_package_root() / "flow" / "apps" / "flow.py")
-        assert detect_branch_from_path(flow_path) == "flow"
+        assert detect_branch_from_path(flow_path) == str(_aipass_package_root() / "flow")
 
     def test_prax_branch(self, mock_prax_infrastructure):
         """Prax branch is detected from aipass/prax/apps/module.py."""
         prax_path = str(_aipass_package_root() / "prax" / "apps" / "module.py")
-        assert detect_branch_from_path(prax_path) == "prax"
+        assert detect_branch_from_path(prax_path) == str(_aipass_package_root() / "prax")
 
     def test_drone_branch(self, mock_prax_infrastructure):
         """Drone branch is detected from aipass/drone/apps/branch.py."""
         drone_path = str(_aipass_package_root() / "drone" / "apps" / "branch.py")
-        assert detect_branch_from_path(drone_path) == "drone"
+        assert detect_branch_from_path(drone_path) == str(_aipass_package_root() / "drone")
 
     def test_random_path_returns_none(self, mock_prax_infrastructure, tmp_path):
         """Random path outside the project returns None."""
@@ -138,7 +138,50 @@ class TestDetectBranchFromPath:
     def test_nested_module_still_resolves(self, mock_prax_infrastructure):
         """Deeply nested module path still resolves to the branch."""
         deep_path = str(_aipass_package_root() / "flow" / "apps" / "handlers" / "deep" / "module.py")
-        assert detect_branch_from_path(deep_path) == "flow"
+        assert detect_branch_from_path(deep_path) == str(_aipass_package_root() / "flow")
+
+    def test_a_citizen_outside_both_roots_is_found_by_its_passport(self, mock_prax_infrastructure, tmp_path):
+        branch = tmp_path / "hark" / "src" / "hark" / "hark"
+        (branch / ".trinity").mkdir(parents=True)
+        (branch / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+        module = branch / "apps" / "handlers" / "ui" / "server.py"
+        module.parent.mkdir(parents=True)
+        module.write_text("", encoding="utf-8")
+        assert detect_branch_from_path(str(module)) == str(branch.resolve())
+
+    def test_a_trinity_dir_without_a_passport_is_no_branch(self, mock_prax_infrastructure, tmp_path):
+        (tmp_path / "loose" / ".trinity").mkdir(parents=True)
+        assert detect_branch_from_path(str(tmp_path / "loose" / "apps" / "m.py")) is None
+
+
+class TestACitizenOutsideTheKnownRoots:
+    """A passport-holding branch anywhere logs into its own logs/, under its own name."""
+
+    def test_its_local_log_lands_in_its_branch_logs_dir(self, monkeypatch, tmp_path):
+        branch = tmp_path / "proj" / "src" / "hark" / "hark"
+        (branch / ".trinity").mkdir(parents=True)
+        (branch / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+        module = branch / "apps" / "server.py"
+        monkeypatch.setattr(setup_handler, "get_system_logs_dir", lambda: tmp_path / "system_logs")
+        # The real resolver's pytest short-circuit hides branch_dir; this one honours only it.
+        monkeypatch.setattr(
+            setup_handler,
+            "get_module_logs_dir",
+            lambda name, branch_dir=None: Path(branch_dir) / "logs" if branch_dir else tmp_path / "by_name",
+        )
+        monkeypatch.setattr(setup_handler, "_captured_loggers", {})
+        monkeypatch.delenv("AIPASS_BRANCH_NAME", raising=False)
+        built = setup_handler.setup_individual_logger("server", caller_path=str(module))
+        try:
+            built.info("served")
+        finally:
+            for handler in list(built.handlers):
+                handler.close()
+                built.removeHandler(handler)
+
+        assert "served" in (branch.resolve() / "logs" / "server.log").read_text(encoding="utf-8")
+        assert "served" in (tmp_path / "system_logs" / "hark_server.log").read_text(encoding="utf-8")
+        assert not (tmp_path / "by_name").exists()
 
 
 class TestDetectExternalProject:
@@ -295,7 +338,9 @@ class TestConcurrentFirstCallsBuildOneLogger:
 
     def _sandbox(self, monkeypatch, tmp_path):
         monkeypatch.setattr(setup_handler, "get_system_logs_dir", lambda: tmp_path / "system_logs")
-        monkeypatch.setattr(setup_handler, "get_module_logs_dir", lambda branch: tmp_path / branch / "logs")
+        monkeypatch.setattr(
+            setup_handler, "get_module_logs_dir", lambda branch, branch_dir=None: tmp_path / branch / "logs"
+        )
         monkeypatch.setattr(setup_handler, "_captured_loggers", {})
 
     def test_a_later_line_is_written_once_after_a_racing_first_call(self, monkeypatch, tmp_path):
@@ -360,7 +405,9 @@ class TestSameModuleNameInTwoBranches:
 
     def test_each_branch_gets_its_own_logger_and_files(self, monkeypatch, tmp_path):
         monkeypatch.setattr(setup_handler, "get_system_logs_dir", lambda: tmp_path / "system_logs")
-        monkeypatch.setattr(setup_handler, "get_module_logs_dir", lambda branch: tmp_path / branch / "logs")
+        monkeypatch.setattr(
+            setup_handler, "get_module_logs_dir", lambda branch, branch_dir=None: tmp_path / branch / "logs"
+        )
         monkeypatch.setattr(setup_handler, "_captured_loggers", {})
         api = setup_handler.setup_individual_logger("config", caller_branch="api")
         drone = setup_handler.setup_individual_logger("config", caller_branch="drone")
@@ -419,7 +466,7 @@ class TestGetCallerInfo:
         monkeypatch.delenv("AIPASS_BOT_ID", raising=False)
 
         result = get_caller_info()
-        assert result == ("test_logging", __file__, "prax")
+        assert result == ("test_logging", __file__, str(_aipass_package_root() / "prax"))
 
     def test_module_name_is_string(self, mock_prax_infrastructure, monkeypatch):
         """The caller is this file, so the name is this file's stem; env overrides cleared first."""
@@ -430,7 +477,7 @@ class TestGetCallerInfo:
         assert isinstance(module_name, str)
         assert module_name == "test_logging"
         assert path == __file__
-        assert branch == "prax"
+        assert branch == str(_aipass_package_root() / "prax")
 
     def test_called_from_test_file(self, mock_prax_infrastructure):
         """When called from a test file, path should reference this file."""
