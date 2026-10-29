@@ -12,7 +12,7 @@ Which events exist, which shape each one is wired in, and what a new handler nee
 
 Hooks operate on two tiers:
 
-**Tier 1 — Provider Settings (wiring).** Claude Code's `~/.claude/settings.json` (or project `.claude/settings.json`) defines hook entries that point to the bridge (`claude.py`). These are installed by `setup.sh` / `doctor` — they're pure wiring. Wiring comes in two shapes. Five events use **one fan-out entry** that dispatches every enabled handler for that event: PreToolUse, PostToolUse, SubagentStop, Stop, Notification. Three events are wired **per handler** (`claude.py EventType:hook_name`, one entry each): UserPromptSubmit (13 entries), PreCompact (8 — four handlers × `manual`/`auto`), SessionStart (1). The per-handler form exists for two reasons: a single fan-out entry answers with ONE merged document whose `additionalContext` shares one 10,000-unit display limit (How It Works, step 7), which the prompt injectors together would cross; and per-entry wiring gives each handler its own timeout budget (in the current manifest, UserPromptSubmit runs at 90s except `auto_process` at 120s; PreCompact runs 60s/120s/120s/30s; SessionStart 30s). Provider settings cannot be changed by branches — only setup tooling manages them.
+**Tier 1 — Provider Settings (wiring).** Claude Code's `~/.claude/settings.json` (or project `.claude/settings.json`) defines hook entries that point to the bridge (`claude.py`). These are installed by `setup.sh` / `doctor` — they're pure wiring. Wiring comes in two shapes. Five events use **one fan-out entry** that dispatches every enabled handler for that event: PreToolUse, PostToolUse, SubagentStop, Stop, Notification. Three events are wired **per handler** (`claude.py EventType:hook_name`, one entry each): UserPromptSubmit (14 entries, `project` among them), PreCompact (8 — four handlers × `manual`/`auto`), SessionStart (1). The per-handler form exists for two reasons: a single fan-out entry answers with ONE merged document whose `additionalContext` shares one 10,000-unit display limit (How It Works, step 7), which the prompt injectors together would cross; and per-entry wiring gives each handler its own timeout budget (in the current manifest, UserPromptSubmit runs at 90s except `auto_process` at 120s; PreCompact runs 60s/120s/120s/30s; SessionStart 30s). Provider settings cannot be changed by branches — only setup tooling manages them.
 
 **Tier 2 — Project Config (control).** Each project's `.aipass/hooks.json` controls which hooks fire for that project. Created by `aipass init`. `enabled` flags turn hooks on/off per project, with limits on the gates: inside AIPass only the root config (a protected file) sets them, a branch-level `hooks.json` is ignored, and a project nested in AIPass has the gates forced over its config (see [project_config.md](project_config.md)). Use `drone @hooks status` to view current config.
 
@@ -58,6 +58,15 @@ Entry name and filename diverge for others too (`pre_edit_gate` → `security/ed
 `pre_compact_rollover` → `lifecycle/rollover.py`). **`.claude/provider_manifest.json` keys by the
 entry name, not the filename** — `claude.py UserPromptSubmit:branch_prompt`, never `:branch_loader`.
 Wire a new per-handler entry with the name as it appears in `hooks.json`.
+
+One per-handler name is generic: **`UserPromptSubmit:project`**. A trusted project's own handlers
+(`handler_namespace`, see [project_config.md](project_config.md)) cannot have rows of their own, because
+provider settings are the user's file and list AIPass's handlers only. For the filter `project`, the engine
+runs every enabled hook of the event whose handler starts with the config's stamped namespace, and nothing
+else. A config with no namespace (AIPass's own tree, any untrusted project) runs nothing and answers
+nothing. The row runs at 30s on every CLI. `drone @hooks verify` counts a namespaced hook as wired by
+that row, and never reports the row as an orphan. A hook named `project` in a hooks.json is unreachable
+per handler, so the name is reserved.
 
 ---
 

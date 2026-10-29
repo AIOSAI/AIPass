@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: engine.py
-# Version: 2.4.0
+# Version: 2.5.0
 # Description: Hook engine — unified dispatcher; gates fail closed, injectors skip on error
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-18
-# Modified: 2026-10-28
+# Modified: 2026-10-29
 # =============================================
 
 """Hook engine — dispatches hook events to handlers, logs via prax + JSONL.
@@ -91,6 +91,11 @@ def _import_handler_module(module_path: str):
     A seam tests replace by name, instead of patching importlib.import_module process-wide.
     """
     return importlib.import_module(module_path)
+
+
+#: The generic per-handler row (``Event:project``): a trusted project's own handlers, which no
+#: provider row can name, since provider settings are the user's and list AIPass's handlers only.
+PROJECT_ROW = "project"
 
 
 def _import_project_handler(module_path: str, project_src: str):
@@ -561,10 +566,23 @@ def run_event(arg: str, stdin_data: str) -> tuple[str, int]:
     event_type, _, hook_filter = arg.partition(":")
     config = resolve_config()
     if hook_filter:
-        hook_def = config.get(event_type, {}).get(hook_filter, {})
+        group = config.get(event_type, {})
         settings = {key: value for key, value in config.items() if not isinstance(value, dict)}
-        config = {**settings, event_type: {hook_filter: hook_def}}
+        if hook_filter == PROJECT_ROW:
+            config = {**settings, event_type: own_hooks(group, config.get("_handler_namespace", ""))}
+        else:
+            config = {**settings, event_type: {hook_filter: group.get(hook_filter, {})}}
     return dispatch(event_type, stdin_data, config)
+
+
+def own_hooks(group: dict, namespace: str) -> dict:
+    """The hooks of *group* whose handler lives in a trusted project's stamped *namespace*; none without one."""
+    prefix = namespace + "."  # no namespace: "." prefixes no handler, so nothing runs
+    return {
+        name: hook
+        for name, hook in group.items()
+        if isinstance(hook, dict) and str(hook.get("handler", "")).startswith(prefix)
+    }
 
 
 def _record_injection(event_type: str, outputs: list, merged: str, payload: dict) -> None:

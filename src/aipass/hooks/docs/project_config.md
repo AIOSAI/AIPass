@@ -39,6 +39,7 @@ Name a function under the project's `apps/modules/`, not `apps/handlers/`: the s
 - **The root config never takes it.** AIPass's own `.aipass/hooks.json` runs `aipass.*` only, and a key there is refused with a WARNING.
 - **`<project>/src` is appended to `sys.path` for that import only**, then removed. It is appended, never prepended, so an `aipass.*` module always resolves to AIPass's copy and a project cannot shadow one.
 - **Command rows stay refused** for every project config, namespaced or not. Nothing about the gates changes.
+- **Where they fire.** On the fan-out events (PreToolUse, PostToolUse, Stop, Notification, SubagentStop), a project's own rows run with the rest. UserPromptSubmit is wired per handler, so they run through the one generic row `UserPromptSubmit:project` ([wiring.md](wiring.md)). PreCompact and SessionStart have no such row, so a project's own hooks there never fire.
 - The loader stamps the trusted name as `_handler_namespace`, with `_project_src`, and it drops either key if the file supplies it, so a config cannot forge them. `drone @hooks status` prints the declared namespace, and says when it was refused.
 
 ## The template ruling — what a project gets, and what stays framework-only

@@ -65,6 +65,11 @@
           "timeout": 90
         },
         {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:project",
+          "event": "UserPromptSubmit",
+          "timeout": 30
+        },
+        {
           "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreToolUse",
           "event": "PreToolUse",
           "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit|Read|Grep|Glob|WebSearch|WebFetch|Task"
@@ -263,6 +268,11 @@
           "timeout": 90
         },
         {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/codex.py UserPromptSubmit:project",
+          "event": "UserPromptSubmit",
+          "timeout": 30
+        },
+        {
           "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/codex.py PreToolUse",
           "event": "PreToolUse",
           "matcher": "Bash|apply_patch"
@@ -387,6 +397,11 @@
           "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py UserPromptSubmit:temporal",
           "event": "UserPromptSubmit",
           "timeout": 90
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py UserPromptSubmit:project",
+          "event": "UserPromptSubmit",
+          "timeout": 30
         },
         {
           "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/opencode.py PreToolUse",
