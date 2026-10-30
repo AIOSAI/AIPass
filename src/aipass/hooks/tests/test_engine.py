@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_engine.py
-# Version: 2.2.0
+# Version: 2.3.0
 # Description: Tests for hook engine dispatch logic: the dispatcher core; contracts and safeguards in two siblings
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-10-26
+# Modified: 2026-10-29
 # =============================================
 
 """Tests for apps/modules/engine.py: the dispatcher core and the hook dispatch it drives."""
@@ -783,3 +783,31 @@ class TestRunEvent:
             "hooks_enabled": True,
             "PreToolUse": {"the_hook": _one(_GATE)["PreToolUse"]["the_hook"]},
         }
+
+    def _project_row(self, config: dict) -> dict:
+        """The config run_event hands dispatch for the generic UserPromptSubmit:project row."""
+        with (
+            patch("aipass.hooks.apps.handlers.config.loader.resolve_config", return_value=config),
+            patch("aipass.hooks.apps.modules.engine.dispatch", return_value=("", 0)) as sent,
+        ):
+            run_event("UserPromptSubmit:project", "{}")
+        return sent.call_args[0][2]
+
+    _OWN = {"enabled": True, "handler": "hark.hark.apps.modules.hook_events.record", "matcher": ""}
+    _HOUSE = {"enabled": True, "handler": "aipass.hooks.apps.handlers.prompt.temporal.handle", "matcher": ""}
+
+    def test_the_project_row_runs_only_the_projects_own_handlers(self, mock_logger):
+        group = {"temporal": self._HOUSE, "hark_events": self._OWN, "gauge": self._HOUSE}
+        config = {"hooks_enabled": True, "_handler_namespace": "hark", "UserPromptSubmit": group}
+        sent = self._project_row(config)
+        assert sent["UserPromptSubmit"] == {"hark_events": self._OWN}
+        assert sent["_handler_namespace"] == "hark"
+
+    def test_the_project_row_runs_nothing_without_a_namespace(self, mock_logger):
+        config = {"hooks_enabled": True, "UserPromptSubmit": {"temporal": self._HOUSE, "hark_events": self._OWN}}
+        assert self._project_row(config)["UserPromptSubmit"] == {}
+
+    def test_the_project_row_answers_nothing_in_aipass_own_tree(self, mock_logger):
+        config = {"hooks_enabled": True, "UserPromptSubmit": {"temporal": self._HOUSE}}
+        with patch("aipass.hooks.apps.handlers.config.loader.resolve_config", return_value=config):
+            assert run_event("UserPromptSubmit:project", "{}") == ("", 0)

@@ -347,12 +347,6 @@
       "reason": "No public route (fleet green leg 15): branch_audit._load_diagnostics_checker is reached by audit_branch only with pyright on PATH. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
-      "file": "tests/test_coverage_proof_diagnostics.py",
-      "standard": "through_the_command",
-      "lines": [920, 938],
-      "reason": "No public route (fleet green leg 15): diagnostics_check._discover_pack_configs is reached only with pyright on PATH. Named in the leg 15 reply to @devpulse as the checker asks."
-    },
-    {
       "file": "apps/handlers/aipass_standards/skip_dirs.py",
       "standard": "json_structure",
       "reason": "Pure constants module \u2014 defines SOURCE_SKIP_DIRS frozenset only, no operations to log."

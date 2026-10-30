@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: introspection.py
 # Description: Stack Introspection
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2025-11-10
-# Modified: 2026-10-28
+# Modified: 2026-10-29
 # =============================================
 
 """PRAX Logging Introspection"""
@@ -110,7 +110,7 @@ def _resolve_caller_path(module_path: str) -> Optional[Path]:
 # Runs on every log line; resolve() is the cost and a module file does not move mid-process.
 @functools.lru_cache(maxsize=1024)
 def detect_branch_from_path(module_path: str) -> Optional[str]:
-    """Detect branch name from module file path: src/aipass/{branch}/... or src/{branch}/..."""
+    """Branch dir of a module: src/aipass/{b}/, src/{b}/, else the nearest ancestor with a passport."""
     path = _resolve_caller_path(module_path)
     if path is None:
         return None
@@ -119,18 +119,18 @@ def detect_branch_from_path(module_path: str) -> Optional[str]:
         relative = path.relative_to(_AIPASS_PKG_ROOT)
         if len(relative.parts) >= 2:
             # No json operation here: every module-level get_direct_logger() resolves through this.
-            return relative.parts[0]
+            return str(_AIPASS_PKG_ROOT / relative.parts[0])
     except ValueError:
         logger.info("Path %s is not relative to aipass package root", module_path)
 
     try:
         relative = path.relative_to(_SRC_ROOT)
         if len(relative.parts) >= 2 and relative.parts[0] != "aipass":
-            return relative.parts[0]
+            return str(_SRC_ROOT / relative.parts[0])
     except ValueError:
         logger.info("Path %s is not relative to src root", module_path)
 
-    return None
+    return next((str(p) for p in path.parents if (p / ".trinity" / "passport.json").is_file()), None)
 
 
 def detect_external_project(module_path: str) -> Optional[tuple]:

@@ -9,6 +9,18 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-10-30] — v2.8.31: a project's own prompt handlers fire, project citizens log to their own logs/, seedgo and backup quiet two false alarms
+
+### Added
+
+- **hooks**: a trusted project's own UserPromptSubmit handlers fire. UserPromptSubmit is wired per handler, so a project could name one in its `.aipass/hooks.json` and never see it run; one generic row, `UserPromptSubmit:project` (30s), on Claude, Codex and OpenCode now runs the resolved config's own-namespace handlers and nothing else, and nothing at all where there is no namespace (AIPass's own tree). `project` is a reserved hook name; `drone @hooks verify` counts a namespaced hook as wired by that row. `aipass doctor --fix` installs it (`docs/wiring.md`, `docs/project_config.md` "Where they fire").
+
+### Fixed
+
+- **prax**: a citizen's logs land in its own `logs/` wherever it lives. A branch is the nearest ancestor of the calling file that holds `.trinity/passport.json`, after the two source roots; `detect_branch_from_path` returns that directory and `get_module_logs_dir(name, branch_dir)` goes straight to `<branch>/logs` with no lookup and no warning. A project under `projects/` (hark) used to resolve by name against `src/aipass` and `src` only, miss both, and route by the caller's cwd to `<project>/logs/<name>` with a WARNING on every line (73 of them, escalated by @trigger as a repeat). No root list, no env var, no registry read.
+- **seedgo**: an untracked test file in the weekly inventory logs at info, not WARNING. It is a row (UNTRACKED), not a fault, and @trigger escalated the warning as a repeat error. `host_portability` gains the tempfile-versus-resolved-path candidate from the macOS red at 4d9b18d0.
+- **backup**: `projects/hark/docs.local/refs/` (cloned third-party repos kept for research, re-fetchable) is skipped; its 15k files breached the run ceiling.
+
 ## [2026-10-29] — v2.8.30: OpenCode 2 as the third provider (plugin, bridge, parity, doctor rows), a run record and grounding receipt on every host, five ponytail audits fixed
 
 ### Added

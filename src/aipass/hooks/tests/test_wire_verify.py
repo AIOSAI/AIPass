@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_wire_verify.py
-# Version: 1.5.0
+# Version: 1.6.0
 # Description: Tests for wire_verify module — provider ↔ project hook wiring checker
 # Branch: hooks
 # Created: 2026-07-09
-# Modified: 2026-10-28
+# Modified: 2026-10-29
 # =============================================
 
 """Tests for apps/modules/wire_verify.py."""
@@ -454,6 +454,45 @@ class TestOpenCodePlugin:
         manifest.write_text(json.dumps({"cli": {"claude": {"hooks": []}}}), encoding="utf-8")
         result = self._verify(tmp_path, self._installed(tmp_path), manifest)
         assert [e for e in result["errors"] if e.startswith("No cli.opencode rows") and str(manifest) in e]
+
+
+class TestTheProjectRow:
+    """UserPromptSubmit:project wires a trusted project's own handlers; it is never an orphan."""
+
+    _OWN = {"enabled": True, "handler": "hark.hark.apps.modules.hook_events.record"}
+
+    def _project(self, namespace: str = "hark") -> dict:
+        own = {"_handler_namespace": namespace} if namespace else {}
+        return {**own, "UserPromptSubmit": {"identity_injector": _ENABLED, "hark_events": self._OWN}}
+
+    def _provider(self, *rows: str) -> dict:
+        names = ("UserPromptSubmit:identity_injector", *rows)
+        return {"UserPromptSubmit": [_provider_entry(name) for name in names]}
+
+    def test_an_own_handler_is_wired_by_the_project_row(self, tmp_path):
+        result = _verify(tmp_path, self._provider("UserPromptSubmit:project"), self._project())
+        assert (result["errors"], result["warnings"]) == ([], [])
+
+    def test_an_own_handler_without_the_project_row_never_fires(self, tmp_path):
+        result = _verify(tmp_path, self._provider(), self._project())
+        assert result["errors"] == [_never_fires("UserPromptSubmit", "hark_events")]
+
+    def test_the_row_does_not_wire_a_handler_outside_the_namespace(self, tmp_path):
+        result = _verify(tmp_path, self._provider("UserPromptSubmit:project"), self._project(namespace=""))
+        assert result["errors"] == [_never_fires("UserPromptSubmit", "hark_events")]
+
+    def test_the_project_row_is_never_an_orphan(self, tmp_path):
+        project = {"UserPromptSubmit": {"identity_injector": _ENABLED}}
+        assert _verify(tmp_path, self._provider("UserPromptSubmit:project"), project)["warnings"] == []
+
+    def test_an_own_handler_wired_by_codex_project_row_only(self, tmp_path):
+        settings = tmp_path / "settings.json"
+        settings.write_text(json.dumps({"hooks": {**_PRETOOL, **self._provider()}}), encoding="utf-8")
+        codex = _codex_file(tmp_path, "UserPromptSubmit:project")
+        project = {"hooks_enabled": True, **self._project()}
+        result = wire_verify.verify_wiring(provider_path=settings, project_config=project, codex_path=codex)
+        assert result["errors"] == []
+        assert "UserPromptSubmit:hark_events: wired for Codex only" in result["info"]
 
 
 class TestHandleCommand:

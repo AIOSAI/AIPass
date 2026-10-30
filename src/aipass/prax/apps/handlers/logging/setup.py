@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: setup.py
 # Description: Logger Setup & Management
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2025-11-10
-# Modified: 2026-10-28
+# Modified: 2026-10-29
 # =============================================
 
 """PRAX Logger Setup"""
@@ -135,12 +135,14 @@ def setup_individual_logger(
     caller_branch: Optional[str] = None,
 ) -> logging.Logger:
     """Setup individual logger for a specific module with dual logging support"""
-    branch_name: Optional[str] = caller_branch
+    branch_path: Optional[str] = caller_branch
     resolved_module_path: Optional[str] = caller_path
-    if not branch_name:
+    if not branch_path:
         resolved_module_path = caller_path or get_calling_module_path()
         branch_path = detect_branch_from_path(resolved_module_path) if resolved_module_path else None
-        branch_name = Path(branch_path).name if branch_path else None
+    branch_name = Path(branch_path).name if branch_path else None
+    # caller_branch may be a bare name, which names no directory.
+    branch_dir = branch_path if branch_path and Path(branch_path).is_absolute() else None
 
     # Set by drone for dispatched commands.
     if not branch_name:
@@ -157,7 +159,7 @@ def setup_individual_logger(
         with _captured_loggers_lock:
             if key in _captured_loggers:
                 return _captured_loggers[key]
-        logger = _build_individual_logger(module_name, resolved_module_path, branch_name)
+        logger = _build_individual_logger(module_name, resolved_module_path, branch_name, branch_dir)
         with _captured_loggers_lock:
             _captured_loggers[key] = logger
         return logger
@@ -167,6 +169,7 @@ def _build_individual_logger(
     module_name: str,
     resolved_module_path: Optional[str],
     branch_name: Optional[str],
+    branch_dir: Optional[str] = None,
 ) -> logging.Logger:
     """Build one module's logger. Called only under _logger_build_lock."""
     # Outside the getLogger registry, which is keyed by name alone; the line keeps its "captured_<module>" tag.
@@ -233,7 +236,10 @@ def _build_individual_logger(
         local_limits = log_config["local_logs"]
         local_max_bytes = lines_to_bytes(local_limits["max_lines"])
         local_handler = _tier_handler(
-            lambda: get_module_logs_dir(branch_name), module_log_file, local_max_bytes, local_limits["backup_count"]
+            lambda: get_module_logs_dir(branch_name, branch_dir),
+            module_log_file,
+            local_max_bytes,
+            local_limits["backup_count"],
         )
         local_handler.setFormatter(formatter)
         local_handler.setLevel(local_level)

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: wire_verify.py
-# Version: 1.5.0
+# Version: 1.6.0
 # Description: Wire verification — cross-checks provider settings vs project hook config
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-09
-# Modified: 2026-10-28
+# Modified: 2026-10-29
 # =============================================
 
 """Wire verification — catches silent hook-wiring breaks.
@@ -29,6 +29,7 @@ from aipass.hooks.apps.handlers.config import gates
 from aipass.hooks.apps.handlers.config.opencode_paths import opencode_plugin_path
 from aipass.hooks.apps.handlers.config.loader import aipass_home, config_unavailable_reason, find_project_config
 from aipass.hooks.apps.modules.context_window import codex_hooks_path
+from aipass.hooks.apps.modules.engine import PROJECT_ROW, own_hooks
 from aipass.hooks.apps.handlers.json import files as json_files
 from aipass.hooks.apps.handlers.module_root import module_file
 from aipass.prax.apps.modules.logger import system_logger as logger
@@ -156,11 +157,15 @@ def _opencode_wired(plugin, manifest, errors) -> frozenset[str]:
     return frozenset(wired)
 
 
-def _check_event_wiring(event_type, hooks_group, pidx, errors, warnings, info, elsewhere=None):
-    """Check one project config event against its provider index entry; *elsewhere* maps a CLI to its wired set."""
+def _check_event_wiring(event_type, hooks_group, pidx, errors, warnings, info, elsewhere=None, namespace=""):
+    """Check one project config event against its provider index entry; *elsewhere* maps a CLI to its wired set.
+
+    A hook in the config's trusted *namespace* is wired by the generic ``Event:project`` row, not its own name.
+    """
     enabled_hooks = {
         name: defn for name, defn in hooks_group.items() if isinstance(defn, dict) and defn.get("enabled", False)
     }
+    own = own_hooks(hooks_group, namespace)
     if not enabled_hooks:
         return
 
@@ -182,8 +187,9 @@ def _check_event_wiring(event_type, hooks_group, pidx, errors, warnings, info, e
         info.append(f"{event_type}: unfiltered bridge, {len(enabled_hooks)} enabled hooks OK")
     else:
         for hook_name, hook_defn in enabled_hooks.items():
-            if hook_name not in filtered:
-                found = [cli for cli, wired in (elsewhere or {}).items() if f"{event_type}:{hook_name}" in wired]
+            row = PROJECT_ROW if hook_name in own else hook_name
+            if row not in filtered:
+                found = [cli for cli, wired in (elsewhere or {}).items() if f"{event_type}:{row}" in wired]
                 if found:
                     info.append(f"{event_type}:{hook_name}: wired for {' and '.join(found)} only")
                     continue
@@ -192,14 +198,14 @@ def _check_event_wiring(event_type, hooks_group, pidx, errors, warnings, info, e
                     " but no provider bridge entry — handler never fires"
                 )
                 continue
-            for matcher, count in filtered[hook_name].items():
+            for matcher, count in filtered[row].items():
                 if count > 1:
                     warnings.append(
                         f"{event_type}:{hook_name}: {count} duplicate provider entries (matcher={matcher or 'none'})"
                     )
 
     for hook_name in filtered:
-        if hook_name not in hooks_group:
+        if hook_name not in hooks_group and hook_name != PROJECT_ROW:
             warnings.append(
                 f"{event_type}:{hook_name}: provider entry exists but no handler in project config (orphaned)"
             )
@@ -264,7 +270,8 @@ def verify_wiring(provider_path=None, project_config=None, codex_path=None, open
         if event_type in _META_KEYS or not isinstance(hooks_group, dict):
             continue
         pidx = provider_index.get(event_type)
-        _check_event_wiring(event_type, hooks_group, pidx, errors, warnings, info, elsewhere)
+        namespace = config.get("_handler_namespace", "")
+        _check_event_wiring(event_type, hooks_group, pidx, errors, warnings, info, elsewhere, namespace)
 
     for event in provider_hooks:
         if event not in config and not provider_index.get(event, {}).get("empty"):

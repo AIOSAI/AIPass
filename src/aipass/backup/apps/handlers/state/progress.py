@@ -3,13 +3,13 @@
 # Description: Running-lane progress files — .backup/running/<lane>.json, written by the lane, read by status and stop
 # Version: 1.0.0
 # Created: 2026-10-16
-# Modified: 2026-10-17
+# Modified: 2026-10-29
 # =============================================
 
 """Running-lane progress files.
 
-The document is the backup door contract's ``running`` entry exactly
-(src/aipass/devpulse/docs.local/backup_door_contract.md); do not reshape it here.
+The document is the ``running`` entry of ``status --json`` exactly
+(docs/cli.md, "Running lanes and stop"); do not reshape it here.
 """
 
 import os
