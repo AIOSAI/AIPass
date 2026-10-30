@@ -32,3 +32,5 @@ logs/
 .coverage
 # Inbound hand-offs between branches are relays, not records (the owner, 2026-10-21)
 dropbox/
+# Cloned third-party repos for research: re-fetchable, and 15k files breached the run ceiling
+projects/hark/docs.local/refs/
