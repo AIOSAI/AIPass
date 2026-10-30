@@ -1,6 +1,6 @@
 # Host Portability
 **Status:** Draft v1.5 (arm G, a stdlib import above the floor; arm F, an emptied git identity; arm E, a symlinked prefix — PR #774; arm D, the host's Python — PR #774; arm C, lib/ corpus — FPLAN-0554 round three)
-**Date:** 2026-10-27
+**Date:** 2026-10-29
 
 ---
 
@@ -350,6 +350,7 @@ starts from the measurement instead of re-deriving it.
 | a debounce unit correlating calls by wall clock and never setting the product's correlation key | hooks 474895f5 | needs the product constant paired with the test's key |
 | `os.kill(pid, 0)` reached under a forced platform on a Windows host | devpulse 7262e9ec | kernel semantics; taught in platform_oracle.md |
 | a read on a pid after the call that ends it (`getpgid` after `hangup()`) | api 950495c9 | kernel semantics; taught in platform_oracle.md |
+| a test compares a tempfile dir it did not resolve with a product value the product resolved (the hooks loader stamps realpaths; `temp_test_dir` was `mkdtemp()` as given; two macOS rows) | hooks 4d9b18d0 | arm E's cross-file case. A probe that follows the test's value to an `==` / `in` against a product value from a module that calls `resolve()` / `realpath` finds 477 rows in 725 test files; every `tmp_path` row is false by construction (pytest resolves its base temp), and the 4 rows from `tempfile` are all green on macOS (0 of 4 real). It catches 1 of the specimen's 2 red asserts. At the fixture: 3 fleet fixtures hand out an unresolved tempfile dir, 1 has bitten. **Cure:** use `tmp_path`, or yield `mkdtemp()` resolved |
 
 **Shapes recommended when curing a row here:**
 - at a subprocess seam that every unit mocks, the honest probe is the **exec

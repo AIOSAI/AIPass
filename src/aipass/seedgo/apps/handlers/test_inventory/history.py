@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: history.py
 # Description: age and authorship per test function, from one blame per file
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-01
-# Modified: 2026-10-17
+# Modified: 2026-10-29
 # =============================================
 
 """
@@ -89,7 +89,7 @@ def _blame_one(root: Path, relpath: str) -> LineHistory:
         return LineHistory(authors={}, times={}, tracked=False)
 
     if completed.returncode != 0:
-        logger.warning(f"[INVENTORY] {relpath} has no version-control history, its rows say UNTRACKED")
+        logger.info(f"[INVENTORY] {relpath} has no version-control history, its rows say UNTRACKED")
         return LineHistory(authors={}, times={}, tracked=False)
 
     return parse_porcelain(completed.stdout)

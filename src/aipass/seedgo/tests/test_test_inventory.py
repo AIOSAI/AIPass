@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_test_inventory.py
 # Description: behavioural pins for the test-inventory verb
-# Version: 1.0.7
+# Version: 1.0.8
 # Created: 2026-09-01
-# Modified: 2026-10-27
+# Modified: 2026-10-29
 # =============================================
 
 """Tests for apps/modules/inventory.py and the handlers under apps/handlers/test_inventory/."""
@@ -17,6 +17,7 @@
 
 import ast
 import json
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -358,6 +359,20 @@ class TestHistory:
 
         assert attributed.author_bucket == history.BUCKET_UNTRACKED
         assert attributed.age_days is None
+
+    @pytest.mark.skipif(shutil.which("git") is None, reason="blame needs git on PATH")
+    def test_an_untracked_file_is_a_row_not_a_warning(self, tmp_path, monkeypatch):
+        """THE DEFECT: a weekly WARNING per scratch file, which trigger escalated as a repeat."""
+        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True, timeout=60)
+        (tmp_path / "test_scratch.py").write_text("def test_x():\n    assert True\n", encoding="utf-8")
+        fake_logger = MagicMock()
+        monkeypatch.setattr(history, "logger", fake_logger)
+
+        blames = history.blame_files(tmp_path, ["test_scratch.py"])
+
+        assert blames["test_scratch.py"].tracked is False
+        fake_logger.warning.assert_not_called()
+        assert "test_scratch.py" in fake_logger.info.call_args.args[0]
 
     def test_an_unrecognised_author_goes_to_other_and_never_to_human(self):
         """THE DEFECT: defaulting unknown names into the smallest bucket."""
