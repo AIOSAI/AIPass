@@ -3,7 +3,7 @@
 # Description: Entry point CLI for drone @spawn
 # Version: 1.2.1
 # Created: 2026-03-05
-# Modified: 2026-10-24
+# Modified: 2026-10-31
 # =============================================
 
 """
@@ -95,7 +95,9 @@ def print_help():
     console.print("  [green]--traits[/green]    Agent personality traits")
     console.print("  [green]--purpose[/green]   Agent purpose (brief)")
     console.print("  [green]--template[/green]  Template class name (manager, specialist) or custom directory path")
-    console.print("  [green]--registry[/green]  Path to AIPASS_REGISTRY.json")
+    console.print(
+        "  [green]--registry[/green]  Registry path; default: nearest *_REGISTRY.json above the target, none refuses"
+    )
     console.print("  [green]--apply[/green]     Execute changes (update/repair are preview-only by default)")
     console.print("  [green]--dry-run[/green]   Preview changes without modifying files (default for update/repair)")
     console.print("  [green]--trace[/green]     Enable verbose logging")

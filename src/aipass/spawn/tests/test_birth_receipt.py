@@ -3,7 +3,7 @@
 # Description: Birth receipt lane — a newborn arrives carrying .trinity/.template_version.json
 # Version: 1.2.2
 # Created: 2026-08-27
-# Modified: 2026-10-17
+# Modified: 2026-10-31
 # =============================================
 
 """Tests for apps/handlers/receipt_ops.py and the birth-receipt lane it drives through apps/modules/core.py."""
@@ -180,7 +180,12 @@ def test_the_one_template_is_what_every_class_mints_from():
 
 def test_a_minted_citizen_arrives_carrying_a_valid_receipt(tmp_path):
 
-    result = spawn_agent(str(tmp_path / "newbie"), role="Test", purpose="receipt e2e")
+    result = spawn_agent(
+        str(tmp_path / "newbie"),
+        role="Test",
+        purpose="receipt e2e",
+        registry_path=str(tmp_path / "AIPASS_REGISTRY.json"),
+    )
 
     assert result["success"] is True
     receipt_path = tmp_path / "newbie" / ".trinity" / receipt_ops.RECEIPT_NAME
@@ -198,7 +203,12 @@ def test_a_minted_citizen_arrives_carrying_the_test_template_receipt(tmp_path, c
     """
     import datetime
 
-    result = spawn_agent(str(tmp_path / "tested"), role="Test", purpose="test template receipt")
+    result = spawn_agent(
+        str(tmp_path / "tested"),
+        role="Test",
+        purpose="test template receipt",
+        registry_path=str(tmp_path / "AIPASS_REGISTRY.json"),
+    )
     assert result["success"] is True, result.get("error")
 
     tests_dir = tmp_path / "tested" / "tests"
@@ -223,7 +233,12 @@ def test_a_newborn_gets_no_test_receipt_when_seedgos_manifest_is_unreadable(tmp_
 
     monkeypatch.setattr(receipt_ops, "_seedgo_templates_dir", lambda: tmp_path / "no_such_gold")
 
-    result = spawn_agent(str(tmp_path / "unstamped"), role="Test", purpose="no gold manifest")
+    result = spawn_agent(
+        str(tmp_path / "unstamped"),
+        role="Test",
+        purpose="no gold manifest",
+        registry_path=str(tmp_path / "AIPASS_REGISTRY.json"),
+    )
 
     assert result["success"] is True, "a birth is not abandoned over a receipt"
     tests_dir = tmp_path / "unstamped" / "tests"
@@ -239,7 +254,12 @@ def test_an_unstampable_receipt_surfaces_but_does_not_abandon_the_birth(tmp_path
     be born because they are unreadable is worse than one missing a receipt."""
 
     monkeypatch.setattr(mint_ops, "write_birth_receipt", lambda _: {"success": False, "error": "gold unreadable"})
-    result = core.spawn_agent(str(tmp_path / "orphan"), role="Test", purpose="receipt failure")
+    result = core.spawn_agent(
+        str(tmp_path / "orphan"),
+        role="Test",
+        purpose="receipt failure",
+        registry_path=str(tmp_path / "AIPASS_REGISTRY.json"),
+    )
 
     assert result["success"] is True
     assert not (tmp_path / "orphan" / ".trinity" / receipt_ops.RECEIPT_NAME).exists()
@@ -259,7 +279,9 @@ def test_the_receipt_is_stamped_before_the_citizen_is_registered(tmp_path, monke
         return real_add(*args, **kwargs)
 
     monkeypatch.setattr(mint_ops, "add_to_registry", spy)
-    core.spawn_agent(str(tmp_path / "ordered"), role="Test", purpose="ordering")
+    core.spawn_agent(
+        str(tmp_path / "ordered"), role="Test", purpose="ordering", registry_path=str(tmp_path / "AIPASS_REGISTRY.json")
+    )
 
     assert seen["receipt_existed_at_registration"] is True
 
@@ -270,9 +292,9 @@ def test_retire_carries_the_whole_trinity_into_the_archive(tmp_path, monkeypatch
     project = tmp_path / "project"
     project.mkdir()
     (project / "pyproject.toml").write_text("[project]\nname = 'demo'\n", encoding="utf-8")
-    spawn_agent(str(project / "leaver"), role="Test", purpose="retire e2e")
-
     registry_path = project / "AIPASS_REGISTRY.json"
+    spawn_agent(str(project / "leaver"), role="Test", purpose="retire e2e", registry_path=str(registry_path))
+
     monkeypatch.setattr(delete_ops, "find_registry", lambda *a, **k: registry_path)
     monkeypatch.setattr(delete_ops, "is_protected", lambda *a, **k: (False, ""))
 
@@ -364,7 +386,12 @@ def test_a_newborn_is_born_inside_every_owners_cap(tmp_path):
     If the template drifts past a cap, every newborn starts in violation.
     """
 
-    result = spawn_agent(str(tmp_path / "budgeted"), role="Test", purpose="birth budget")
+    result = spawn_agent(
+        str(tmp_path / "budgeted"),
+        role="Test",
+        purpose="birth budget",
+        registry_path=str(tmp_path / "AIPASS_REGISTRY.json"),
+    )
     assert result["success"] is True
 
     over = []
@@ -378,7 +405,12 @@ def test_a_newborn_is_born_inside_every_owners_cap(tmp_path):
 def test_every_newborn_passport_string_is_inside_memorys_per_string_cap(tmp_path):
     """The file budget is one number; a single runaway string is the other."""
 
-    spawn_agent(str(tmp_path / "stringy"), role="Test", purpose="passport strings")
+    spawn_agent(
+        str(tmp_path / "stringy"),
+        role="Test",
+        purpose="passport strings",
+        registry_path=str(tmp_path / "AIPASS_REGISTRY.json"),
+    )
     cap = int(_memory_file_budgets()["passport.json"]["max_string_chars"])
     passport = json.loads((tmp_path / "stringy" / ".trinity" / "passport.json").read_text(encoding="utf-8"))
 
@@ -392,7 +424,12 @@ def test_a_newborn_carries_its_own_dashboard_without_flow_or_prax(tmp_path):
     The dashboard ships in the template and lands rendered at mint: birth depends on neither @flow nor @prax.
     """
 
-    spawn_agent(str(tmp_path / "dashed"), role="Test", purpose="dashboard at birth")
+    spawn_agent(
+        str(tmp_path / "dashed"),
+        role="Test",
+        purpose="dashboard at birth",
+        registry_path=str(tmp_path / "AIPASS_REGISTRY.json"),
+    )
 
     raw = (tmp_path / "dashed" / "DASHBOARD.local.json").read_text(encoding="utf-8")
     assert "{{" not in raw, "the newborn's dashboard still carries unrendered placeholders"

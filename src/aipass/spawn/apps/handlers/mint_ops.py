@@ -3,7 +3,7 @@
 # Description: The mint of a new citizen from the template, step by step
 # Version: 1.2.0
 # Created: 2026-09-28
-# Modified: 2026-10-24
+# Modified: 2026-10-31
 # =============================================
 
 """The mint body: a validated target becomes a registered citizen."""
@@ -43,8 +43,6 @@ from aipass.spawn.apps.handlers.class_registry import (
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.json import json_handler
 from aipass.spawn.apps.handlers.seed_ops import find_seed
-
-_PROJECT_MARKERS = (".git", "pyproject.toml", "setup.py", "setup.cfg")
 
 # Left in a tree the mint refused, so a retry refuses instead of adopting the partial tree.
 INCOMPLETE_MARKER = "INCOMPLETE_MINT.txt"
@@ -130,16 +128,6 @@ def spawn_at(
     )
 
 
-def _find_project_registry(target: Path) -> Path:
-    """Walk up from target to find a project root, return its registry path."""
-    for parent in [target.parent] + list(target.parent.parents):
-        if any((parent / m).exists() for m in _PROJECT_MARKERS):
-            return parent / "AIPASS_REGISTRY.json"
-        if parent == parent.parent:
-            break
-    return target.parent / "AIPASS_REGISTRY.json"
-
-
 def mint_citizen(
     target: Path,
     template: Path,
@@ -157,16 +145,18 @@ def mint_citizen(
     branch_lower = normalize_branch_name(folder_name, "lower")
     detected_profile = profile or detect_profile(target)
 
-    # Per-project registry: never borrow another project's.
+    # The registry must already exist above the target or be named explicitly; a mint never invents one.
     reg_path = Path(registry_path) if registry_path else find_registry(target.parent)
     if reg_path is None:
-        logger.info("[spawn] No registry above %s — resolving project-local registry", target)
-        reg_path = _find_project_registry(target)
+        logger.warning("[spawn] Mint refused: no registry above %s", target)
+        return error_result(
+            f"No registry above {target}: pass --registry <path>, or create the citizen inside a project that has one."
+        )
     try:
         target.relative_to(reg_path.parent)
     except ValueError:
-        logger.info("[spawn] Target %s outside registry %s — resolving project-local registry", target, reg_path)
-        reg_path = _find_project_registry(target)
+        logger.warning("[spawn] Mint refused: %s is outside registry %s", target, reg_path)
+        return error_result(f"{target} is outside the project of registry {reg_path}; nothing was written.")
     if any(b.get("name") == branch_upper for b in branches_as_list(load_registry(reg_path).get("branches", []))):
         return error_result(f"{branch_upper} is already registered in {reg_path}; nothing was written.")
     citizen_number = get_next_citizen_number(reg_path)
