@@ -6,7 +6,7 @@
 
 Git in a repo that is not AIPass — a project inside the tree, a clone outside it — goes through one
 door, held by @devpulse's admin grant. Sixteen verbs take
-`--repo <path>` (or `--repo=<path>`) in any slot: status, diff, show, log, tracked, commit, untrack, push,
+`--repo <path>` (or `--repo=<path>`) in any slot: status, diff, show, log, tracked, remote (and `remote set`), commit, untrack, push,
 tag, fetch, sync, merge-upstream, the read side of gh's `run`, and the GitHub chores `release edit`,
 `label` and `alerts` (see [git_interface.md](git_interface.md)), aimed at the repo's own origin.
 `release list` keeps `--repo` as GitHub's OWNER/NAME.

@@ -21,6 +21,16 @@ Per-hook narration runs ~3 lines per tool call, enough to dominate the prax stre
 AIPASS_HOOKS_VERBOSE_LOG=1    # restore per-hook lines in the prax stream
 ```
 
+A per-hook row in `engine.jsonl` has this shape (Notification shown):
+
+```json
+{"ts": 1793400000.1, "event": "Notification", "hook": "notification_sound", "agent_type": "", "agent_id": "",
+ "exit_code": 0, "elapsed_ms": 3.2, "stdout_len": 0, "stderr_preview": "", "cwd": "/path", "session_id": "…",
+ "notification_type": "permission_prompt"}
+```
+
+`notification_type` (Claude Code sends `permission_prompt` or `idle_prompt`) and `tool_name` are copied from the payload only when it carries them, so a Stop row has neither. An event with no hooks configured still logs one row, `{"ts", "event", "action": "no_hooks_configured"}`, plus the payload's `tool_name`, `notification_type` and `session_id` when present. Wiring Claude Code's `PermissionRequest` as a bare row (`claude.py PermissionRequest`) therefore logs which tool waits on a prompt, and decides nothing: no hook runs, the answer is empty, and Claude Code shows its own prompt.
+
 The switch lives in `engine._log_detail()`, read per call, and is separate from prax's own DEBUG level (`SystemLogger.debug()`, silent under the default INFO level and opened with `AIPASS_LOG_LEVEL`). Blocks, crashes, timeouts, and trust-break banners are never suppressed.
 
 ## The diagnostics block
