@@ -4,7 +4,9 @@ Purpose: move this chat from Claude Code to Codex in one turn, in this same term
 
 **Workflow:** `/codex` → prep → handoff written → this pane becomes Codex, greeting it with the handoff.
 
-**Fresh switch, no handoff:** `/codex fresh` (arguments: `$ARGUMENTS`), or a chat with nothing in it yet (a greeting, nothing done, nothing in flight): skip steps 0 to 2 and run step 3 with the `"$(cat .ai_mail.local/handoff.md)"` argument dropped from both lines, so Codex opens an empty chat in this directory. There is no thread to carry; the user greets it and the startup protocol runs as on any fresh chat.
+**Arguments** (`$ARGUMENTS`): the word `fresh` skips the handoff; a word starting with `gpt-` (`gpt-6-luna`, `gpt-6.1-sol`) is the model Codex opens on, passed as `-m`; nothing means the model in `~/.codex/config.toml`. Both words may be given.
+
+**Fresh switch, no handoff:** `/codex fresh`, or a chat with nothing in it yet (a greeting, nothing done, nothing in flight): skip steps 0 to 2 and run step 3 with the `"$(cat .ai_mail.local/handoff.md)"` argument dropped from both lines, so Codex opens an empty chat in this directory. There is no thread to carry; the user greets it and the startup protocol runs as on any fresh chat.
 
 ## Execution
 
@@ -26,13 +28,14 @@ Purpose: move this chat from Claude Code to Codex in one turn, in this same term
    ```
 
    Facts only, no praise, no narration. Under 2,500 words. The next model has your memories; the handoff carries what memories do not: the live thread.
-3. **Switch.** Run, with the Bash tool:
+3. **Switch.** Run, with the Bash tool, with `MODEL` set to the `gpt-` word from the arguments or left empty:
 
    ```bash
+   MODEL=""; M=""; [ -n "$MODEL" ] && M="-m $MODEL"
    p=$$; PANE=""; while [ "$p" -gt 1 ] && [ -z "$PANE" ]; do PANE=$(tmux list-panes -a -F '#{pane_id} #{pane_pid}' 2>/dev/null | awk -v pid="$p" '$2==pid{print $1}'); p=$(awk '{print $4}' /proc/$p/stat); done
    [ -n "$PANE" ] || PANE=$(tmux list-panes -a -F '#{pane_id} #{pane_current_command} #{pane_current_path}' 2>/dev/null | awk -v d="$PWD" '$2=="claude" && $3==d{print $1; exit}')
-   test -n "$PANE" || { echo "not in a tmux pane: open Codex yourself: codex --dangerously-bypass-approvals-and-sandbox \"\$(cat .ai_mail.local/handoff.md)\""; exit 1; }
-   tmux respawn-pane -k -t "$PANE" -c "$PWD" -e AIPASS_HOME="${AIPASS_HOME:-$(cd "$(dirname "$(readlink -f "$(command -v drone)")")/../.." && pwd)}" 'codex --dangerously-bypass-approvals-and-sandbox "$(cat .ai_mail.local/handoff.md)"'
+   test -n "$PANE" || { echo "not in a tmux pane: open Codex yourself: codex $M --dangerously-bypass-approvals-and-sandbox \"\$(cat .ai_mail.local/handoff.md)\""; exit 1; }
+   tmux respawn-pane -k -t "$PANE" -c "$PWD" -e AIPASS_HOME="${AIPASS_HOME:-$(cd "$(dirname "$(readlink -f "$(command -v drone)")")/../.." && pwd)}" "codex $M --dangerously-bypass-approvals-and-sandbox \"\$(cat .ai_mail.local/handoff.md)\""
    ```
 
    The posture mirrors BAUD's rooms (`claude --permission-mode bypassPermissions`): the hooks are the gates on both CLIs.
