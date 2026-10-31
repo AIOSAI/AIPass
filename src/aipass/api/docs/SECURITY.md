@@ -35,6 +35,7 @@ login keyring  →  handlers/auth/secrets.py (get_secret)  →  keys.py / google
 - Google: `google/creds` feeds `Credentials.from_authorized_user_info`, `google/client_secret` feeds `InstalledAppFlow.from_client_config`, and a refresh or a consent writes `google/creds` back through `set_secret`.
 - Host API: token rows (`host_api/tokens`), pairing rows (`host_api/pairings`) and the server config (`host_api/config`) are JSON entries.
 - `drone @api get-secret <provider/slug>` prints a masked summary (`set (N chars)`) and `--list` prints slugs. It writes no value to stdout and none to a file.
+- `drone @api run <provider> -- <command> [args...]` sets the key in the child's environment only: `openai` as `OPENAI_API_KEY`, `anthropic` as `ANTHROPIC_API_KEY`, `openrouter` as `OPENROUTER_API_KEY`. The rest of the environment, the working directory and stdin, stdout and stderr are inherited, so grandchildren see the key too, and the child's output is never read or filtered. The door exits with the child's code; an unknown provider, a missing key or a program that cannot start exits 2 and starts nothing. The log records the provider and the program word.
 - The operations log records the provider and slug of a read or write, never a value and never a path.
 - `get_cache_stats()` returns count only, never cache keys.
 

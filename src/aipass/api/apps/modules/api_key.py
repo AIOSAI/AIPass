@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: api_key.py
 # Description: API Key Management Module
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2025-11-15
-# Modified: 2026-10-24
+# Modified: 2026-10-31
 # =============================================
 
 """API Key Management Module"""
@@ -26,6 +26,7 @@ from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.auth import keys, env, secrets
 
 GET_SECRET_USAGE = "Usage: drone @api get-secret <provider/slug> [--json] [--list]"
+RUN_USAGE = "Usage: drone @api run <openai|anthropic|openrouter> -- <command> [args...]"
 
 
 def print_introspection():
@@ -54,7 +55,7 @@ def print_introspection():
 def handle_command(command: str, args: List[str]) -> bool:
     """Handle API key management commands"""
     try:
-        if command not in ["get-key", "validate", "list-providers", "init", "get-secret"]:
+        if command not in ["get-key", "validate", "list-providers", "init", "get-secret", "run"]:
             return False
 
         # `validate google` is google_client's OAuth2; this module is discovered first and would shadow it.
@@ -62,8 +63,11 @@ def handle_command(command: str, args: List[str]) -> bool:
             return False
 
         # A help flag anywhere means explain (__main__ bypasses the router's check), so
-        # `get-key <provider> --help` never prints key material.
-        if args and (args[0] == "help" or any(arg in ("--help", "-h") for arg in args)):
+        # `get-key <provider> --help` never prints key material. After `--` the words are run's child's own.
+        own = args[: args.index("--")] if "--" in args else args
+        if own and (own[0] == "help" or any(arg in ("--help", "-h") for arg in own)):
+            print_help()
+            return True
             print_help()
             return True
 
@@ -83,6 +87,9 @@ def handle_command(command: str, args: List[str]) -> bool:
             return True
         if command == "validate":
             validate_key(args)
+            return True
+        if command == "run":
+            run_cmd(args)
             return True
 
         if not args:
@@ -114,6 +121,22 @@ def get_key(args: List[str]):
         console.print(f"  Key: {masked}")
     else:
         error(f"Failed to retrieve API key for {provider_name}")
+
+
+def run_cmd(args: List[str]) -> None:
+    """`run <provider> -- <command...>`: exits with the child's code; a refusal prints and exits 2."""
+    split = args.index("--") if "--" in args else -1
+    if split != 1 or len(args) == 2:
+        error(RUN_USAGE)
+        return
+
+    try:
+        code = keys.run_with_key(args[0], args[2:])
+    except (keys.KeyUnavailable, keys.RunRefused) as e:
+        error(str(e))
+        return
+    # SystemExit, not a return: the router's resolve_exit knows 0, 1 and 2, and the caller needs the child's code.
+    sys.exit(code)
 
 
 def validate_key(args: List[str]):
@@ -246,6 +269,7 @@ def print_help():
     console.print("[yellow]COMMANDS:[/yellow]")
     console.print("  [cyan]get-key[/cyan]         [dim]Retrieve API key for a provider[/dim]")
     console.print("  [cyan]get-secret[/cyan]      [dim]Read secret from provider store[/dim]")
+    console.print("  [cyan]run[/cyan]             [dim]Run a command with a provider key in its environment only[/dim]")
     console.print("  [cyan]validate[/cyan]        [dim]Validate API key[/dim]")
     console.print("  [cyan]list-providers[/cyan]  [dim]List available providers[/dim]")
     console.print("  [cyan]init[/cyan]            [dim]Initialize .env template[/dim]")
@@ -265,6 +289,10 @@ def print_help():
     console.print()
     console.print("  [dim]# Programmatic access (in-process, no stdout):[/dim]")
     console.print("  [dim]from aipass.api.apps.modules.secrets import get_secret[/dim]")
+    console.print()
+    console.print("  [dim]# Run a command with OPENAI_API_KEY set for it alone; its exit code is the door's[/dim]")
+    console.print("  [cyan]drone @api run openai -- codex app-server --listen ws://127.0.0.1:4500[/cyan]")
+    console.print("  [dim]# openai OPENAI_API_KEY, anthropic ANTHROPIC_API_KEY, openrouter OPENROUTER_API_KEY[/dim]")
     console.print()
     console.print("  [dim]# Validate key[/dim]")
     console.print("  [cyan]drone @api validate openrouter[/cyan]")

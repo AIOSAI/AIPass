@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: api.py
 # Description: Entry point CLI for drone @api — external clients, secrets, usage and the host API
-# Version: 1.1.3
+# Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-10-24
+# Modified: 2026-10-31
 # =============================================
 
 """api Branch - Main Orchestrator"""
@@ -129,6 +129,7 @@ def print_help():
     table.add_row("get-key", "Retrieve API key for provider")
     table.add_row("get-secret", "Show a masked secret from the keyring")
     table.add_row("secrets migrate", "Import the store files into the keyring [--dry-run]")
+    table.add_row("run", "Run a command with a provider key in its environment only")
     table.add_row("validate", "Validate API credentials and connection")
     table.add_row("validate google", "Validate Google OAuth2 credentials")
     table.add_row("reauth google", "Re-authenticate Google OAuth2")
@@ -259,7 +260,9 @@ def main():
 
         # A help flag ANYWHERE means explain, never run: checking only args[0] let
         # `get-key <provider> --help` print key material and `cleanup 30 --help` clean.
-        if any(arg in ("--help", "-h") for arg in remaining_args):
+        # Words after `--` belong to run's child, whose own --help must reach it.
+        own = remaining_args[: remaining_args.index("--")] if "--" in remaining_args else remaining_args
+        if any(arg in ("--help", "-h") for arg in own):
             for module in modules:
                 if module.handle_command(command, ["--help"]):
                     return 0

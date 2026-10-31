@@ -23,7 +23,7 @@ drone @api host-api status                              # Is the phone's server 
 ## What It Does
 
 - **Hands out authenticated clients.** A consumer imports a ready service — OpenRouter chat, Google Drive, Google Calendar — and never writes an auth flow of its own. Plumbing, never product: what you do with the service is yours.
-- **Owns the credentials.** Keys, OAuth tokens and per-provider secrets rest in the login keyring (service `aipass`, entry `<provider>/<slug>`) and are read through this branch. A plaintext or failing keyring is refused by name. A raw value is never printed to a terminal.
+- **Owns the credentials.** Keys, OAuth tokens and per-provider secrets rest in the login keyring (service `aipass`, entry `<provider>/<slug>`) and are read through this branch. A plaintext or failing keyring is refused by name. A raw value is never printed to a terminal. A program that reads its key from the environment runs through `drone @api run <provider> -- <command> [args...]`: the key is set in that child's environment alone, and the child's exit code is the door's.
 - **Accounts for usage.** Every generation can be tracked by caller, aggregated, and cleaned up on a retention window.
 - **Serves the phone.** The host API binds one address this machine holds and answers the BAUD face: reads of the fleet, the git surface, files, settings, a photo upload, a terminal socket into a real tmux room, and a backup door that starts and stops @backup's lanes and reads their status and progress.
 - **Pairs a phone by its camera.** `drone @api host-api pair phone --scope operate` prints a
