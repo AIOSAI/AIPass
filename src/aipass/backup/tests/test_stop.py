@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_stop.py
 # Description: Tests for the stop verb and the lane side of a stop: the SIGTERM flag, the stopped line, exit 130
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-16
-# Modified: 2026-10-21
+# Modified: 2026-10-31
 # =============================================
 
 """Tests for apps/modules/stop.py and the lane side it signals: snapshot, versioned, all and drive_sync stopping."""
@@ -210,6 +210,7 @@ def _fake_drive_client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     instance = MagicMock(name="DriveClient")
     instance.authenticate.return_value = True
     instance.last_error = None
+    instance.network_down = ""
     instance._api_call.return_value = {"storageQuota": {"usage": "0", "limit": str(10**12)}}
     # MagicMock builds children unlocked; three upload threads racing on _thread_local break its __bool__.
     instance._thread_local = threading.local()

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: client.py
 # Description: Google Drive client — auth, folders, file lookup via @api gateway
-# Version: 2.1.1
+# Version: 2.2.0
 # Created: 2026-04-16
-# Modified: 2026-10-24
+# Modified: 2026-10-31
 # =============================================
 
 """Google Drive client.
@@ -13,6 +13,8 @@ All auth flows through ``aipass.api.apps.modules.google_client``; never console-
 
 from __future__ import annotations
 
+import re
+import socket
 import threading
 from typing import Any
 
@@ -38,6 +40,28 @@ BACKUP_FOLDER_NAME = "AIPass Backups"
 FOLDER_MIME = "application/vnd.google-apps.folder"
 
 
+#: Network-layer failures known by name across httplib2, urllib3 and requests, none of them a Google answer.
+_NETWORK_ERROR_NAMES = {"ServerNotFoundError", "NameResolutionError", "NewConnectionError", "ConnectionError"}
+_UNRESOLVED_HOST = re.compile(r"Failed to resolve '([^']+)'|Unable to find the server at ([\w.-]+)")
+
+
+def network_down(exc: BaseException) -> str:
+    """The plain line when exc, or anything in its cause chain, is the network failing; "" for a Google answer."""
+    seen: set[int] = set()
+    link: BaseException | None = exc
+    while link is not None and id(link) not in seen:
+        seen.add(id(link))
+        if isinstance(link, (socket.gaierror, ConnectionError, TimeoutError)) or (
+            type(link).__name__ in _NETWORK_ERROR_NAMES
+        ):
+            host = _UNRESOLVED_HOST.search(str(exc))
+            if host:
+                return f"network is down (cannot resolve {host.group(1) or host.group(2)})"
+            return f"network is down ({type(link).__name__}: {link})"
+        link = link.__cause__ or link.__context__
+    return ""
+
+
 def quoted(value: str) -> str:
     """A string literal for a Drive search query: ' and \\ escaped, so "Bob's notes" stays one name."""
     return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
@@ -58,6 +82,8 @@ class DriveClient:
         # (parent_id, name) -> id of every live file, from drive_sync's listing at run start; a create adopts a hit.
         self.live_files: dict[tuple[str, str], str] = {}
         self.last_error: str | None = None
+        # Set by the first call that failed for want of a network; drive_sync stops on it.
+        self.network_down = ""
 
     @property
     def drive_service(self) -> Any:
@@ -92,6 +118,7 @@ class DriveClient:
             return True
         except Exception as exc:
             self.last_error = str(exc)
+            self.network_down = network_down(exc)
             # Only "not installed" (a human must pip install) is ERROR for medic; auth/network is transient.
             if "libraries not installed" in self.last_error:
                 logger.error(f"[backup] Drive sync unavailable: {exc}")
@@ -114,6 +141,7 @@ class DriveClient:
                 return api_call_with_retry(request, max_retries=1)  # type: ignore[misc]
             except Exception as exc:
                 self.last_error = str(exc)
+                self.network_down = self.network_down or network_down(exc)
                 logger.info(f"API call retry also failed: {exc}")
                 return None
 

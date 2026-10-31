@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drive_sync.py
 # Description: Drive sync module — uploads the snapshot store to Google Drive
-# Version: 2.6.2
+# Version: 2.6.3
 # Created: 2026-04-17
-# Modified: 2026-10-24
+# Modified: 2026-10-31
 # =============================================
 
 """Drive Sync Module — orchestrates file upload to Google Drive.
@@ -156,7 +156,11 @@ def _drive_sync_run(
         result["error_shown"] = True
         result["duration"] = time.time() - start
         logger.warning(f"[backup] Drive sync auth failed: {result['error']}")
-        console.print(f"Drive sync auth failed: {result['error']}. Nothing uploaded.", markup=False)
+        if client.network_down:
+            result["error"] = f"Drive sync stopped: {client.network_down}; nothing uploaded, the next run resumes"
+            console.print(result["error"], markup=False)
+        else:
+            console.print(f"Drive sync auth failed: {result['error']}. Nothing uploaded.", markup=False)
         mark_command_failed()
         return result
 
@@ -204,7 +208,8 @@ def _drive_sync_run(
     # Drive is the truth for what is remote: a tracker that cannot be checked would skip files that are gone.
     live = list_live(client)
     if live is None:
-        refusal = f"Drive listing unavailable: {client.last_error or 'no answer'}. Nothing uploaded."
+        reason = client.network_down or client.last_error or "no answer"
+        refusal = f"Drive listing unavailable: {reason}. Nothing uploaded."
         result["error"] = refusal
         result["error_shown"] = True
         result["duration"] = time.time() - start

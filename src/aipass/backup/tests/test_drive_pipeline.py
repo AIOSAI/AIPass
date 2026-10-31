@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_drive_pipeline.py
 # Description: Tests for the Drive sync pipeline -- every Google edge sealed, zero live calls
-# Version: 3.1.2
+# Version: 3.1.3
 # Created: 2026-06-12
-# Modified: 2026-10-24
+# Modified: 2026-10-31
 # =============================================
 
 """Tests for apps/modules/drive_sync.py and the apps/handlers/drive/ pipeline it drives."""
@@ -88,6 +88,7 @@ def _install_offline_client(
     instance = MagicMock(name="DriveClient")
     instance.authenticate.return_value = authenticated
     instance.last_error = last_error
+    instance.network_down = ""
     instance.file_tracker = {}
     roomy = {"storageQuota": {"usage": "0", "limit": str(15 * 1024**3)}}
     about_request = instance.drive_service.about.return_value.get.return_value

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_drive_snapshot_lane.py
-# Description: Tests for the Drive lane's source store, tracker lane stamp, never-leaves floor and Drive headroom
-# Version: 1.2.2
+# Description: Tests for the Drive lane's source store, tracker lane stamp, never-leaves floor, Drive headroom and network loss
+# Version: 1.3.0
 # Created: 2026-10-16
-# Modified: 2026-10-24
+# Modified: 2026-10-31
 # =============================================
 
 """Tests for apps/modules/drive_sync.py: the snapshot store it uploads, the tracker lane, the floor and the headroom."""
@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+import socket
 from pathlib import Path
 from unittest.mock import DEFAULT, MagicMock
 
@@ -66,6 +67,7 @@ def _offline_client(
     instance = MagicMock(name="DriveClient")
     instance.authenticate.return_value = True
     instance.last_error = None
+    instance.network_down = ""
     instance.file_tracker = {}
     about_request = instance.drive_service.about.return_value.get.return_value
     list_request = instance.drive_service.files.return_value.list.return_value
@@ -523,3 +525,88 @@ class TestTheRunMustFitTheDrive:
         assert result["success"] is False and result["error"] == expected
         assert capsys.readouterr().out.splitlines() == [expected]
         assert uploads == []
+
+
+def _network_failure(message: str) -> RuntimeError:
+    """A gateway error whose cause chain holds the resolver's gaierror, the shape @api raises with ``from e``."""
+    error = RuntimeError(message)
+    error.__cause__ = socket.gaierror(-3, "Temporary failure in name resolution")
+    return error
+
+
+def _real_client_over(monkeypatch: pytest.MonkeyPatch, raised: Exception) -> MagicMock:
+    """The real DriveClient over a recorded service: quota and listings answer, every other request raises."""
+    monkeypatch.setattr(drive_client, "GOOGLE_API_AVAILABLE", True)
+    service = MagicMock(name="drive_service")
+    monkeypatch.setattr(drive_client, "get_drive_service", MagicMock(return_value=service))
+    answers = {
+        id(service.about.return_value.get.return_value): ROOMY,
+        id(service.files.return_value.list.return_value): {"files": []},
+    }
+
+    def _edge(request: object, max_retries: int = 3) -> dict:
+        """Answer what the run reads before uploading; raise on everything that would write."""
+        if id(request) in answers:
+            return answers[id(request)]
+        raise raised
+
+    edge = MagicMock(name="api_call_with_retry", side_effect=_edge)
+    monkeypatch.setattr(drive_client, "api_call_with_retry", edge)
+    return edge
+
+
+class TestALostNetworkIsSaidPlainly:
+    """A resolver that cannot answer stops the run at once with one line; Google answering errors still trips the breaker."""
+
+    def test_a_lost_network_stops_the_upload_at_the_first_failures_and_says_so_with_the_count(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        project = tmp_path / "project"
+        _seed(project / ".backup" / "snapshots", tuple(f"f{index}.txt" for index in range(40)))
+        _real_client_over(monkeypatch, _network_failure("Unable to find the server at www.googleapis.com"))
+
+        result = drive_sync.run_drive_sync(str(project), show_panels=False)
+
+        # Three workers may each have started a file before the first one failed; the breaker would have run to 20.
+        assert result["uploaded"] == 0 and 1 <= result["failed"] <= 3
+        assert command_failed() is True
+        assert capsys.readouterr().out.splitlines()[-1] == (
+            "Drive sync stopped: network is down (cannot resolve www.googleapis.com); "
+            "nothing more uploaded, 0 files up this run, the next run resumes"
+        )
+
+    def test_an_unresolvable_token_endpoint_fails_auth_with_the_network_line(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, uploads: list, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        project = tmp_path / "project"
+        _seed(project / ".backup" / "snapshots", ("a.txt",))
+        monkeypatch.setattr(drive_client, "GOOGLE_API_AVAILABLE", True)
+        refresh = _network_failure(
+            "Google credential refresh failed, transient network error: HTTPSConnectionPool("
+            "host='oauth2.googleapis.com', port=443): Max retries exceeded with url: /token "
+            "(Caused by NameResolutionError(\"Failed to resolve 'oauth2.googleapis.com'\"))"
+        )
+        monkeypatch.setattr(drive_client, "get_drive_service", MagicMock(side_effect=refresh))
+
+        assert _main(["drive_sync", str(project)]) == 2
+
+        assert uploads == []
+        assert capsys.readouterr().out.splitlines()[-1] == (
+            "Drive sync stopped: network is down (cannot resolve oauth2.googleapis.com); "
+            "nothing uploaded, the next run resumes"
+        )
+
+    def test_google_answering_with_errors_still_trips_the_breaker_and_is_not_called_network_down(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        project = tmp_path / "project"
+        _seed(project / ".backup" / "snapshots", tuple(f"f{index}.txt" for index in range(40)))
+        _real_client_over(monkeypatch, RuntimeError("<HttpError 503 returned 'Backend Error'>"))
+
+        result = drive_sync.run_drive_sync(str(project), show_panels=False)
+
+        assert drive_upload.BREAKER_FAILURES <= result["failed"] < 40
+        assert capsys.readouterr().out.splitlines()[-1] == (
+            f"Drive upload aborted after {drive_upload.BREAKER_FAILURES} consecutive failures: "
+            "<HttpError 503 returned 'Backend Error'>"
+        )
