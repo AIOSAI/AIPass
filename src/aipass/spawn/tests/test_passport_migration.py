@@ -3,7 +3,7 @@
 # Description: DPLAN-0319 — passport 2.0 fleet migration: order, drops, lanes, idempotency
 # Version: 1.0.2
 # Created: 2026-08-28
-# Modified: 2026-10-17
+# Modified: 2026-10-31
 # =============================================
 
 """Tests for apps/handlers/passport_migration.py's fleet-wide passport 2.0 migration (DPLAN-0319 deliverable 3)."""
@@ -353,7 +353,7 @@ class TestDiscovery:
             EXPECTED_FLEET["total"],
             EXPECTED_FLEET["core"],
             EXPECTED_FLEET["resident"],
-        ), "Fleet size drifted from the 2026-08-28 measurement — report it, do not silently migrate a new shape"
+        ), "Fleet size drifted from the 2026-10-31 measurement — report it, do not silently migrate a new shape"
 
 
 class TestBlockAndKeyOrder:

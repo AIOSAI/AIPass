@@ -3,7 +3,7 @@
 # Description: Passport 2.0 fleet migration — structure transform, backup, measured receipt
 # Version: 1.0.0
 # Created: 2026-08-28
-# Modified: 2026-10-17
+# Modified: 2026-10-31
 # =============================================
 
 """One-shot fleet migration of every live passport to schema 2.0 (DPLAN-0319).
@@ -118,7 +118,7 @@ IDENTITY_CONTENT_KEYS = (
 # The baseline is an alarm, never a gate: drift is reported, the discovered set is the truth.
 CORE_GLOB = "src/aipass/*/.trinity/passport.json"
 RESIDENT_GLOB = "projects/*/src/*/*/.trinity/passport.json"
-EXPECTED_FLEET = {"core": 18, "resident": 4, "total": 22}
+EXPECTED_FLEET = {"core": 18, "resident": 5, "total": 23}
 
 
 class PassportMigrationError(Exception):
