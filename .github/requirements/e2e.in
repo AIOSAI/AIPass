@@ -22,5 +22,5 @@
 # Regenerate (on Linux, Python 3.12):
 #   pip-compile --allow-unsafe --generate-hashes --no-emit-index-url --output-file=e2e.txt e2e.in
 build==1.6.1
-pytest==9.1.1
+pytest==9.2.0
 colorama==0.4.6
