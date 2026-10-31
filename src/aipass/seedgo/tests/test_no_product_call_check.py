@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_no_product_call_check.py
 # Description: no_product_call_check — crack class A, a test that reaches no product code
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-09-22
-# Modified: 2026-09-27
+# Modified: 2026-10-30
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/no_product_call_check.py."""
@@ -284,6 +284,22 @@ class TestTheEntryPoint:
         path = _write(tmp_path, "def test_it(tmp_repo):\n    assert tmp_repo\n")
         no_product_call_check.shared_fixtures.cache_clear()
         assert no_product_call_check.check_module(str(path))["score"] == 100
+
+    def test_a_project_branch_s_own_package_is_its_product(self, tmp_path):
+        """THE DEFECT: beo's tests calling beo.beo.* read as reaching nothing; another package still does."""
+        package = tmp_path / "beo" / "beo"
+        (package / "tests").mkdir(parents=True)
+        for directory in (package.parent, package, package / "tests"):
+            (directory / "__init__.py").write_text("", encoding="utf-8")
+        own = package / "tests" / "test_own.py"
+        own.write_text(
+            "from beo.beo.apps import memory\ndef test_it():\n    assert memory.recall()\n", encoding="utf-8"
+        )
+        other = package / "tests" / "test_other.py"
+        other.write_text("from json import loads\ndef test_it():\n    assert loads('1')\n", encoding="utf-8")
+
+        assert no_product_call_check.check_module(str(own))["score"] == 100
+        assert no_product_call_check.check_module(str(other))["score"] == 0
 
     def test_a_missing_conftest_is_an_empty_set_not_a_crash(self, tmp_path):
         """Most directories under tests/ have no conftest of their own."""
