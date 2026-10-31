@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_engine.py
-# Version: 2.3.0
+# Version: 2.4.0
 # Description: Tests for hook engine dispatch logic: the dispatcher core; contracts and safeguards in two siblings
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-10-29
+# Modified: 2026-10-30
 # =============================================
 
 """Tests for apps/modules/engine.py: the dispatcher core and the hook dispatch it drives."""
@@ -428,6 +428,40 @@ class TestLogVolume:
             dispatch("PreToolUse", '{"tool_name":"Bash","session_id":"s-123"}', self.CONFIG)
         ran = [c.args[0] for c in mock_log.call_args_list if "exit_code" in c.args[0]]
         assert [e["session_id"] for e in ran] == ["s-123"]
+
+    def _rows(self, event: str, payload: dict, config: dict) -> list:
+        with (
+            patch("aipass.hooks.apps.modules.engine._log") as mock_log,
+            patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run,
+        ):
+            mock_run.return_value = {"exit_code": 0, "stdout": "", "stderr": "", "elapsed_ms": 1}
+            dispatch(event, json.dumps(payload), config)
+        return [c.args[0] for c in mock_log.call_args_list]
+
+    def test_a_notification_row_names_its_notification_type(self, mock_logger):
+        config = {"hooks_enabled": True, "Notification": {"sound": {"enabled": True, "command": "true"}}}
+        rows = self._rows("Notification", {"notification_type": "permission_prompt", "session_id": "s-1"}, config)
+        assert [e["notification_type"] for e in rows if "exit_code" in e] == ["permission_prompt"]
+
+    def test_a_tool_row_names_its_tool(self, mock_logger):
+        rows = self._rows("PreToolUse", {"tool_name": "Bash"}, self.CONFIG)
+        assert [e["tool_name"] for e in rows if "exit_code" in e] == ["Bash"]
+
+    def test_a_payload_without_them_adds_no_empty_fields(self, mock_logger):
+        config = {"hooks_enabled": True, "Stop": {"sound": {"enabled": True, "command": "true"}}}
+        (row,) = [e for e in self._rows("Stop", {"session_id": "s-1"}, config) if "exit_code" in e]
+        assert "notification_type" not in row and "tool_name" not in row
+
+    def test_an_event_with_no_hooks_still_logs_who_waits_on_what(self, mock_logger):
+        payload = {"tool_name": "Bash", "session_id": "s-9", "hook_event_name": "PermissionRequest"}
+        (row,) = self._rows("PermissionRequest", payload, {"hooks_enabled": True})
+        assert row == {
+            "ts": row["ts"],
+            "event": "PermissionRequest",
+            "action": "no_hooks_configured",
+            "tool_name": "Bash",
+            "session_id": "s-9",
+        }
 
     def test_verbose_env_restores_the_lines(self, mock_logger, monkeypatch):
         """AIPASS_HOOKS_VERBOSE_LOG=1 is the DEBUG-level stand-in."""
