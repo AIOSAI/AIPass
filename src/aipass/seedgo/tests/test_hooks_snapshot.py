@@ -3,7 +3,7 @@
 # Description: Snapshot tests for hook configurations across provider, project, and branch levels
 # Version: 1.1.0
 # Created: 2026-05-07
-# Modified: 2026-10-17
+# Modified: 2026-10-30
 # =============================================
 
 """Tests for the hook wiring .claude/provider_manifest.json gives hooks/apps/handlers/bridges/claude.py."""
@@ -112,7 +112,7 @@ class TestProviderHooksSnapshot:
 
     def test_same_hook_count_per_event(self, baseline, current):
         """Verify the same number of hooks per event in baseline and current."""
-        assert len(baseline) == 8, f"provider baseline should snapshot 8 events, got {sorted(baseline)}"
+        assert len(baseline) == 9, f"provider baseline should snapshot 9 events, got {sorted(baseline)}"
         for event in baseline:
             expected = len(baseline[event])
             actual = len(current.get(event, []))
