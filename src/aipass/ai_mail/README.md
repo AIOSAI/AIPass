@@ -28,6 +28,9 @@ drone @ai_mail dispatch @target "Subject" "Body"    # Send and wake the recipien
 - **Hands work over.** A dispatch is a send plus a wake — the recipient's agent starts,
   reads the mail, does the work and replies, and the reply closes the row that opened when
   the dispatch was sent.
+- **Stops a dispatch on request.** `dispatch stop @agent --by <who>` ends the running agent,
+  closes its row as `stopped` and tells the dispatcher, so nobody reads it as a failure and
+  retries. The session is kept, so the agent can be resumed later.
 - **Says who is speaking.** Sender identity is resolved from the caller's own environment
   and the registry, never guessed from a working directory, because a wrong identity is
   worse than no identity.

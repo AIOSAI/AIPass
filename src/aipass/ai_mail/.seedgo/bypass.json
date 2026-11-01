@@ -160,9 +160,10 @@
       "file": "apps/modules/dispatch.py",
       "standard": "logged_fallback",
       "lines": [
-        370
+        342,
+        419
       ],
-      "reason": "Same CLI handler contract (ai_mail, fleet green legs 9 and 10): 326 is the send phase failing to resolve the sender, which has already called error() (mark_command_failed). True tells the router the command was recognised."
+      "reason": "Same CLI handler contract (ai_mail, fleet green legs 9 and 10): 419 is the send phase failing to resolve the sender, 342 is dispatch stop meeting an unreadable registry; each has already called error() (mark_command_failed). True tells the router the command was recognised."
     },
     {
       "file": "apps/handlers/email/send.py",

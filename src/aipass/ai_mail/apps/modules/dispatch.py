@@ -3,7 +3,7 @@
 # Description: Dispatch Module
 # Version: 3.9.0
 # Created: 2026-02-02
-# Modified: 2026-10-28
+# Modified: 2026-11-01
 # =============================================
 
 """
@@ -40,6 +40,7 @@ COMMANDS:
   dispatch @target "Subject" "Body"   - Send dispatch email + wake target
   dispatch register                   - Show outstanding dispatches and which are overdue
   dispatch wake @branch               - Wake only (no email sent)
+  dispatch stop @agent [--by <who>]   - End the agent's running dispatch; the row reads stopped
 
 DISPATCH (send + wake):
   drone @ai_mail dispatch @branch "Subject" "Body"                    # Send + wake
@@ -54,6 +55,15 @@ WAKE ONLY:
   drone @ai_mail dispatch wake @branch "custom"              # Wake with custom prompt
   drone @ai_mail dispatch wake @branch --model opus          # Wake with Opus model
   drone wake @branch                                         # Shortcut via drone
+
+STOP:
+  drone @ai_mail dispatch stop @branch                       # --by defaults to the caller's seat
+  drone @ai_mail dispatch stop @branch --by Beo              # Who stopped it, named in the mail
+  Ends the monitor and its agent (TERM, 5s grace, KILL), closes the register row as stopped and
+  mails the dispatcher "Dispatch stopped: @branch (by <who>)"; no wake-back follows. The session
+  pointer is kept, so a resume in the branch continues. Exit 0 prints
+  "stopped @branch (dispatch <id>, by <who>)"; nothing running prints
+  "no dispatch is running for @branch" and exits 1, as does an unknown agent.
 
 WAKE-BACK:
   Library callers such as @daemon's scheduled nudges may pass wake_back=False to
@@ -102,6 +112,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     verbs = {
         "register": lambda: _orchestrate_register(),
         "wake": lambda: _orchestrate_wake(args[1:]),
+        "stop": lambda: _orchestrate_stop(args[1:]),
     }
 
     run_verb = verbs.get(subcommand)
@@ -306,6 +317,44 @@ def _orchestrate_wake(args: List[str]) -> bool:
     return True
 
 
+def _orchestrate_stop(args: List[str]) -> bool:
+    """End a running dispatch: dispatch stop @agent [--by <who>]."""
+    flags, rest = _parse_flags(args, ("--by",), ())
+    if len(rest) != 1:
+        error("Usage: dispatch stop @agent [--by <who>]")
+        return True
+
+    from aipass.ai_mail.apps.handlers.users.verified_caller import resolve_verified_caller
+
+    by = flags.get("--by") or resolve_verified_caller()
+    if not by:
+        error(f"{rest[0]} not stopped: the caller cannot be identified, name who with --by <who>")
+        return True
+
+    from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable
+    from aipass.ai_mail.apps.handlers.dispatch.wake import resolve_branch
+    from aipass.ai_mail.apps.handlers.dispatch.stop import stop_dispatch
+
+    try:
+        resolved = resolve_branch(rest[0])
+    except RegistryUnreadable as exc:
+        error(f"{rest[0]} not stopped: the registry is unreadable ({exc})")
+        return True
+    if resolved is None:
+        error(f"unknown agent {rest[0]}")
+        return True
+
+    stopped, line, note = stop_dispatch(*resolved, by)
+    if not stopped:
+        error(line)
+        return True
+    # One line whatever the width: a caller parses it.
+    console.print(line, soft_wrap=True)
+    if note:
+        warning(note)
+    return True
+
+
 def _orchestrate_dispatch_send(args: List[str]) -> bool:
     """Orchestrate combined dispatch: send email with --dispatch flag + wake branch."""
     flags, filtered = _parse_flags(args, ("--from",) + _RUN_FLAGS, ("--fresh", "--no-memory-save", "--no-watchdog"))
@@ -445,6 +494,9 @@ def print_introspection():
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print("  [cyan]handlers/dispatch/[/cyan]")
     console.print("    - [cyan]wake.py[/cyan] [dim](wake_branch — manually wake a branch by spawning an agent)[/dim]")
+    console.print(
+        "    - [cyan]stop.py[/cyan] [dim](stop_dispatch — end a running dispatch, row stopped, dispatcher mailed)[/dim]"
+    )
     console.print("  [cyan]handlers/email/[/cyan] [dim](used by combined dispatch)[/dim]")
     console.print(
         "    - [cyan]send.py[/cyan] [dim](resolve_sender_info — the sender the mail and the wake share)[/dim]"

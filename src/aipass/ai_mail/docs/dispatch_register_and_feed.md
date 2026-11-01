@@ -169,6 +169,25 @@ watchdog pass (five minutes) instead of at `expected_by`.
 systemd-scope spawn path, which never learns a pid. Readers treat `None` as "fall
 back to `overdue`"; reading it as `False` would announce a death that nobody saw.
 
+### A stop closes the row
+
+`drone @ai_mail dispatch stop @agent [--by <who>]` ends a running dispatch from outside.
+It finds the live monitor through the branch's dispatch lock and checks the pid's
+command line names `dispatch_monitor`, because a lock may hold a pre-spawn parent's pid
+or a reused number. It sends TERM to the monitor's process group (the monitor and its
+agent), waits 5 seconds and then sends KILL to whatever is left. The monitor dies before
+its retries, bounce and wake-back, so it is the stop that closes the row
+(`status: "stopped"`) and mails the dispatcher `Dispatch stopped: @agent (by <who>)`.
+`--by` defaults to the verified caller; with neither, the stop is refused. The session
+pointer and transcript are left alone, so a resume in the branch continues where the agent
+stopped.
+
+Exit 0 prints `stopped @agent (dispatch <id>, by <who>)`. When nothing is running, the
+stop prints `no dispatch is running for @agent` and changes nothing; an unknown agent
+prints `unknown agent @agent`. Both exit 2, the routed-but-failed code of
+[cli_contract.md](cli_contract.md). A second stop of the same dispatch gets the
+nothing-running line.
+
 ### A reply closes the row
 
 An agent's own reply is the strongest completion evidence the system has, so a
