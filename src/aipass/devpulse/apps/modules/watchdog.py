@@ -20,6 +20,7 @@ from aipass.devpulse.apps.handlers.json import json_handler
 from aipass.devpulse.apps.handlers.watchdog import dispatches as _dispatches
 from aipass.devpulse.apps.handlers.watchdog import presenter
 from aipass.devpulse.apps.handlers.watchdog import registry as _registry
+from aipass.devpulse.apps.handlers.watchdog import stop_gate as _stop_gate
 
 _VALID_SUBCOMMANDS = ["agent", "baseline", "timer", "schedule", "status", "cancel", "list"]
 _DEFAULT_AGENT_TIMEOUT = 600
@@ -87,6 +88,11 @@ Examples:
   watchdog schedule "14:30" "drone @flow execute DPLAN-0200"
   watchdog schedule "+30m" "drone @git status"
 """
+
+
+def hook_stop(hook_data: dict) -> dict:
+    """The Stop hook's door (handlers are branch-internal): refuse the turn's end while work is out unwired."""
+    return _stop_gate.handle(hook_data)
 
 
 def print_introspection() -> None:

@@ -178,6 +178,12 @@
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.security.presence_gate.handle_stop",
       "matcher": ""
+    },
+    "watchdog_wire_gate": {
+      "enabled": true,
+      "handler": "aipass.devpulse.apps.modules.watchdog.hook_stop",
+      "matcher": "",
+      "timeout": 10
     }
   },
 

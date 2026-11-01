@@ -44,6 +44,10 @@ Green needs the registered wire's `metadata.wrapper` to be `monitor` or `backgro
 
 ai_mail's wake-back spawns a new headless process and can never inject into a live interactive session (`BLOCKED — interactive session` in the logs is that guard working as designed; it only serves senders whose session closed). Dispatch and idle without signing in and nothing will ever wake you — the report just queues.
 
+## The Stop gate — the sign-in cannot be forgotten
+
+A Stop hook (`watchdog_wire_gate` in `.aipass/hooks.json`, door `aipass.devpulse.apps.modules.watchdog.hook_stop`) refuses to end a devpulse turn while a dispatch this seat sent is still out and no baseline wire is registered for the session. The refusal carries the arm command; the seat arms and ends the turn. Dead rows do not count (they are announced once by the wire), other seats are never gated, a Stop that already follows a refusal is allowed so a seat that cannot arm is not trapped, and any failure in the check allows with the error on stderr.
+
 ## Dead-monitor backstop
 
 A dispatch whose monitor died — host reboot, OOM, kill — can never report, so the receiver announces it: at sign-in and every 5 minutes it reads `@ai_mail`'s dispatch register once (no agent is polled, no process is armed) and pushes one line per dispatch of yours whose monitor is gone: `monitor_alive` false (ai_mail records the monitor's pid and checks `/proc` at read time — a death is announced within one cadence, wording "its monitor (pid N) is gone before the hard timeout"), or past `expected_by` (ai_mail's hard timeout for the attempt). Overdue is not proof of death: ai_mail retries a dispatch up to three times with a fresh timeout each attempt, so an overdue row is often a live monitor part way through attempt 2, and the line says so. `monitor_alive` is tri-state; `None` (a row that never learned a pid) keeps the overdue rule only:
