@@ -19,6 +19,7 @@ seedgo proof aipass                              # Proof certification
 seedgo test_map @branch                          # Custom function test coverage
 seedgo test-inventory <path>                     # Every test function in a tree, ranked
 seedgo tests retired / restore <name>            # The retire lane — a logged move, never a delete
+seedgo tests pinning <path>...                   # Test files naming a non-.py path, one per line
 seedgo bypass prune @branch [--dry-run]          # Remove bypass rules that match nothing; live/blank never
 seedgo tests template-status / template bump     # Test template v1: receipts vs gold (--confirm writes)
 seedgo shadow-cycle run                          # The three weekly v5 passes

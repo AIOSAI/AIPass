@@ -65,6 +65,28 @@ hooks also owns the branch-prompt cap that `startup_budget` reads — see
 
 ---
 
+## What the checklist cannot see: a test pinning a non-Python file
+
+The checklist judges the file being written. When a `.md` or `.json` file is pinned by a test
+in another branch's suite (a scaffold copy compared byte for byte, a fixture mirroring a
+manifest), nothing on the edit is wrong, and the red arrives in CI. A non-Python file has no
+import graph, so its tests are found by the path they name:
+
+```
+drone @seedgo tests pinning <path> [<path> ...]
+```
+
+Each path is repo-relative (as `git diff --name-only` prints it) or absolute. It is matched
+in test files under pyproject's testpaths, spelled as one string (`".claude/commands/codex.md"`)
+or as trailing literal Path parts (`root / ".claude" / "commands" / "codex.md"`,
+`Path(".claude", "commands", "codex.md")`). stdout carries only test paths, one per line,
+deduplicated, so it feeds pytest directly; the count per path, a skipped `.py` path and
+"no test names it" go to stderr. Exit 0 whether or not anything matched. A path built from a
+variable is not seen; a bare name such as `README.md` matches every test that spells it,
+so it over-selects, never under-selects.
+
+---
+
 ## Related
 
 - [audit_engine.md](audit_engine.md) — the other lane

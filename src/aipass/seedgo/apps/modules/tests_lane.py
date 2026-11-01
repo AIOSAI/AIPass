@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests_lane.py
 # Description: Tests Lane Module — the retire lane and the test-template distribution
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-09-21
-# Modified: 2026-10-24
+# Modified: 2026-11-01
 # =============================================
 
 """Tests Lane Module
@@ -16,10 +16,14 @@ The RETIRE lane: a test file leaves by a logged move to
 what is there with its log line; ``tests restore NAME`` moves one back.
 
 The TEMPLATE lane: seedgo is the gold source of the fleet's test template, on @memory's trinity pattern.
+
+The PINNING lane: ``tests pinning PATH...`` prints, one per line on stdout, the test files
+whose source names each repo-relative PATH, for a commit to run before it lands.
 """
 
 import json
 import sys
+from pathlib import Path
 from typing import List
 
 from aipass.prax import logger
@@ -27,11 +31,12 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 
 from aipass.cli import console, header
-from aipass.cli.apps.modules import error as display_error, warning
+from aipass.cli.apps.modules import err_console, error as display_error, warning
 
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
 from aipass.seedgo.apps.handlers.module_root import module_file
-from aipass.seedgo.apps.handlers.tests_lane import retire_ops, template_ops
+from aipass.seedgo.apps.handlers.bypass.ignore_handler import find_repo_root
+from aipass.seedgo.apps.handlers.tests_lane import pinning, retire_ops, template_ops
 from aipass.seedgo.apps.modules import CommandRefused
 
 #: The vocabulary is handlers/audit_tests/refusal.py's, so one code never means two things.
@@ -48,6 +53,7 @@ _SUBCOMMANDS = {
     "restore": "Move one retired test file back into tests/",
     "template-status": "Every branch's template receipt against gold",
     "template": "template bump [@branch] [--confirm] — report, or write the receipts",
+    "pinning": "pinning <path>... — the test files that name each non-.py path, one per line",
 }
 
 
@@ -62,6 +68,7 @@ def print_introspection() -> None:
     console.print("  [cyan]handlers/tests_lane/[/cyan]")
     console.print("    [dim]- retire_ops.py (retire_root, list_retired, restore)[/dim]")
     console.print("    [dim]- template_ops.py (gold_versions, receipt_status, bump)[/dim]")
+    console.print("    [dim]- pinning.py (test_files, pinning)[/dim]")
     console.print()
     console.print("  [cyan]handlers/audit/[/cyan]")
     console.print("    [dim]- discovery.py (discover_branches — who gets a receipt)[/dim]")
@@ -102,17 +109,18 @@ def handle_command(command: str, args: List[str]) -> bool:
     subcommand = args[0]
     remaining = args[1:]
 
-    if subcommand == "retired":
-        _handle_retired()
-    elif subcommand == "restore":
-        _handle_restore(remaining)
-    elif subcommand == "template-status":
-        _handle_template_status()
-    elif subcommand == "template":
-        _handle_template(remaining)
-    else:
+    routes = {
+        "retired": lambda: _handle_retired(),
+        "restore": lambda: _handle_restore(remaining),
+        "template-status": lambda: _handle_template_status(),
+        "template": lambda: _handle_template(remaining),
+        "pinning": lambda: _handle_pinning(remaining),
+    }
+    route = routes.get(subcommand)
+    if route is None:
         _refuse(subcommand)
-
+    else:
+        route()
     return True
 
 
@@ -170,6 +178,37 @@ def _handle_restore(args: List[str]) -> None:
     else:
         display_error(f"Cannot restore: {message}")
         raise CommandRefused(EXIT_NOT_STAMPED, "tests restore")
+
+
+def _handle_pinning(args: List[str]) -> None:
+    """Test paths on stdout, one per line, so the output feeds pytest; every note goes to stderr."""
+    flags = [a for a in args if a.startswith("-")]
+    if flags:
+        _refuse(" ".join(flags))
+    if not args:
+        warning("Usage: drone @seedgo tests pinning <path> [<path> ...]")
+        return
+
+    root = find_repo_root(Path.cwd())
+    if root is None:
+        display_error(f"No repository above {Path.cwd()}: nothing to search")
+        raise CommandRefused(EXIT_NOT_STAMPED, "tests pinning")
+
+    rels = []
+    for arg in args:
+        path = Path(arg)
+        rel = path.resolve().relative_to(root).as_posix() if path.is_absolute() else path.as_posix()
+        if rel.endswith(".py"):
+            err_console.print(f"{rel}: a Python file, skipped: its tests follow its imports", markup=False)
+        else:
+            rels.append(rel)
+
+    found = pinning.pinning(root, rels)
+    for rel, files in found.items():
+        count = f"{len(files)} test file{'' if len(files) == 1 else 's'}" if files else "no test names it"
+        err_console.print(f"{rel}: {count}", markup=False)
+    for test_path in sorted({f for files in found.values() for f in files}):
+        console.print(test_path, markup=False, highlight=False, soft_wrap=True)
 
 
 def _handle_template_status() -> None:
@@ -296,6 +335,7 @@ def print_help() -> None:
     console.print("  [green]drone @seedgo tests template bump[/green]               [dim]Dry run[/dim]")
     console.print("  [green]drone @seedgo tests template bump --confirm[/green]     [dim]Write the receipts[/dim]")
     console.print("  [green]drone @seedgo tests template bump @flow --confirm[/green] [dim]One branch[/dim]")
+    console.print("  [green]drone @seedgo tests pinning <path> [<path> ...][/green] [dim]Tests naming each file[/dim]")
     console.print()
     console.print("[yellow]THE RETIRE LANE:[/yellow]")
     console.print("  A retired test is MOVED to .backup/tests/<branch>/, never deleted,")
@@ -305,6 +345,12 @@ def print_help() -> None:
     console.print("  Gold is seedgo/templates/. Each branch holds tests/.template_version.json.")
     console.print("  A bump writes that receipt and the page; a test's BODY is never distributed.")
     console.print("  A bump announces test_template_bumped on @trigger's bus — never polled.")
+    console.print()
+    console.print("[yellow]THE PINNING LANE:[/yellow]")
+    console.print("  A .md or .json file has no import graph: its tests are the files that NAME it.")
+    console.print("  Each path is repo-relative (or absolute), spelled as one string or as Path parts.")
+    console.print("  stdout carries only test paths, one per line; counts and skips go to stderr.")
+    console.print("  A .py path is skipped. A path built from a variable is not seen.")
     console.print()
     console.print("[dim]Commands: tests, tests_lane, --help[/dim]")
 
