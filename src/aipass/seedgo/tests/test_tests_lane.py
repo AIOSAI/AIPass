@@ -424,6 +424,7 @@ def pinned_repo(tmp_path, monkeypatch):
     """A repo whose tests name .claude/commands/codex.md three ways, plus two that only look alike."""
     root = tmp_path / "repo"
     (root / ".git").mkdir(parents=True)
+    (root / ".git" / "HEAD").write_text("ref: refs/heads/dev\n", encoding="utf-8")
     tests_dir = root / "src" / "aipass" / "alpha" / "tests"
     tests_dir.mkdir(parents=True)
     bodies = {
@@ -454,6 +455,27 @@ class TestPinning:
         prefix = "src/aipass/alpha/tests/"
         assert out.splitlines() == [prefix + "test_call.py", prefix + "test_literal.py", prefix + "test_split.py"]
         assert ".claude/commands/codex.md: 3 test files" in err
+
+    def test_an_empty_git_dir_below_the_repo_is_a_sandbox_mount_point_not_a_root(self, capsys, pinned_repo):
+        """THE DEFECT: Codex's sandbox leaves an empty .git in its cwd; beo read itself as the repo and found nothing."""
+        (pinned_repo / "src" / "aipass" / "alpha" / ".git").mkdir()
+
+        tests_lane.handle_command("tests", ["pinning", ".claude/commands/codex.md"])
+
+        assert capsys.readouterr().out.splitlines()[0] == "src/aipass/alpha/tests/test_call.py"
+
+    def test_a_git_file_marks_a_worktree_root(self, capsys, tmp_path, monkeypatch):
+        """A worktree's .git is a pointer file, not a directory, and it is still the repository."""
+        root = tmp_path / "worktree"
+        tests_dir = root / "tests"
+        tests_dir.mkdir(parents=True)
+        (root / ".git").write_text("gitdir: elsewhere\n", encoding="utf-8")
+        (tests_dir / "test_pin.py").write_text('P = "AGENTS.md"\n', encoding="utf-8")
+        monkeypatch.chdir(tests_dir)
+
+        tests_lane.handle_command("tests", ["pinning", "AGENTS.md"])
+
+        assert capsys.readouterr().out.splitlines() == ["tests/test_pin.py"]
 
     def test_an_absolute_path_and_a_python_file_and_a_miss_each_say_so_on_stderr(self, capsys, pinned_repo):
         args = ["pinning", str(pinned_repo / ".claude" / "commands" / "codex.md"), "apps/x.py", "README.md"]

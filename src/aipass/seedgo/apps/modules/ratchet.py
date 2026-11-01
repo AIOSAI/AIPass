@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ratchet.py
 # Description: the execution ratchet - pick one branch a week, probe it, record the point
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-10-12
-# Modified: 2026-10-25
+# Modified: 2026-11-01
 # =============================================
 
 """
@@ -41,6 +41,9 @@ PROBE_GROUP = "pseudo_tested"
 #: A week whose target could not be measured is still a point on the series: the reason is
 #: in the line, and only a lane that could not run exits non-zero.
 RECORDED_STATUSES: tuple = ("measured", "not_applicable")
+
+#: How many of a red baseline's failing tests the output names: enough to show the cause in a job mail.
+FAILING_SHOWN = 5
 
 
 def handle_command(command: str, args: List[str]) -> bool:
@@ -135,6 +138,7 @@ def _run(budget: int) -> None:
     line = _write_point(document, chosen, series.TRIGGER_WEEKLY, reason, len(chain) + 1)
 
     _print_point(line, time.time() - started)
+    _print_failing(document)
     if code in refusal.REFUSAL_CODES or line["status"] not in RECORDED_STATUSES:
         raise CommandRefused(_exit_code(code, line), chosen)
 
@@ -210,6 +214,19 @@ def _print_point(line: dict, elapsed: Optional[float]) -> None:
     console.print(f"  [dim]crash-only   [/dim] {len(line['crash_only'])}")
     console.print(f"  [dim]archive      [/dim] {line['archive']}")
     console.print(f"  [dim]series       [/dim] {series.series_path()}")
+
+
+def _print_failing(document: dict) -> None:
+    """A red baseline's first failing tests, so the job output names the cause, not just the archive."""
+    baseline = (series.campaign_group(document) or {}).get("baseline") or {}
+    failing = baseline.get("failing") or []
+    if not failing:
+        return
+    console.print(f"  [dim]baseline red, {len(failing)} failing:[/dim]")
+    for row in failing[:FAILING_SHOWN]:
+        console.print(f"    {row.get('nodeid')}", markup=False, highlight=False, soft_wrap=True)
+    if len(failing) > FAILING_SHOWN:
+        console.print(f"    [dim]... {len(failing) - FAILING_SHOWN} more in the archive[/dim]")
 
 
 def _print_help() -> None:

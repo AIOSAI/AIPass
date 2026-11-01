@@ -515,7 +515,7 @@
     {
       "file": "apps/handlers/bypass/ignore_handler.py",
       "standard": "logged_fallback",
-      "lines": [154],
+      "lines": [165],
       "reason": "The checker is wrong on this line (fleet green leg 14). relative_to raises ValueError only when the file is not under the branch root, and such a file is truly not ignored: a branch's .seedgoignore governs its own tree only. False here is the answer, not a failure, and the case is logged."
     },
     {

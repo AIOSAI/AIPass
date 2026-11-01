@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_branch_audit_scoring.py
 # Description: audit_branch's all_files row — which files the average counts
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-09-25
-# Modified: 2026-10-03
+# Modified: 2026-11-01
 # =============================================
 
 """Tests for apps/handlers/audit/branch_audit.py, the all_files row's average."""
@@ -199,6 +199,7 @@ def repo_audit(tmp_path, monkeypatch):
     monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
     monkeypatch.setattr(branch_audit, "scan_branch", lambda path: None)
     (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "HEAD").write_text("ref: refs/heads/dev\n", encoding="utf-8")
     (tmp_path / ".gitignore").write_text(GITIGNORE, encoding="utf-8")
     apps = tmp_path / "mybranch" / "apps"
     for rel, body in {"apps/main.py": "pass\n", **LAYOUT}.items():

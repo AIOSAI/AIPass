@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ignore_handler.py
 # Description: Ignore Pattern Configuration Handler
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-03-05
-# Modified: 2026-10-24
+# Modified: 2026-11-01
 # =============================================
 
 """Ignore Pattern Configuration Handler"""
@@ -58,9 +58,20 @@ def _compiled_patterns(patterns: Tuple[str, ...]) -> List[Tuple[str, pathspec.Gi
 
 
 def find_repo_root(path: Path) -> Optional[Path]:
-    """The nearest ancestor holding a .git entry: the root git reads .gitignore files from."""
+    """The nearest ancestor holding a .git entry: the root git reads .gitignore files from.
+
+    An EMPTY .git directory is skipped: a sandbox (Codex's) leaves one as a mount point in its cwd and
+    temp root, and git itself never reads it as a repository.
+    """
     resolved = path.resolve()
-    return next((parent for parent in (resolved, *resolved.parents) if (parent / ".git").exists()), None)
+    return next((parent for parent in (resolved, *resolved.parents) if _is_git_marker(parent / ".git")), None)
+
+
+def _is_git_marker(marker: Path) -> bool:
+    """A .git file (a worktree's pointer), or a .git directory with anything in it."""
+    if marker.is_file():
+        return True
+    return marker.is_dir() and any(marker.iterdir())
 
 
 def _gitignore_spec(gitignore: Path) -> pathspec.GitIgnoreSpec:
