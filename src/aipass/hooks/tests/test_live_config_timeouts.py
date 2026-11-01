@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_live_config_timeouts.py
-# Version: 1.1.0
-# Description: Pins against the live .aipass/hooks.json and .aipass/project_hooks.json
+# Version: 1.2.0
+# Description: Pins against the live .aipass/hooks.json, .aipass/project_hooks.json and the provider manifest
 # Branch: hooks
 # Created: 2026-08-13
-# Modified: 2026-10-26
+# Modified: 2026-11-01
 # =============================================
 
 """Tests for the live .aipass/ hook configs that apps/handlers/config/loader.py hands the engine."""
@@ -177,3 +177,39 @@ class TestTheTemplateRuling:
         assert "not a mirror" in comment
         assert "docs/project_config.md" in comment
         assert "The template ruling" in comment
+
+
+class TestEveryTaskMatcherNamesAgent:
+    """Claude Code's sub-agent tool is Agent; older CLIs call it Task. A matcher naming only Task never
+    sends a sub-agent's opening to the engine, so engine.jsonl holds no row for it."""
+
+    @staticmethod
+    def _matchers():
+        import json
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[4]
+        manifest = json.loads((root / ".claude" / "provider_manifest.json").read_text(encoding="utf-8"))
+        found = {
+            f"provider_manifest {hook['event']}": hook["matcher"]
+            for hook in manifest["cli"]["claude"]["hooks"]
+            if hook.get("matcher")
+        }
+        for name in ("hooks.json", "project_hooks.json"):
+            config = json.loads((root / ".aipass" / name).read_text(encoding="utf-8"))
+            for event, hooks in config.items():
+                for hook_name, defn in hooks.items() if isinstance(hooks, dict) else ():
+                    if isinstance(defn, dict) and defn.get("matcher"):
+                        found[f"{name} {event}:{hook_name}"] = defn["matcher"]
+        return found
+
+    def test_no_matcher_names_task_without_agent(self):
+        lacking = [
+            where for where, m in self._matchers().items() if "Task" in m.split("|") and "Agent" not in m.split("|")
+        ]
+        assert lacking == [], f"these never fire for Claude Code's sub-agent tool: {lacking}"
+
+    def test_both_provider_tool_matchers_reach_agent(self):
+        matchers = self._matchers()
+        for event in ("PreToolUse", "PostToolUse"):
+            assert "Agent" in matchers[f"provider_manifest {event}"].split("|"), event

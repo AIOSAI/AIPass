@@ -169,7 +169,7 @@
   ],
   "PostToolUse": [
     {
-      "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit|Read|Grep|Glob|Task",
+      "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit|Read|Grep|Glob|Task|Agent",
       "hooks": [
         {
           "type": "command",
@@ -180,7 +180,7 @@
   ],
   "PreToolUse": [
     {
-      "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit|Read|Grep|Glob|WebSearch|WebFetch|Task",
+      "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit|Read|Grep|Glob|WebSearch|WebFetch|Task|Agent",
       "hooks": [
         {
           "type": "command",

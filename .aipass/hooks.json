@@ -82,7 +82,7 @@
     "tool_use_sound": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.notification.tool_sound.handle",
-      "matcher": "Bash|Edit|MultiEdit|Write|Read|Grep|Glob|WebSearch|WebFetch|Task"
+      "matcher": "Bash|Edit|MultiEdit|Write|Read|Grep|Glob|WebSearch|WebFetch|Task|Agent"
     },
     "pre_edit_gate": {
       "enabled": true,

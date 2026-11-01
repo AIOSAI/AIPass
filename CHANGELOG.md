@@ -16,6 +16,7 @@ PyPI version — not the changelog header.
 - **seedgo**: Host_Portability arm H flags product code that reads a bare `.git` existence probe as a repository; a `.git` file (worktree) or a function that reads `.git/HEAD` or lists `.git` is acquitted. `ratchet run` names the first failing tests of a red baseline.
 
 ### Changed
+- **hooks**: the provider tool matchers name `Agent`, Claude Code's sub-agent tool, beside `Task`, so the engine logs a sub-agent's opening row; `aipass doctor` reports the drift and `--fix` rewires. `drone @hooks hooksound --json` prints `{"active": bool}`.
 - **hooks**: hook sounds are off by default. `drone @hooks hooksound on` creates `~/.aipass/aipass-hooks-sound-on`; `off` removes it. The old mute flags are removed on sight. Anyone who had sound on without a flag is silent until they run `hooksound on`.
 
 ### Fixed

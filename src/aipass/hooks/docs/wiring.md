@@ -74,7 +74,7 @@ Compass is the managers' decision store, so a builder seat, or a directory with 
 
 **Sound is off by default.** `apps/sound.py`'s `speak()` and `play()` check `is_muted()`, which is True
 unless `~/.aipass/aipass-hooks-sound-on` exists (outside the temp dir, so a reboot or `TMPDIR` cannot move it).
-`hooksound on` creates it, `off` removes it; a fresh install is silent. An old mute flag
+`hooksound on` creates it, `off` removes it, `--json` prints `{"active": bool}` on stdout; a fresh install is silent. An old mute flag
 (`~/.aipass/aipass-hooks-muted`, `<temp dir>/aipass-hooks-muted`) is redundant: `is_muted()` removes it.
 `tests/conftest.py` points all three at a temp dir.
 
