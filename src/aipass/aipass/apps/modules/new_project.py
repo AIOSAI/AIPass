@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: new_project.py
 # Description: aipass new — create projects inside the AIPass installation
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-07-17
-# Modified: 2026-10-25
+# Modified: 2026-11-01
 # =============================================
 
 """
@@ -66,7 +66,8 @@ def print_introspection() -> None:
     else:
         console.print(f"[yellow]{len(projects)} project(s):[/yellow]")
         for p in projects:
-            has_git = (p / ".git").is_dir()
+            git_dir = p / ".git"
+            has_git = git_dir.is_file() or (git_dir.is_dir() and any(git_dir.iterdir()))
             has_reg = any(f.name.endswith("_REGISTRY.json") for f in p.iterdir() if f.is_file())
             markers = []
             if has_git:

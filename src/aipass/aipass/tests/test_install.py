@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_install.py
 # Description: Tests for aipass install — one-command bootstrap (DPLAN-0233)
-# Version: 1.4.2
+# Version: 1.4.3
 # Created: 2026-07-05
-# Modified: 2026-10-24
+# Modified: 2026-11-01
 # =============================================
 
 """Tests for apps/modules/install.py (DPLAN-0233) and the install command it drives."""
@@ -322,6 +322,7 @@ def _checkout(tmp_path: Path) -> Path:
     """A directory that reads as a checkout: a .git directory, made without running git (no git from this seat)."""
     repo = tmp_path / "checkout"
     (repo / ".git").mkdir(parents=True)
+    (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
     return repo
 
 
@@ -351,11 +352,14 @@ class TestSource:
         missing = tmp_path / "nowhere"
         plain = tmp_path / "plain"
         plain.mkdir()
+        hollow = tmp_path / "hollow"
+        (hollow / ".git").mkdir(parents=True)
         a_file = tmp_path / "file.txt"
         a_file.write_text("x", encoding="utf-8")
         cases = {
             str(missing): f"{missing} does not exist",
-            str(plain): f"{plain} is not a repository (no .git)",
+            str(plain): f"{plain} is not a repository (no .git, or an empty one)",
+            str(hollow): f"{hollow} is not a repository (no .git, or an empty one)",
             str(a_file): f"{a_file} is not a directory",
             "": "it needs a path or a URL",
         }

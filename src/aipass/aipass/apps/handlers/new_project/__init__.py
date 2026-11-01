@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: New project handler — create projects inside AIPass
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-07-17
-# Modified: 2026-10-28
+# Modified: 2026-11-01
 # =============================================
 
 """
@@ -232,7 +232,9 @@ def _git_init(target: Path, name: str, template: str) -> None:
     Left on dev (agents default to ``git_branch: dev``). dev is cut after the birth commit:
     cut from an empty repo it shares no history with main and the first merge is refused.
     """
-    if (target / ".git").exists():
+    marker = target / ".git"
+    # An empty .git (Codex's sandbox plants one) holds no history to protect; git init fills it.
+    if marker.is_file() or (marker.is_dir() and any(marker.iterdir())):
         raise RuntimeError(f"'{target}' already has a .git directory")
     _git(["init", "-b", "main"], target)
     _git(["add", "-A"], target)
