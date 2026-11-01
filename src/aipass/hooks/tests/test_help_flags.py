@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_help_flags.py
-# Version: 1.1.2
+# Version: 1.2.0
 # Description: Help-flag safety — a help flag anywhere means explain, never execute
 # Branch: hooks
 # Created: 2026-08-13
-# Modified: 2026-10-26
+# Modified: 2026-11-01
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py and the modules that route through it."""
@@ -188,33 +188,27 @@ class TestFeedbackNeverTogglesOnHelp:
 
 
 class TestHooksoundNeverTogglesOnHelp:
-    """These patch the flag's real owner, sound, and run the true write path end to end."""
+    """These run the true write path end to end on conftest's isolated sound flag."""
 
-    def test_help_after_off_does_not_mute(self, tmp_path):
-        flag = tmp_path / "mute"
-        with patch.object(sound, "MUTE_FLAG", flag):
-            assert hooksound.handle_command("hooksound", ["off", "--help"]) is True
-        assert not flag.exists(), "help request muted the fleet"
+    def test_help_after_off_does_not_mute(self):
+        sound.SOUND_FLAG.parent.mkdir(parents=True, exist_ok=True)
+        sound.SOUND_FLAG.touch()
+        assert hooksound.handle_command("hooksound", ["off", "--help"]) is True
+        assert sound.SOUND_FLAG.exists(), "help request muted the fleet"
 
-    def test_help_after_on_does_not_unmute(self, tmp_path):
-        flag = tmp_path / "mute"
-        flag.touch()
-        with patch.object(sound, "MUTE_FLAG", flag):
-            assert hooksound.handle_command("hooksound", ["on", "--help"]) is True
-        assert flag.exists(), "help request unmuted the fleet"
+    def test_help_after_on_does_not_unmute(self):
+        assert hooksound.handle_command("hooksound", ["on", "--help"]) is True
+        assert not sound.SOUND_FLAG.exists(), "help request unmuted the fleet"
 
-    def test_real_mute_still_runs(self, tmp_path):
-        flag = tmp_path / "mute"
-        with patch.object(sound, "MUTE_FLAG", flag):
-            assert hooksound.handle_command("hooksound", ["off"]) is True
-        assert flag.exists()
+    def test_real_mute_still_runs(self):
+        sound.SOUND_FLAG.parent.mkdir(parents=True, exist_ok=True)
+        sound.SOUND_FLAG.touch()
+        assert hooksound.handle_command("hooksound", ["off"]) is True
+        assert not sound.SOUND_FLAG.exists()
 
-    def test_real_unmute_still_runs(self, tmp_path):
-        flag = tmp_path / "mute"
-        flag.touch()
-        with patch.object(sound, "MUTE_FLAG", flag):
-            assert hooksound.handle_command("hooksound", ["on"]) is True
-        assert not flag.exists()
+    def test_real_unmute_still_runs(self):
+        assert hooksound.handle_command("hooksound", ["on"]) is True
+        assert sound.SOUND_FLAG.exists()
 
 
 class TestEngineLogNeverDumpsOnHelp:
@@ -315,11 +309,8 @@ class TestUnknownCommandNamesWhatFailed:
         assert code == 1
         assert "Unknown command: banana" in out
 
-    def test_known_verbs_still_succeed(self, tmp_path):
-        from unittest.mock import patch
-
-        # An absent flag under tmp_path: the status line must read it as ACTIVE.
-        with patch("aipass.hooks.apps.sound.MUTE_FLAG", tmp_path / "mute"):
-            code, out = self._main(["hooksound"])
+    def test_known_verbs_still_succeed(self):
+        # conftest's sound flag is absent: off by default, so the status line reads MUTED.
+        code, out = self._main(["hooksound"])
         assert code == 0
-        assert "Hook sound control (ACTIVE)" in out
+        assert "Hook sound control (MUTED)" in out

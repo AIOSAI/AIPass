@@ -9,6 +9,18 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+### Added
+- **seedgo**: Host_Portability arm H flags product code that reads a bare `.git` existence probe as a repository; a `.git` file (worktree) or a function that reads `.git/HEAD` or lists `.git` is acquitted. `ratchet run` names the first failing tests of a red baseline.
+
+### Changed
+- **hooks**: hook sounds are off by default. `drone @hooks hooksound on` creates `~/.aipass/aipass-hooks-sound-on`; `off` removes it. The old mute flags are removed on sight. Anyone who had sound on without a flag is silent until they run `hooksound on`.
+
+### Fixed
+- **seedgo, hooks, aipass, prax, flow, api**: an empty `.git` directory is not a repository. Codex's sandbox leaves one in `/tmp` and in every working directory it starts in, and 22 repo-root probes read it as a repo, turning @api and @prax suites red on any host where Codex had run.
+- **flow**: the merge playbook wakes @vera at the release tag with the version and its CHANGELOG section.
+
 ## [2026-11-01] — v2.8.32: compass recall for managers only, a hook mute that survives reboots, seedgo finds the tests that pin a file, spawn owner moves, api run with a scoped key
 
 ### Added

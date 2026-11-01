@@ -1,15 +1,15 @@
 # =================== AIPass ====================
 # Name: test_sound.py
-# Version: 1.2.0
+# Version: 2.0.0
 # Description: Tests for shared sound module
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-10-31
+# Modified: 2026-11-01
 # =============================================
 
 """Tests for apps/sound.py."""
 
-# Shared speak/play with mute support.
+# Shared speak/play; silent unless hook sounds are switched on.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — PIPER_BIN and PIPER_VOICE's install locations under the home directory
@@ -27,25 +27,23 @@ from aipass.hooks.apps.sound import is_muted, mute, play, speak, unmute
 
 
 class TestIsMuted:
-    """Mute flag detection."""
+    """Hook sounds are off by default: muted unless the sound-on flag exists."""
 
-    def test_not_muted_when_flag_missing(self):
-        with patch("aipass.hooks.apps.sound.MUTE_FLAG") as mock_flag:
-            mock_flag.exists.return_value = False
-            assert is_muted() is False
+    def test_a_fresh_home_is_muted(self):
+        assert is_muted() is True
 
-    def test_muted_when_flag_exists(self):
-        with patch("aipass.hooks.apps.sound.MUTE_FLAG") as mock_flag:
-            mock_flag.exists.return_value = True
-            assert is_muted() is True
+    def test_the_sound_flag_turns_sound_on(self):
+        sound.SOUND_FLAG.parent.mkdir(parents=True, exist_ok=True)
+        sound.SOUND_FLAG.touch()
+        assert is_muted() is False
 
 
-class TestMuteFlagHome:
+class TestSoundFlagHome:
     """The flag survives a reboot and every TMPDIR: it lives in the user's AIPass home, not the temp dir."""
 
     def test_the_flag_path_ignores_tmpdir(self, tmp_path):
         """Asked of a fresh child, so the conftest isolation does not answer for the module."""
-        probe = "from aipass.hooks.apps import sound; print(sound.MUTE_FLAG)"
+        probe = "from aipass.hooks.apps import sound; print(sound.SOUND_FLAG)"
         paths = set()
         for tmpdir in (tmp_path / "a", tmp_path / "b"):
             tmpdir.mkdir()
@@ -55,43 +53,37 @@ class TestMuteFlagHome:
             )
             assert child.returncode == 0, child.stderr
             paths.add(Path(child.stdout.strip()))
-        assert paths == {tmp_path / "home" / ".aipass" / "aipass-hooks-muted"}
+        assert paths == {tmp_path / "home" / ".aipass" / "aipass-hooks-sound-on"}
 
-    def test_a_legacy_temp_dir_flag_migrates_once_and_stays_muted(self, tmp_path, monkeypatch):
-        flag = tmp_path / "home" / ".aipass" / "aipass-hooks-muted"
-        legacy = tmp_path / "tmp" / "aipass-hooks-muted"
-        legacy.parent.mkdir()
-        legacy.touch()
-        monkeypatch.setattr("aipass.hooks.apps.sound.MUTE_FLAG", flag)
-        monkeypatch.setattr("aipass.hooks.apps.sound.LEGACY_MUTE_FLAG", legacy)
-        assert is_muted() is True
-        assert flag.exists()
-        assert not legacy.exists()
-        assert is_muted() is True
+    def test_old_mute_flags_are_removed_once_and_the_seat_stays_muted(self):
+        for old in (sound.MUTE_FLAG, sound.LEGACY_MUTE_FLAG):
+            old.parent.mkdir(parents=True, exist_ok=True)
+            old.touch()
+        with patch.object(sound, "logger") as mock_logger:
+            assert is_muted() is True
+            assert is_muted() is True
+        assert not sound.MUTE_FLAG.exists()
+        assert not sound.LEGACY_MUTE_FLAG.exists()
+        assert mock_logger.info.call_count == 2
 
-    def test_a_home_it_cannot_write_still_reads_muted_and_keeps_the_legacy_flag(self, tmp_path, monkeypatch):
-        """A sandboxed seat: the move waits for a seat that may write the home, and the owner stays muted."""
-        legacy = tmp_path / "tmp" / "aipass-hooks-muted"
-        legacy.parent.mkdir()
-        legacy.touch()
-        blocker = tmp_path / "not-a-dir"
-        blocker.touch()
-        monkeypatch.setattr("aipass.hooks.apps.sound.MUTE_FLAG", blocker / ".aipass" / "aipass-hooks-muted")
-        monkeypatch.setattr("aipass.hooks.apps.sound.LEGACY_MUTE_FLAG", legacy)
-        assert is_muted() is True
-        assert legacy.exists()
-
-    def test_no_legacy_flag_leaves_an_unmuted_owner_unmuted(self, tmp_path, monkeypatch):
-        flag = tmp_path / "home" / ".aipass" / "aipass-hooks-muted"
-        monkeypatch.setattr("aipass.hooks.apps.sound.MUTE_FLAG", flag)
-        monkeypatch.setattr("aipass.hooks.apps.sound.LEGACY_MUTE_FLAG", tmp_path / "absent")
+    def test_an_old_mute_flag_never_silences_a_seat_that_turned_sound_on(self):
+        sound.MUTE_FLAG.parent.mkdir(parents=True, exist_ok=True)
+        sound.MUTE_FLAG.touch()
+        unmute()
         assert is_muted() is False
-        assert not flag.exists()
 
-    def test_the_suite_never_points_at_the_live_flag(self):
-        """conftest's isolated_mute_flag: a hooksound test that reached the real home would flip the owner's mute."""
-        live = Path.home() / ".aipass" / "aipass-hooks-muted"
-        assert sound.MUTE_FLAG != live
+    def test_an_old_flag_it_cannot_remove_still_reads_muted(self, monkeypatch):
+        """A sandboxed seat cannot write the home: the flag waits for a seat that can, and the answer is muted."""
+        locked = MagicMock()
+        locked.exists.return_value = True
+        locked.unlink.side_effect = PermissionError("read-only home")
+        monkeypatch.setattr(sound, "MUTE_FLAG", locked)
+        assert is_muted() is True
+
+    def test_the_suite_never_points_at_the_live_flags(self):
+        """conftest's isolated_mute_flag: a hooksound test that reached the real home would flip the owner's sound."""
+        assert sound.SOUND_FLAG != Path.home() / ".aipass" / "aipass-hooks-sound-on"
+        assert sound.MUTE_FLAG != Path.home() / ".aipass" / "aipass-hooks-muted"
         assert sound.LEGACY_MUTE_FLAG != Path(tempfile.gettempdir()) / "aipass-hooks-muted"
 
 
@@ -276,63 +268,34 @@ class TestPlay:
 class TestMuteWritePair:
     """The write half of the door — exported so callers stop shelling out (@api ask)."""
 
-    def _isolated(self, tmp_path, monkeypatch):
-        flag = tmp_path / "aipass-hooks-muted"
-        monkeypatch.setattr("aipass.hooks.apps.sound.MUTE_FLAG", flag)
-        return flag
+    def test_unmute_creates_the_sound_flag_on_a_fresh_home_and_is_idempotent(self):
+        assert not sound.SOUND_FLAG.parent.exists()
+        assert unmute() is False
+        assert unmute() is False
+        assert sound.SOUND_FLAG.exists()
 
-    def test_mute_creates_the_flag(self, tmp_path, monkeypatch):
-        flag = self._isolated(tmp_path, monkeypatch)
+    def test_mute_removes_the_sound_flag(self):
+        unmute()
         assert mute() is True
-        assert flag.exists()
+        assert not sound.SOUND_FLAG.exists()
 
-    def test_unmute_removes_the_flag(self, tmp_path, monkeypatch):
-        flag = self._isolated(tmp_path, monkeypatch)
-        flag.touch()
-        assert unmute() is False
-        assert not flag.exists()
-
-    def test_mute_creates_the_flag_directory_on_a_fresh_home(self, tmp_path, monkeypatch):
-        flag = tmp_path / "fresh-home" / ".aipass" / "aipass-hooks-muted"
-        monkeypatch.setattr("aipass.hooks.apps.sound.MUTE_FLAG", flag)
+    def test_mute_is_idempotent_on_a_missing_flag(self):
         assert mute() is True
-        assert flag.exists()
-
-    def test_unmute_also_clears_the_legacy_flag_so_it_cannot_re_mute(self, tmp_path, monkeypatch):
-        flag = self._isolated(tmp_path, monkeypatch)
-        legacy = tmp_path / "legacy-tmp" / "aipass-hooks-muted"
-        legacy.parent.mkdir()
-        legacy.touch()
-        monkeypatch.setattr("aipass.hooks.apps.sound.LEGACY_MUTE_FLAG", legacy)
-        assert unmute() is False
-        assert not legacy.exists()
-        assert is_muted() is False
-        assert not flag.exists()
-
-    def test_unmute_is_idempotent_on_missing_flag(self, tmp_path, monkeypatch):
-        """Was a caller-side exists() check; missing_ok owns it now."""
-        self._isolated(tmp_path, monkeypatch)
-        assert unmute() is False
-        assert unmute() is False
-
-    def test_mute_is_idempotent(self, tmp_path, monkeypatch):
-        """Muting an already-muted seat: the flag is there before the call, and stays."""
-        flag = self._isolated(tmp_path, monkeypatch)
-        flag.touch()
         assert mute() is True
-        assert flag.exists()
+        assert not sound.SOUND_FLAG.exists()
 
-    def test_round_trip_agrees_with_is_muted(self, tmp_path, monkeypatch):
+    def test_round_trip_agrees_with_is_muted(self):
         """@api flips then reads back through is_muted() — the two halves must agree."""
-        self._isolated(tmp_path, monkeypatch)
-        assert mute() == is_muted() is True
         assert unmute() == is_muted() is False
+        assert mute() == is_muted() is True
 
-    def test_writes_are_logged(self, tmp_path, monkeypatch):
+    def test_writes_are_logged(self):
         """A state change nobody can audit left no trace before — hooksound imported
         the logger and never called it."""
-        self._isolated(tmp_path, monkeypatch)
         with patch.object(sound, "logger") as mock_logger:
-            sound.mute()
             sound.unmute()
-        assert len(mock_logger.info.call_args_list) == 2
+            sound.mute()
+        assert [c.args[0] for c in mock_logger.info.call_args_list] == [
+            "[HOOKS] sound: unmuted",
+            "[HOOKS] sound: muted",
+        ]
