@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: scaffold_content.py
 # Description: Shared template content generators for project scaffolding
-# Version: 1.6.1
+# Version: 1.6.2
 # Created: 2026-04-22
-# Modified: 2026-10-28
+# Modified: 2026-11-01
 # =============================================
 
 """
@@ -519,7 +519,9 @@ Purpose: move this chat from Claude Code to Codex in one turn, in this same term
 
 **Workflow:** `/codex` → prep → handoff written → this pane becomes Codex, greeting it with the handoff.
 
-**Fresh switch, no handoff:** `/codex fresh` (arguments: `$ARGUMENTS`), or a chat with nothing in it yet (a greeting, nothing done, nothing in flight): skip steps 0 to 2 and run step 3 with the `"$(cat .ai_mail.local/handoff.md)"` argument dropped from both lines, so Codex opens an empty chat in this directory. There is no thread to carry; the user greets it and the startup protocol runs as on any fresh chat.
+**Arguments** (`$ARGUMENTS`): the word `fresh` skips the handoff; a word starting with `gpt-` (`gpt-6-luna`, `gpt-6.1-sol`) is the model Codex opens on, passed as `-m`; nothing means the model in `~/.codex/config.toml`. Both words may be given.
+
+**Fresh switch, no handoff:** `/codex fresh`, or a chat with nothing in it yet (a greeting, nothing done, nothing in flight): skip steps 0 to 2 and run step 3 with the `"$(cat .ai_mail.local/handoff.md)"` argument dropped from both lines, so Codex opens an empty chat in this directory. There is no thread to carry; the user greets it and the startup protocol runs as on any fresh chat.
 
 ## Execution
 
@@ -529,15 +531,16 @@ Purpose: move this chat from Claude Code to Codex in one turn, in this same term
 
 """
         + _handoff_shape("Claude Code", "Codex", "/codex")
-        + r"""3. **Switch.** Run, with the Bash tool:
+        + r"""3. **Switch.** Run, with the Bash tool, with `MODEL` set to the `gpt-` word from the arguments or left empty:
 
    ```bash
+   MODEL=""; M=""; [ -n "$MODEL" ] && M="-m $MODEL"
    p=$$; PANE=""; while [ "$p" -gt 1 ] && [ -z "$PANE" ]; do PANE=$(tmux list-panes -a -F '#{pane_id} #{pane_pid}' 2>/dev/null | awk -v pid="$p" '$2==pid{print $1}'); p=$(awk '{print $4}' /proc/$p/stat); done
    [ -n "$PANE" ] || PANE=$(tmux list-panes -a -F '#{pane_id} #{pane_current_command} #{pane_current_path}' 2>/dev/null | awk -v d="$PWD" '$2=="claude" && $3==d{print $1; exit}')
-   test -n "$PANE" || { echo "not in a tmux pane: open Codex yourself: codex --dangerously-bypass-approvals-and-sandbox \"\$(cat .ai_mail.local/handoff.md)\""; exit 1; }
+   test -n "$PANE" || { echo "not in a tmux pane: open Codex yourself: codex $M --dangerously-bypass-approvals-and-sandbox \"\$(cat .ai_mail.local/handoff.md)\""; exit 1; }
    tmux respawn-pane -k -t "$PANE" -c "$PWD" """
         + _AIPASS_HOME_ENV
-        + r""" 'codex --dangerously-bypass-approvals-and-sandbox "$(cat .ai_mail.local/handoff.md)"'
+        + r""" "codex $M --dangerously-bypass-approvals-and-sandbox \"\$(cat .ai_mail.local/handoff.md)\""
    ```
 
    The posture mirrors BAUD's rooms (`claude --permission-mode bypassPermissions`): the hooks are the gates on both CLIs.
