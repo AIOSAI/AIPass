@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_compass_recall.py
-# Version: 1.3.3
+# Version: 1.5.0
 # Description: Tests for compass recall prompt handler
 # Branch: hooks
 # Created: 2026-07-16
-# Modified: 2026-10-08
+# Modified: 2026-10-31
 # =============================================
 
 """Tests for apps/handlers/prompt/compass_recall.py."""
@@ -27,6 +27,16 @@ from aipass.hooks.apps.handlers.prompt.compass_recall import handle
 from aipass.hooks.apps.modules.cadence import reset_counter
 from aipass.hooks.apps.modules.engine import dispatch
 from aipass.memory.apps.modules.governance import should_surface as governance_should_surface
+
+
+@pytest.fixture(autouse=True)
+def _manager_seat(request):
+    """Recall is for manager seats; the handler tests run as one. TestSeatGate reads real passports."""
+    if request.cls is not None and request.cls.__name__ == "TestSeatGate":
+        yield
+        return
+    with patch("aipass.hooks.apps.modules.release_notice.is_manager_seat", return_value=True):
+        yield
 
 
 @pytest.fixture(autouse=True)
@@ -473,6 +483,55 @@ class TestCompassRecallHandler:
             assert "[GOOD] #56:" in result["stdout"]
             state_file = tmp_path / "aipass-compass-recall-env-fallback.json"
             assert state_file.exists()
+
+
+def _seat_dir(tmp_path, name: str, citizen_class: str) -> Path:
+    """A branch directory whose passport names *name* with *citizen_class*."""
+    seat = tmp_path / name
+    (seat / ".trinity").mkdir(parents=True)
+    passport = {"branch_info": {"branch_name": name}, "identity": {"name": name, "citizen_class": citizen_class}}
+    (seat / ".trinity" / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+    return seat
+
+
+class TestSeatGate:
+    """Compass is for manager agents, never builders: the gate is the passport's citizen_class, not a name."""
+
+    def _recall_at(self, tmp_path, seat):
+        payload = {**_payload("How should we handle prompt config?"), "cwd": str(seat)}
+        with (
+            patch("aipass.hooks.apps.handlers.prompt.compass_recall._STATE_DIR", tmp_path),
+            patch("aipass.devpulse.apps.modules.compass.recall_decisions", return_value=[CANDIDATE_GOOD]) as recall,
+            patch("aipass.devpulse.apps.modules.compass.mark_surfaced", return_value=1),
+            patch("aipass.memory.apps.modules.governance.should_surface", return_value=(True, "ok", {})),
+            patch("aipass.memory.apps.modules.governance.record_message", side_effect=lambda s: s),
+        ):
+            return handle(payload), recall
+
+    def test_a_builder_hears_nothing_and_compass_is_not_read(self, tmp_path):
+        result, recall = self._recall_at(tmp_path, _seat_dir(tmp_path, "canary", "specialist"))
+        assert result == {"stdout": "", "exit_code": 0}
+        recall.assert_not_called()
+
+    def test_a_seat_with_no_passport_hears_nothing(self, tmp_path):
+        bare = tmp_path / "bare"
+        bare.mkdir()
+        result, recall = self._recall_at(tmp_path, bare)
+        assert result == {"stdout": "", "exit_code": 0}
+        recall.assert_not_called()
+
+    def test_a_builder_named_devpulse_hears_nothing(self, tmp_path):
+        result, recall = self._recall_at(tmp_path, _seat_dir(tmp_path, "devpulse", "specialist"))
+        assert result == {"stdout": "", "exit_code": 0}
+        recall.assert_not_called()
+
+    def test_devpulse_still_hears_its_decisions(self, tmp_path):
+        result, _ = self._recall_at(tmp_path, _seat_dir(tmp_path, "devpulse", "manager"))
+        assert "[GOOD] #56:" in result["stdout"]
+
+    def test_a_future_manager_hears_recall_with_no_code_change(self, tmp_path):
+        result, _ = self._recall_at(tmp_path, _seat_dir(tmp_path, "canary", "manager"))
+        assert "[GOOD] #56:" in result["stdout"]
 
 
 class TestGovernanceKnobsAndWindow:

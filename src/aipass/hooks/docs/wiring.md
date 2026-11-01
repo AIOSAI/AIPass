@@ -68,6 +68,15 @@ nothing. The row runs at 30s on every CLI. `drone @hooks verify` counts a namesp
 that row, and never reports the row as an orphan. A hook named `project` in a hooks.json is unreachable
 per handler, so the name is reserved.
 
+`compass_recall` speaks to manager seats only: its handler walks up from the payload's cwd to the
+nearest `.trinity/passport.json` and recalls nothing unless the passport declares `citizen_class: manager`.
+Compass is the managers' decision store, so a builder seat, or a directory with no passport, hears nothing.
+
+**Mute flag.** `apps/sound.py`'s `speak()` and `play()` check `is_muted()`: the file
+`~/.aipass/aipass-hooks-muted`, outside the temp dir so a reboot or a `TMPDIR` cannot move it.
+`hooksound off` creates it, `on` removes it. A legacy `<temp dir>/aipass-hooks-muted` reads as muted and
+`is_muted()` moves it home; `unmute()` removes both. `tests/conftest.py` points both at a temp dir.
+
 ---
 
 ## Codex

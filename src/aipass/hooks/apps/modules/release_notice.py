@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: release_notice.py
-# Version: 1.0.2
+# Version: 1.1.0
 # Description: Manager-only "AIPass release available" notice builder (DPLAN-0335 leg 2)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-09
-# Modified: 2026-10-17
+# Modified: 2026-10-31
 # =============================================
 
 """Builds the manager-only notice that a project's scaffold is behind AIPass.
@@ -83,6 +83,12 @@ def _is_manager(passport: Path) -> bool:
     identity = data.get("identity")
     nested = identity.get("citizen_class") if isinstance(identity, dict) else None
     return (nested or data.get("citizen_class")) == MANAGER_CLASS
+
+
+def is_manager_seat(start: Path) -> bool:
+    """True when the nearest passport above ``start`` declares citizen_class manager."""
+    passport = _find_passport(start)
+    return bool(passport) and _is_manager(passport)
 
 
 def _is_aipass_source_repo(root: Path) -> bool:
@@ -172,8 +178,7 @@ def build_notice(hook_data: dict) -> str:
     an absent or unparseable manifest counts as behind."""
     start = Path(hook_data.get("cwd", "") or Path.cwd())
 
-    passport = _find_passport(start)
-    if not passport or not _is_manager(passport):
+    if not is_manager_seat(start):
         return ""
 
     root = _find_project_root(start)
