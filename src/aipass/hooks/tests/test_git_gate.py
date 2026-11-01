@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_git_gate.py
-# Version: 5.4.1
+# Version: 5.5.0
 # Description: Tests for git_gate: raw git, gh and the secrets store refused for every seat; protected writes
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-10-24
+# Modified: 2026-10-31
 # =============================================
 
 """Tests for apps/handlers/security/git_gate.py."""
@@ -898,6 +898,36 @@ class TestGitHubWritesWithoutGh:
         seat = _seat(tmp_path, "canary")
         _assert_allowed(_canary_bash("curl https://api.github.com/repos/o/r", seat))
         _assert_allowed(_canary_bash("curl -X POST https://example.com/hook -d x", seat))
+
+    # An interpreter's program: the API host plus a body keyword or a method call is a write; a name is not.
+    _URL = "https://api.github.com/repos/o/r"
+
+    def _py(self, body: str) -> str:
+        return f"python3 - <<'EOF'\nimport json, requests\nfrom urllib.request import urlopen\n{body}\nEOF"
+
+    def test_a_read_only_get_whose_variable_is_named_data_is_allowed(self, tmp_path):
+        seat = _seat(tmp_path, "canary")
+        for body in (
+            f"data = json.load(urlopen('{self._URL}'))",
+            f"data: dict = json.load(urlopen('{self._URL}'))",
+            f"payload = urlopen('{self._URL}').read()\nprint(data == payload)",
+            f"# post the result later, from /posts\nprint(urlopen('{self._URL}/posts').read())",
+        ):
+            _assert_allowed(_canary_bash(self._py(body), seat))
+
+    def test_a_body_keyword_or_a_method_call_to_the_api_is_refused(self, tmp_path):
+        seat = _seat(tmp_path, "canary")
+        for body in (
+            f"requests.post('{self._URL}/issues', data=b)",
+            f"requests.get('{self._URL}', json=b)",
+            f"requests.request('GET', '{self._URL}', data=b)",
+            f"requests.patch('{self._URL}', headers=h)",
+            f"urlopen(Request('{self._URL}', method='DELETE'))",
+            f"fetch('{self._URL}', {{\n  body: s}})",
+        ):
+            result = _canary_bash(self._py(body), seat)
+            _assert_blocked(result)
+            assert "GitHub API" in json.loads(result["stdout"])["reason"], body
 
 
 class TestProtectedPathsAreDefaultDeny:

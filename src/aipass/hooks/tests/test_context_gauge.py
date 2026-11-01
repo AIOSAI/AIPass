@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_context_gauge.py
-# Version: 1.8.0
+# Version: 1.9.0
 # Description: Tests for context_gauge (per-window guard, real window, Codex, OpenCode store) and the grounding receipt
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-10-28
+# Modified: 2026-10-31
 # =============================================
 
 """Tests for apps/handlers/prompt/context_gauge.py."""
@@ -576,6 +576,41 @@ class TestGroundingReceipt:
         compact.handle({"session_id": "ses_1", "cwd": str(seat)})
         _, doc = self._prompt(seat, provider="claude")
         assert (doc["current"]["status"], doc["current"]["generation"]) == ("unverified", 1)
+
+    def _stop(self, seat, provider="opencode", session="ses_1"):
+        with patch(f"{MODULE}._GUARD_DIR", seat):
+            result = context_gauge.handle_stop({"session_id": session, "cwd": str(seat), "provider": provider})
+        doc = json.loads((seat / ".ai_mail.local" / "grounding.json").read_text(encoding="utf-8"))
+        return result, doc
+
+    def test_a_one_prompt_opencode_run_settles_at_stop(self, seat, tmp_path, monkeypatch):
+        """The prompt reads the store before the turn's puts; Stop reads it after them."""
+        _instruction_store(tmp_path / "opencode.db", "ses_1", {}, {})
+        _, doc = self._prompt(seat)
+        assert doc["current"]["status"] == "pending"
+        _instruction_store(tmp_path / "after_puts.db", "ses_1", GROUNDED, GROUNDED)
+        monkeypatch.setenv("OPENCODE_DB", str(tmp_path / "after_puts.db"))
+        result, doc = self._stop(seat)
+        assert result == {"exit_code": 0, "stdout": ""}
+        assert doc["current"]["status"] == "verified"
+        assert [old["status"] for old in doc["history"]] == ["pending"]
+
+    def test_stop_says_nothing_even_when_ungrounded(self, seat, tmp_path):
+        _instruction_store(tmp_path / "opencode.db", "ses_1", GROUNDED, {})
+        result, doc = self._stop(seat)
+        assert (result["stdout"], doc["current"]["status"]) == ("", "ungrounded")
+
+    def test_a_compacted_headless_claude_run_returns_to_unverified_at_stop(self, seat):
+        self._prompt(seat, provider="claude")
+        compact.handle({"session_id": "ses_1", "cwd": str(seat)})
+        _, doc = self._stop(seat, provider="claude")
+        assert (doc["current"]["status"], doc["current"]["generation"]) == ("unverified", 1)
+
+    def test_stop_outside_a_branch_writes_nothing(self, tmp_path):
+        with patch(f"{MODULE}._GUARD_DIR", tmp_path):
+            result = context_gauge.handle_stop({"session_id": "s", "cwd": str(tmp_path), "provider": "claude"})
+        assert result == {"exit_code": 0, "stdout": ""}
+        assert not list(tmp_path.rglob("grounding.json"))
 
     def test_history_keeps_changed_rows_only_and_at_most_twenty(self, seat):
         self._prompt(seat, provider="claude")

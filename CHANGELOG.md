@@ -9,6 +9,11 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+- **hooks**: the grounding receipt is also settled at Stop (`grounding_receipt` Stop row, `context_gauge.handle_stop`), so a one-prompt OpenCode dispatch ends verified or ungrounded instead of pending, and a headless run that compacted returns from pending to unverified.
+- **hooks**: the GitHub-write gate reads an interpreter's program more narrowly: a body counts only as a keyword argument or object key (`data=`, `{body: ...}`), a method only as a call or a quoted method. A read-only GET with a variable named `data` passes; a comment saying post or a `/posts` path no longer refuses.
+
 ## [2026-10-30] — v2.8.31: a project's own prompt handlers fire, project citizens log to their own logs/, seedgo and backup quiet two false alarms
 
 ### Added

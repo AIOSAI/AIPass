@@ -81,6 +81,12 @@ lookups, python `keyring.get_password`, `hosts.yml`, `.git-credentials`), and so
 sending a non-GET method or a body to `api.github.com` (`GITHUB_HTTP_REFUSED`: curl, wget, httpie, or
 an interpreter's request). A text gate cannot close this fully; `bash_writes.NOT_CAUGHT` says so, and
 the kernel sandbox ([sandbox.md](sandbox.md)) is the real boundary.
+In an interpreter's program text that names the API host (`shell_reader.program_github_write`), a write
+is a method as a call or a quoted method (`requests.post(`, `method='PATCH'`, `request("DELETE", …)`), or
+a body as a keyword argument or an object key (`, data=`, `(u, json=`, `{body:`). A variable named
+`data`, a `data: dict` annotation, `x == data`, a comment or a `/posts` path is none of these, so a
+read-only GET with them runs. A positional body (`urlopen(url, b"…")`) and a `**kwargs` body pass
+unseen.
 
 **R7: the secrets store.** Agents get actions, never values (the owner's rulings, 2026-09-02: the admin
 seat changes any file except `.secrets` and sudo; 2026-10-22). Reading or writing `~/.secrets` is refused

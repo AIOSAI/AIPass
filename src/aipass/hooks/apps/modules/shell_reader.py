@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: shell_reader.py
-# Version: 1.4.3
+# Version: 1.4.4
 # Description: The one shell-word reader: every program a Bash command runs, as the shell runs it (rm_gate, git_gate)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-01
-# Modified: 2026-10-24
+# Modified: 2026-10-31
 # =============================================
 
 """What a Bash command RUNS, read the way bash reads it (DPLAN-0356 phase 3, R3 to R6).
@@ -1350,9 +1350,9 @@ SOURCE_SECRETS_SHAPES = (
     re.compile(r"aipass\.api\.apps\.(?:modules|handlers\.auth)(?:\.|\s+import\s+)secrets\b"),
     re.compile(r"handlers\.auth(?:\.|\s+import\s+)(?:keys|env)\b"),
 )
-# A write to the GitHub API from an interpreter's program (R6): the API host, then a method or a body.
+# GitHub API write from an interpreter (R6): host, then .post(/'POST' or data=/{body:. shortcut: positional body passes
 GITHUB_API_HOST = re.compile(r"\b(?:api|uploads)\.github\.com\b", re.IGNORECASE)
-_SOURCE_HTTP_WRITE = re.compile(r"(?i)\b(?:post|put|patch|delete)\b|\b(?:data|json|body)\s*[=:]")
+_HTTP_WRITE = re.compile(r"(?i)[.\"'](?:post|put|patch|delete)(?:\s*\(|[\"'])|[({,]\s*(?:data|json|body)\s*[=:](?!=)")
 
 
 def program_credential(inv: Invocation, shapes: tuple = _SOURCE_CREDENTIAL_SHAPES) -> str:
@@ -1370,7 +1370,7 @@ def program_github_write(inv: Invocation) -> str:
     """The GitHub API write *inv*'s own program text shows (R6): the API host and a method or body."""
     if not inv.text or inv.language in ("", "shell") or not GITHUB_API_HOST.search(inv.text):
         return ""
-    match = _SOURCE_HTTP_WRITE.search(inv.text)
+    match = _HTTP_WRITE.search(inv.text)
     return f"{inv.program}: {match.group(0)} to the GitHub API" if match else ""
 
 
