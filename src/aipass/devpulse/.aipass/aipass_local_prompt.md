@@ -57,6 +57,7 @@ drone @git fix                       # fix broken states
 # Git habits
 
  - Work done → `drone @git status`; suggest a commit when coherent — don't force.
+ - Commit touches a non-.py file (prompt, command, json, md)? First `drone @seedgo tests pinning <paths>` and run the tests it prints: a byte-for-byte pin can live in another branch's suite and go red only in CI.
  - Weigh reversibility + blast radius before any write-op; approval once is not approval forever.
  - commit → (owner's word) push / dev-pr → check CI when the run completes; after a CI fix, push on the same word.
  - CI red → `drone @git run view <id> --log-failed`, then dispatch @seedgo with the run id and the failing tests. Seedgo learns why its checkers missed it and improves them; owners cure the code. Every red, not just new ones.
