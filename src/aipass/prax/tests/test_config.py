@@ -3,7 +3,7 @@
 # Description: Tests for prax config handlers (load + ignore_patterns)
 # Version: 1.5.0
 # Created: 2026-03-29
-# Modified: 2026-10-29
+# Modified: 2026-11-01
 # =============================================
 
 """Tests for apps/handlers/config/load.py and apps/handlers/config/ignore_patterns.py."""
@@ -221,6 +221,7 @@ class TestGetModuleLogsDir:
         caller_project = tmp_path / "caller_project"
         caller_project.mkdir()
         (caller_project / ".git").mkdir()
+        (caller_project / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
         caller_cwd = str(caller_project / "src" / "polyglot")
         monkeypatch.setenv("AIPASS_CALLER_CWD", caller_cwd)
         result = load_mod.get_module_logs_dir("polyglot")
@@ -229,6 +230,19 @@ class TestGetModuleLogsDir:
         assert result.exists()
         assert result.is_dir()
         assert not (tmp_path / "polyglot").exists()
+
+    def test_an_empty_git_dir_does_not_make_the_caller_cwd_a_project(
+        self, mock_prax_infrastructure, monkeypatch, tmp_path
+    ):
+        """Codex's sandbox plants an empty .git in every cwd it starts in."""
+        _patch_load_world(monkeypatch, tmp_path)
+        monkeypatch.setattr(load_mod, "_find_repo_root", lambda: tmp_path)
+        sandbox = tmp_path / "sandbox"
+        (sandbox / ".git").mkdir(parents=True)
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(sandbox))
+        result = load_mod.get_module_logs_dir("polyglot")
+        assert result == tmp_path / "system_logs" / "external" / "polyglot"
+        assert not (sandbox / "logs").exists()
 
 
 class TestPytestCurrentTestRouting:

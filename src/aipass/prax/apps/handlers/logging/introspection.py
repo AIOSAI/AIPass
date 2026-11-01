@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: introspection.py
 # Description: Stack Introspection
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2025-11-10
-# Modified: 2026-10-29
+# Modified: 2026-11-01
 # =============================================
 
 """PRAX Logging Introspection"""
@@ -156,7 +156,11 @@ def detect_external_project(module_path: str) -> Optional[tuple]:
         return None
 
     for candidate in [search_path] + list(search_path.parents):
-        if (candidate / ".git").exists() or (candidate / "pyproject.toml").exists():
+        if (
+            (m := candidate / ".git").is_file()
+            or (m.is_dir() and any(m.iterdir()))
+            or (candidate / "pyproject.toml").exists()
+        ):
             project_name = candidate.name.lower().replace(" ", "_").replace("-", "_")
             # Logged outside AIPass only, never on a fleet module's import.
             json_handler.log_operation(

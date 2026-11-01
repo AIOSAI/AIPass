@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_section.py
 # Description: Git status section builder for devpulse dashboard
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-05-16
-# Modified: 2026-10-17
+# Modified: 2026-11-01
 # =============================================
 
 """Git section builder for devpulse dashboard plugin."""
@@ -31,7 +31,7 @@ def _find_git_root(start: Path) -> Path:
         raise ValueError("start must be absolute; resolving a relative path reads the cwd")
     current = start
     while current != current.parent:
-        if (current / ".git").exists():
+        if (m := current / ".git").is_file() or (m.is_dir() and any(m.iterdir())):
             return current
         current = current.parent
     raise FileNotFoundError("No .git found above " + str(start))

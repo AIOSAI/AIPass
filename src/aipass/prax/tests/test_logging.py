@@ -3,7 +3,7 @@
 # Description: Tests for prax logging subsystem
 # Version: 1.4.1
 # Created: 2026-03-29
-# Modified: 2026-10-29
+# Modified: 2026-11-01
 # =============================================
 
 """Tests for apps/handlers/logging/introspection.py and setup.py."""
@@ -197,12 +197,20 @@ class TestDetectExternalProject:
         internal_path = str(repo_root / "src" / "aipass" / "flow" / "apps" / "handler.py")
         assert detect_external_project(internal_path) is None
 
+    def test_an_empty_git_dir_is_no_project_root(self, mock_prax_infrastructure, tmp_path):
+        """Codex's sandbox plants an empty .git in every cwd it starts in."""
+        (tmp_path / "Sandbox" / ".git").mkdir(parents=True)
+        module_file = tmp_path / "Sandbox" / "module.py"
+        module_file.touch()
+        assert detect_external_project(str(module_file)) is None
+
     def test_detects_external_project_with_git(self, mock_prax_infrastructure, tmp_path):
         """Detects project root via .git directory for external paths."""
         # Create a fake external project with .git
         project_dir = tmp_path / "MyProject"
         project_dir.mkdir()
         (project_dir / ".git").mkdir()
+        (project_dir / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
         module_file = project_dir / "src" / "module.py"
         module_file.parent.mkdir(parents=True)
         module_file.touch()
@@ -233,6 +241,7 @@ class TestDetectExternalProject:
         project_dir = tmp_path / "Backup-System"
         project_dir.mkdir()
         (project_dir / ".git").mkdir()
+        (project_dir / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
         module_file = project_dir / "main.py"
         module_file.touch()
 
@@ -254,7 +263,11 @@ class TestDetectExternalProject:
         # not None` guard here used to swallow the whole oracle, so a host whose
         # tmpdir sat inside a checkout reported green having checked nothing.
         ancestors = [module_file, *module_file.parents]
-        marked = [p for p in ancestors if (p / ".git").exists() or (p / "pyproject.toml").exists()]
+        marked = [
+            p
+            for p in ancestors
+            if (m := p / ".git").is_file() or (m.is_dir() and any(m.iterdir())) or (p / "pyproject.toml").exists()
+        ]
         assert marked == [], f"tmp_path sits inside a project root ({marked}) — the None below is not testable here"
 
         assert detect_external_project(str(module_file)) is None
@@ -268,6 +281,7 @@ class TestSetupExternalRouting:
         project_dir = tmp_path / "AIPL"
         project_dir.mkdir()
         (project_dir / ".git").mkdir()
+        (project_dir / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
         fake_module = str(project_dir / "src" / "polyglot.py")
         env_patch = {"AIPASS_BRANCH_NAME": "", "AIPASS_CALLER_CWD": ""}
 
@@ -285,6 +299,7 @@ class TestSetupExternalRouting:
         project_dir = tmp_path / "Compass"
         project_dir.mkdir()
         (project_dir / ".git").mkdir()
+        (project_dir / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
         fake_module = str(project_dir / "nav.py")
         get_calls = []
         env_patch = {"AIPASS_BRANCH_NAME": "", "AIPASS_CALLER_CWD": ""}
@@ -594,6 +609,7 @@ def _external_logger(setup, tmp_path, module_name, env=None, config=None):
     project_dir = tmp_path / "Proj"
     project_dir.mkdir(exist_ok=True)
     (project_dir / ".git").mkdir(exist_ok=True)
+    (project_dir / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
     fake_module = str(project_dir / f"{module_name}.py")
     env_patch = {"AIPASS_BRANCH_NAME": "", "AIPASS_CALLER_CWD": ""}
     env_patch.update(env or {})
