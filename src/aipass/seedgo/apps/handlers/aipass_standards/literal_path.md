@@ -61,6 +61,7 @@ A **name bound only to such a literal** is the same habit, and is judged where t
 | `Path("/home/user/x.py")` | **no** — `hardcoded_path` owns it |
 | `mock.return_value = "/usr/bin/tmux"`, `parametrize(...)` | **no** — a stub's data |
 | `client.get("/v1/whoami")` | **no** — a route, not a file |
+| `_get(server, "/drop")`, where `_get` hands that parameter to `conn.request` | **no** — a route, one same-file hop |
 | `read_file("/etc/passwd")`, `setenv("SHELL", "/bin/bash")` | **no** — a real host file |
 | `PureWindowsPath("/x/a.py")` | **no** — string algebra, no filesystem |
 | `value.startswith("/proc")` | **no** — a comparison operand |

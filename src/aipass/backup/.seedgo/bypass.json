@@ -68,8 +68,8 @@
     {
       "file": "apps/handlers/drive/client.py",
       "standard": "logged_fallback",
-      "lines": [104, 139, 177, 243, 314],
-      "reason": "Checker reads failure guards as the success path. Success is True (92), True/False (136) or a folder id str (148, 173, 198, 239, 256, 321); every other return of the same False/None is itself a no-service/no-answer failure. Decision of @backup, fleet green leg 5; lines re-pointed 2026-10-24 after the 10-23 client.py fixes moved them."
+      "lines": [131, 167, 205, 271, 342],
+      "reason": "Checker reads failure guards as the success path. Success is True (118), True/False (164) or a folder id str (176, 201, 226, 267, 284, 349); every other return of the same False/None is itself a no-service/no-answer failure. Decision of @backup, fleet green leg 5; lines re-pointed 2026-10-31 after the network_down classifier moved them."
     },
     {
       "file": "apps/handlers/drive/share.py",

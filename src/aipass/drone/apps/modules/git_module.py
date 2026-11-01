@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.14.0
+# Version: 1.15.0
 # Created: 2026-03-17
-# Modified: 2026-10-26
+# Modified: 2026-10-30
 # =============================================
 
 """
@@ -46,6 +46,7 @@ from aipass.drone.apps.handlers.git import (
     tag_handler,
     remote_handler,
     repo_door,
+    issue_signing,
     help_pages,
 )
 from aipass.drone.apps.handlers.deletion_log import UNKNOWN_CALLER
@@ -101,6 +102,7 @@ _COMMANDS = (
     "release-write",
     "label-write",
     "alerts-write",
+    "remote-write",
     "ci-cure",
 )
 
@@ -140,13 +142,6 @@ _RUN_WATCH_INTERVAL = "60"
 
 _DIFF_FLAGS = ("--staged", "--all", "--stat")
 _REFUSE_PUSH_ARGS = "push takes no arguments: drone @git push sends the checked-out branch to origin, never forced."
-# A body gh reads from a file, an editor or the browser never passes through drone to be signed.
-_UNSIGNABLE_BODY_FLAGS = ("-F", "--body-file", "-e", "--editor", "-w", "--web")
-_REFUSE_UNSIGNABLE = (
-    "An issue or comment filed upstream from any seat is signed with its seat and project, "
-    "so give the text with --body; --body-file, --editor and --web are not signed here."
-)
-_CONTRIBUTION_SIGNATURE = "Filed through drone @git by @{caller}, project {project}."
 
 _LOG_COUNT_FLAGS = ("-n", "--count", "--max-count")
 
@@ -233,6 +228,8 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
             )
             return {"stdout": "", "stderr": message, "exit_code": 1}
         cmd = gh_key
+    elif command == "remote" and args[:1] == ["set"]:
+        cmd = "remote-write"
     elif command in _CHORE_COMMANDS:
         cmd = gh_access_key(command, args) or command
     try:
@@ -249,7 +246,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
     json_handler.log_operation("git_handle_command", {"command": command, "args": args, "caller": caller})
 
     if cmd == ISSUE_CONTRIBUTE:
-        signed, refusal = _signed_contribution(args, caller)
+        signed, refusal = issue_signing.signed_contribution(args, caller, lock_handler.find_repo_root())
         if refusal:
             return {"stdout": "", "stderr": refusal, "exit_code": 1}
         return _handle_gh_passthrough(command, signed)
@@ -274,7 +271,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
     if command == "export":
         return _handle_export(args)
     if command == "remote":
-        return _handle_remote(args)
+        return _handle_remote(args, caller=caller)
     if command == "lock":
         return _handle_lock()
     if command == "branches":
@@ -373,7 +370,9 @@ def _handle_repo_door(command: str, flag: repo_door.RepoFlag) -> dict:
         return _refuse_repo_door(verdict, flag, verb, target.refusal)
 
     head_before = repo_door.head_sha(target.root)
-    if command in _CHORE_COMMANDS:
+    if command == "remote":
+        result = _handle_remote(flag.args, target.root, verdict.caller)
+    elif command in _CHORE_COMMANDS:
         result = _handle_chore(command, flag.args, target.root, verdict.caller)
     else:
         result = _run_door_verb(command, flag.args, target.root)
@@ -1160,13 +1159,15 @@ def _handle_export(args: list[str]) -> dict:
     return {"stdout": result["message"], "stderr": "", "exit_code": 0}
 
 
-def _handle_remote(args: list[str]) -> dict:
-    """Handle the remote subcommand (global tier) — where this repository points.
+def _handle_remote(args: list[str], repo_root: Path | None = None, caller: str = "") -> dict:
+    """Handle remote: the listing (global tier), or ``remote set <name> <url>`` (owner tier, the gate's remote-write).
 
     Credentials are redacted in the handler, before any value reaches this rendering.
     """
+    if args[:1] == ["set"]:
+        return remote_handler.set_remote(args[1:], repo_root or lock_handler.find_repo_root(), caller)
     as_json = wants_json(args)
-    result = remote_handler.list_remotes()
+    result = remote_handler.list_remotes(repo_root)
 
     if as_json:
         return _json_document(
@@ -1289,22 +1290,6 @@ def _handle_push(args: list[str]) -> dict:
     if args:
         return {"stdout": "", "stderr": _REFUSE_PUSH_ARGS, "exit_code": 1}
     return repo_door.push_current_branch(lock_handler.find_repo_root())
-
-
-def _signed_contribution(args: list[str], caller: str) -> tuple[list[str], str]:
-    """Sign an upstream issue or comment with the seat and project it came from, or say why it cannot be."""
-    if any(arg in _UNSIGNABLE_BODY_FLAGS or arg.startswith("--body-file=") for arg in args):
-        return [], _REFUSE_UNSIGNABLE
-    signature = _CONTRIBUTION_SIGNATURE.format(caller=caller, project=lock_handler.find_repo_root().name)
-    signed = list(args)
-    for index, arg in enumerate(signed):
-        if arg in ("-b", "--body") and index + 1 < len(signed):
-            signed[index + 1] = f"{signed[index + 1]}\n\n{signature}"
-            return signed, ""
-        if arg.startswith("--body="):
-            signed[index] = f"{arg}\n\n{signature}"
-            return signed, ""
-    return [*signed, "--body", signature], ""
 
 
 def _handle_merge_main(args: list[str]) -> dict:

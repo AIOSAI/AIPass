@@ -3,7 +3,7 @@
 # Description: Tests for owner/identity check and fix (DPLAN-0239 P4)
 # Version: 1.0.5
 # Created: 2026-07-11
-# Modified: 2026-10-24
+# Modified: 2026-10-31
 # =============================================
 
 """Tests for apps/handlers/sync_registry_ops.py and apps/modules/sync_registry.py."""
@@ -155,6 +155,29 @@ class TestCheckOwnerIdentity:
         assert result == 1
         assert "multi_ci_cure" in said
         assert "alpha, trigger" in said
+
+    def test_a_seated_specialist_owner_is_a_note_and_the_check_stays_clean(self, tmp_path, monkeypatch, capsys):
+        _make_branch(tmp_path, "beo", "src/beo", citizen_class="manager", passport_rid="proj-id")
+        _make_branch(tmp_path, "dean", "src/dean", passport_rid="proj-id")
+        reg = _write_registry(
+            tmp_path,
+            metadata={"version": "1.0.0", "last_updated": "2026-07-11", "id": "proj-id"},
+            branches=[
+                _entry("beo", "src/beo", owner=False, registry_id="uid-b"),
+                _entry("dean", "src/dean", created="2026-10-31", owner=True, registry_id="uid-d"),
+            ],
+        )
+        monkeypatch.setattr("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", lambda *a, **k: reg)
+
+        result = check_owner_identity(registry_path=reg)
+        code = handle_sync_registry(["--check"])
+
+        said = " ".join("".join(capsys.readouterr()).split())
+        assert result["clean"] is True and result["issues"] == []
+        assert [n["flag"] for n in result["notes"]] == ["owner_not_manager_or_first"]
+        assert code == 0
+        assert "clean" in said
+        assert "note [owner_not_manager_or_first] Owner dean is not the manager" in said
 
     def test_owner_missing_branch_flag(self, tmp_path):
 

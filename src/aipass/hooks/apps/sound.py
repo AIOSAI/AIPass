@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: sound.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Shared sound utilities — Piper TTS and WAV playback with mute support
 # Branch: hooks
 # Layer: apps
 # Created: 2026-05-22
-# Modified: 2026-10-25
+# Modified: 2026-10-31
 # =============================================
 
 """Shared sound functions for hook handlers. Checks mute flag before playing."""
@@ -19,7 +19,9 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import err_console
 
 CONSOLE = err_console
-MUTE_FLAG = Path(tempfile.gettempdir()) / "aipass-hooks-muted"
+# Per-user, outside the temp dir: /tmp clears at reboot and TMPDIR moves it per process.
+MUTE_FLAG = Path.home() / ".aipass" / "aipass-hooks-muted"
+LEGACY_MUTE_FLAG = Path(tempfile.gettempdir()) / "aipass-hooks-muted"
 PIPER_BIN = Path.home() / ".local" / "share" / "piper" / "piper"
 PIPER_VOICE = Path.home() / ".local" / "share" / "piper-voices" / "en_US-amy-medium.onnx"
 
@@ -35,7 +37,16 @@ def print_introspection():
 
 
 def is_muted() -> bool:
-    """Check whether hook sounds are currently muted."""
+    """Check whether hook sounds are currently muted; a flag at the old temp-dir path moves here once."""
+    if LEGACY_MUTE_FLAG.exists():
+        try:
+            mute()
+            LEGACY_MUTE_FLAG.unlink(missing_ok=True)
+        except OSError as exc:
+            # A sandboxed seat cannot write the home: it stays muted and an unsandboxed one moves the flag.
+            logger.info("[HOOKS] sound: mute flag move deferred: %s", exc)
+            return True
+        logger.info("[HOOKS] sound: mute flag moved from %s to %s", LEGACY_MUTE_FLAG, MUTE_FLAG)
     return MUTE_FLAG.exists()
 
 
@@ -44,14 +55,16 @@ def mute() -> bool:
 
     Returns the resulting muted state (always True); @api imports this directly.
     """
+    MUTE_FLAG.parent.mkdir(parents=True, exist_ok=True)
     MUTE_FLAG.touch()
     logger.info("[HOOKS] sound: muted")
     return True
 
 
 def unmute() -> bool:
-    """Unmute all hook sounds. Idempotent — a missing flag is already unmuted."""
+    """Unmute all hook sounds. Idempotent — a missing flag is already unmuted. The legacy flag goes too."""
     MUTE_FLAG.unlink(missing_ok=True)
+    LEGACY_MUTE_FLAG.unlink(missing_ok=True)
     logger.info("[HOOKS] sound: unmuted")
     return False
 

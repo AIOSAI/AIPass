@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: no_product_call_content.py
 # Description: No Product Call Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-10-30
 # =============================================
 
 """
@@ -38,7 +38,7 @@ def get_no_product_call_standards() -> str:
         "  Reachable means the test's body, its decorators, every same-file helper",
         "  it calls, and every fixture it requests. NAMING the product means any of:",
         "",
-        "  [green]•[/green] a name bound by an [green]aipass.*[/green] import",
+        "  [green]•[/green] a name bound by an [green]aipass.*[/green] import, or a project branch's own top package",
         "  [green]•[/green] a module-level constant whose value reaches one (fixed point) —",
         "    SIMPLE_MODULES = [snapshot, versioned] is how a parametrized test",
         "    reaches mod.handle_command with the import three screens up",

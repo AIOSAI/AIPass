@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_settings.py
 # Description: Host API settings handler — the desktop's gear rules, held in Python
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-08-16
-# Modified: 2026-10-19
+# Modified: 2026-10-31
 # =============================================
 
 """Tests for apps/handlers/host/settings.py, the desktop's settings lane."""
@@ -30,7 +30,7 @@ def _where_the_door_would_write() -> Path:
     """
     Ask @hooks' own module, in a child that inherits this process's environment.
 
-    Never compute it here: gettempdir silently falls back when TMPDIR does not exist."""
+    Never compute it here: the module's own path is the one the door's process will touch."""
     child = subprocess.run(
         [sys.executable, "-c", WHERE_THE_FLAG_LIVES],
         capture_output=True,
@@ -262,7 +262,10 @@ class TestHooksSound:
         operator_flag = Path(str(host_settings.hooks_sound.MUTE_FLAG))
         before = _fingerprint(operator_flag)
 
-        flag = tmp_path / operator_flag.name
+        flag = tmp_path / ".aipass" / operator_flag.name
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        # TMPDIR too: the door moves a legacy temp-dir flag once, and the operator's must never be the one moved.
         monkeypatch.setenv("TMPDIR", str(tmp_path))
         monkeypatch.setattr(host_settings.hooks_sound, "MUTE_FLAG", flag)
 
@@ -298,16 +301,15 @@ class TestTheGuardsOnTheLiveDoorTest:
     """Two hermetic tests about the ONE non-hermetic test above it."""
 
     def test_the_redirect_check_asks_the_door_rather_than_computing_the_answer(self, tmp_path, monkeypatch) -> None:
-        """The failure mode, reproduced, with no live @hooks needed."""
-        doomed = tmp_path / "never-created"
-        monkeypatch.setenv("TMPDIR", str(doomed))
+        """A HOME the child inherits is the HOME the door's own module resolves against."""
+        elsewhere = tmp_path / "elsewhere"
+        monkeypatch.setenv("HOME", str(elsewhere))
+        monkeypatch.setenv("USERPROFILE", str(elsewhere))
 
         would_write = _where_the_door_would_write()
 
-        assert doomed not in would_write.parents, (
-            "tempfile no longer falls back on a missing TMPDIR — good news, but "
-            "the live test's guard was written for a platform where it does"
-        )
+        assert elsewhere in would_write.parents
+        assert would_write != Path(str(host_settings.hooks_sound.MUTE_FLAG))
 
     def test_the_fingerprint_notices_a_rewrite_that_changed_nothing(self, tmp_path) -> None:
         """Why the operator's flag is fingerprinted with its mtime and not just its state."""

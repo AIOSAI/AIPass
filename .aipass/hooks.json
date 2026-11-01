@@ -168,6 +168,7 @@
   },
 
   "Stop": {
+    "grounding_receipt": {"enabled": true, "handler": "aipass.hooks.apps.handlers.prompt.context_gauge.handle_stop", "matcher": "", "timeout": 10},
     "stop_sound": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.notification.stop_sound.handle",

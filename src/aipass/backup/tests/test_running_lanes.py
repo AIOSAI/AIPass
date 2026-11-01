@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_running_lanes.py
 # Description: Tests for the running-lane progress files every lane writes under .backup/running/
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-16
-# Modified: 2026-10-16
+# Modified: 2026-10-31
 # =============================================
 
 """Tests for apps/handlers/state/progress.py as snapshot, versioned, all and drive_sync drive it."""
@@ -217,6 +217,7 @@ def _client(monkeypatch: pytest.MonkeyPatch):
     instance = MagicMock(name="DriveClient")
     instance.authenticate.return_value = True
     instance.last_error = None
+    instance.network_down = ""
     instance._api_call.return_value = {"storageQuota": {"usage": "0", "limit": str(10**12)}}
     monkeypatch.setattr(drive_client, "DriveClient", MagicMock(return_value=instance))
     return instance

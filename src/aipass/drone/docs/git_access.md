@@ -17,7 +17,7 @@ Auth is centralised in `verify_git_access()` and checked **once**, at the top of
 | Tier | Who | What it covers |
 |------|-----|----------------|
 | **Global** | All branches | the read doors and the passthroughs — status, diff, log, show, blame, tracked, export, remote, lock, branches, tag listing, release list, label list, alerts list, the `gh` reads, and `issue create` / `issue comment` aimed at AIOSAI/AIPass |
-| **Owner** | The project's registry-declared owner — **earned, never hardcoded** (devpulse in AIPass) | everything that writes: commit, untrack, checkout, push (outside AIPass), the PR verbs, branch deletion, prune-temp, sync, merge-main, merge, smart-sync, unlock, tag, fix, release edit, label create, alerts dismiss, and the `gh` writes |
+| **Owner** | The project's registry-declared owner — **earned, never hardcoded** (devpulse in AIPass) | everything that writes: commit, untrack, checkout, push (outside AIPass), the PR verbs, branch deletion, prune-temp, sync, merge-main, merge, smart-sync, unlock, tag, fix, release edit, label create, alerts dismiss, remote set, and the `gh` writes |
 | **CI cure** | The one citizen whose registry entry carries `ci_cure: true` (@trigger in AIPass) | `ci-cure` alone: commit a CI cure on dev and push dev |
 
 Owner tier is **earned per repo** from four facts in the caller's own project registry:

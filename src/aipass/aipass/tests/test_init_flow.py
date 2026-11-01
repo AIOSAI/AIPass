@@ -3,7 +3,7 @@
 # Description: Tests for aipass init_flow Phase 3
 # Version: 1.3.0
 # Created: 2026-04-16
-# Modified: 2026-10-27
+# Modified: 2026-10-31
 # =============================================
 
 """Tests for apps/modules/init_flow.py and the handlers it drives."""
@@ -797,11 +797,13 @@ class TestStages:
     def test_stage_6_non_interactive_creates_my_agent(self, tmp_local_json) -> None:
         """non_interactive=True uses 'my_agent' as default name."""
         mock_proc = MagicMock(returncode=0)
-        with patch(f"{_MOD}.subprocess.run", return_value=mock_proc):
+        with patch(f"{_MOD}.subprocess.run", return_value=mock_proc) as run:
             with patch(f"{_MOD}._resolve_package_dir", return_value=None):
                 result = stage_6_first_agent(non_interactive=True)
         assert result["agent_name"] == "my_agent"
         assert result["agent_path"] == "src/my_agent"
+        # a fresh project has no registry: the first mint must name it, spawn never invents one
+        assert run.call_args.args[0][-2:] == ["--registry", str(Path.cwd() / "AIPASS_REGISTRY.json")]
 
     def test_stage_6_drone_not_found(self, tmp_local_json) -> None:
         """FileNotFoundError from drone is handled gracefully."""

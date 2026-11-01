@@ -49,13 +49,16 @@ name instead of silently making a branch called WIZARD in `./wizard`.
    `--registry` to an absolute path. Extract the branch name from the target path and refuse a
    target that sits inside another citizen's tree (any parent holding `.trinity/passport.json`).
    An existing directory that already has a passport is **adopted** instead of refused (see
-   Adoption), unless it holds `INCOMPLETE_MINT.txt` (step 8). A name already in the registry
-   refuses before anything is copied.
+   Adoption), unless it holds `INCOMPLETE_MINT.txt` (step 8). The registry is the `--registry`
+   path, or the nearest `*_REGISTRY.json` walking up from the target; a mint never invents one
+   from a `.git` or `pyproject.toml` marker. No registry above the target, or a target outside
+   the named registry's directory, refuses and exits non-zero with nothing written. A name
+   already in the registry refuses before anything is copied.
 2. **Lookup** — Resolve the citizen class to a template directory via `class_registry`.
 3. **Credential** — Resolve the target project's registry credential (`metadata.id`)
    **before anything is written**, through `resolve_project_credential` in `registry.py`.
-   Loading is a read: `load_registry` never mints. A **missing** registry gets a fresh
-   uuid4 — that is what a brand-new external project is, and it stops its first citizen
+   Loading is a read: `load_registry` never mints. A **missing** file at an explicit
+   `--registry` path gets a fresh uuid4 — that is what a brand-new external project is, and it stops its first citizen
    inheriting AIPass's own id. A **present** registry hands back its own id, untouched. A
    registry that **exists but will not parse** gets `""`: that is a live project whose
    credential could not be READ, and inventing a replacement would re-credential it and

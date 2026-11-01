@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: grant_admin.py
-# Description: Seat-flag ceremonies — thin CLI layer for the registry admin and ci_cure flags
-# Version: 1.1.0
+# Description: Seat-flag ceremonies — thin CLI layer for the registry admin, ci_cure and owner flags
+# Version: 1.2.0
 # Created: 2026-08-12
-# Modified: 2026-10-23
+# Modified: 2026-10-31
 # =============================================
 
-"""Seat-flag ceremonies: admin on the devpulse entry, ci_cure on the trigger entry.
+"""Seat-flag ceremonies: admin on the devpulse entry, ci_cure on the trigger entry, a project's owner seat.
 
 Each flag is one leg of a lane drone verifies; spawn owns only the write.
 """
@@ -15,7 +15,13 @@ from aipass.prax import logger
 
 from aipass.cli.apps.modules import console, error
 
-from aipass.spawn.apps.handlers.registry import ADMIN_BRANCH, CI_CURE_BRANCH, ensure_admin, ensure_ci_cure
+from aipass.spawn.apps.handlers.registry import (
+    ADMIN_BRANCH,
+    CI_CURE_BRANCH,
+    ensure_admin,
+    ensure_ci_cure,
+    move_owner,
+)
 from aipass.spawn.apps.handlers.json import json_handler
 
 
@@ -25,11 +31,13 @@ def print_introspection():
     console.print("[bold cyan]grant_admin Module[/bold cyan]")
     console.print(f"Admin ceremony — writes admin:true onto the {ADMIN_BRANCH} registry entry")
     console.print(f"ci-cure ceremony — writes ci_cure:true onto the {CI_CURE_BRANCH} registry entry")
+    console.print("owner — moves a project's owner seat onto one citizen (preview; --apply writes)")
     console.print()
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print("  [cyan]handlers/[/cyan]")
     console.print(f"    [dim]- registry.py (ensure_admin — sanctioned writer, {ADMIN_BRANCH}-only fence)[/dim]")
     console.print(f"    [dim]- registry.py (ensure_ci_cure — {CI_CURE_BRANCH}-only, one holder)[/dim]")
+    console.print("    [dim]- registry.py (move_owner — one owner per project registry, never AIPASS_REGISTRY)[/dim]")
     console.print()
 
 
@@ -39,6 +47,8 @@ def handle_command(command: str, args: list) -> bool:
         handler = handle_grant_admin
     elif command == "grant-ci-cure":
         handler = handle_grant_ci_cure
+    elif command == "owner":
+        handler = handle_owner
     else:
         return False
 
@@ -155,5 +165,62 @@ def handle_grant_ci_cure(args: list[str]) -> int:
     if _run_ceremony(args, "grant-ci-cure", "ci_cure", CI_CURE_BRANCH, ensure_ci_cure):
         return 1
     console.print("  [dim]drone's ci-cure tier still checks tenancy and the passport's path-binding.[/dim]")
+    console.print()
+    return 0
+
+
+def _print_owner_usage() -> None:
+    """Print the owner verb usage block."""
+    console.print("[bold cyan]Usage:[/bold cyan] drone @spawn owner <@citizen> [--registry <path>] [--apply]")
+    console.print()
+    console.print("  [dim]Moves owner:true onto the citizen's entry and clears it on every other entry.[/dim]")
+    console.print(
+        "  [green]--registry[/green]  Project registry [dim](default: nearest *_REGISTRY.json above the CWD)[/dim]"
+    )
+    console.print("  [green]--apply[/green]     Write the move [dim](default: preview, nothing written)[/dim]")
+    console.print()
+    console.print("  [dim]Refused: a citizen not in the registry, and AIPASS_REGISTRY.json itself.[/dim]")
+    console.print("  [dim]Passports are untouched: citizen_class stays where it is.[/dim]")
+
+
+def handle_owner(args: list[str]) -> int:
+    """Move a project's owner seat: preview by default, --apply writes.
+
+    Returns exit code (0=preview, moved or already the owner, 1=refused).
+    """
+    if "--help" in args or "-h" in args:
+        _print_owner_usage()
+        return 0
+
+    registry_path = None
+    positional = []
+    i = 0
+    while i < len(args):
+        if args[i] == "--registry" and i + 1 < len(args):
+            registry_path = args[i + 1]
+            i += 2
+        elif args[i].startswith("--"):
+            i += 1
+        else:
+            positional.append(args[i])
+            i += 1
+
+    if len(positional) != 1:
+        error(
+            "owner takes exactly one citizen", suggestion="drone @spawn owner <@citizen> [--registry <path>] [--apply]"
+        )
+        return 1
+
+    status, reason, _holders = move_owner(positional[0], registry_path, apply="--apply" in args)
+    json_handler.log_operation("owner_ceremony", data={"citizen": positional[0], "status": status})
+
+    console.print()
+    if status == "refused":
+        error(reason)
+        console.print()
+        return 1
+    console.print(f"[green]{reason}[/green]")
+    if status == "preview":
+        console.print("  [dim]Nothing written. Add --apply to move the seat.[/dim]")
     console.print()
     return 0

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_tests_lane.py
 # Description: Template v1 — tests_lane module, retire_ops and template_ops
-# Version: 1.0.6
+# Version: 1.0.7
 # Created: 2026-09-21
-# Modified: 2026-10-24
+# Modified: 2026-11-01
 # =============================================
 
 """Tests for apps/modules/tests_lane.py and the handlers it drives."""
@@ -417,3 +417,49 @@ class TestTemplateBump:
 
         assert refusal.value.code == 7
         assert "template sprinkle" in capsys.readouterr().err
+
+
+@pytest.fixture
+def pinned_repo(tmp_path, monkeypatch):
+    """A repo whose tests name .claude/commands/codex.md three ways, plus two that only look alike."""
+    root = tmp_path / "repo"
+    (root / ".git").mkdir(parents=True)
+    tests_dir = root / "src" / "aipass" / "alpha" / "tests"
+    tests_dir.mkdir(parents=True)
+    bodies = {
+        "test_literal.py": 'SWITCH = {".claude/commands/codex.md": "body"}\n',
+        "test_split.py": 'def test_x(root):\n    assert (root / ".claude" / "commands" / "codex.md").is_file()\n',
+        "test_call.py": 'from pathlib import Path\nPATH = Path(".claude", "commands", "codex.md")\n',
+        "test_other_codex.py": 'PATH = ".opencode/commands/codex.md"\n',
+        "test_nested.py": 'A = "src/x/.claude/commands/codex.md"\nB = ".claude/commands/codex.md.bak"\n',
+        "test_deeper.py": 'P = root / "src" / "x" / ".claude" / "commands" / "codex.md"\n',
+    }
+    for name, body in bodies.items():
+        (tests_dir / name).write_text(body, encoding="utf-8")
+    scratch = root / "src" / "aipass" / "alpha" / "docs.local"
+    scratch.mkdir()
+    (scratch / "test_scratch.py").write_text('P = ".claude/commands/codex.md"\n', encoding="utf-8")
+    monkeypatch.chdir(root / "src" / "aipass" / "alpha")
+    return root
+
+
+class TestPinning:
+    """`tests pinning <path>`: the test files that name a changed non-.py file, ready for pytest."""
+
+    def test_every_spelling_of_the_path_is_found_and_look_alikes_are_not(self, capsys, pinned_repo):
+        """THE DEFECT: 3f64c5ef edited the root codex.md; the test pinning it ran only in CI."""
+        assert tests_lane.handle_command("tests", ["pinning", ".claude/commands/codex.md"]) is True
+
+        out, err = capsys.readouterr()
+        prefix = "src/aipass/alpha/tests/"
+        assert out.splitlines() == [prefix + "test_call.py", prefix + "test_literal.py", prefix + "test_split.py"]
+        assert ".claude/commands/codex.md: 3 test files" in err
+
+    def test_an_absolute_path_and_a_python_file_and_a_miss_each_say_so_on_stderr(self, capsys, pinned_repo):
+        args = ["pinning", str(pinned_repo / ".claude" / "commands" / "codex.md"), "apps/x.py", "README.md"]
+        assert tests_lane.handle_command("tests", args) is True
+
+        out, err = capsys.readouterr()
+        assert len(out.splitlines()) == 3
+        assert "apps/x.py: a Python file, skipped" in err
+        assert "README.md: no test names it" in err

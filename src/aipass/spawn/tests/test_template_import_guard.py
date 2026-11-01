@@ -3,7 +3,7 @@
 # Description: What the newborn's handler guard must survive on its very first import
 # Version: 1.1.1
 # Created: 2026-08-30
-# Modified: 2026-10-17
+# Modified: 2026-10-31
 # =============================================
 
 """Tests for templates/citizen/apps/handlers/__init__.py, the newborn's import-time access guard."""
@@ -769,7 +769,12 @@ class TestOptionalPeerImportsAreWideEnough:
             monkeypatch.delitem(sys.modules, name, raising=False)
 
         try:
-            result = core.spawn_agent(str(tmp_path / "newbie"), role="Test", purpose="meta-tab fallback")
+            result = core.spawn_agent(
+                str(tmp_path / "newbie"),
+                role="Test",
+                purpose="meta-tab fallback",
+                registry_path=str(tmp_path / "AIPASS_REGISTRY.json"),
+            )
         except (ImportError, OSError) as err:
             pytest.fail(f"a peer raising {type(exc).__name__} took spawn's mint down instead of falling back: {err}")
 
@@ -795,7 +800,12 @@ class TestOptionalPeerImportsAreWideEnough:
             monkeypatch.delitem(sys.modules, name, raising=False)
 
         with pytest.raises(ValueError, match="peer has a bug"):
-            core.spawn_agent(str(tmp_path / "newbie"), role="Test", purpose="meta-tab fatal")
+            core.spawn_agent(
+                str(tmp_path / "newbie"),
+                role="Test",
+                purpose="meta-tab fatal",
+                registry_path=str(tmp_path / "AIPASS_REGISTRY.json"),
+            )
 
         assert not (tmp_path / "newbie").exists(), "the lookup runs before the copy: nothing is minted"
 

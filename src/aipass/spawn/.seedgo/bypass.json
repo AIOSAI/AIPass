@@ -112,7 +112,7 @@
       "file": "tests/test_template_import_guard.py",
       "standard": "import_site",
       "lines": [
-        788
+        793
       ],
       "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision; HELD in leg 7): importlib.import_module in test_the_denier_actually_denies is the negative control. Its subject is the import attempt under the denier; a top-level import would succeed before the denier exists and prove nothing. The sys.modules delitems only drop cached aipass.memory modules so the finder is consulted, and monkeypatch restores them."
     },
@@ -136,9 +136,9 @@
       "file": "apps/modules/grant_admin.py",
       "standard": "logged_fallback",
       "lines": [
-        109
+        119
       ],
-      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): the function answers an exit code, 0 success and 1 failure. The other return 1 (line 118) follows error(reason) on a refused ceremony with a console.print() between; it is a failure. Every 1 here is a failure, and spawn.py's exit seam reads it so."
+      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): the function answers an exit code, 0 success and 1 failure. The other return 1 (line 128) follows error(reason) on a refused ceremony with a console.print() between; it is a failure. Every 1 here is a failure, and spawn.py's exit seam reads it so."
     },
     {
       "file": "apps/modules/repair.py",

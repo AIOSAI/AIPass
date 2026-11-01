@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: upload.py
 # Description: Google Drive upload engine — single + batch with threading
-# Version: 1.5.2
+# Version: 1.6.0
 # Created: 2026-04-16
-# Modified: 2026-10-24
+# Modified: 2026-10-31
 # =============================================
 
 """Google Drive upload engine."""
@@ -173,12 +173,14 @@ def upload_batch(
     project_root set: the tracker is saved every batch_save_interval files, so a dying run keeps what it uploaded.
     A stop cancels unstarted futures; uploads in flight finish and count; success is then False.
     So do BREAKER_FAILURES failures in a row, and "aborted" then names the last error.
+    A lost network stops it at the first failure, and "aborted" is then the client's network_down line.
     """
     if not files:
         return {"success": True, "uploaded": 0, "failed": 0}
 
     skipped = object()
 
+    client.network_down = ""
     client.file_tracker = tracker
     uploaded = 0
     failed = 0
@@ -198,7 +200,7 @@ def upload_batch(
 
     def _upload_one(file_path: Path) -> object:
         """Upload a single file in a worker thread; ``skipped`` when a stop or the breaker came first."""
-        if stop_requested() or breaker["aborted"]:
+        if stop_requested() or breaker["aborted"] or client.network_down:
             return skipped
         if not getattr(client._thread_local, "service", None):
             client._thread_local.service = client._build_thread_service()
@@ -277,6 +279,11 @@ def upload_batch(
     # A stop that lands after the last upload finished stopped nothing.
     stopped = stop_requested() and completed < len(files)
     aborted = breaker["aborted"]
+    if client.network_down:
+        aborted = (
+            f"Drive sync stopped: {client.network_down}; nothing more uploaded, "
+            f"{uploaded} files up this run, the next run resumes"
+        )
     if aborted:
         logger.warning(f"[backup] {aborted}")
 

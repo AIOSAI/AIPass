@@ -3,7 +3,7 @@
 # Description: Integration tests for citizen class system
 # Version: 1.3.3
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-10-31
 # =============================================
 
 """Tests for apps/handlers/class_registry.py and the citizen-class-aware create and update paths."""
@@ -229,6 +229,39 @@ class TestMintTimeClass:
         assert self._class_of(tmp_path / "firstborn") == "specialist"
 
 
+class TestMintNeedsARegistry:
+    """A mint never invents a registry: none above the target, or a target outside it, refuses."""
+
+    def test_no_registry_above_the_target_refuses_and_writes_nothing(
+        self, tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]
+    ):
+        # An operator-named AIPASS_REGISTRY would be found and returned unchecked.
+        monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
+        (tmp_path / ".git").mkdir()
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = 'bare'\n", encoding="utf-8")
+
+        assert handle_create([str(tmp_path / "orphan")]) != 0
+
+        out, err = capsys.readouterr()
+        assert f"No registry above {tmp_path / 'orphan'}" in " ".join((out + err).split())
+        assert not (tmp_path / "orphan").exists()
+        assert list(tmp_path.rglob("*_REGISTRY.json")) == []
+
+    def test_a_target_outside_the_explicit_registry_refuses_and_writes_nothing(
+        self, tmp_path, capsys: pytest.CaptureFixture[str]
+    ):
+        project = tmp_path / "project"
+        project.mkdir()
+        elsewhere = tmp_path / "elsewhere"
+
+        assert handle_create([str(elsewhere / "stray"), "--registry", str(project / "AIPASS_REGISTRY.json")]) != 0
+
+        out, err = capsys.readouterr()
+        assert "is outside the project of registry" in " ".join((out + err).split())
+        assert not elsewhere.exists()
+        assert list(project.iterdir()) == []
+
+
 class TestCustomConfigReadmeGuide:
     """The custom_config/ README ships the S193 self-heal doctrine (DPLAN-0283 WS-C)."""
 
@@ -269,7 +302,9 @@ class TestClassAwareCreate:
     def test_create_explicit_class_creates_full_scaffold(self, tmp_path, citizen_class):
         """drone @spawn create <class> @path creates the full scaffold, either class."""
         target = tmp_path / f"{citizen_class}_agent"
-        result = spawn_agent(str(target), citizen_class=citizen_class)
+        result = spawn_agent(
+            str(target), citizen_class=citizen_class, registry_path=str(tmp_path / "AIPASS_REGISTRY.json")
+        )
 
         assert result["success"] is True, result.get("error")
         assert (target / "apps").exists()
@@ -289,7 +324,7 @@ class TestClassAwareCreate:
     def test_create_with_citizen_class_in_passport(self, tmp_path, citizen_class):
         """Created agents carry the class they were minted with, verbatim."""
         target = tmp_path / f"class_test_{citizen_class}"
-        spawn_agent(str(target), citizen_class=citizen_class)
+        spawn_agent(str(target), citizen_class=citizen_class, registry_path=str(tmp_path / "AIPASS_REGISTRY.json"))
 
         passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert passport["identity"]["citizen_class"] == citizen_class
@@ -297,7 +332,9 @@ class TestClassAwareCreate:
     def test_create_includes_integrations_scaffold(self, tmp_path):
         """Creation includes apps/integrations/README.md (DPLAN-0133)."""
         target = tmp_path / "integrations_test"
-        result = spawn_agent(str(target), citizen_class="specialist")
+        result = spawn_agent(
+            str(target), citizen_class="specialist", registry_path=str(tmp_path / "AIPASS_REGISTRY.json")
+        )
 
         assert result["success"] is True
         assert (target / "apps" / "integrations").is_dir()
@@ -512,7 +549,9 @@ class TestAgentScaffoldContent:
     def test_created_agent_has_no_claude_md(self, tmp_path):
         """Branches should NOT have CLAUDE.md or AGENTS.md — project root covers it."""
         target = tmp_path / "content_test"
-        spawn_agent(str(target), role="Tester", purpose="Testing scaffold")
+        spawn_agent(
+            str(target), role="Tester", purpose="Testing scaffold", registry_path=str(tmp_path / "AIPASS_REGISTRY.json")
+        )
 
         assert not (target / "CLAUDE.md").exists()
         assert not (target / "AGENTS.md").exists()
@@ -520,7 +559,7 @@ class TestAgentScaffoldContent:
     def test_created_agent_local_prompt_has_content(self, tmp_path):
         """Created agent's local prompt should reference branch identity."""
         target = tmp_path / "prompt_agent"
-        spawn_agent(str(target), purpose="Testing prompt")
+        spawn_agent(str(target), purpose="Testing prompt", registry_path=str(tmp_path / "AIPASS_REGISTRY.json"))
 
         prompt = target / ".aipass" / "aipass_local_prompt.md"
         assert prompt.exists()
@@ -533,7 +572,9 @@ class TestAgentScaffoldContent:
         import json
 
         target = tmp_path / "role_test"
-        spawn_agent(str(target), role="Data Analyst", purpose="Reports")
+        spawn_agent(
+            str(target), role="Data Analyst", purpose="Reports", registry_path=str(tmp_path / "AIPASS_REGISTRY.json")
+        )
 
         passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert passport["identity"]["role"] == "Data Analyst"
@@ -541,7 +582,13 @@ class TestAgentScaffoldContent:
     def test_created_agent_passport_has_traits_as_a_list(self, tmp_path):
         """CONTRACT CHANGED (R7): traits lands as a LIST; a bare string becomes a one-element list."""
         target = tmp_path / "traits_test"
-        spawn_agent(str(target), role="Analyst", traits="curious, terse", purpose="Reports")
+        spawn_agent(
+            str(target),
+            role="Analyst",
+            traits="curious, terse",
+            purpose="Reports",
+            registry_path=str(tmp_path / "AIPASS_REGISTRY.json"),
+        )
 
         passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert passport["identity"]["traits"] == ["curious, terse"]
@@ -549,7 +596,12 @@ class TestAgentScaffoldContent:
     def test_created_agent_passport_traits_accepts_a_real_list(self, tmp_path):
         """A caller who already has a list gets it stored as-is, not re-wrapped."""
         target = tmp_path / "traits_list_test"
-        spawn_agent(str(target), traits=["curious", "terse"], purpose="Reports")
+        spawn_agent(
+            str(target),
+            traits=["curious", "terse"],
+            purpose="Reports",
+            registry_path=str(tmp_path / "AIPASS_REGISTRY.json"),
+        )
 
         passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert passport["identity"]["traits"] == ["curious", "terse"]
@@ -558,7 +610,7 @@ class TestAgentScaffoldContent:
         """Omitting traits leaves the template's empty LIST — the identity hook
         skips the line when falsy, and [] is falsy just as "" was."""
         target = tmp_path / "no_traits_test"
-        spawn_agent(str(target), purpose="Testing default")
+        spawn_agent(str(target), purpose="Testing default", registry_path=str(tmp_path / "AIPASS_REGISTRY.json"))
 
         passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert passport["identity"]["traits"] == []
@@ -566,7 +618,7 @@ class TestAgentScaffoldContent:
     def test_created_agent_passport_has_email(self, tmp_path):
         """Passport carries the branch address, so identity does not render 'Email: unknown'."""
         target = tmp_path / "email_test"
-        spawn_agent(str(target), purpose="Testing email")
+        spawn_agent(str(target), purpose="Testing email", registry_path=str(tmp_path / "AIPASS_REGISTRY.json"))
 
         passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert passport["branch_info"]["email"] == "@email_test"
@@ -751,7 +803,9 @@ class TestBirthCertificateSchema:
     def test_mint_carries_metadata_template(self, tmp_path, class_name):
         """A real create must render metadata.template with the detected profile."""
         target = tmp_path / f"cert_{class_name}"
-        result = spawn_agent(str(target), citizen_class=class_name)
+        result = spawn_agent(
+            str(target), citizen_class=class_name, registry_path=str(tmp_path / "AIPASS_REGISTRY.json")
+        )
         assert result["success"] is True, result
 
         cert = json.loads((target / "artifacts" / "birth_certificate.json").read_text(encoding="utf-8"))
@@ -765,7 +819,9 @@ class TestBirthCertificateSchema:
     def test_mint_description_matches_metadata(self, tmp_path, class_name):
         """The prose must name the same template the metadata records."""
         target = tmp_path / f"desc_{class_name}"
-        result = spawn_agent(str(target), citizen_class=class_name)
+        result = spawn_agent(
+            str(target), citizen_class=class_name, registry_path=str(tmp_path / "AIPASS_REGISTRY.json")
+        )
         assert result["success"] is True, result
 
         cert = json.loads((target / "artifacts" / "birth_certificate.json").read_text(encoding="utf-8"))

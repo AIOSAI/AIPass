@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_literal_path_check.py
 # Description: literal_path_check — test template v1 item 22, paths built from tmp_path, never written
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-10-30
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/literal_path_check.py."""
@@ -129,6 +129,16 @@ class TestWhatIsNeverConvicted:
     def test_a_url_path_names_a_route_not_a_file(self):
         """188 fleet-wide, all of them api's client verbs."""
         assert _values('client.get("/v1/whoami")\n') == []
+
+    def test_a_route_through_a_helper_that_hands_it_to_a_client_verb_is_a_url(self):
+        """THE DEFECT: beo's _get(server, "/widgets/mail") read as a file, one hop from conn.request."""
+        helpers = (
+            "def _get(srv, path):\n    return srv.request('GET', path)\ndef _read(p):\n    return open(p).read()\n"
+            "def _ping(srv):\n    url = '/health'\n    return srv.get(url)\n"
+        )
+        source = helpers + '_get(server, "/widgets/mail")\n_get(server, path="/drop")\n_read("/srv/data.txt")\n'
+
+        assert _values(source) == ["/srv/data.txt"]
 
     def test_a_system_root_names_a_real_file_the_test_is_about(self):
         """60 fleet-wide. tmp_path cannot express "a file the fence must refuse"."""

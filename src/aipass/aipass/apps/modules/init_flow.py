@@ -3,7 +3,7 @@
 # Description: 10-stage guided first-run setup — aipass init command
 # Version: 1.5.0
 # Created: 2026-04-16
-# Modified: 2026-10-27
+# Modified: 2026-10-31
 # =============================================
 
 """
@@ -560,7 +560,9 @@ def stage_6_first_agent(non_interactive: bool = False, dry_run: bool = False) ->
         spawned = True
     else:
         try:
-            proc = subprocess.run(["drone", "@spawn", "create", agent_path], timeout=60)
+            # A fresh project has no registry yet; naming it is the deliberate door, spawn never invents one.
+            registry = str(Path.cwd() / "AIPASS_REGISTRY.json")
+            proc = subprocess.run(["drone", "@spawn", "create", agent_path, "--registry", registry], timeout=60)
             spawned = proc.returncode == 0
         except FileNotFoundError as exc:
             logger.warning("[init_flow] drone not found in stage 6: %s", exc)

@@ -92,6 +92,11 @@
           "event": "Notification"
         },
         {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PermissionRequest",
+          "event": "PermissionRequest",
+          "timeout": 10
+        },
+        {
           "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:pre_compact",
           "event": "PreCompact",
           "matcher": "manual",

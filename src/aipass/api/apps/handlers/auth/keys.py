@@ -1,14 +1,16 @@
 # =================== AIPass ====================
 # Name: keys.py
 # Description: API Key Management Handler
-# Version: 2.2.0
+# Version: 2.3.0
 # Created: 2025-11-16
-# Modified: 2026-10-22
+# Modified: 2026-10-31
 # =============================================
 
 """API Key Management Handler"""
 
-from typing import Optional, Dict, Any
+import os
+import subprocess
+from typing import Any, Dict, List, Optional
 
 from aipass.api.apps.handlers.auth import secrets
 from aipass.api.apps.handlers.json import json_handler
@@ -22,8 +24,20 @@ VALIDATION_RULES = {
 }
 
 
+# The variable each provider's own SDK and CLI read; a provider absent here has no `run`.
+ENV_NAMES = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
+
+
 class KeyUnavailable(Exception):
     """The keyring could not give the key: named by backend class and reason, raised from None."""
+
+
+class RunRefused(ValueError):
+    """`run` refused before the child started; the message never holds the key."""
 
 
 def get_api_key(provider: str = "openrouter") -> Optional[str]:
@@ -94,3 +108,22 @@ def diagnose_key(provider: str = "openrouter") -> str:
         return f"Key found (secrets) but too short — {len(key)} chars, need {rules['min_length']}+"
 
     return "Key found (secrets) but failed validation"
+
+
+def run_with_key(provider: str, command: List[str]) -> int:
+    """Run *command* with the provider's key in its environment only; returns the child's exit code.
+    stdin, stdout and stderr are inherited: the child's output is its own and is never read here."""
+    env_name = ENV_NAMES.get(provider)
+    if env_name is None:
+        raise RunRefused(f"run knows no environment variable for '{provider}' (known: {', '.join(sorted(ENV_NAMES))})")
+
+    key = get_api_key(provider)
+    if key is None:
+        raise RunRefused(f"no valid {provider} key in the keyring entry {provider}/api_key; see drone @api validate")
+
+    json_handler.log_operation("key_run", {"provider": provider, "program": command[0]})
+    try:
+        return subprocess.run(command, env={**os.environ, env_name: key.strip()}).returncode
+    except OSError as e:
+        # Program and errno text only: the exception's own repr could carry the environment.
+        raise RunRefused(f"could not start {command[0]}: {e.strerror}") from None

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: engine.py
-# Version: 2.5.0
+# Version: 2.6.0
 # Description: Hook engine — unified dispatcher; gates fail closed, injectors skip on error
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-18
-# Modified: 2026-10-29
+# Modified: 2026-10-30
 # =============================================
 
 """Hook engine — dispatches hook events to handlers, logs via prax + JSONL.
@@ -296,6 +296,15 @@ def _refuse_broken_gate(event_type: str, hook_name: str, handler: str, why: str,
     return json.dumps({"decision": "block", "reason": reason}), 2
 
 
+#: Payload fields a row carries when the payload has them: what an agent waits on (a log reader's state).
+_ROW_FIELDS = ("notification_type", "tool_name")
+
+
+def _payload_fields(parsed: dict, *extra: str) -> dict:
+    """The payload's non-empty _ROW_FIELDS (plus *extra*), for a log row; never an empty field."""
+    return {key: parsed[key] for key in (*_ROW_FIELDS, *extra) if parsed.get(key)}
+
+
 def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
     """Core dispatch — run hooks for event, return (merged_stdout, exit_code)."""
     if not config.get("hooks_enabled", True):
@@ -331,7 +340,8 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
             return nudge, 0
 
     if not event_hooks:
-        _log({"ts": time.time(), "event": event_type, "action": "no_hooks_configured"})
+        row = {"ts": time.time(), "event": event_type, "action": "no_hooks_configured"}
+        _log({**row, **_payload_fields(parsed, "session_id")})
         return "", 0
 
     outputs = []
@@ -467,6 +477,7 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
                 "stderr_preview": result["stderr"][:200] if result["stderr"] else "",
                 "cwd": str(Path.cwd()),
                 "session_id": payload_session_id,
+                **_payload_fields(parsed),
             }
         )
 

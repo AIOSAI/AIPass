@@ -3,7 +3,7 @@
 # Description: metadata.id — the project credential a new registry is born with
 # Version: 1.0.2
 # Created: 2026-08-24
-# Modified: 2026-10-17
+# Modified: 2026-10-31
 # =============================================
 
 """Tests for apps/handlers/registry.py's project-credential mint (metadata.id)."""
@@ -254,9 +254,9 @@ class TestCreatePathStillStampsACredential:
 
         project = tmp_path / "brandnew"
         project.mkdir()
-        (project / "pyproject.toml").write_text("[project]\nname='brandnew'\n", encoding="utf-8")
-
-        result = spawn_agent(str(project / "src" / "brandnew" / "widget"))
+        result = spawn_agent(
+            str(project / "src" / "brandnew" / "widget"), registry_path=str(project / "AIPASS_REGISTRY.json")
+        )
         assert result.get("success"), result
 
         passport = json.loads(

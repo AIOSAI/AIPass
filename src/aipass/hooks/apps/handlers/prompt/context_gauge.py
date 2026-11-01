@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: context_gauge.py
-# Version: 1.6.1
+# Version: 1.7.0
 # Description: Heads-up to run /prep ($prep on Codex) before auto-compact, and the grounding receipt (UserPromptSubmit)
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-20
-# Modified: 2026-10-28
+# Modified: 2026-10-31
 # =============================================
 
 """Heads-up so the model banks memories via /prep before the compact ceiling.
@@ -95,6 +95,16 @@ def handle(hook_data: dict) -> dict:
     if line:
         result = {**result, "stdout": "\n\n".join(part for part in (result["stdout"], line) if part)}
     return result
+
+
+def handle_stop(hook_data: dict) -> dict:
+    """Settle the grounding receipt at the end of a turn; silent, the line is the next prompt's to say.
+
+    The prompt reads OpenCode's store before that turn's entries are put, so a one-prompt run (a dispatch)
+    would end pending; at Stop they are stored. A compacted headless run returns from pending the same way.
+    """
+    _receipt_line(hook_data)
+    return {"exit_code": 0, "stdout": ""}
 
 
 def _gauge(hook_data: dict) -> dict:

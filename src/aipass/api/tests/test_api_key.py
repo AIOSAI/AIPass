@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_api_key.py
 # Description: Tests for API Key Management Module
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-10-24
+# Modified: 2026-10-31
 # =============================================
 
 """Tests for apps/modules/api_key.py, the API key management module."""
@@ -14,11 +14,13 @@
 # seedgo: no-test-needed(covered_elsewhere) — get_secret_cmd's secret read, tests/test_secrets.py
 # seedgo: no-test-needed(hardcoded_key) — any real key; the keyring is conftest's dict and the env writer is stubbed
 
+import os
+import sys
 from unittest.mock import patch, MagicMock
 
 import pytest
 
-from aipass.api.apps.api import discover_modules, route_command
+from aipass.api.apps.api import discover_modules, main, route_command
 from aipass.api.apps.handlers.auth import env as env_handler
 from aipass.api.apps.handlers.auth import keys as keys_handler
 from aipass.api.apps.modules import api_key
@@ -642,3 +644,92 @@ class TestTheKeyringIsTheOnlyKeySource:
         out, _ = capsys.readouterr()
         assert "get-secret telegram/bot" in out
         assert "--out" not in out
+
+
+RUN_KEYS = {
+    "openai": ("OPENAI_API_KEY", "sk-" + "8" * 45),
+    "anthropic": ("ANTHROPIC_API_KEY", "sk-ant-" + "9" * 40),
+    "openrouter": ("OPENROUTER_API_KEY", FIXTURE_KEY),
+}
+# The child writes the variable it was handed to argv[1], then exits with argv[2].
+CHILD = "import os, sys; open(sys.argv[1], 'w', encoding='utf-8').write(os.environ.get(sys.argv[3], '')); sys.exit(int(sys.argv[2]))"
+
+
+class TestRunPutsTheKeyInTheChildOnly:
+    """run <provider> -- <command>: the key reaches the child's environment, never the seat."""
+
+    @pytest.mark.parametrize("provider", sorted(RUN_KEYS))
+    def test_the_child_reads_its_provider_variable_and_its_exit_code_is_the_door_s(
+        self, provider, keyring_store, tmp_path, capsys
+    ):
+        variable, value = RUN_KEYS[provider]
+        keyring_store.set_password("aipass", f"{provider}/api_key", value)
+        seen = tmp_path / "seen.txt"
+
+        with pytest.raises(SystemExit) as exited:
+            api_key.handle_command("run", [provider, "--", sys.executable, "-c", CHILD, str(seen), "7", variable])
+
+        assert exited.value.code == 7
+        assert seen.read_text(encoding="utf-8") == value
+        assert variable not in os.environ
+        out, err = capsys.readouterr()
+        assert value not in out + err
+
+    def test_the_key_never_reaches_the_log(self, keyring_store, tmp_path, mock_infrastructure):
+        variable, value = RUN_KEYS["openai"]
+        keyring_store.set_password("aipass", "openai/api_key", value)
+
+        with pytest.raises(SystemExit):
+            api_key.handle_command(
+                "run", ["openai", "--", sys.executable, "-c", CHILD, str(tmp_path / "seen.txt"), "0", variable]
+            )
+
+        logged = "".join(path.read_text(encoding="utf-8") for path in mock_infrastructure.rglob("*") if path.is_file())
+        assert '"key_run"' in logged
+        assert value not in logged
+
+    def test_an_unknown_provider_is_refused_and_starts_nothing(self, tmp_path, capsys):
+        seen = tmp_path / "seen.txt"
+
+        assert api_key.handle_command("run", ["nosuch", "--", sys.executable, "-c", CHILD, str(seen), "0", "X"])
+
+        _, err = capsys.readouterr()
+        assert "run knows no environment variable for 'nosuch'" in err
+        assert not seen.exists()
+
+    def test_a_provider_with_no_key_is_refused_and_starts_nothing(self, tmp_path, capsys):
+        seen = tmp_path / "seen.txt"
+
+        assert api_key.handle_command("run", ["openai", "--", sys.executable, "-c", CHILD, str(seen), "0", "X"])
+
+        _, err = capsys.readouterr()
+        assert "no valid openai key in the keyring entry openai/api_key" in err
+        assert not seen.exists()
+
+    @pytest.mark.parametrize("args", [["openai", "--"], ["openai"], ["--", "true"], ["openai", "extra", "--", "true"]])
+    def test_anything_but_one_provider_then_a_command_is_the_usage_line(self, args, capsys):
+        assert api_key.handle_command("run", args) is True
+
+        _, err = capsys.readouterr()
+        assert api_key.RUN_USAGE in err
+
+    def test_a_program_that_does_not_exist_is_refused_by_name(self, keyring_store, capsys):
+        keyring_store.set_password("aipass", "openai/api_key", RUN_KEYS["openai"][1])
+
+        api_key.handle_command("run", ["openai", "--", "aipass-no-such-program"])
+
+        _, err = capsys.readouterr()
+        assert "could not start aipass-no-such-program" in err
+
+    def test_a_help_flag_after_the_separator_reaches_the_child(self, keyring_store, tmp_path, monkeypatch, capsys):
+        variable, value = RUN_KEYS["openai"]
+        keyring_store.set_password("aipass", "openai/api_key", value)
+        probe = "import sys; sys.exit(0 if sys.argv[1:] == ['--help'] else 3)"
+        monkeypatch.setattr(sys, "argv", ["api", "run", "openai", "--", sys.executable, "-c", probe, "--help"])
+
+        with pytest.raises(SystemExit) as exited:
+            main()
+
+        assert exited.value.code == 0
+        out, _ = capsys.readouterr()
+        assert "API_KEY — Manage API keys" not in out

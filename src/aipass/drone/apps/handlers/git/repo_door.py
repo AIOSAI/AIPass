@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repo_door.py
 # Description: The external-repo door — git verbs in another repo, admin seat only, every use recorded
-# Version: 1.10.0
+# Version: 1.11.0
 # Created: 2026-09-13
-# Modified: 2026-10-26
+# Modified: 2026-10-30
 # =============================================
 
 """The external-repo door: ``drone @git <verb> --repo <path>``.
@@ -52,6 +52,7 @@ DOOR_VERBS = (
     "release",
     "label",
     "alerts",
+    "remote",
 )
 
 # gh's run, read side only; rerun, cancel, delete and download stay home-only.

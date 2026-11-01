@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_git_module_handlers.py
-# Description: Tests for the handlers @git drives — lock, repo root, status, sync and PR
-# Version: 1.0.1
+# Description: Tests for the handlers @git drives — lock, repo root, status, sync, PR and remote set
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-24
+# Modified: 2026-10-30
 # =============================================
 
-"""Tests for the lock, status, sync and PR handlers under apps/handlers/git/ that apps/modules/git_module.py drives."""
+"""Tests for the lock, status, sync, PR and remote handlers that apps/modules/git_module.py drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — subprocess.run, which every git and gh call here reaches as a recorded stub
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -29,6 +30,10 @@ from aipass.drone.apps.handlers.git.lock_handler import (
 )
 from aipass.drone.apps.handlers.git.status_handler import get_branch_status
 from aipass.drone.apps.handlers.git.sync_handler import sync_main, sync_main_ref
+from aipass.drone.apps.handlers.git import remote_handler, repo_door
+from aipass.drone.apps.modules.git_module import handle_command
+
+from .conftest import make_owner_project
 
 
 # ===========================================================================
@@ -564,3 +569,131 @@ class TestSyncMainRef:
 
         assert result["success"] is False
         assert "main" in result["message"].lower()
+
+
+def _git(repo: Path, *argv: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *argv], cwd=repo, capture_output=True, text=True, encoding="utf-8")
+
+
+def _remote_ledger(tmp_path: Path) -> list[dict]:
+    path = tmp_path / remote_handler.LEDGER_NAME
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+@pytest.fixture()
+def beo_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """An external project's git repo with BEO's manager seat at its root, standing in it; git sees no host config."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    for name in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.setenv(name, "beo@test.invalid")
+    root = make_owner_project(tmp_path / "beo", branch="BEO", registry_name="BEO_REGISTRY.json")
+    _git(root, "init", "-q", "-b", "main")
+    monkeypatch.chdir(root)
+    return root
+
+
+_BEO = "https://github.com/AIOSAI/BEO.git"
+
+
+class TestRemoteSet:
+    """remote set points a remote at a github.com repo, owner tier, and records the change."""
+
+    def test_a_missing_remote_is_added_and_the_change_is_recorded(self, beo_repo: Path, tmp_path: Path) -> None:
+        """Mutant: set-url used when the remote is absent — git refuses 'No such remote'."""
+        result = handle_command("remote", ["set", "origin", _BEO])
+
+        assert result["exit_code"] == 0, result["stderr"]
+        assert "(none) -> " + _BEO in result["stdout"]
+        assert _git(beo_repo, "remote", "get-url", "origin").stdout.strip() == _BEO
+        [record] = _remote_ledger(tmp_path)
+        assert (record["caller"], record["name"], record["old"], record["new"], record["outcome"]) == (
+            "BEO",
+            "origin",
+            "",
+            _BEO,
+            "set",
+        )
+
+    def test_an_existing_remote_is_re_pointed_and_the_old_url_is_recorded(self, beo_repo: Path, tmp_path: Path) -> None:
+        old = "https://github.com/AIOSAI/hark.git"
+        _git(beo_repo, "remote", "add", "origin", old)
+
+        result = handle_command("remote", ["set", "origin", "git@github.com:AIOSAI/BEO.git"])
+
+        assert result["exit_code"] == 0, result["stderr"]
+        assert _git(beo_repo, "remote", "get-url", "origin").stdout.strip() == "git@github.com:AIOSAI/BEO.git"
+        assert _remote_ledger(tmp_path)[0]["old"] == old
+
+    def test_the_same_url_again_is_reported_unchanged(self, beo_repo: Path, tmp_path: Path) -> None:
+        _git(beo_repo, "remote", "add", "origin", _BEO)
+
+        result = handle_command("remote", ["set", "origin", _BEO])
+
+        assert result["exit_code"] == 0
+        assert "already points at" in result["stdout"]
+        assert _remote_ledger(tmp_path)[0]["outcome"] == "unchanged"
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://github.com/AIOSAI/BEO.git",
+            "https://ghp_token@github.com/AIOSAI/BEO.git",
+            "https://gitlab.com/AIOSAI/BEO.git",
+            "git@github.com:AIOSAI",
+            "https://github.com/AIOSAI/BEO/extra",
+            "ssh://git@evil.example/AIOSAI/BEO.git",
+        ],
+    )
+    def test_a_url_that_is_not_a_plain_github_repo_is_refused_and_nothing_changes(
+        self, beo_repo: Path, tmp_path: Path, url: str
+    ) -> None:
+        """Mutant: the url check dropped — a token lands in .git/config in clear."""
+        result = handle_command("remote", ["set", "origin", url])
+
+        assert result["exit_code"] == 1
+        assert result["stderr"] == remote_handler.REFUSE_URL
+        assert _git(beo_repo, "remote").stdout.strip() == ""
+        assert _remote_ledger(tmp_path) == []
+
+    @pytest.mark.parametrize("args", [["-f", _BEO], ["origin"], ["origin", _BEO, "extra"]])
+    def test_a_bad_name_or_arity_is_refused_before_git(self, beo_repo: Path, args: list[str]) -> None:
+        result = handle_command("remote", ["set", *args])
+
+        assert result["exit_code"] == 1
+        assert result["stderr"].startswith(("remote set refused", "Usage: drone @git remote set"))
+        assert _git(beo_repo, "remote").stdout.strip() == ""
+
+    def test_a_seat_without_owner_tier_is_refused_and_listing_stays_global(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Mutant: remote set left on the global key — any citizen re-points origin."""
+        root = make_owner_project(tmp_path / "beo", branch="scout", citizen_class="specialist")
+        monkeypatch.chdir(root)
+
+        refused = handle_command("remote", ["set", "origin", _BEO])
+
+        assert refused["exit_code"] == 1
+        assert "not authorized for 'remote-write'" in refused["stderr"]
+        with patch("aipass.drone.apps.handlers.git.remote_handler.subprocess.run") as run:
+            run.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+            assert handle_command("remote", [])["exit_code"] == 0
+
+    def test_the_admin_door_sets_a_remote_in_another_repo(
+        self, beo_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Mutant: remote off DOOR_VERBS — --repo refuses the verb."""
+        ext = tmp_path / "ext"
+        ext.mkdir()
+        _git(ext, "init", "-q", "-b", "main")
+        monkeypatch.setattr(repo_door, "admin_verdict", lambda: repo_door.AdminVerdict(True, "devpulse", ""))
+
+        result = handle_command("remote", ["set", "origin", _BEO, "--repo", str(ext)])
+
+        assert result["exit_code"] == 0, result["stderr"]
+        assert _git(ext, "remote", "get-url", "origin").stdout.strip() == _BEO
+        assert _git(beo_repo, "remote").stdout.strip() == ""
+        assert _remote_ledger(tmp_path)[0]["caller"] == "devpulse"

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: literal_path_check.py
 # Description: Literal Absolute Path Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-09-22
-# Modified: 2026-10-24
+# Modified: 2026-10-30
 # =============================================
 
 """
@@ -178,6 +178,29 @@ def _path_bindings(tree: ast.Module) -> Dict[str, str]:
     return {name: value for name, value in bound.items() if name not in rejected}
 
 
+def _url_helpers(tree: ast.Module) -> Dict[str, Set[int | str]]:
+    """Same-file functions that hand a parameter straight to a client verb, and which parameters.
+
+    ``_get(server, "/drop")`` reaches ``conn.request("GET", path)`` one hop down: each parameter is
+    keyed by position and by name, so either spelling at the call site is the route.
+    """
+    helpers: Dict[str, Set[int | str]] = {}
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        params = [arg.arg for arg in function.args.args]
+        forwarded: Set[int | str] = set()
+        for node in ast.walk(function):
+            if not isinstance(node, ast.Call) or tail_name(node.func) not in _URL_CALLS:
+                continue
+            for _keyword, argument in _arguments(node):
+                if isinstance(argument, ast.Name) and argument.id in params:
+                    forwarded |= {params.index(argument.id), argument.id}
+        if forwarded:
+            helpers[function.name] = forwarded
+    return helpers
+
+
 _parse = partial(parse, tag="literal_path")
 
 
@@ -188,13 +211,16 @@ def scan(source: str) -> List[Tuple[int, str, str]]:
         return []
 
     bound = _path_bindings(tree)
+    routes = _url_helpers(tree)
     hits: List[Tuple[int, str, str]] = []
     seen: Set[Tuple[int, str]] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         call_name = tail_name(node.func)
-        for keyword_name, argument in _arguments(node):
+        for position, (keyword_name, argument) in enumerate(_arguments(node)):
+            if (keyword_name if keyword_name is not None else position) in routes.get(call_name, ()):
+                continue
             value = _string_value(argument)
             if value is None and isinstance(argument, ast.Name):
                 value = bound.get(argument.id)

@@ -3,7 +3,7 @@
 # Description: Tests for CLI routing and help output
 # Version: 1.1.0
 # Created: 2026-03-27
-# Modified: 2026-10-24
+# Modified: 2026-10-31
 # =============================================
 
 """Tests for apps/spawn.py's CLI routing, help output, and introspection."""
@@ -131,7 +131,7 @@ class TestCreateDryRun:
         Mutant: the preview drops its 'DRY RUN' header -> red."""
 
         target = str(tmp_path / "drytest")
-        result = handle_create([target, "--dry-run"])
+        result = handle_create([target, "--dry-run", "--registry", str(tmp_path / "AIPASS_REGISTRY.json")])
         assert result == 0
         out = capsys.readouterr().out
         assert "DRY RUN" in out
@@ -141,7 +141,7 @@ class TestCreateDryRun:
         """--dry-run creates nothing on disk."""
 
         target = tmp_path / "drytest"
-        handle_create([str(target), "--dry-run"])
+        handle_create([str(target), "--dry-run", "--registry", str(tmp_path / "AIPASS_REGISTRY.json")])
         assert not target.exists()
         assert "No files were created" in capsys.readouterr().out
 
@@ -161,7 +161,19 @@ class TestCreateDryRun:
         template = tmp_path / "my_template"
         template.mkdir()
 
-        assert handle_create([str(tmp_path / "drytest"), "--template", str(template), "--dry-run"]) == 0
+        assert (
+            handle_create(
+                [
+                    str(tmp_path / "drytest"),
+                    "--template",
+                    str(template),
+                    "--dry-run",
+                    "--registry",
+                    str(tmp_path / "AIPASS_REGISTRY.json"),
+                ]
+            )
+            == 0
+        )
         assert str(template) in capsys.readouterr().out
 
     def test_dry_run_on_a_passported_dir_previews_adoption_not_an_error(
@@ -173,6 +185,25 @@ class TestCreateDryRun:
 
         assert handle_create([str(target), "--dry-run"]) == 0
         assert "Would adopt" in capsys.readouterr().out
+
+    def test_dry_run_names_the_nearest_registry_not_the_framework_one(
+        self, tmp_path, capsys: pytest.CaptureFixture[str]
+    ):
+        (tmp_path / "BEO_REGISTRY.json").write_text('{"metadata": {}, "branches": []}', encoding="utf-8")
+
+        assert handle_create([str(tmp_path / "src" / "dean"), "--dry-run"]) == 0
+        out = " ".join(capsys.readouterr().out.split())
+        assert f"Registry: add to {tmp_path / 'BEO_REGISTRY.json'}" in out
+        assert "AIPASS_REGISTRY" not in out
+
+    def test_dry_run_with_no_registry_above_says_create_would_refuse(
+        self, tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]
+    ):
+        monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
+
+        assert handle_create([str(tmp_path / "orphan"), "--dry-run"]) == 1
+        assert "create would refuse" in " ".join(capsys.readouterr().err.split())
+        assert not (tmp_path / "orphan").exists()
 
 
 class TestCreateSummary:

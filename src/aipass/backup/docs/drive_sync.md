@@ -142,9 +142,23 @@ well as once at the end of the run. A run that is killed or fails part-way
 leaves the files it uploaded tracked, so the next run skips them instead of
 uploading them again as orphans.
 
-## An outage ends the run after 20 failures in a row
+## A lost network ends the run at its first failure
 
-With no network every file fails in milliseconds, so a run with no breaker
+`DriveClient` reads the cause chain of every request that failed past its
+retries, and of a failed authentication. A name-resolution or connection
+error, or a timeout with no response (`socket.gaierror`, `ConnectionError`,
+`TimeoutError`, httplib2's `ServerNotFoundError`, urllib3's
+`NameResolutionError`), sets `network_down` to `network is down (cannot
+resolve <host>)`; an HTTP answer from Google does not. Once it is set, no
+worker starts another file, and the run's last stdout line is `Drive sync
+stopped: network is down (cannot resolve <host>); nothing more uploaded, N
+files up this run, the next run resumes`, exit 2. A token refresh that cannot
+resolve its host ends the same way at authentication, with `nothing uploaded`,
+and a listing refusal names the network the same way.
+
+## Google answering with errors ends the run after 20 failures in a row
+
+A Google outage can fail every file in milliseconds, so a run with no breaker
 walks the whole queue and floods its log. `upload_batch` counts failures in
 its worker threads; the 20th in a row with no success between
 (`BREAKER_FAILURES`) trips the breaker, and no worker starts another file.
@@ -182,6 +196,7 @@ never touches the tracker; the listing at run start is the only heal.
 
 The two refusals before the listing fail the run the same way: a failed
 authentication ends with `Drive sync auth failed: <reason>. Nothing uploaded.`
+(or the network line above)
 and a project without a snapshot store with `Snapshot store not found: <path>.
 Nothing uploaded.` as the last stdout line, the command marked failed, exit 2.
 The daemon's job mail and the host API's job record read that exit and that

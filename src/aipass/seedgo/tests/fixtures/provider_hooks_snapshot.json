@@ -280,5 +280,16 @@
         }
       ]
     }
+  ],
+  "PermissionRequest": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PermissionRequest",
+          "timeout": 10
+        }
+      ]
+    }
   ]
 }

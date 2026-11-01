@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: literal_path_content.py
 # Description: Literal Absolute Path Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-10-30
 # =============================================
 
 """
@@ -51,7 +51,8 @@ def get_literal_path_standards() -> str:
         "[bold cyan]NEVER CONVICTED (each measured over 553 fleet test files):[/bold cyan]",
         "  [green]Home-rooted[/green] (78) -- hardcoded_path already convicts it.",
         '  [green]Mock data[/green] (200) -- [dim]mock.return_value = "/usr/bin/tmux"[/dim].',
-        '  [green]A URL path[/green] (188) -- [dim]client.get("/v1/whoami")[/dim] names a route.',
+        '  [green]A URL path[/green] (188) -- [dim]client.get("/v1/whoami")[/dim] names a route,',
+        "    and so does a same-file helper's parameter it hands to one.",
         '  [green]A system root[/green] (60) -- [dim]read_file("/etc/passwd")[/dim] names a real file',
         "  the fence must refuse; tmp_path cannot express that.",
         '  [green]A pure path class[/green] (26) -- [dim]PureWindowsPath("/x")[/dim] is string algebra.',

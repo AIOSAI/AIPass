@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: no_product_call_check.py
 # Description: No Product Call Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-09-22
-# Modified: 2026-10-24
+# Modified: 2026-10-30
 # =============================================
 
 """
@@ -28,8 +28,9 @@ AUDIT_SCOPE = "all_files"
 STANDARD = "NO_PRODUCT_CALL"
 STANDARD_KEY = "no_product_call"
 
-#: The product's import root. Everything under it is the thing under test.
+#: The product's import root; a project branch's own top package joins it (import_root).
 PRODUCT = "aipass"
+
 
 #: The one filename that carries a branch's shared apparatus.
 CONFTEST = "conftest.py"
@@ -49,54 +50,65 @@ def _base_name(node: ast.expr) -> str:
     return node.id if isinstance(node, ast.Name) else ""
 
 
-def _product_imports(tree: ast.Module) -> Set[str]:
-    """Names this file binds from an ``aipass.*`` import."""
+def import_root(path: Path) -> str:
+    """The top package a file imports under: the highest dir of its unbroken ``__init__.py`` chain."""
+    top = None
+    for directory in path.resolve().parents:
+        if (directory / "__init__.py").is_file():
+            top = directory
+        elif top is not None:
+            break
+    return top.name if top is not None else PRODUCT
+
+
+def _product_imports(tree: ast.Module, roots: Tuple[str, ...]) -> Set[str]:
+    """Names this file binds from an import under one of the product roots."""
     names: Set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name.split(".")[0] == PRODUCT:
+                if alias.name.split(".")[0] in roots:
                     names.add(alias.asname or alias.name.split(".")[0])
-        elif isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] == PRODUCT:
+        elif isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] in roots:
             names |= {alias.asname or alias.name for alias in node.names}
     return names
 
 
-def _names_the_product(text: str) -> bool:
+def _names_the_product(text: str, roots: Tuple[str, ...]) -> bool:
     """Whether a string literal addresses the product by name.
 
     ``importlib.import_module`` and ``mock.patch`` both take it dotted; a
     multi-line literal is a probe source, which is product code written down.
     """
-    if text == PRODUCT or text.startswith(PRODUCT + "."):
+    if any(text == root or text.startswith(root + ".") for root in roots):
         return True
-    return "\n" in text and PRODUCT in text
+    return "\n" in text and any(root in text for root in roots)
 
 
-def _names_node(node: ast.AST, bound: Set[str]) -> bool:
+def _names_node(node: ast.AST, bound: Set[str], roots: Tuple[str, ...]) -> bool:
     """Whether ONE node names the product. The per-node half of the rule."""
     if isinstance(node, ast.Name):
         return node.id in bound or node.id == "__file__"
     if isinstance(node, ast.Attribute):
         return _base_name(node) in bound
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return _names_the_product(node.value)
+        return _names_the_product(node.value, roots)
     return False
 
 
-def _names_product(node: ast.AST, bound: Set[str]) -> bool:
+def _names_product(node: ast.AST, bound: Set[str], roots: Tuple[str, ...]) -> bool:
     """Whether an expression names the product anywhere inside it."""
-    return any(_names_node(child, bound) for child in ast.walk(node))
+    return any(_names_node(child, bound, roots) for child in ast.walk(node))
 
 
-def _product_bound(tree: ast.Module) -> Set[str]:
+def _product_bound(tree: ast.Module, roots: Tuple[str, ...]) -> Set[str]:
     """Module-level names that reach the product, to a fixed point.
 
     ``SIMPLE_MODULES = [snapshot, versioned]`` at the top of a file is what a
     ``@pytest.mark.parametrize("mod", SIMPLE_MODULES)`` test calls through.
     One pass would credit that; two levels of indirection need the loop.
     """
-    bound = _product_imports(tree)
+    bound = _product_imports(tree, roots)
     assignments = [node for node in tree.body if isinstance(node, (ast.Assign, ast.AnnAssign))]
     changed = True
     while changed:
@@ -106,7 +118,7 @@ def _product_bound(tree: ast.Module) -> Set[str]:
             names = [t.id for t in targets if isinstance(t, ast.Name)]
             if not names or node.value is None or all(n in bound for n in names):
                 continue
-            if _names_product(node.value, bound):
+            if _names_product(node.value, bound, roots):
                 bound.update(names)
                 changed = True
     return bound
@@ -128,6 +140,7 @@ def _reaches(
     local: Dict[str, Union[ast.FunctionDef, ast.AsyncFunctionDef]],
     shared: Set[str],
     seen: Set[int],
+    roots: Tuple[str, ...],
 ) -> bool:
     """Whether anything reachable from this function names the product.
 
@@ -137,9 +150,9 @@ def _reaches(
         return False
     seen.add(id(function))
 
-    if any(_names_product(d, bound) for d in function.decorator_list):
+    if any(_names_product(d, bound, roots) for d in function.decorator_list):
         return True
-    if any(_names_product(stmt, bound) for stmt in function.body):
+    if any(_names_product(stmt, bound, roots) for stmt in function.body):
         return True
 
     for node in ast.walk(function):
@@ -155,7 +168,7 @@ def _reaches(
     return False
 
 
-def _acquitted_by_class(tree: ast.Module, bound: Set[str]) -> Set[int]:
+def _acquitted_by_class(tree: ast.Module, bound: Set[str], roots: Tuple[str, ...]) -> Set[int]:
     """Node ids of methods defined in a class whose own body reaches the product.
 
     A ``unittest.TestCase`` method reaches the product through ``self.conn``, which ``setUp`` built:
@@ -182,7 +195,7 @@ def _acquitted_by_class(tree: ast.Module, bound: Set[str]) -> Set[int]:
 
     acquitted: Set[int] = set()
     for key, owned in nodes.items():
-        if any(_names_node(node, bound) for node in owned):
+        if any(_names_node(node, bound, roots) for node in owned):
             acquitted |= methods[key]
     return acquitted
 
@@ -208,20 +221,22 @@ def shared_fixtures(conftest_path: str) -> frozenset[str]:
     return frozenset(_functions(tree)) if tree is not None else frozenset()
 
 
-def scan(source: str, shared: frozenset[str] = frozenset()) -> List[Tuple[int, str]]:
+def scan(
+    source: str, shared: frozenset[str] = frozenset(), roots: Tuple[str, ...] = (PRODUCT,)
+) -> List[Tuple[int, str]]:
     """(line, test name) for each test in this file that reaches no product code."""
     tree = _parse(source)
     if tree is None:
         return []
 
-    bound = _product_bound(tree)
+    bound = _product_bound(tree, roots)
     local = _functions(tree)
-    by_class = _acquitted_by_class(tree, bound)
+    by_class = _acquitted_by_class(tree, bound, roots)
     findings: List[Tuple[int, str]] = []
     for name, node in local.items():
         if not name.startswith(TEST_PREFIX) or id(node) in by_class:
             continue
-        if not _reaches(node, bound, local, set(shared), set()):
+        if not _reaches(node, bound, local, set(shared), set(), roots):
             findings.append((node.lineno, name))
     return sorted(findings)
 
@@ -253,7 +268,8 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if source is None:
         return _result(False, _one_check(False, f"Error reading file: {module_path}"), 0)
 
-    findings = scan(source, shared_fixtures(str(path.parent / CONFTEST)))
+    roots = tuple(dict.fromkeys((PRODUCT, import_root(path))))
+    findings = scan(source, shared_fixtures(str(path.parent / CONFTEST)), roots)
     if not findings:
         return _result(True, _one_check(True, "Every test here reaches the product"), 100)
 

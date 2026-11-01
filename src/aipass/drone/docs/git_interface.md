@@ -67,6 +67,15 @@ A repository with no remote is a real answer (`ok: true`, `count: 0`), not an er
 with no `.git` at all answers `ok: false` on a non-zero return — a different answer, and the two
 are not collapsed.
 
+**`remote set <name> <url>`** is the one write, owner tier (the gate's `remote-write`), so a
+project's manager runs it in its own repo and the admin seat reaches another repo with `--repo`.
+It adds the remote when the name is absent and re-points it with `set-url` when present; the same
+url again is reported unchanged. The url must name a github.com repository in one of three forms,
+`https://github.com/OWNER/NAME`, `git@github.com:OWNER/NAME` or `ssh://git@github.com/OWNER/NAME`
+(`.git` optional), and an https url with userinfo is refused, because a token there would be
+stored in `.git/config` in clear. Every set lands one line in `git_remote_sets.jsonl` in AIPass's
+`.ai_central`: caller, repo, name, the old url (redacted) and the new one, and the outcome.
+
 ---
 
 ## The commit subject cap — the why goes in the body

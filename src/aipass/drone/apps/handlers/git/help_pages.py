@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: help_pages.py
 # Description: The @git help pages, one per verb and the whole page
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2026-10-04
-# Modified: 2026-10-26
+# Modified: 2026-10-30
 # =============================================
 
 """The @git help pages: one per verb, and the whole page.
@@ -393,6 +393,7 @@ def page(command: str | None = None) -> str:
         "  release edit <tag>     Rewrite a release's notes with its CHANGELOG.md block\n"
         "  label create <name>    Create a repo label; one already there is reported present\n"
         "  alerts dismiss <n> --reason R --comment 'text'  Dismiss a code-scanning alert\n"
+        "  remote set <name> <url>  Add or re-point a remote at a github.com repo (https or ssh)\n"
         "  A gh subcommand in neither list is refused, never passed to gh.\n"
         "CI cure (the one citizen whose registry entry carries ci_cure: true):\n"
         "  ci-cure <run_id> @<owner> <msg> <path ...>  Commit a CI cure on dev, push dev\n"
@@ -400,7 +401,7 @@ def page(command: str | None = None) -> str:
         "  An external project's manager, from its own seat, runs: commit, untrack,\n"
         "  restore, checkout, sync, push, merge-main, unlock, merge, dev-pr, prune-temp,\n"
         "  tag, issue <write>, run <write>, workflow <write>, release <write>, label\n"
-        "  <write>, alerts <write>. The rest refuse there.\n"
+        "  <write>, alerts <write>, remote <write>. The rest refuse there.\n"
         "  Every write is fenced by the session: one started in another project is\n"
         "  refused here even from this project's seat, unless the seat is admin.\n"
         "\n"

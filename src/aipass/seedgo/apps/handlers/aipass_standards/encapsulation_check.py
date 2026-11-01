@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: encapsulation_check.py
 # Description: Handler Encapsulation Standards Checker
-# Version: 1.4.1
+# Version: 1.4.2
 # Created: 2026-03-05
-# Modified: 2026-10-24
+# Modified: 2026-10-30
 # =============================================
 
 """Handler Encapsulation Standards Checker"""
@@ -587,9 +587,17 @@ def _infrastructure_handlers(branch_root_str: str) -> frozenset:
 
 
 def _branch_root(module_path: str) -> Optional[Path]:
-    """The ``src/aipass/<branch>`` directory above a file, or None."""
-    for parent in Path(module_path).resolve().parents:
+    """The ``src/aipass/<branch>`` directory above a file, else the nearest package holding ``apps/``, or None.
+
+    The second reading is a project branch (``beo/beo``); it comes second so a nested
+    ``aipass.skills.lib.telegram`` still answers skills, not telegram.
+    """
+    parents = Path(module_path).resolve().parents
+    for parent in parents:
         if parent.parent.name == "aipass" and (parent / "apps").is_dir():
+            return parent
+    for parent in parents:
+        if (parent / "apps").is_dir() and (parent / "__init__.py").is_file():
             return parent
     return None
 

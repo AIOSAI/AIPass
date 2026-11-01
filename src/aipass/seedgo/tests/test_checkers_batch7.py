@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch7.py
 # Description: Unit tests for encapsulation_check sub-functions (the other checkers moved to test_checkers_batch7_*.py)
-# Version: 1.4.1
+# Version: 1.4.2
 # Created: 2026-04-25
-# Modified: 2026-10-24
+# Modified: 2026-10-30
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/encapsulation_check.py and its sibling checkers (batch 7)."""
@@ -355,6 +355,27 @@ class TestTestsAreKinToTheirOwnBranchOnly:
         )
         result = encapsulation_check.check_module(self._test_file(tmp_path, body))
         assert result["score"] == 100
+
+    def test_a_project_branch_is_kin_to_its_own_handlers_and_no_other(self, tmp_path):
+        """THE DEFECT: beo's tests importing beo.beo.apps.handlers read as foreign: no root outside src/aipass."""
+        branch = tmp_path / "beo" / "beo"
+        (branch / "apps").mkdir(parents=True)
+        (branch / "tests").mkdir()
+        for directory in (branch.parent, branch):
+            (directory / "__init__.py").write_text("", encoding="utf-8")
+        own = branch / "tests" / "test_own.py"
+        own.write_text("from beo.beo.apps.handlers import memory\n", encoding="utf-8")
+        other = branch / "tests" / "test_other.py"
+        other.write_text("from aipass.memory.apps.handlers.json import entry_limits\n", encoding="utf-8")
+        loose = tmp_path / "loose"
+        (loose / "apps").mkdir(parents=True)
+        (loose / "tests").mkdir()
+        unpackaged = loose / "tests" / "test_loose.py"
+        unpackaged.write_text("from loose.apps.handlers import memory\n", encoding="utf-8")
+
+        assert encapsulation_check.check_module(str(own))["score"] == 100
+        assert encapsulation_check.check_module(str(other))["score"] == 0
+        assert encapsulation_check.check_module(str(unpackaged))["score"] == 0
 
     def test_own_handlers_and_a_source_fixture_stay_allowed(self, tmp_path):
         """Own-branch imports and patches pass; a handlers import inside a triple-quoted fixture is prose."""
