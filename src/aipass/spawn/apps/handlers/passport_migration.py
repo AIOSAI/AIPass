@@ -118,7 +118,7 @@ IDENTITY_CONTENT_KEYS = (
 # The baseline is an alarm, never a gate: drift is reported, the discovered set is the truth.
 CORE_GLOB = "src/aipass/*/.trinity/passport.json"
 RESIDENT_GLOB = "projects/*/src/*/*/.trinity/passport.json"
-EXPECTED_FLEET = {"core": 18, "resident": 5, "total": 23}
+EXPECTED_FLEET = {"core": 18, "resident": 6, "total": 24}
 
 
 class PassportMigrationError(Exception):

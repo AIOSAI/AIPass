@@ -3,7 +3,7 @@
 # Description: Registry repair — thin CLI layer for registry synchronization
 # Version: 1.2.0
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-10-31
 # =============================================
 
 """Registry synchronization for branch lifecycle management.
@@ -135,18 +135,27 @@ def _handle_check(registry_path, json_output=False) -> int:
         return 0 if result["clean"] else 1
 
     issues = result["issues"]
+    notes = result.get("notes", [])
     console.print()
     if not issues:
         console.print("[green]Owner/identity check: clean[/green]")
+        _print_notes(notes)
         return 0
 
     error(f"Owner/identity check: {len(issues)} issue(s)")
     console.print()
     for issue in issues:
         console.print(f"  \\[{issue['flag']}] {issue['detail']}")
+    _print_notes(notes)
     console.print()
     console.print("[dim]Run with --fix to reconcile.[/dim]")
     return 1
+
+
+def _print_notes(notes) -> None:
+    """Print informational check lines; they never change the exit code."""
+    for note in notes:
+        console.print(f"  [dim]note \\[{note['flag']}] {note['detail']}[/dim]")
 
 
 def _handle_fix(registry_path, dry_run=False) -> int:

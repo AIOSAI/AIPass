@@ -3,7 +3,7 @@
 # Description: *_REGISTRY.json discovery and CRUD operations
 # Version: 1.3.0
 # Created: 2026-03-05
-# Modified: 2026-10-24
+# Modified: 2026-10-31
 # =============================================
 
 """*_REGISTRY.json discovery and CRUD operations.
@@ -365,6 +365,59 @@ def ensure_project_has_owner(registry_path):
             return False
     logger.info("[registry] Set owner=true on %s (registry entry)", owner_branch.get("name", "?"))
     return True
+
+
+def move_owner(citizen, registry_path=None, apply=False):
+    """Move the project's owner seat onto one citizen's entry, clearing owner on every other entry.
+
+    Preview unless apply. Returns (status, reason, holders): status is "preview", "moved", "already"
+    or "refused" (nothing written); holders are the entry names carrying owner:true before the call."""
+    requested = (citizen or "").strip().lstrip("@").lower()
+    registry_path = Path(registry_path).resolve() if registry_path else find_registry()
+    if not requested:
+        return _refuse_owner("REFUSED: name the citizen that takes the owner seat (drone @spawn owner @name)")
+    if registry_path is None:
+        return _refuse_owner("REFUSED: no registry found above the current directory — pass --registry <path>")
+    # The framework's own owner is the floor drone and the hooks trust; this verb only moves a project's seat.
+    if registry_path.name == "AIPASS_REGISTRY.json":
+        return _refuse_owner(f"REFUSED: {registry_path} is the framework registry — this verb never moves its owner")
+    if not registry_path.is_file() or not registry_is_writable_document(registry_path):
+        return _refuse_owner(f"REFUSED: {registry_path} is missing or unreadable — nothing written")
+
+    with registry_lock(registry_path):
+        reg_data = load_registry(registry_path)
+        branches = branches_as_list(reg_data.get("branches", []))
+        holders = [b.get("name", "?") for b in branches if b.get("owner") is True]
+        target = next(
+            (b for b in branches if requested in (b.get("name", "").lower(), b.get("email", "").lstrip("@").lower())),
+            None,
+        )
+        if target is None:
+            return _refuse_owner(f"REFUSED: {citizen} is not in {registry_path} — nothing written", holders)
+        name = target.get("name", "?")
+        if holders == [name]:
+            return "already", f"{name} already holds the owner seat in {registry_path.name}", holders
+        if not apply:
+            return "preview", f"Would move the owner seat {', '.join(holders) or '(none)'} -> {name}", holders
+
+        for branch in branches:
+            if "owner" in branch:
+                branch["owner"] = False
+        target["owner"] = True
+        reg_data["branches"] = branches
+        if not save_registry(registry_path, reg_data):
+            return _refuse_owner(f"REFUSED: {registry_path.name} could not be written — the seat did not move", holders)
+
+    reason = f"Moved the owner seat {', '.join(holders) or '(none)'} -> {name} in {registry_path.name}"
+    logger.info("[registry] %s", reason)
+    json_handler.log_operation("owner_moved", data={"from": holders, "to": name, "registry": str(registry_path)})
+    return "moved", reason, holders
+
+
+def _refuse_owner(reason, holders=None):
+    """Log and return an owner-move refusal."""
+    logger.warning("[registry] %s", reason)
+    return "refused", reason, holders or []
 
 
 def ensure_admin(registry_path=None, branch_name=ADMIN_BRANCH):

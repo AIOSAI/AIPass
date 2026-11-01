@@ -77,6 +77,7 @@ def print_help():
     console.print("  [dim]         add --relocate-artifacts to carry the branch's vector store with it[/dim]")
     console.print("  [green]grant-admin[/green]                    Ceremony: write admin:true onto the devpulse entry")
     console.print("  [green]grant-ci-cure[/green]                  Ceremony: write ci_cure:true onto the trigger entry")
+    console.print("  [green]owner[/green] @citizen                 Move a project's owner seat (preview; add --apply)")
     console.print()
     console.print("[bold cyan]CITIZEN CLASSES:[/bold cyan]")
     console.print()
@@ -272,6 +273,7 @@ def _dry_run_create(target_path, citizen_class, parsed, template_dir=None):
         normalize_branch_name,
         INCOMPLETE_MARKER,
     )
+    from aipass.spawn.apps.modules.door_owner import find_registry
 
     target = Path(target_path).resolve()
     template = Path(template_dir) if template_dir else get_template_dir(citizen_class or get_default_class())
@@ -313,7 +315,11 @@ def _dry_run_create(target_path, citizen_class, parsed, template_dir=None):
     console.print("  [bold cyan]Would create:[/bold cyan]")
     console.print(f"    Files:       ~{file_count}")
     console.print(f"    Directories: ~{dir_count}")
-    console.print("    Registry:    add to AIPASS_REGISTRY.json")
+    registry = Path(parsed.registry).resolve() if parsed.registry else find_registry(target.parent)
+    if registry is None:
+        error(f"No registry above {target}: create would refuse", suggestion="pass --registry <path>")
+        return 1
+    console.print(f"    Registry:    add to {registry}")
     console.print()
     console.print("  [dim]No files were created. Remove --dry-run to execute.[/dim]")
     console.print()
@@ -346,6 +352,7 @@ def print_introspection():
     console.print(
         "    [dim]- grant-admin, grant-ci-cure: grant_admin.py (handle_grant_admin, handle_grant_ci_cure — registry seat flag ceremonies)[/dim]"
     )
+    console.print("    [dim]- owner: grant_admin.py (handle_owner — moves a project's owner seat)[/dim]")
     console.print()
     console.print("[dim]Run 'drone @spawn --help' for usage information[/dim]")
     console.print()
@@ -434,6 +441,11 @@ def main():
         from aipass.spawn.apps.modules.grant_admin import handle_grant_ci_cure
 
         return _resolved(handle_grant_ci_cure(remaining))
+
+    if command == "owner":
+        from aipass.spawn.apps.modules.grant_admin import handle_owner
+
+        return _resolved(handle_owner(remaining))
 
     error(f"Unknown command: {command}", suggestion="Run 'drone @spawn --help' for available commands")
     return 1

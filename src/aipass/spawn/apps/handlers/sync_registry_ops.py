@@ -3,7 +3,7 @@
 # Description: Registry sync handler — implementation logic for registry repair
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-10-31
 # =============================================
 
 """Registry synchronization handler for branch lifecycle management.
@@ -386,6 +386,8 @@ def check_owner_identity(registry_path=None):
     inside = [b for b in branches if _validate_path_containment(b.get("path", ""), registry_path)]
 
     issues: list[dict] = []
+    # Notes are reported but never make the registry unclean.
+    notes: list[dict] = []
 
     owners = [b for b in branches if b.get("owner") is True]
     if not owners:
@@ -423,9 +425,10 @@ def check_owner_identity(registry_path=None):
         if not is_manager and branches:
             first = min(branches, key=lambda b: b.get("created", "9999-99-99"))
             if owner.get("name") != first.get("name"):
-                issues.append(
+                # A seat set on purpose by `drone @spawn owner` is the human's call, not a defect.
+                notes.append(
                     {
-                        "flag": "owner_wrong_branch",
+                        "flag": "owner_not_manager_or_first",
                         "detail": f"Owner {owner.get('name', '?')} is not the manager and not the first agent",
                     }
                 )
@@ -496,13 +499,14 @@ def check_owner_identity(registry_path=None):
         "owner": owner_entry.get("name") if owner_entry else None,
         "owner_uid": owner_entry.get("registry_id", "") if owner_entry else "",
         "issues": issues,
+        "notes": notes,
     }
 
 
 def fix_owner_identity(registry_path=None, dry_run=False):
     """Reconcile owner + identity in the sealed registry.
 
-    Each action is idempotent. Never moves a seated owner: ``owner_wrong_branch`` is for a human.
+    Each action is idempotent. Never moves a seated owner: ``drone @spawn owner`` is the human's door.
     Returns ``actions`` and ``applied``, plus ``error`` when there is no registry to reconcile.
     """
     if registry_path is None:

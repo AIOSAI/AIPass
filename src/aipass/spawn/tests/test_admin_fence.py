@@ -3,14 +3,14 @@
 # Description: Admin grant ceremony + permanent admin-class refusal (FPLAN-0401 P2)
 # Version: 1.1.1
 # Created: 2026-08-12
-# Modified: 2026-10-24
+# Modified: 2026-10-31
 # =============================================
 
-"""Tests for apps/modules/grant_admin.py, apps/handlers/registry.py and apps/handlers/class_registry.py: the seat-flag fences."""
+"""Tests for apps/modules/grant_admin.py, apps/handlers/registry.py and apps/handlers/class_registry.py: the seat-flag fences and the owner seat."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every handler and module this file imports parses and imports
-# seedgo: no-test-needed(documentation) — docstrings on ensure_admin, ensure_ci_cure and the two grant handlers
+# seedgo: no-test-needed(documentation) — docstrings on ensure_admin, ensure_ci_cure, move_owner and the handlers
 # seedgo: no-test-needed(documentation) — docstrings on the class_registry refusal helpers
 
 import json
@@ -27,10 +27,10 @@ from aipass.spawn.apps.handlers.class_registry import (
     resolve_template_class,
     validate_class,
 )
-from aipass.spawn.apps.handlers.registry import ADMIN_BRANCH, ensure_admin, ensure_ci_cure
+from aipass.spawn.apps.handlers.registry import ADMIN_BRANCH, ensure_admin, ensure_ci_cure, move_owner
 from aipass.spawn.apps.handlers.sync_registry_ops import resolve_sync_template_class
 from aipass.spawn.apps.modules.core import spawn_agent
-from aipass.spawn.apps.modules.grant_admin import handle_grant_admin, handle_grant_ci_cure
+from aipass.spawn.apps.modules.grant_admin import handle_grant_admin, handle_grant_ci_cure, handle_owner
 from aipass.spawn.apps.modules.update import handle_update
 from aipass.spawn.apps.spawn import handle_create, main
 
@@ -306,6 +306,82 @@ class TestGrantCiCure:
 
         assert main() == 0
         assert _read_entry(registry, "trigger")["ci_cure"] is True
+
+
+class TestOwnerMove:
+    """drone @spawn owner @citizen — the project's owner seat moves onto one entry, and off every other."""
+
+    def _registry(self, tmp_path):
+        framework = _write_registry(
+            tmp_path,
+            [_entry("BEO", owner=True, custom_key="keep-me"), _entry("DEAN"), _entry("SCOUT", owner=False)],
+        )
+        return framework.rename(tmp_path / "BEO_REGISTRY.json")
+
+    def test_apply_moves_the_seat_to_the_citizen_and_clears_every_other(self, tmp_path, capsys):
+        registry = self._registry(tmp_path)
+
+        code = handle_owner(["@dean", "--registry", str(registry), "--apply"])
+
+        data = json.loads(registry.read_text(encoding="utf-8"))
+        assert code == 0
+        assert "BEO -> DEAN" in capsys.readouterr().out
+        assert [b["name"] for b in data["branches"] if b.get("owner") is True] == ["DEAN"]
+        assert _read_entry(registry, "beo")["owner"] is False
+        assert _read_entry(registry, "beo")["custom_key"] == "keep-me"
+        assert data["metadata"]["last_updated"] != "2026-08-12"
+
+    def test_a_preview_names_the_move_and_writes_nothing(self, tmp_path, capsys):
+        registry = self._registry(tmp_path)
+        before = registry.read_text(encoding="utf-8")
+
+        code = handle_owner(["@dean", "--registry", str(registry)])
+
+        assert code == 0
+        assert "Would move the owner seat BEO -> DEAN" in " ".join(capsys.readouterr().out.split())
+        assert registry.read_text(encoding="utf-8") == before
+
+    def test_the_current_owner_reports_already_and_writes_nothing(self, tmp_path, capsys):
+        registry = self._registry(tmp_path)
+        before = registry.read_text(encoding="utf-8")
+
+        code = handle_owner(["@beo", "--registry", str(registry), "--apply"])
+
+        assert code == 0
+        assert "BEO already holds the owner seat" in " ".join(capsys.readouterr().out.split())
+        assert registry.read_text(encoding="utf-8") == before
+
+    def test_a_citizen_not_in_the_registry_is_refused_and_nothing_written(self, tmp_path, capsys):
+        registry = self._registry(tmp_path)
+        before = registry.read_text(encoding="utf-8")
+
+        code = handle_owner(["@ghost", "--registry", str(registry), "--apply"])
+
+        assert code == 1
+        assert "@ghost is not in" in " ".join(capsys.readouterr().err.split())
+        assert registry.read_text(encoding="utf-8") == before
+
+    def test_the_framework_registry_is_refused_and_nothing_written(self, tmp_path, capsys):
+        registry = _write_registry(tmp_path, [_entry("DEVPULSE", owner=True), _entry("SPAWN")])
+        before = registry.read_text(encoding="utf-8")
+
+        code = handle_owner(["@spawn", "--registry", str(registry), "--apply"])
+
+        assert code == 1
+        assert "framework registry" in " ".join(capsys.readouterr().err.split())
+        assert registry.read_text(encoding="utf-8") == before
+
+    def test_the_handler_returns_the_holders_it_found(self, tmp_path):
+        registry = self._registry(tmp_path)
+
+        assert move_owner("dean", registry, apply=True)[::2] == ("moved", ["BEO"])
+
+    def test_entry_point_routes_owner(self, tmp_path, monkeypatch):
+        registry = self._registry(tmp_path)
+        monkeypatch.setattr("sys.argv", ["spawn", "owner", "@dean", "--registry", str(registry), "--apply"])
+
+        assert main() == 0
+        assert _read_entry(registry, "dean")["owner"] is True
 
 
 class TestAdminClassRefusal:
