@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: ignore_handler.py
 # Description: Ignore Pattern Configuration Handler
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-03-05
 # Modified: 2026-11-01
 # =============================================
@@ -64,10 +64,10 @@ def find_repo_root(path: Path) -> Optional[Path]:
     temp root, and git itself never reads it as a repository.
     """
     resolved = path.resolve()
-    return next((parent for parent in (resolved, *resolved.parents) if _is_git_marker(parent / ".git")), None)
+    return next((parent for parent in (resolved, *resolved.parents) if is_git_marker(parent / ".git")), None)
 
 
-def _is_git_marker(marker: Path) -> bool:
+def is_git_marker(marker: Path) -> bool:
     """A .git file (a worktree's pointer), or a .git directory with anything in it."""
     if marker.is_file():
         return True

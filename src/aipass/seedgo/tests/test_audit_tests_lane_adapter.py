@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_audit_tests_lane_adapter.py
 # Description: audit-tests pytest adapter, its nominators and the M10 env copy (split from test_audit_tests_lane.py)
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-10-08
-# Modified: 2026-10-25
+# Modified: 2026-11-01
 # =============================================
 
 """Tests for apps/handlers/tests_pytest_standards/adapter.py, envcopy.py and apps/handlers/audit_tests/m10.py."""
@@ -345,6 +345,7 @@ class TestRootFiles:
     def _repo(self, tmp_path):
         """A repo root with a launcher, an ignored registry and a declared directory."""
         (tmp_path / ".git").mkdir(parents=True)
+        (tmp_path / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
         (tmp_path / "aipass").write_text("#!/bin/sh\n", encoding="utf-8")
         (tmp_path / "aipass").chmod(0o755)
         (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")

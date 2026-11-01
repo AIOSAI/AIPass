@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_portability_check.py
 # Description: Host Portability Standards Checker Handler
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-09-12
-# Modified: 2026-10-27
+# Modified: 2026-11-01
 # =============================================
 
 """Host Portability Standards Checker Handler.
@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Set, Tuple
 
 from aipass.prax import logger
-from aipass.seedgo.apps.handlers.aipass_standards.applicability import is_retired_path
+from aipass.seedgo.apps.handlers.aipass_standards.applicability import is_retired_path, is_test_path
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS, is_disabled_file
 from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored, load_ignore_entries
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
@@ -968,6 +968,65 @@ def _version_bound_imports(tree: ast.Module, floor: Tuple[int, int] | None) -> L
     return violations
 
 
+#: Tests an empty directory passes; ``is_file`` is not here because a sandbox mounts directories only.
+_DIR_PASSING = frozenset({"exists", "is_dir", "isdir"})
+_EMPTY_GIT_FIX = (
+    "an empty directory passes, and a sandbox mounts an empty .git in each writable root; "
+    "accept `marker.is_file() or (marker.is_dir() and any(marker.iterdir()))`"
+)
+
+
+def _names_git(node: ast.expr) -> bool:
+    """``x / ".git"`` or ``os.path.join(..., ".git")``."""
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        last = node.right
+    elif isinstance(node, ast.Call) and node.args and tail_name(node.func) == "join":
+        last = node.args[-1]
+    else:
+        return False
+    return isinstance(last, ast.Constant) and last.value == ".git"
+
+
+def _operand(call: ast.Call) -> ast.expr | None:
+    """The path a call is about: ``os.path.f(x)``'s x, else ``x.f()``'s x."""
+    if call.args:
+        return call.args[0]
+    return call.func.value if isinstance(call.func, ast.Attribute) else None
+
+
+def _opens_marker(node: ast.AST) -> bool:
+    """``.git / "HEAD"``, ``join(..., ".git", "HEAD")``, or a listing of ``.git`` itself."""
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return isinstance(node.right, ast.Constant) and node.right.value == "HEAD" and _names_git(node.left)
+    if not isinstance(node, ast.Call):
+        return False
+    if tail_name(node.func) == "join" and len(node.args) > 1:
+        tail = [arg.value if isinstance(arg, ast.Constant) else None for arg in node.args[-2:]]
+        return tail == [".git", "HEAD"]
+    operand = _operand(node)
+    return tail_name(node.func) in {"iterdir", "listdir", "scandir"} and operand is not None and _names_git(operand)
+
+
+def _reads_inside(func: ast.AST | None) -> bool:
+    """The enclosing function also looks inside the marker, not merely at its name."""
+    return func is not None and any(_opens_marker(node) for node in ast.walk(func))
+
+
+def _empty_git_markers(tree: ast.Module) -> List[Tuple[int, str]]:
+    """A .git existence test that an empty directory satisfies, in a function that never looks inside."""
+    violations: List[Tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        if node.func.attr not in _DIR_PASSING:
+            continue
+        operand = _operand(node)
+        if operand is None or not _names_git(operand) or _reads_inside(find_enclosing_function(tree, node.lineno)):
+            continue
+        violations.append((node.lineno, f"`{ast.unparse(node)}` - {_EMPTY_GIT_FIX}"))
+    return violations
+
+
 def _declared_floor(branch_root: Path) -> Tuple[int, int] | None:
     """The nearest pyproject.toml's ``requires-python >=3.N``; None when none declares one.
 
@@ -1009,9 +1068,9 @@ def _relative(path: Path, branch_root: Path) -> str:
 
 
 def scan_file(file_path: str, floor: Tuple[int, int] | None = None) -> Tuple[List[Tuple[int, str]], int]:
-    """Every arm (A to G) over one file. Returns (violations, acquitted binary sites).
+    """Every arm (A to H) over one file. Returns (violations, acquitted binary sites).
 
-    Arm G runs only with the branch's declared ``floor``.
+    Arm G runs only with the branch's declared ``floor``; arm H only outside a test tree, whose fixtures plant .git.
 
     A file that cannot be read or parsed reports NOTHING: an unparseable file is ruff's business.
     """
@@ -1037,6 +1096,8 @@ def scan_file(file_path: str, floor: Tuple[int, int] | None = None) -> Tuple[Lis
     violations.extend(_mixed_spelling_comparisons(tree))
     violations.extend(_unanswered_git_identity(tree))
     violations.extend(_version_bound_imports(tree, floor))
+    if not is_test_path(str(path)):
+        violations.extend(_empty_git_markers(tree))
     violations.sort(key=lambda row: row[0])
     return violations, acquitted
 
@@ -1061,7 +1122,7 @@ def _violation_items(rows: Iterable[Tuple[str, int, str]]) -> List[Dict]:
 
 
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check a branch for host assumptions: Linux-only OS calls, a 3.12-only Path subclass, a stdlib import above the floor."""
+    """Check a branch for host assumptions: Linux-only OS calls, a 3.12-only Path subclass, an empty .git as a repo."""
     branch_root = Path(branch_path)
 
     if is_bypassed(branch_path, _BYPASS_KEY, bypass_rules=bypass_rules):

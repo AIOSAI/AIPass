@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: state_leak_check.py
 # Description: State Leak Standards Checker Handler
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-09-22
-# Modified: 2026-10-24
+# Modified: 2026-11-01
 # =============================================
 
 """
@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_git_marker
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.aipass_standards.check_support import parse, read_text, result, tail_name
 
@@ -556,7 +557,7 @@ def _conftests(test_path: Path) -> List[Path]:
         conftest = directory / "conftest.py"
         if conftest.is_file() and conftest != test_path:
             found.append(conftest)
-        if (directory / "pyproject.toml").is_file() or (directory / ".git").exists():
+        if (directory / "pyproject.toml").is_file() or is_git_marker(directory / ".git"):
             break
     return found
 
