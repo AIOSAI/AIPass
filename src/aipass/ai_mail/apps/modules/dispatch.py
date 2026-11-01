@@ -336,7 +336,7 @@ def _orchestrate_stop(args: List[str]) -> bool:
     from aipass.ai_mail.apps.handlers.dispatch.stop import stop_dispatch
 
     try:
-        resolved = resolve_branch(rest[0])
+        resolved = resolve_branch(rest[0], admin=_admin_lane())
     except RegistryUnreadable as exc:
         error(f"{rest[0]} not stopped: the registry is unreadable ({exc})")
         return True
