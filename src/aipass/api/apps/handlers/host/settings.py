@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: settings.py
 # Description: Host API Settings Handler — the desktop's two gears, served
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-08-16
-# Modified: 2026-10-19
+# Modified: 2026-11-01
 # =============================================
 
 """
@@ -17,14 +17,13 @@ import json
 import os
 import stat
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Dict
 
 from aipass.prax import logger
 
-# Imported, not mirrored: the flag's location is declared once, in @hooks' tree.
-from aipass.hooks.apps import sound as hooks_sound
 from aipass.api.apps.handlers.json import json_handler
 
 AGENT_SETTINGS_RELATIVE = Path(".claude") / "settings.local.json"
@@ -34,6 +33,12 @@ HOOKS_SOUND_DOOR = ["drone", "@hooks", "hooksound"]
 HOOKS_SOUND_ON = "on"
 HOOKS_SOUND_OFF = "off"
 HOOKS_SOUND_TIMEOUT_SECONDS = 30
+# A fresh child per read: an import held by a long-running server keeps the @hooks code it started with.
+HOOKS_SOUND_STATE = [
+    sys.executable,
+    "-c",
+    "from aipass.hooks.apps import sound; print('muted' if sound.is_muted() else 'active')",
+]
 
 KEY_MODEL = "model"
 KEY_AUTO_COMPACT_ENABLED = "autoCompactEnabled"
@@ -200,8 +205,24 @@ def write_baud_settings(project_root: Path, patch: Dict[str, Any]) -> Dict[str, 
 
 
 def hooks_sound_get() -> bool:
-    """Whether hook sounds are currently on."""
-    return not hooks_sound.is_muted()
+    """Whether hook sounds are currently on, as @hooks' current code reads its own flag."""
+    try:
+        result = subprocess.run(
+            HOOKS_SOUND_STATE,
+            capture_output=True,
+            text=True,
+            timeout=HOOKS_SOUND_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        logger.error("[host_api] hooks sound read failed: %s", e)
+        raise SettingsUnavailable(f"Could not read the hooks sound state: {e}") from e
+
+    state = result.stdout.strip()
+    if result.returncode != 0 or state not in ("muted", "active"):
+        detail = (result.stderr or result.stdout or "").strip()[-200:]
+        raise SettingsUnavailable(f"The hooks sound state could not be read: {detail}")
+
+    return state == "active"
 
 
 def hooks_sound_set(active: bool) -> bool:
