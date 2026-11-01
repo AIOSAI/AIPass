@@ -9,8 +9,22 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-11-01] — v2.8.32: compass recall for managers only, a hook mute that survives reboots, seedgo finds the tests that pin a file, spawn owner moves, api run with a scoped key
 
+### Added
+- **seedgo**: `drone @seedgo tests pinning <path ...>` prints every test file that names a path (as one string or as trailing Path parts), one per line, ready for pytest before a commit; `.py` inputs are skipped.
+- **spawn**: `drone @spawn owner` moves a project's owner seat to another citizen; a mint never invents a registry.
+- **api**: `drone @api run <provider> -- <command>` puts a key in the child's environment only.
+- **drone**: `drone @git remote set <name> <url> [--repo <path>]`.
+- **hooks**: engine rows carry `notification_type` and `tool_name`; PermissionRequest is logged as an action row.
+- **commands**: `/codex` takes a model word, passed as `-m`.
+
+### Fixed
+- **hooks**: compass recall injects only into manager seats (passport `citizen_class`), never builder seats.
+- **hooks**: the hook-sound mute flag lives at `~/.aipass/aipass-hooks-muted`, so reboots, `TMPDIR` and test runs cannot unmute it; an old temp-dir flag migrates once.
+- **aipass**: the scaffold `/codex` command text equals the repo-root file byte for byte again.
+- **backup**: drive_sync says plainly when the network is down and stops at once.
+- **seedgo**: three checkers see a project branch's own package.
 - **hooks**: the grounding receipt is also settled at Stop (`grounding_receipt` Stop row, `context_gauge.handle_stop`), so a one-prompt OpenCode dispatch ends verified or ungrounded instead of pending, and a headless run that compacted returns from pending to unverified.
 - **hooks**: the GitHub-write gate reads an interpreter's program more narrowly: a body counts only as a keyword argument or object key (`data=`, `{body: ...}`), a method only as a call or a quoted method. A read-only GET with a variable named `data` passes; a comment saying post or a `/posts` path no longer refuses.
 
