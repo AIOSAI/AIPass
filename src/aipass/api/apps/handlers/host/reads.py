@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: reads.py
 # Description: Host API Read Handler — file and directory reads behind the name fence
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-08-14
-# Modified: 2026-10-24
+# Modified: 2026-11-01
 # =============================================
 
 """
@@ -385,9 +385,10 @@ def list_dir(branch: str = "", dir: str = "", project: str = "", root: str = "",
 
 def repository_of(root: Path) -> Optional[Path]:
     """The repository a directory actually sits in, found the way the tool does."""
-    # exists(), not is_dir(): a worktree or submodule carries '.git' as a file.
+    # A '.git' file is a worktree or submodule; an EMPTY '.git' dir is a sandbox's stub, not a repository.
     for candidate in (root, *root.parents):
-        if (candidate / ".git").exists():
+        marker = candidate / ".git"
+        if marker.is_file() or (marker.is_dir() and any(marker.iterdir())):
             return candidate
     return None
 

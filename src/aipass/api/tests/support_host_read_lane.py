@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: support_host_read_lane.py
 # Description: Shared helpers for the read lane's test files (test_host_read_lane*.py)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-11-01
 # =============================================
 
 """Helpers shared by test_host_read_lane.py and its _feed, _changes and _history siblings."""
@@ -14,6 +14,13 @@
 import json
 from pathlib import Path
 from typing import Any
+
+
+def plant_repository(directory: Path) -> None:
+    """Make *directory* a repository root as the read lane sees one: a '.git' holding a HEAD."""
+    # An empty '.git' is a sandbox's stub and is no repository, so a bare mkdir plants nothing.
+    (directory / ".git").mkdir(parents=True, exist_ok=True)
+    (directory / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
 
 
 class _BranchNotFound(Exception):

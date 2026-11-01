@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_read_lane_history.py
 # Description: Tests for the read lane's per-file diff, commit patch, log, commit detail and remote link-cards
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-10-08
-# Modified: 2026-10-24
+# Modified: 2026-11-01
 # =============================================
 
 """Tests for read_diff, read_git_log, read_commit and read_git_remote in apps/handlers/host/git_reads.py."""
@@ -30,6 +30,7 @@ from aipass.api.tests.support_host_read_lane import (
     TWO_FILE_DIFF,
     _BranchNotFound,
     _RegistryBroken,
+    plant_repository,
     remote_document,
     remotes_document,
     show_document,
@@ -939,8 +940,8 @@ class TestWhichRepositoryADirectoryIsIn:
         inner = outer / "vendor" / "inner"
         deep = inner / "src" / "aipass" / "api"
         deep.mkdir(parents=True)
-        (outer / ".git").mkdir()
-        (inner / ".git").mkdir()
+        plant_repository(outer)
+        plant_repository(inner)
 
         assert host_reads.repository_of(deep) == inner
 
@@ -953,6 +954,15 @@ class TestWhichRepositoryADirectoryIsIn:
 
         assert host_reads.repository_of(inside) == worktree
 
+    def test_an_empty_marker_directory_is_skipped_for_the_real_repository_above_it(self, tmp_path) -> None:
+        """A sandbox leaves an empty '.git' in every directory it starts in; that stub is no repository."""
+        outer = tmp_path / "outer"
+        sandboxed = outer / "scratch"
+        (sandboxed / ".git").mkdir(parents=True)
+        plant_repository(outer)
+
+        assert host_reads.repository_of(sandboxed) == outer
+
     def test_no_repository_above_it_answers_none_not_a_guess(self, tmp_path) -> None:
         """Absent is a real answer here; callers branch on it rather than assume."""
         loose = tmp_path / "just" / "some" / "directories"
@@ -964,6 +974,6 @@ class TestWhichRepositoryADirectoryIsIn:
         """The walk starts at the directory, not at its parent."""
         repository = tmp_path / "seat"
         repository.mkdir()
-        (repository / ".git").mkdir()
+        plant_repository(repository)
 
         assert host_reads.repository_of(repository) == repository

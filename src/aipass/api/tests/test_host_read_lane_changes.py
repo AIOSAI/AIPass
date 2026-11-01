@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_read_lane_changes.py
 # Description: Tests for the read lane's git-changes lane — the card contract, the stampede, grains, rows, refusals
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-10-08
-# Modified: 2026-10-24
+# Modified: 2026-11-01
 # =============================================
 
 """Tests for read_git_changes() in apps/handlers/host/git_reads.py and its cache and refusal memory."""
@@ -27,7 +27,12 @@ from aipass.api.apps.handlers.host import reads as host_reads
 from aipass.api.apps.handlers.host import git_reads as host_git
 from aipass.api.apps.handlers.host import read_cache as host_read_cache
 from aipass.api.apps.handlers.host import refusals as host_refusals
-from aipass.api.tests.support_host_read_lane import GIT_STATUS_ALL_STDOUT, GIT_STATUS_STDOUT, status_document
+from aipass.api.tests.support_host_read_lane import (
+    GIT_STATUS_ALL_STDOUT,
+    GIT_STATUS_STDOUT,
+    plant_repository,
+    status_document,
+)
 
 # Own constants, not conftest's: discarded_patch judges a target imported from this package.
 PATCH_GIT_LOGGER = "aipass.api.apps.handlers.host.git_reads.logger"
@@ -199,7 +204,7 @@ class TestGitChangesCoalescesTheStampede:
         """The PROJECT is part of the key, and this pin exists because a mutation
         proved it was not protected: a branch NAME is not unique across projects."""
         foreign = tmp_path / "OtherRepo"
-        (foreign / ".git").mkdir(parents=True)
+        plant_repository(foreign)
         foreign_root = foreign / "src" / "other" / "demo"
         foreign_root.mkdir(parents=True)
 
@@ -412,7 +417,7 @@ class TestGitChangesInAForeignProject:
     def foreign_repo(self, fake_repo: dict, tmp_path: Path):
         """A whole other repository, with its own .git and its own branch."""
         project = tmp_path / "OtherRepo"
-        (project / ".git").mkdir(parents=True)
+        plant_repository(project)
         root = project / "src" / "vera_studio" / "vera"
         root.mkdir(parents=True)
 
@@ -461,7 +466,7 @@ class TestGitChangesInAForeignProject:
         """THE case the seat-first version got wrong: a nested .git inside the seat
         makes `relative_to(seat)` succeed with the wrong prefix, so discovery must win."""
         tenant = fake_repo["root"] / "projects" / "tenant"
-        (tenant / ".git").mkdir(parents=True)
+        plant_repository(tenant)
         root = tenant / "src" / "tenant" / "tenant"
         root.mkdir(parents=True)
 
@@ -593,7 +598,7 @@ class TestRepoGrainChanges:
         assert mock_run.call_count == 0
 
     def _rooted(self, fake_repo: dict, repository: Path, census_rows: list) -> Any:
-        (repository / ".git").mkdir(exist_ok=True)
+        plant_repository(repository)
         census = {"projects": census_rows, "generated_at": "", "error": None}
         with patch.object(host_fleet, "list_projects", return_value=census):
             with patch.object(subprocess, "run", return_value=self._completed()):
@@ -635,7 +640,7 @@ class TestRepoGrainChanges:
         assert result["root"] is None
 
     def test_a_census_that_cannot_answer_is_unavailable_never_no_root(self, fake_repo: dict) -> None:
-        (fake_repo["branch"] / ".git").mkdir()
+        plant_repository(fake_repo["branch"])
         gone = host_fleet.FleetUnavailable("census gated")
 
         with patch.object(host_fleet, "list_projects", side_effect=gone), patch(PATCH_READS_LOGGER) as log:
@@ -646,7 +651,7 @@ class TestRepoGrainChanges:
         log.warning.assert_called_once()
 
     def test_branch_grain_carries_no_root(self, fake_repo: dict) -> None:
-        (fake_repo["root"] / ".git").mkdir()
+        plant_repository(fake_repo["root"])
 
         with patch.object(subprocess, "run", return_value=self._completed(GIT_STATUS_STDOUT)):
             result = host_git.read_git_changes("demo")
