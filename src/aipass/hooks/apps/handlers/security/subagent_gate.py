@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: subagent_gate.py
-# Version: 1.0.3
+# Version: 1.0.4
 # Description: Checks modified Python files against seedgo standards on SubagentStop
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-22
-# Modified: 2026-10-05
+# Modified: 2026-11-01
 # =============================================
 
 """Checks modified Python files against seedgo standards and blocks on violations.
@@ -52,7 +52,7 @@ def _find_repo_root(cwd: str) -> Path | None:
             continue
         p = Path(start)
         while p != p.parent:
-            if (p / ".git").exists():
+            if (git := p / ".git").is_file() or (git.is_dir() and any(git.iterdir())):
                 return p
             p = p.parent
     return None

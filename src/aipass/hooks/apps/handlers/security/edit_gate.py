@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.20.2
+# Version: 1.20.3
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-10-24
+# Modified: 2026-11-01
 # =============================================
 
 """Blocks unsafe edits: inbox, cross-project, cross-branch and shell-to-memory writes, daemon confinement, diagnostics
@@ -974,7 +974,7 @@ def handle(hook_data: dict) -> dict:
                 return _refuse(reason)
             repo_root = None
             for parent in Path(cwd).parents:
-                if (parent / ".git").exists():
+                if (git := parent / ".git").is_file() or (git.is_dir() and any(git.iterdir())):
                     repo_root = parent
                     break
             if repo_root and not target_branch:

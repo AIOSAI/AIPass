@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: context_window.py
-# Version: 1.10.0
+# Version: 1.10.1
 # Description: Context fill per CLI (Claude transcript, Codex rollout, OpenCode store) and the compact window
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-20
-# Modified: 2026-10-28
+# Modified: 2026-11-01
 # =============================================
 
 """Live context fill and the model from a session transcript, and the window Claude Code runs.
@@ -406,7 +406,7 @@ def _opencode_buffer(cwd: str) -> int | None:
     start = Path(cwd)
     for folder in (start, *start.parents):
         texts.append(_read_text(folder / "opencode.json"))
-        if (folder / ".git").exists():
+        if (git := folder / ".git").is_file() or (git.is_dir() and any(git.iterdir())):
             break
     texts.append(_read_text(opencode_config_path()))
     for text in filter(None, texts):

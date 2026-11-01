@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: email.py
-# Version: 1.2.0
+# Version: 1.2.1
 # Description: Checks inbox for unread emails on UserPromptSubmit
 # Branch: hooks
 # Layer: apps/handlers/notification
 # Created: 2026-05-21
-# Modified: 2026-10-17
+# Modified: 2026-11-01
 # =============================================
 
 """Checks branch inbox for unread emails and returns notification text."""
@@ -47,7 +47,9 @@ def _find_repo_root() -> Path | None:
     """Find the repo root (contains pyproject.toml or .git)."""
     search = Path.cwd()
     while search.parent != search:
-        if (search / "pyproject.toml").exists() or (search / ".git").is_dir():
+        if (search / "pyproject.toml").exists() or (
+            (git := search / ".git").is_file() or (git.is_dir() and any(git.iterdir()))
+        ):
             return search
         search = search.parent
     return None

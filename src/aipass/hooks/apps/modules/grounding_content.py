@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: grounding_content.py
-# Version: 1.4.1
+# Version: 1.4.2
 # Description: Shared content loaders for grounding prompt injections (DPLAN-0276), each rendered under its cap
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-01
-# Modified: 2026-10-17
+# Modified: 2026-11-01
 # =============================================
 
 """Loads raw grounding content — kernel, navmap, branch, identity — with no cadence gating."""
@@ -143,7 +143,9 @@ def find_branch_root(cwd: str) -> Path | None:
     while search.parent != search:
         if (search / ".trinity").is_dir() or (search / "apps").is_dir():
             return search
-        if (search / "pyproject.toml").exists() or (search / ".git").is_dir():
+        if (search / "pyproject.toml").exists() or (
+            (git := search / ".git").is_file() or (git.is_dir() and any(git.iterdir()))
+        ):
             return None
         search = search.parent
     return None

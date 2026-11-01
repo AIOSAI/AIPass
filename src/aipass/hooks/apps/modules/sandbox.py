@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: sandbox.py
-# Version: 1.0.2
+# Version: 1.0.3
 # Description: Sandbox wrapper — launches commands inside srt (kernel FS boundary)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-09
-# Modified: 2026-10-17
+# Modified: 2026-11-01
 # =============================================
 
 """Sandbox wrapper — launches commands inside srt kernel filesystem boundary.
@@ -71,7 +71,7 @@ def _find_repo_root(branch_path: Path) -> Path:
     """Walk up from branch_path to find the repo root (contains .git)."""
     current = branch_path.resolve()
     while current != current.parent:
-        if (current / ".git").exists():
+        if (git := current / ".git").is_file() or (git.is_dir() and any(git.iterdir())):
             return current
         current = current.parent
     msg = f"No .git found above {branch_path}"

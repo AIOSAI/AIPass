@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: presence_gate.py
-# Version: 3.3.1
+# Version: 3.3.2
 # Description: Single-session gate — blocks duplicate Claude runtimes per branch
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-06-29
-# Modified: 2026-10-17
+# Modified: 2026-11-01
 # =============================================
 
 """Single-session gate — blocks duplicate Claude runtimes per branch.
@@ -47,7 +47,9 @@ def _resolve_branch(hook_data: dict) -> str:
     while search.parent != search:
         if (search / ".trinity").is_dir() or (search / "apps").is_dir():
             return search.name
-        if (search / "pyproject.toml").exists() or (search / ".git").is_dir():
+        if (search / "pyproject.toml").exists() or (
+            (git := search / ".git").is_file() or (git.is_dir() and any(git.iterdir()))
+        ):
             break
         search = search.parent
     return Path(cwd).name
