@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-11-01] — v2.8.33: an empty .git is not a repo, dispatch stop from the deck, hook sounds off by default, the Stop gate for the watchdog wire
 
 ### Added
 - **devpulse**: a Stop hook (`watchdog_wire_gate`) refuses to end a devpulse turn while a dispatch it sent is out and no watchdog wire is armed for the session; the refusal is the arm command.
