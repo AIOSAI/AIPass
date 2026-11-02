@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: stop.py
-# Description: End a running dispatch from outside: the stop verb's handler
-# Version: 1.0.0
+# Description: End a running dispatch from outside: the stop verb's handler, and the live-monitor test close uses
+# Version: 1.0.1
 # Created: 2026-11-01
-# Modified: 2026-11-01
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -35,7 +35,7 @@ GRACE_SECONDS = 5.0
 MONITOR_MARK = "dispatch_monitor"
 
 
-def _is_monitor(pid: int) -> bool:
+def is_monitor(pid: int) -> bool:
     """Whether pid runs the dispatch monitor: a lock's pid may be a pre-spawn parent or a reused number."""
     if sys.platform == "win32":
         # shortcut: Windows has no ps; the lock's live pid is trusted. Upgrade with a WMI query if Windows dispatches.
@@ -45,7 +45,12 @@ def _is_monitor(pid: int) -> bool:
     except (OSError, subprocess.SubprocessError) as e:
         logger.warning("[stop] cannot read the command line of PID %s: %s", pid, e)
         return False
-    return MONITOR_MARK in result.stdout
+    found = MONITOR_MARK in result.stdout
+    if not found:
+        logger.info(
+            "[stop] PID %s is not a dispatch monitor (ps exit %s): %r", pid, result.returncode, result.stdout[:200]
+        )
+    return found
 
 
 def _alive(pid: int, as_group: bool) -> bool:
@@ -113,15 +118,21 @@ def _mail_dispatcher(entry: dict, email: str, by: str, when: str) -> Tuple[bool,
     return deliver_email_to_branch(sender, email_data)
 
 
+def running_monitor(branch_path: Path) -> Optional[int]:
+    """The pid of the live dispatch monitor holding the branch's lock, or None when none runs."""
+    lock = check_lock(branch_path)
+    pid = lock.get("pid") if lock else None
+    return pid if isinstance(pid, int) and is_monitor(pid) else None
+
+
 def stop_dispatch(branch_path: Path, email: str, by: str) -> Tuple[bool, str, str]:
     """(stopped, the one output line, a warning or "").
 
     False with "no dispatch is running for @x" when no live monitor holds the branch's lock.
     """
     json_handler.log_operation("dispatch_stop", {"target": email, "by": by})
-    lock = check_lock(branch_path)
-    pid = lock.get("pid") if lock else None
-    if not isinstance(pid, int) or not _is_monitor(pid):
+    pid = running_monitor(branch_path)
+    if pid is None:
         return False, f"no dispatch is running for {email}", ""
 
     try:

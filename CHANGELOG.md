@@ -14,6 +14,7 @@ PyPI version — not the changelog header.
 ### Added
 - **devpulse**: a Stop hook (`watchdog_wire_gate`) refuses to end a devpulse turn while a dispatch it sent is out and no watchdog wire is armed for the session; the refusal is the arm command.
 - **ai_mail**: `drone @ai_mail dispatch stop @agent [--by <who>]` ends a running dispatch (TERM to the monitor's process group, a 5 s grace, then KILL), closes the register row as stopped and mails the dispatcher so the wake-back reads stopped, not failed; the session pointer survives for a later resume. Refusals exit 2. The verb resolves projects/* seats through the admin lane, as dispatch does.
+- **ai_mail**: `drone @ai_mail dispatch close <id> "reason"` closes an outstanding register row no monitor will close (one ended by hand, reading OVERDUE): status `closed: <reason>`, the row leaves outstanding. Only the row's sender or the admin may close it; a row whose monitor still runs is refused, `dispatch stop` ends that one. The stop's not-a-monitor refusal logs the `ps` answer.
 - **seedgo**: Host_Portability arm H flags product code that reads a bare `.git` existence probe as a repository; a `.git` file (worktree) or a function that reads `.git/HEAD` or lists `.git` is acquitted. `ratchet run` names the first failing tests of a red baseline.
 
 ### Changed

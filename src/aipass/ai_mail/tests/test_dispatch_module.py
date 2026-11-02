@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_module.py
 # Description: Tests for dispatch.py orchestrator functions
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-04-26
-# Modified: 2026-11-01
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/dispatch.py."""
@@ -18,7 +18,8 @@ import signal
 import subprocess
 import sys
 import threading
-from contextlib import ExitStack
+import time
+from contextlib import ExitStack, suppress
 
 import pytest
 from unittest.mock import MagicMock, patch
@@ -1228,6 +1229,15 @@ def running_dispatch(tmp_path, monkeypatch):
             proc.agent_pid = int(proc.stdout.readline())
             threading.Thread(target=proc.wait, daemon=True).start()
             procs.append(proc)
+            # Returned only once the product's own checks see the stand-in; a slow runner otherwise raced them.
+            deadline = time.monotonic() + 10
+            while not (check_pid_alive(proc.pid) and stop_mod.is_monitor(proc.pid) == (mark == "dispatch_monitor")):
+                assert time.monotonic() < deadline, f"the stand-in PID {proc.pid} never became visible to ps"
+                with suppress(subprocess.TimeoutExpired):
+                    proc.wait(timeout=0.05)
+                assert proc.returncode is None, (
+                    f"the stand-in monitor exited before the stop: returncode {proc.returncode}"
+                )
             (branch / ".ai_mail.local" / ".dispatch.lock").write_text(json.dumps({"pid": proc.pid}), encoding="utf-8")
             return proc
 
@@ -1327,4 +1337,72 @@ class TestDispatchStop:
         _stop("@nobody", "--by", "Beo")
 
         assert "unknown agent @nobody" in capsys.readouterr().err
+        assert display.command_failed()
+
+
+# ===========================================================================
+# dispatch close
+# ===========================================================================
+
+
+def _close(*args):
+    return handle_command("dispatch", ["close", *args])
+
+
+def _last_status(dispatch_id):
+    rows = [json.loads(line) for line in register.register_file().read_text(encoding="utf-8").splitlines()]
+    return [r["status"] for r in rows if r["dispatch_id"] == dispatch_id][-1]
+
+
+class TestDispatchClose:
+    def test_the_sender_closes_a_dead_row_by_its_short_id(self, running_dispatch, monkeypatch, capsys):
+        _, dispatch_id, _, _ = running_dispatch
+        monkeypatch.setattr(f"{_H_VERIFIED}.resolve_verified_caller", lambda: "@boss")
+
+        _close(dispatch_id[:8], "unit ended by hand")
+
+        assert capsys.readouterr().out == f"closed dispatch {dispatch_id} (@boss -> @worker): unit ended by hand\n"
+        assert register.outstanding() == []
+        assert _last_status(dispatch_id) == "closed: unit ended by hand"
+
+    def test_the_admin_closes_another_senders_row(self, running_dispatch, monkeypatch):
+        _, dispatch_id, _, _ = running_dispatch
+        monkeypatch.setattr(f"{_H_VERIFIED}.resolve_verified_caller", lambda: "@devpulse")
+        monkeypatch.setattr(f"{_H_VERIFIED}.ADMIN_HOLDER", "@devpulse")
+        monkeypatch.setattr(f"{_H_VERIFIED}.verify_admin_caller", lambda: (True, "admin grant verified"))
+
+        _close(dispatch_id, "ended by hand")
+
+        assert register.outstanding() == []
+
+    def test_a_caller_who_is_neither_sender_nor_admin_is_refused_and_the_row_stays(
+        self, running_dispatch, monkeypatch, capsys
+    ):
+        _, dispatch_id, _, _ = running_dispatch
+        monkeypatch.setattr(f"{_H_VERIFIED}.resolve_verified_caller", lambda: "@stranger")
+
+        _close(dispatch_id, "not mine")
+
+        assert "only its sender @boss or the admin may close it" in capsys.readouterr().err
+        assert display.command_failed()
+        assert [e["dispatch_id"] for e in register.outstanding()] == [dispatch_id]
+
+    @_posix_only
+    def test_a_row_still_running_is_refused_and_points_at_stop(self, running_dispatch, monkeypatch, capsys):
+        _, dispatch_id, start, _ = running_dispatch
+        proc = start()
+        monkeypatch.setattr(f"{_H_VERIFIED}.resolve_verified_caller", lambda: "@boss")
+
+        _close(dispatch_id, "too early")
+
+        assert "@worker is still running it; end it with dispatch stop @worker" in capsys.readouterr().err
+        assert [e["dispatch_id"] for e in register.outstanding()] == [dispatch_id]
+        assert proc.poll() is None
+
+    def test_an_id_matching_no_outstanding_row_is_refused(self, running_dispatch, monkeypatch, capsys):
+        monkeypatch.setattr(f"{_H_VERIFIED}.resolve_verified_caller", lambda: "@boss")
+
+        _close("ffffffff", "gone")
+
+        assert "0 outstanding dispatches match ffffffff" in capsys.readouterr().err
         assert display.command_failed()

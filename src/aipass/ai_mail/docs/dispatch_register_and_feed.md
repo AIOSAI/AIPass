@@ -188,6 +188,15 @@ prints `unknown agent @agent`. Both exit 2, the routed-but-failed code of
 [cli_contract.md](cli_contract.md). A second stop of the same dispatch gets the
 nothing-running line.
 
+### A close ends a row no monitor will close
+
+`drone @ai_mail dispatch close <id> "reason"` closes an outstanding row whose monitor is gone
+(a unit ended by hand, a crashed monitor), so it stops reading OVERDUE. It takes the id or
+a unique prefix of it, as `dispatch register` prints it, and appends
+`status: "closed: <reason>"`. Only the row's sender or the verified admin may close it. A row
+that is still running is refused with a pointer to `dispatch stop`. A row counts as running
+when it is its target's newest outstanding row and a live monitor holds the target's lock.
+
 ### A reply closes the row
 
 An agent's own reply is the strongest completion evidence the system has, so a
