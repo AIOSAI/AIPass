@@ -18,6 +18,7 @@ PyPI version — not the changelog header.
 
 ### Fixed
 - **ai_mail**: `dispatch stop` ends a monitor on macOS. `check_pid_alive` reads the process state through `ps` where there is no `/proc` (a zombie answers `kill(pid, 0)` there), and the stop waits up to 2 s for a signalled monitor to leave the process table before calling it alive, since the group reads empty while the monitor is still exiting. The refusal is logged.
+- **hooks**: the provider-settings gate no longer asks when a Bash command merely names `~/.claude` or `~/.codex` in an interpreter's own text (a heredoc's prose). Only a move, delete, overlay or link takes a settings folder whole; a write lands on a file, so the folder itself is never a settings write. A heredoc that opens `~/.codex/config.toml` for writing still asks or denies.
 - **drone**: the commit gate runs each suite with drone's `AIPASS_CALLER_*` stamps dropped from the environment (they posed as the session cwd inside hooks', prax's and ai_mail's tests) and passes `--force-exclude` to ruff, so a staged file that pyproject excludes is never rewritten.
 
 ## [2026-11-01] — v2.8.33: an empty .git is not a repo, dispatch stop from the deck, hook sounds off by default, the Stop gate for the watchdog wire

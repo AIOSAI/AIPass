@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_settings_gate.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Description: Tests for the provider-settings gate: the decision table, the paths, the Bash shapes, the installers
 # Branch: hooks
 # Layer: tests
@@ -267,6 +267,19 @@ class TestDirectories:
 
     def test_listing_a_settings_directory_is_untouched(self, seat):
         assert _decision(_bash(seat, "ls ~/.codex ~/.claude", provider="codex")) == "allow"
+
+    def test_a_settings_directory_named_in_an_interpreters_own_text_is_not_a_settings_write(self, seat):
+        # 2026-11-01: a python heredoc editing a plan whose prose said "~/.claude or ~/.codex" asked the owner.
+        command = (
+            "python3 - plan.md <<'EOF'\nimport sys\nt = open(sys.argv[1]).read()\n"
+            "t += 'under ~/.claude or ~/.codex'\nopen(sys.argv[1], 'w').write(t)\nEOF"
+        )
+        assert _decision(_bash(seat, command)) == "allow"
+        assert _decision(_bash(seat, command, provider="codex")) == "allow"
+
+    def test_a_settings_file_named_in_an_interpreters_own_text_still_asks(self, seat):
+        command = "python3 - <<'EOF'\nopen('~/.codex/config.toml', 'a').write('x')\nEOF"
+        assert _decision(_bash(seat, command)) == "ask"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")

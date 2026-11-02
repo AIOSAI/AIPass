@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: settings_gate.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: No AI changes a provider's settings alone: Claude asks the owner; Codex, OpenCode, headless deny
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-10-25
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """The provider-settings gate (DPLAN-0424): the owner accepts every change to a CLI's own settings.
@@ -84,10 +84,11 @@ def _opencode(path: Path, whole: bool) -> bool:
 
 
 def _holds(path: Path, folder: Path, whole: bool) -> bool:
-    """*path* is *folder*, or a call that moves or deletes *path* whole takes an ancestor of it (and so *folder*).
+    """A call that moves or deletes *path* whole takes *folder* or an ancestor of it.
 
-    A copy into an ancestor (`cp notes ~/`) changes only the copied file."""
-    return _same(path, folder) or (whole and any(_same(path, parent) for parent in folder.parents))
+    A copy into an ancestor (`cp notes ~/`) changes only the copied file. The folder itself, merely
+    named (`~/.codex` in a heredoc's prose, 2026-11-01), is not a settings write: a write lands on a file."""
+    return whole and any(_same(path, parent) for parent in (folder, *folder.parents))
 
 
 def _kind(path: Path, whole: bool = False) -> str | None:
@@ -154,9 +155,9 @@ def _targets(tool_name: str, tool_input: dict, cwd: str) -> list[tuple[str, str]
             found[installer] = (installer, INSTALLER)
         raws = importlib.import_module("aipass.hooks.apps.modules.bash_writes").changed_paths(command, cwd)
         reader = importlib.import_module("aipass.hooks.apps.modules.shell_reader")
-        # A mutated path is the very thing changed (a copy into a folder is resolved to the file); a bare
-        # operand (`cp x ~/` names `~`) is not, so only the former takes a folder holding settings whole.
-        whole = {str(path) for path, _role, _how in reader.mutated_paths(command, cwd)}
+        # Only a move, delete, overlay or link takes a folder whole; a write (a redirect, or a path an
+        # interpreter merely holds in its own text) lands on a file, and `cp x ~/` resolves to the file.
+        whole = {str(path) for path, role, _how in reader.mutated_paths(command, cwd) if role != "write"}
     else:
         raw = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
         raws = [str(raw)] if raw else []
