@@ -15,6 +15,10 @@ PyPI version — not the changelog header.
 - **sentry** (was seedgo): the standards citizen is renamed, whole, because the old name could not be said to a speech recognizer. Package `aipass.sentry`, address `@sentry`, directory `src/aipass/sentry`, every branch's `.sentry/` bypass dir and `.sentryignore`, `sentry_json/`, the CI audit script `.github/scripts/sentry_audit.py` and its job `sentry-audit`, the `# sentry: no-test-needed(...)` markers and the three checkers that parse them, the `SENTRY:` label on hook auto-fixes, the passport and registry row (registry_id unchanged). History keeps the old name: past CHANGELOG sections, closed plans, memory entries and @memory's archives are not rewritten. `drone @seedgo` is unknown. Branch protection must name the required check `sentry-audit`.
 - **devpulse**: `tools/rename_term.py` renames a term across a tree, paths then content, four case pairs, whole-word only, with the memory, archive, plan, lock and registry files excluded; dry run by default, `--apply` writes.
 
+### Fixed
+- **ai_mail**: `dispatch stop` ends a monitor on macOS. `check_pid_alive` reads the process state through `ps` where there is no `/proc` (a zombie answers `kill(pid, 0)` there), and the stop waits up to 2 s for a signalled monitor to leave the process table before calling it alive, since the group reads empty while the monitor is still exiting. The refusal is logged.
+- **drone**: the commit gate runs each suite with drone's `AIPASS_CALLER_*` stamps dropped from the environment (they posed as the session cwd inside hooks', prax's and ai_mail's tests) and passes `--force-exclude` to ruff, so a staged file that pyproject excludes is never rewritten.
+
 ## [2026-11-01] — v2.8.33: an empty .git is not a repo, dispatch stop from the deck, hook sounds off by default, the Stop gate for the watchdog wire
 
 ### Added
