@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ruff_check.py
 # Description: Ruff Linter & Formatter Standards Checker Handler
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-04-16
-# Modified: 2026-10-24
+# Modified: 2026-11-01
 # =============================================
 
 """
@@ -22,6 +22,7 @@ from typing import Dict
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_git_marker
 
 # APPLIES_TO: ruff lints tests/ as well as apps/, the same corpus CI's gate reads.
 APPLIES_TO = "everywhere"
@@ -110,7 +111,7 @@ def _find_ruff_bypass_from_file(file_path: str) -> list:
             except Exception as exc:
                 logger.warning("Failed to load ruff_bypass.json at %s: %s", candidate, exc)
                 return []
-        if (parent / ".git").exists():
+        if is_git_marker(parent / ".git"):
             break
     return []
 

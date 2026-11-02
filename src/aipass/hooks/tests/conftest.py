@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: conftest.py
-# Version: 2.6.0
+# Version: 2.7.0
 # Description: Shared pytest fixtures for hooks tests
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-10-31
+# Modified: 2026-11-01
 # =============================================
 
 """Shared pytest fixtures for hooks tests.
@@ -100,11 +100,12 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
 
 @pytest.fixture(autouse=True)
 def isolated_mute_flag(tmp_path_factory, monkeypatch) -> Path:
-    """Keep every test off the owner's LIVE mute flag, and off the legacy temp-dir one is_muted() migrates."""
+    """Keep every test off the owner's LIVE sound flag, and off the old mute flags is_muted() removes."""
     sandbox = tmp_path_factory.mktemp("mute_flag")
+    monkeypatch.setattr(sound, "SOUND_FLAG", sandbox / "home" / "aipass-hooks-sound-on")
     monkeypatch.setattr(sound, "MUTE_FLAG", sandbox / "home" / "aipass-hooks-muted")
     monkeypatch.setattr(sound, "LEGACY_MUTE_FLAG", sandbox / "tmp" / "aipass-hooks-muted")
-    return sound.MUTE_FLAG
+    return sound.SOUND_FLAG
 
 
 @pytest.fixture(autouse=True)

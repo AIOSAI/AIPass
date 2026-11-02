@@ -1,5 +1,5 @@
 # Host Portability
-**Status:** Draft v1.5 (arm G, a stdlib import above the floor; arm F, an emptied git identity; arm E, a symlinked prefix — PR #774; arm D, the host's Python — PR #774; arm C, lib/ corpus — FPLAN-0554 round three)
+**Status:** Draft v1.6 (arm H, an empty `.git` read as a repo; arm G, a stdlib import above the floor; arm F, an emptied git identity; arm E, a symlinked prefix — PR #774; arm D, the host's Python — PR #774; arm C, lib/ corpus — FPLAN-0554 round three)
 **Date:** 2026-10-29
 
 ---
@@ -200,6 +200,28 @@ floor: the arm is off.
 **Fleet, 2026-10-27:** 5 version-bound imports, floor 3.10; 1 row, seedgo's own
 `test_inventory/collection.py` (a version gate, no tomli), cured to the
 fallback in collection 1.0.3.
+
+### Arm H — an existence test on `.git` that an empty directory passes (product code)
+
+`(x / ".git").exists()` / `.is_dir()`, or `os.path.exists` / `os.path.isdir`
+of `os.path.join(..., ".git")`, as the test for "this is a repository". A
+sandbox (Codex's) mounts an EMPTY `.git` directory in each writable root, its
+cwd and the temp root, so a walk up the tree stops at a directory git itself
+never reads as a repo. Specimen: seedgo `home_paths.py` 1.0.0 stopped at
+`/tmp/.git` and scanned nothing.
+
+**Acquitted:** `.is_file()` (a worktree's pointer file; a sandbox mounts
+directories only), and a probe whose enclosing function also opens the marker:
+`.git / "HEAD"`, `os.path.join(..., ".git", "HEAD")`, or a listing
+(`iterdir` / `listdir` / `scandir`) of `.git` itself. A listing of any other
+directory acquits nothing.
+**Not read:** files in a test tree — a fixture plants its own `.git`. A
+fixture that plants an EMPTY one now needs a `HEAD` file for the code it feeds.
+**Cure:** `marker.is_file() or (marker.is_dir() and any(marker.iterdir()))`;
+seedgo's `ignore_handler.is_git_marker` and `find_repo_root` are that test.
+
+**Fleet, 2026-11-01:** 22 rows across seedgo (5, cured), hooks (8), aipass (4),
+prax (3), flow (1), api (1).
 
 ### Valid guards (recognized by checker)
 - a platform test anywhere in the enclosing function: `sys.platform`, `os.name`,

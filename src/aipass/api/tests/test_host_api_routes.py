@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_api_routes.py
 # Description: Tests for the host API's live app — the extra guard, ping, bearer auth, scopes, the declared routes
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-10-08
-# Modified: 2026-10-25
+# Modified: 2026-11-01
 # =============================================
 
 """Tests for create_app(), its auth and the declared routes in apps/handlers/host/server.py."""
@@ -344,6 +344,17 @@ class TestTheDeclaredRoutesAnswerThroughTheRealApp:
         assert response.status_code == 200
         assert response.json() == {"active": True}
         reader.assert_called_once()
+
+    def test_hooks_sound_read_that_fails_is_a_503_not_a_guess(self, routed: Any) -> None:
+        """An unreadable hooks state is 503 settings_unavailable, never a default bool."""
+        api, read_raw, _ = routed
+        broken = host_settings.SettingsUnavailable("The hooks sound state could not be read: ")
+
+        with patch.object(host_server.host_settings, "hooks_sound_get", side_effect=broken):
+            response = api.get("/v1/hooks-sound", headers={"Authorization": f"Bearer {read_raw}"})
+
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "settings_unavailable"
 
     def test_hooks_sound_refuses_a_non_boolean_active(self, routed: Any) -> None:
         """

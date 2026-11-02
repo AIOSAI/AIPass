@@ -1,16 +1,18 @@
 # =================== AIPass ====================
 # Name: hooksound.py
-# Version: 1.1.0
+# Version: 1.3.0
 # Description: Hook sound control — mute/unmute all hook audio
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-22
-# Modified: 2026-10-17
+# Modified: 2026-11-01
 # =============================================
 
 """Hook sound control — mute and unmute all hook audio via drone @hooks hooksound."""
 
-from aipass.cli.apps.modules import err_console
+import json
+
+from aipass.cli.apps.modules import console, err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.sound import is_muted, mute, unmute
 from aipass.prax.apps.modules.logger import system_logger as logger
@@ -21,6 +23,7 @@ HELP_COMMANDS = [
     ("hooksound on", "Unmute all hook sounds"),
     ("hooksound off", "Mute all hook sounds"),
     ("hooksound", "Show current sound status"),
+    ("hooksound --json", 'Print {"active": bool} on stdout'),
 ]
 
 
@@ -41,10 +44,17 @@ def handle_command(command: str, args: list) -> bool:
 
         if wants_help(args):
             CONSOLE.print("[bold cyan]hooksound[/bold cyan] — Mute/unmute all hook audio")
+            CONSOLE.print("  Hook sounds are off by default; 'on' is the switch.")
             CONSOLE.print()
             CONSOLE.print("  drone @hooks hooksound        Show current status")
             CONSOLE.print("  drone @hooks hooksound on     Unmute all hook sounds")
             CONSOLE.print("  drone @hooks hooksound off    Mute all hook sounds")
+            CONSOLE.print('  drone @hooks hooksound --json Print {"active": bool} on stdout')
+            return True
+
+        if sub == "--json":
+            # stdout: @api's host lane parses it; CONSOLE is stderr.
+            console.print_json(json.dumps({"active": not is_muted()}))
             return True
 
         # sound.py is the one flag writer and logs the effect; this logs that the CLI asked.

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_timer.py
 # Description: Tests for the watchdog timer handler + router integration
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-04-14
-# Modified: 2026-10-24
+# Modified: 2026-11-01
 # =============================================
 
 """Tests for apps/handlers/watchdog/timer.py and the watchdog timer command that drives it."""
@@ -381,7 +381,7 @@ def test_router_timer_invalid_duration(_bypass_caller_guard, capsys, monkeypatch
     monkeypatch.setattr(timer_handler, "wake_in", wake_in)
     result = wd_mod.handle_command("watchdog", ["timer", "notaduration"])
 
-    assert result is True
+    assert result is False
     captured = capsys.readouterr()
     combined = captured.out + captured.err
     assert "invalid" in combined.lower()

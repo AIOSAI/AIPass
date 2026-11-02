@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: heal_registry.py
 # Description: Registry Doctrine Self-Heal Handler
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-07-29
-# Modified: 2026-10-17
+# Modified: 2026-11-01
 # =============================================
 
 """
@@ -366,9 +366,10 @@ def _is_citizen_seat(path: Path) -> bool:
 
 
 def _project_root(path: Path) -> Path | None:
-    """Nearest ancestor holding a .git directory, or None."""
+    """Nearest ancestor holding a .git file or non-empty .git dir; Codex plants empty ones in /tmp and cwds."""
     for parent in [path] + list(path.parents):
-        if (parent / ".git").exists():
+        marker = parent / ".git"
+        if marker.is_file() or (marker.is_dir() and any(marker.iterdir())):
             return parent
     return None
 

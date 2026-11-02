@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: system_detector.py
 # Description: Pure system detection logic for aipass doctor
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-16
-# Modified: 2026-10-21
+# Modified: 2026-11-01
 # =============================================
 
 """
@@ -193,7 +193,8 @@ def detect_install_method() -> str:
         return "pip"
 
     for parent in this_file.parents:
-        if (parent / ".git").exists():
+        marker = parent / ".git"
+        if marker.is_file() or (marker.is_dir() and any(marker.iterdir())):
             if (parent / "pyproject.toml").exists() and (parent / "src").exists():
                 return "dev"
             return "clone"

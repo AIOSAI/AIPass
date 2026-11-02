@@ -1,18 +1,17 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for api tests
-# Version: 2.3.0
+# Version: 2.3.1
 # Created: 2026-03-05
-# Modified: 2026-10-25
+# Modified: 2026-11-01
 # Category: api/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v2.3.1 (2026-11-01): remote_repo plants a .git with a HEAD; an empty one is no repository
 #   - v2.3.0 (2026-10-25): no_fsync for the session; host_app shared by request-only fixtures
 #   - v2.2.0 (2026-10-22): dict-backed keyring for every test (autouse); no test reaches the login keyring
-#   - v2.1.0 (2026-09-27): Console width pin + command-state reset (C1, C2);
-#     host imports hoisted to module level; mock_json_handler removed (unused)
-#   - v2.0.0 (2026-03-27): Added mock_infrastructure, mock_logger,
-#     mock_json_handler fixtures for test quality compliance
+#   - v2.1.0 (2026-09-27): Console width pin + command-state reset (C1, C2); host imports hoisted
+#   - v2.0.0 (2026-03-27): mock_infrastructure and mock_logger fixtures
 #
 # CODE STANDARDS:
 #   - Error handling: Use error handler system (apps/handlers/error/)
@@ -161,7 +160,7 @@ def seated(tmp_path: Path, monkeypatch: Any):
 
 
 from aipass.api.apps.handlers.host import git_reads as host_git
-from aipass.api.tests.support_host_read_lane import _BranchNotFound, _RegistryBroken, remote_document
+from aipass.api.tests.support_host_read_lane import _BranchNotFound, _RegistryBroken, plant_repository, remote_document
 
 PATCH_FEED_PATH = "aipass.api.apps.handlers.host.feed.feed_path"
 PATCH_FEED_LOGGER = "aipass.api.apps.handlers.host.feed.logger"
@@ -241,7 +240,7 @@ def remote_repo(tmp_path: Path):
     root = tmp_path / "RemoteRepo"
     branch = root / "src" / "aipass" / "demo"
     branch.mkdir(parents=True)
-    (root / ".git").mkdir()
+    plant_repository(root)
 
     registry = root / "AIPASS_REGISTRY.json"
     registry.write_text(

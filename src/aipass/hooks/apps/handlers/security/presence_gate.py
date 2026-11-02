@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: presence_gate.py
-# Version: 3.3.1
+# Version: 3.3.3
 # Description: Single-session gate — blocks duplicate Claude runtimes per branch
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-06-29
-# Modified: 2026-10-17
+# Modified: 2026-11-01
 # =============================================
 
 """Single-session gate — blocks duplicate Claude runtimes per branch.
@@ -47,14 +47,16 @@ def _resolve_branch(hook_data: dict) -> str:
     while search.parent != search:
         if (search / ".trinity").is_dir() or (search / "apps").is_dir():
             return search.name
-        if (search / "pyproject.toml").exists() or (search / ".git").is_dir():
+        if (search / "pyproject.toml").exists() or (
+            (git := search / ".git").is_file() or (git.is_dir() and any(git.iterdir()))
+        ):
             break
         search = search.parent
     return Path(cwd).name
 
 
-def _format_session_age(session: dict) -> str:
-    """Format session age from its start time."""
+def _format_session_age(session: dict) -> str | None:
+    """Format session age from its start time: "" with no start recorded, None when the start is unreadable."""
     started = session.get("startedAt") or session.get("started", "")
     if not started:
         return ""
@@ -73,18 +75,18 @@ def _format_session_age(session: dict) -> str:
         return f"{minutes}m"
     except Exception as exc:
         logger.info("[presence_gate] age format error: %s", exc)
-        return ""
+        return None
 
 
 def _session_start(session: dict) -> float | None:
     """Epoch seconds this session began, or None when it cannot be told.
 
-    An unreadable start means "cannot rank", never "younger".
+    An absent or unreadable start means "cannot rank", never "younger": None, which no readable start returns.
     """
     started = session.get("startedAt") or session.get("started", "")
-    if not started:
-        return None
     try:
+        if not started:
+            raise ValueError("no start recorded")
         if isinstance(started, (int, float)):
             return float(started) / 1000
         from datetime import datetime

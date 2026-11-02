@@ -3,7 +3,7 @@
 # Description: Dispatch Module
 # Version: 3.9.0
 # Created: 2026-02-02
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -40,6 +40,8 @@ COMMANDS:
   dispatch @target "Subject" "Body"   - Send dispatch email + wake target
   dispatch register                   - Show outstanding dispatches and which are overdue
   dispatch wake @branch               - Wake only (no email sent)
+  dispatch stop @agent [--by <who>]   - End the agent's running dispatch; the row reads stopped
+  dispatch close <id> "reason"        - Close a register row no monitor will close (sender or admin)
 
 DISPATCH (send + wake):
   drone @ai_mail dispatch @branch "Subject" "Body"                    # Send + wake
@@ -54,6 +56,21 @@ WAKE ONLY:
   drone @ai_mail dispatch wake @branch "custom"              # Wake with custom prompt
   drone @ai_mail dispatch wake @branch --model opus          # Wake with Opus model
   drone wake @branch                                         # Shortcut via drone
+
+STOP:
+  drone @ai_mail dispatch stop @branch                       # --by defaults to the caller's seat
+  drone @ai_mail dispatch stop @branch --by Beo              # Who stopped it, named in the mail
+  Ends the monitor and its agent (TERM, 5s grace, KILL), closes the register row as stopped and
+  mails the dispatcher "Dispatch stopped: @branch (by <who>)"; no wake-back follows. The session
+  pointer is kept, so a resume in the branch continues. Exit 0 prints
+  "stopped @branch (dispatch <id>, by <who>)"; nothing running prints
+  "no dispatch is running for @branch" and exits 1, as does an unknown agent.
+
+CLOSE:
+  drone @ai_mail dispatch close 4e215275 "unit ended by hand"   # id or a unique prefix of it
+  For a row whose monitor is gone (OVERDUE, ended by hand): appends status "closed: <reason>".
+  Only the row's sender or the admin may close it. A row whose dispatch is still running is
+  refused; end it with dispatch stop.
 
 WAKE-BACK:
   Library callers such as @daemon's scheduled nudges may pass wake_back=False to
@@ -102,6 +119,8 @@ def handle_command(command: str, args: List[str]) -> bool:
     verbs = {
         "register": lambda: _orchestrate_register(),
         "wake": lambda: _orchestrate_wake(args[1:]),
+        "stop": lambda: _orchestrate_stop(args[1:]),
+        "close": lambda: _orchestrate_close(args[1:]),
     }
 
     run_verb = verbs.get(subcommand)
@@ -306,6 +325,89 @@ def _orchestrate_wake(args: List[str]) -> bool:
     return True
 
 
+def _orchestrate_stop(args: List[str]) -> bool:
+    """End a running dispatch: dispatch stop @agent [--by <who>]."""
+    flags, rest = _parse_flags(args, ("--by",), ())
+    if len(rest) != 1:
+        error("Usage: dispatch stop @agent [--by <who>]")
+        return True
+
+    from aipass.ai_mail.apps.handlers.users.verified_caller import resolve_verified_caller
+
+    by = flags.get("--by") or resolve_verified_caller()
+    if not by:
+        error(f"{rest[0]} not stopped: the caller cannot be identified, name who with --by <who>")
+        return True
+
+    from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable
+    from aipass.ai_mail.apps.handlers.dispatch.wake import resolve_branch
+    from aipass.ai_mail.apps.handlers.dispatch.stop import stop_dispatch
+
+    try:
+        resolved = resolve_branch(rest[0], admin=_admin_lane())
+    except RegistryUnreadable as exc:
+        error(f"{rest[0]} not stopped: the registry is unreadable ({exc})")
+        return True
+    if resolved is None:
+        error(f"unknown agent {rest[0]}")
+        return True
+
+    stopped, line, note = stop_dispatch(*resolved, by)
+    if not stopped:
+        error(line)
+        return True
+    # One line whatever the width: a caller parses it.
+    console.print(line, soft_wrap=True)
+    if note:
+        warning(note)
+    return True
+
+
+def _orchestrate_close(args: List[str]) -> bool:
+    """Close an outstanding register row that no monitor will close: dispatch close <id> "reason"."""
+    if len(args) != 2 or not args[1].strip():
+        error('Usage: dispatch close <id> "reason"')
+        return True
+    wanted, reason = args[0].strip(), args[1].strip()
+
+    from aipass.ai_mail.apps.handlers.dispatch import register
+    from aipass.ai_mail.apps.handlers.dispatch.stop import running_monitor
+    from aipass.ai_mail.apps.handlers.dispatch.wake import resolve_branch
+    from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable
+    from aipass.ai_mail.apps.handlers.users.verified_caller import resolve_verified_caller
+
+    rows = register.outstanding()
+    matches = [r for r in rows if wanted and str(r.get("dispatch_id", "")).startswith(wanted)]
+    if len(matches) != 1:
+        error(f"{len(matches)} outstanding dispatches match {wanted}; give one id from dispatch register")
+        return True
+    row = matches[0]
+    dispatch_id, sender, target = row["dispatch_id"], row.get("sender"), row.get("target")
+
+    caller = resolve_verified_caller()
+    if caller != sender and not _admin_lane():
+        error(f"{dispatch_id} not closed: only its sender {sender} or the admin may close it")
+        return True
+
+    # The newest row for a target is the one its live monitor runs; stop owns that one.
+    newest = next((r for r in rows if r.get("target") == target), None)
+    if newest is row:
+        try:
+            resolved = resolve_branch(str(target), admin=True)
+        except RegistryUnreadable as exc:
+            error(f"{dispatch_id} not closed: cannot tell whether {target} still runs it ({exc})")
+            return True
+        if resolved is not None and running_monitor(resolved[0]) is not None:
+            error(f"{dispatch_id} not closed: {target} is still running it; end it with dispatch stop {target}")
+            return True
+
+    if not register.close_dispatch(dispatch_id, f"closed: {reason}"):
+        error(f"{dispatch_id} not closed: the register could not be written")
+        return True
+    console.print(f"closed dispatch {dispatch_id} ({sender} -> {target}): {reason}", soft_wrap=True)
+    return True
+
+
 def _orchestrate_dispatch_send(args: List[str]) -> bool:
     """Orchestrate combined dispatch: send email with --dispatch flag + wake branch."""
     flags, filtered = _parse_flags(args, ("--from",) + _RUN_FLAGS, ("--fresh", "--no-memory-save", "--no-watchdog"))
@@ -445,6 +547,12 @@ def print_introspection():
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print("  [cyan]handlers/dispatch/[/cyan]")
     console.print("    - [cyan]wake.py[/cyan] [dim](wake_branch — manually wake a branch by spawning an agent)[/dim]")
+    console.print(
+        "    - [cyan]register.py[/cyan] [dim](outstanding, close_dispatch — dispatch register and close)[/dim]"
+    )
+    console.print(
+        "    - [cyan]stop.py[/cyan] [dim](stop_dispatch — end a running dispatch, row stopped, dispatcher mailed)[/dim]"
+    )
     console.print("  [cyan]handlers/email/[/cyan] [dim](used by combined dispatch)[/dim]")
     console.print(
         "    - [cyan]send.py[/cyan] [dim](resolve_sender_info — the sender the mail and the wake share)[/dim]"

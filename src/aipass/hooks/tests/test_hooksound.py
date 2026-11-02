@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_hooksound.py
-# Version: 1.0.1
+# Version: 1.2.0
 # Description: Tests for hooksound module (drone @hooks hooksound)
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-09-28
+# Modified: 2026-11-01
 # =============================================
 
 """Tests for apps/modules/hooksound.py."""
@@ -15,6 +15,7 @@
 # seedgo: no-test-needed(constant) — HELP_COMMANDS' display strings
 # seedgo: no-test-needed(ruff) — that modules/hooksound.py parses and imports sound.py and help_flags
 
+import json
 from unittest.mock import patch
 
 from aipass.hooks.apps.modules.hooksound import handle_command, print_introspection
@@ -68,6 +69,23 @@ class TestHandleCommand:
 
         assert "hooksound — Hook sound control (MUTED)" in capsys.readouterr().err
 
+    def test_json_status_is_one_machine_line_on_stdout(self, capsys):
+        """@api's phone lane reads the door, not the module: {"active": bool} and nothing else on stdout."""
+        for muted, active in ((True, False), (False, True)):
+            with patch("aipass.hooks.apps.modules.hooksound.is_muted", return_value=muted):
+                assert handle_command("hooksound", ["--json"]) is True
+            assert json.loads(capsys.readouterr().out) == {"active": active}
+
+    def test_json_status_reads_the_flag_and_flips_nothing(self, capsys):
+        with (
+            patch("aipass.hooks.apps.modules.hooksound.mute") as mock_mute,
+            patch("aipass.hooks.apps.modules.hooksound.unmute") as mock_unmute,
+        ):
+            assert handle_command("hooksound", ["--json"]) is True
+        assert json.loads(capsys.readouterr().out) == {"active": False}
+        mock_mute.assert_not_called()
+        mock_unmute.assert_not_called()
+
     def test_status_shows_active(self, capsys):
         with patch("aipass.hooks.apps.modules.hooksound.is_muted", return_value=False):
             assert handle_command("hooksound", []) is True
@@ -78,7 +96,9 @@ class TestHandleCommand:
         with patch("aipass.hooks.apps.modules.hooksound.mute") as mock_mute:
             assert handle_command("hooksound", ["--help"]) is True
 
-        assert "hooksound — Mute/unmute all hook audio" in capsys.readouterr().err
+        err = capsys.readouterr().err
+        assert "hooksound — Mute/unmute all hook audio" in err
+        assert "Hook sounds are off by default; 'on' is the switch." in err
         mock_mute.assert_not_called()
 
     def test_help_word(self, capsys):

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inbox_audit.py
 # Description: Inbox ID validator — scans all inbox.json files for non-8-hex ids
-# Version: 1.1.3
+# Version: 1.1.4
 # Created: 2026-04-21
-# Modified: 2026-10-24
+# Modified: 2026-11-01
 # =============================================
 
 """Inbox ID validator for the drone @seedgo audit inbox-ids command.
@@ -24,6 +24,7 @@ from aipass.prax import logger
 from aipass.cli import console, header
 from aipass.cli.apps.modules import error, success, warning
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.bypass.ignore_handler import find_repo_root
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
 from aipass.seedgo.apps.handlers.audit_tests import refusal
 from aipass.seedgo.apps.modules import CommandRefused
@@ -50,10 +51,7 @@ def _is_live_inbox(inbox_path: Path) -> bool:
 
 def _find_repo_root() -> Path:
     current = Path(__file__).resolve().parent
-    for parent in (current, *current.parents):
-        if (parent / ".git").exists():
-            return parent
-    return current
+    return find_repo_root(current) or current
 
 
 def _find_inboxes(repo_root: Path) -> List[Path]:

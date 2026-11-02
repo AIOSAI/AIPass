@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_subagent_gate.py
-# Version: 1.0.3
+# Version: 1.0.4
 # Description: Tests for subagent_gate security handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-10-05
+# Modified: 2026-11-01
 # =============================================
 
 """Tests for apps/handlers/security/subagent_gate.py."""
@@ -58,6 +58,7 @@ def _repo_with(tmp_path, name: str, *files: str):
     """A repo root (a .git directory) holding each of `files`, written empty."""
     repo = tmp_path / name
     (repo / ".git").mkdir(parents=True)
+    (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
     for rel in files:
         target = repo / rel
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -72,6 +73,16 @@ class TestSubagentGateHandler:
         assert result["exit_code"] == 0
         assert result["stdout"] == ""
         assert "sound" not in result
+
+    def test_an_empty_git_is_no_repo_and_runs_nothing(self, tmp_path):
+        """Codex's sandbox plants an empty .git in every cwd it starts in; that is not a repository."""
+        root = tmp_path / "codex_cwd"
+        (root / "src" / "aipass" / "hooks" / "apps").mkdir(parents=True)
+        (root / "src" / "aipass" / "hooks" / "apps" / "x.py").write_text("", encoding="utf-8")
+        (root / ".git").mkdir()
+        result, calls = _stop_in(root, root / "src" / "aipass" / "hooks", " M src/aipass/hooks/apps/x.py\n")
+        assert result == {"exit_code": 0, "stdout": ""}
+        assert calls == []
 
     def test_no_modified_files_allows(self):
         with patch("aipass.hooks.apps.handlers.security.subagent_gate._find_repo_root", return_value=None):

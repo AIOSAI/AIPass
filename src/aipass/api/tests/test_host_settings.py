@@ -1,16 +1,16 @@
 # =================== AIPass ====================
 # Name: test_host_settings.py
 # Description: Host API settings handler — the desktop's gear rules, held in Python
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-16
-# Modified: 2026-10-31
+# Modified: 2026-11-01
 # =============================================
 
 """Tests for apps/handlers/host/settings.py, the desktop's settings lane."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(external) — @baud's settings.rs, the other face; @baud's own tests
-# seedgo: no-test-needed(covered_elsewhere) — where hooks_sound puts the mute flag; @hooks' tests of that module
+# seedgo: no-test-needed(covered_elsewhere) — the flag path HOOKS_SOUND_STATE's child reads; @hooks' tests of sound.py
 
 import json
 import os
@@ -23,7 +23,7 @@ import pytest
 
 from aipass.api.apps.handlers.host import settings as host_settings
 
-WHERE_THE_FLAG_LIVES = "from aipass.hooks.apps import sound; print(sound.MUTE_FLAG)"
+WHERE_THE_FLAG_LIVES = "from aipass.hooks.apps import sound; print(sound.SOUND_FLAG)"
 
 
 def _where_the_door_would_write() -> Path:
@@ -59,23 +59,26 @@ def _ok() -> subprocess.CompletedProcess:
 
 
 @pytest.fixture
-def muted_elsewhere(tmp_path, monkeypatch):
+def sound_elsewhere(tmp_path, monkeypatch):
     """
     @hooks' flag, relocated into this test's own directory, plus a stand-in for
     the door that moves it."""
-    flag = tmp_path / "aipass-hooks-muted"
+    flag = tmp_path / ".aipass" / "aipass-hooks-sound-on"
     calls: list = []
 
     def fake_door(command, **kwargs):
         calls.append(list(command))
+        if command == host_settings.HOOKS_SOUND_STATE:
+            state = "active" if flag.exists() else "muted"
+            return subprocess.CompletedProcess(args=command, returncode=0, stdout=f"{state}\n", stderr="")
         verb = command[-1]
-        if verb == "off":
+        if verb == "on":
+            flag.parent.mkdir(parents=True, exist_ok=True)
             flag.touch()
-        elif verb == "on":
+        elif verb == "off":
             flag.unlink(missing_ok=True)
         return _ok()
 
-    monkeypatch.setattr(host_settings.hooks_sound, "MUTE_FLAG", flag)
     monkeypatch.setattr(host_settings.subprocess, "run", fake_door)
     return flag, calls
 
@@ -204,52 +207,70 @@ class TestHooksSound:
         source = Path(host_settings.__file__).read_text(encoding="utf-8")
 
         assert "aipass-hooks-muted" not in source
+        assert "aipass-hooks-sound-on" not in source
         assert "hooks_mute_flag" not in source
 
-    def test_the_flip_goes_through_the_hooks_door(self, muted_elsewhere) -> None:
+    def test_no_hooks_code_is_held_in_process(self) -> None:
+        """A long-running server would keep the @hooks code it started with; every read is a fresh child."""
+        assert not hasattr(host_settings, "hooks_sound")
+        assert host_settings.HOOKS_SOUND_STATE[0] == sys.executable
+
+    def test_the_flip_goes_through_the_hooks_door(self, sound_elsewhere) -> None:
         """The WRITE is the registered command, not a touch and an unlink."""
-        flag, calls = muted_elsewhere
+        flag, calls = sound_elsewhere
 
-        host_settings.hooks_sound_set(False)
         host_settings.hooks_sound_set(True)
+        host_settings.hooks_sound_set(False)
 
-        assert [call[-2:] for call in calls] == [["hooksound", "off"], ["hooksound", "on"]]
-        assert all(call[:2] == ["drone", "@hooks"] for call in calls)
+        flips = [call for call in calls if call != host_settings.HOOKS_SOUND_STATE]
+        assert flips == [["drone", "@hooks", "hooksound", "on"], ["drone", "@hooks", "hooksound", "off"]]
 
-    def test_active_means_no_flag_and_flips_are_idempotent(self, muted_elsewhere) -> None:
-        flag, _ = muted_elsewhere
+    def test_off_by_default_active_means_the_on_flag_and_flips_are_idempotent(self, sound_elsewhere) -> None:
+        flag, _ = sound_elsewhere
 
-        assert host_settings.hooks_sound_get() is True
-        assert host_settings.hooks_sound_set(False) is False
-        assert host_settings.hooks_sound_set(False) is False
+        assert host_settings.hooks_sound_get() is False
+        assert host_settings.hooks_sound_set(True) is True
+        assert host_settings.hooks_sound_set(True) is True
         assert flag.exists()
-        assert host_settings.hooks_sound_set(True) is True
-        assert host_settings.hooks_sound_set(True) is True
+        assert host_settings.hooks_sound_set(False) is False
+        assert host_settings.hooks_sound_set(False) is False
         assert not flag.exists()
 
-    def test_a_door_that_answers_but_does_not_flip_is_a_failure(self, muted_elsewhere) -> None:
+    @pytest.mark.parametrize("answer", [_ok(), subprocess.CompletedProcess([], 1, "active\n", "Traceback: no hooks")])
+    def test_a_state_read_that_says_nothing_known_is_a_refusal_not_a_guess(self, answer) -> None:
+        with patch.object(host_settings.subprocess, "run", return_value=answer):
+            with pytest.raises(host_settings.SettingsUnavailable) as refusal:
+                host_settings.hooks_sound_get()
+
+        assert "hooks sound state could not be read" in str(refusal.value)
+
+    def test_a_door_that_answers_but_does_not_flip_is_a_failure(self, sound_elsewhere) -> None:
         """
         MEASURED, and the reason this lane re-reads instead of trusting a zero.
 
         An unknown hooksound verb exits ZERO too; the flag is the only witness."""
-        flag, _ = muted_elsewhere
-        host_settings.hooks_sound_set(False)
+        flag, _ = sound_elsewhere
+        honest = host_settings.subprocess.run
 
-        with patch.object(host_settings.subprocess, "run", return_value=_ok()):
+        def deaf(command, **kwargs):
+            return honest(command, **kwargs) if command == host_settings.HOOKS_SOUND_STATE else _ok()
+
+        with patch.object(host_settings.subprocess, "run", deaf):
             with pytest.raises(host_settings.SettingsUnavailable) as refusal:
                 host_settings.hooks_sound_set(True)
 
-        assert "hook sounds" in str(refusal.value).lower()
+        assert "hook sounds are still off" in str(refusal.value)
+        assert not flag.exists()
 
-    def test_a_door_that_cannot_be_reached_refuses_rather_than_writing_the_file(self, muted_elsewhere) -> None:
+    def test_a_door_that_cannot_be_reached_refuses_rather_than_writing_the_file(self, sound_elsewhere) -> None:
         """
         No silent fallback to hand-writing. If the door is gone, say so — the
         one thing this lane must never do is quietly become the thing it replaced."""
-        flag, _ = muted_elsewhere
+        flag, _ = sound_elsewhere
 
         with patch.object(host_settings.subprocess, "run", side_effect=FileNotFoundError("drone")):
             with pytest.raises(host_settings.SettingsUnavailable):
-                host_settings.hooks_sound_set(False)
+                host_settings.hooks_sound_set(True)
 
         assert not flag.exists()
 
@@ -259,7 +280,7 @@ class TestHooksSound:
 
         The mocks pin what the lane sends, not that @hooks still answers the verb.
         It skips without a live @hooks (CI: a tmp registry cannot point at the real tree)."""
-        operator_flag = Path(str(host_settings.hooks_sound.MUTE_FLAG))
+        operator_flag = _where_the_door_would_write()
         before = _fingerprint(operator_flag)
 
         flag = tmp_path / ".aipass" / operator_flag.name
@@ -267,7 +288,6 @@ class TestHooksSound:
         monkeypatch.setenv("USERPROFILE", str(tmp_path))
         # TMPDIR too: the door moves a legacy temp-dir flag once, and the operator's must never be the one moved.
         monkeypatch.setenv("TMPDIR", str(tmp_path))
-        monkeypatch.setattr(host_settings.hooks_sound, "MUTE_FLAG", flag)
 
         listening = subprocess.run(
             list(host_settings.HOOKS_SOUND_DOOR),
@@ -289,9 +309,9 @@ class TestHooksSound:
         )
 
         try:
-            assert host_settings.hooks_sound_set(False) is False
-            assert flag.exists()
             assert host_settings.hooks_sound_set(True) is True
+            assert flag.exists()
+            assert host_settings.hooks_sound_set(False) is False
             assert not flag.exists()
         finally:
             assert _fingerprint(operator_flag) == before
@@ -302,6 +322,7 @@ class TestTheGuardsOnTheLiveDoorTest:
 
     def test_the_redirect_check_asks_the_door_rather_than_computing_the_answer(self, tmp_path, monkeypatch) -> None:
         """A HOME the child inherits is the HOME the door's own module resolves against."""
+        operator_flag = _where_the_door_would_write()
         elsewhere = tmp_path / "elsewhere"
         monkeypatch.setenv("HOME", str(elsewhere))
         monkeypatch.setenv("USERPROFILE", str(elsewhere))
@@ -309,7 +330,7 @@ class TestTheGuardsOnTheLiveDoorTest:
         would_write = _where_the_door_would_write()
 
         assert elsewhere in would_write.parents
-        assert would_write != Path(str(host_settings.hooks_sound.MUTE_FLAG))
+        assert would_write != operator_flag
 
     def test_the_fingerprint_notices_a_rewrite_that_changed_nothing(self, tmp_path) -> None:
         """Why the operator's flag is fingerprinted with its mtime and not just its state."""

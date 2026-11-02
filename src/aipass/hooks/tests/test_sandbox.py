@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_sandbox.py
-# Version: 1.0.3
+# Version: 1.0.4
 # Description: Tests for sandbox wrapper module
 # Branch: hooks
 # Created: 2026-06-09
-# Modified: 2026-10-05
+# Modified: 2026-11-01
 # =============================================
 
 """Tests for apps/modules/sandbox.py."""
@@ -331,13 +331,17 @@ class TestSrtResolveCwd:
 class TestBuildPolicy:
     """Policy generation from branch path."""
 
-    def _make_branch(self, tmp_path, name, citizen_class="builder", is_devpulse=False):
-        """Create a minimal branch structure for testing."""
+    def _make_branch(self, tmp_path, name, citizen_class="builder", is_devpulse=False, worktree=False):
+        """Create a minimal branch structure for testing; a worktree's .git is a file."""
         import json
 
         repo = tmp_path / "repo"
         repo.mkdir()
-        (repo / ".git").mkdir()
+        if worktree:
+            (repo / ".git").write_text("gitdir: /elsewhere/.git/worktrees/repo\n", encoding="utf-8")
+        else:
+            (repo / ".git").mkdir()
+            (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
         src_aipass = repo / "src" / "aipass"
         src_aipass.mkdir(parents=True)
 
@@ -387,6 +391,18 @@ class TestBuildPolicy:
         assert str(repo / "system_logs") in policy["allow_write"]
         assert str(repo / ".ai_central") in policy["allow_write"]
         assert str(repo / "AIPASS_REGISTRY.json") in policy["allow_write"]
+
+    def test_an_empty_git_in_the_branch_is_not_the_repo_root(self, tmp_path):
+        """Codex's sandbox plants an empty .git in every cwd it starts in; the walk must pass it by."""
+        branch = self._make_branch(tmp_path, "seedgo")
+        (branch / ".git").mkdir()
+        policy = build_policy(branch)
+        assert str(tmp_path / "repo" / "system_logs") in policy["allow_write"]
+
+    def test_a_worktree_git_file_is_still_the_repo_root(self, tmp_path):
+        branch = self._make_branch(tmp_path, "seedgo", worktree=True)
+        policy = build_policy(branch)
+        assert str(tmp_path / "repo" / "system_logs") in policy["allow_write"]
 
     def test_builder_excludes_git(self, tmp_path):
         branch = self._make_branch(tmp_path, "seedgo")

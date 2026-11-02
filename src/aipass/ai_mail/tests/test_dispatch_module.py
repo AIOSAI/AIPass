@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_module.py
 # Description: Tests for dispatch.py orchestrator functions
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-04-26
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/dispatch.py."""
@@ -13,7 +13,13 @@
 # seedgo: no-test-needed(constant) — DISPATCH_ID_ENV and the other literal env-var names dispatch.py reads
 
 import json
-from contextlib import ExitStack
+import os
+import signal
+import subprocess
+import sys
+import threading
+import time
+from contextlib import ExitStack, suppress
 
 import pytest
 from unittest.mock import MagicMock, patch
@@ -26,6 +32,9 @@ from aipass.ai_mail.apps.modules.dispatch import (
     print_introspection,
 )
 import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
+import aipass.ai_mail.apps.handlers.dispatch.stop as stop_mod
+from aipass.ai_mail.apps.handlers.dispatch import register, session_pointer
+from aipass.ai_mail.apps.handlers.dispatch.pid_lock import check_pid_alive
 
 
 # Each verb is reached the way `drone @ai_mail dispatch ...` reaches it: through
@@ -1177,3 +1186,223 @@ class TestBothVerbsAgreeAtTheManagerGate:
         assert len(verdicts) == 2
         assert verdicts[0] == verdicts[1]
         assert verdicts[0][0] == "info" and "wake skipped" in verdicts[0][2]
+
+
+# ===========================================================================
+# dispatch stop
+# ===========================================================================
+
+# Real processes in their own session, real signals and ps: POSIX only.
+_posix_only = pytest.mark.skipif(sys.platform == "win32", reason="process groups, signals and ps are POSIX")
+# The stand-in monitor starts its own agent child in its group and prints the child's pid.
+_SLEEPER = (
+    "import signal, subprocess, sys, time\n"
+    "agent = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+    "if sys.argv[1] == 'deaf':\n    signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+    "print(agent.pid, flush=True)\ntime.sleep(60)"
+)
+
+
+@pytest.fixture
+def running_dispatch(tmp_path, monkeypatch):
+    """@worker with a live stand-in monitor holding its lock, a register row from @boss, and a session pointer."""
+    branch = tmp_path / "worker"
+    (branch / ".ai_mail.local").mkdir(parents=True)
+    monkeypatch.setattr(f"{_H_WAKE}.resolve_branch", lambda email, admin=False: (branch, "@worker"))
+    mails = []
+    monkeypatch.setattr(stop_mod, "deliver_email_to_branch", lambda to, data: mails.append((to, data)) or (True, ""))
+    monkeypatch.setattr(stop_mod, "GRACE_SECONDS", 0.5)
+    # ps cuts args at COLUMNS; a monitor's long venv argv put its mark past an 80-column cut.
+    monkeypatch.setenv("COLUMNS", "40")
+    procs = []
+
+    def start(mode="polite", mark="dispatch_monitor"):
+        if sys.platform != "win32":
+            proc = subprocess.Popen(
+                [sys.executable, "-c", _SLEEPER, mode, mark],
+                start_new_session=True,
+                stdout=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+            )
+            assert proc.stdout is not None
+            proc.agent_pid = int(proc.stdout.readline())
+            threading.Thread(target=proc.wait, daemon=True).start()
+            procs.append(proc)
+            # Returned only once the product's own checks see the stand-in; a slow runner otherwise raced them.
+            deadline = time.monotonic() + 10
+            while not (check_pid_alive(proc.pid) and stop_mod.is_monitor(proc.pid) == (mark == "dispatch_monitor")):
+                assert time.monotonic() < deadline, f"the stand-in PID {proc.pid} never became visible to ps"
+                with suppress(subprocess.TimeoutExpired):
+                    proc.wait(timeout=0.05)
+                assert proc.returncode is None, (
+                    f"the stand-in monitor exited before the stop: returncode {proc.returncode}"
+                )
+            (branch / ".ai_mail.local" / ".dispatch.lock").write_text(json.dumps({"pid": proc.pid}), encoding="utf-8")
+            return proc
+
+    dispatch_id = register.open_dispatch(sender="@boss", target="@worker", subject="Build it", expected_seconds=600)
+    session_pointer.write_pointer(branch, "sess-1", "wake-fresh")
+    yield branch, dispatch_id, start, mails
+    for proc in procs:
+        proc.kill()
+        if sys.platform != "win32" and check_pid_alive(proc.agent_pid):
+            os.kill(proc.agent_pid, signal.SIGKILL)
+        proc.stdout.close()
+
+
+def _stop(*args):
+    return handle_command("dispatch", ["stop", *args])
+
+
+@_posix_only
+class TestDispatchStop:
+    def test_a_stop_ends_the_monitor_closes_the_row_stopped_and_mails_the_dispatcher(self, running_dispatch, capsys):
+        branch, dispatch_id, start, mails = running_dispatch
+        proc = start()
+
+        _stop("@worker", "--by", "Beo")
+
+        out, _ = capsys.readouterr()
+        assert out.strip() == f"stopped @worker (dispatch {dispatch_id}, by Beo)"
+        assert proc.wait(timeout=10) == -signal.SIGTERM
+        assert not check_pid_alive(proc.agent_pid)
+        assert register.outstanding() == []
+        rows = [json.loads(line) for line in register.register_file().read_text(encoding="utf-8").splitlines()]
+        assert rows[-1]["dispatch_id"] == dispatch_id and rows[-1]["status"] == "stopped"
+        [(to, mail)] = mails
+        assert (to, mail["subject"]) == ("@boss", "Dispatch stopped: @worker (by Beo)")
+        assert "Beo stopped @worker's dispatch" in mail["message"]
+        assert not (branch / ".ai_mail.local" / ".dispatch.lock").exists()
+
+    def test_the_stopped_line_stays_one_line_on_a_narrow_console(self, running_dispatch, capsys, monkeypatch):
+        _, dispatch_id, start, _ = running_dispatch
+        start()
+        monkeypatch.setattr(display.CONSOLE, "width", 40)
+
+        _stop("@worker", "--by", "a-long-seat-name")
+
+        assert capsys.readouterr().out == f"stopped @worker (dispatch {dispatch_id}, by a-long-seat-name)\n"
+
+    def test_a_monitor_deaf_to_sigterm_is_killed_after_the_grace(self, running_dispatch):
+        _, _, start, _ = running_dispatch
+        proc = start("deaf")
+
+        _stop("@worker", "--by", "Beo")
+
+        assert proc.wait(timeout=10) == -signal.SIGKILL
+
+    def test_the_session_pointer_survives_a_stop(self, running_dispatch):
+        branch, _, start, _ = running_dispatch
+        start()
+
+        _stop("@worker", "--by", "Beo")
+
+        assert (session_pointer.read_pointer(branch) or {}).get("session_id") == "sess-1"
+
+    def test_nothing_running_fails_with_one_line_and_touches_no_row_and_no_mail(self, running_dispatch, capsys):
+        _, dispatch_id, _, mails = running_dispatch
+
+        _stop("@worker", "--by", "Beo")
+
+        out, err = capsys.readouterr()
+        assert out == "" and "no dispatch is running for @worker" in err
+        assert display.command_failed()
+        assert [e["dispatch_id"] for e in register.outstanding()] == [dispatch_id]
+        assert mails == []
+
+    def test_a_second_stop_is_the_nothing_running_line(self, running_dispatch, capsys):
+        _, _, start, mails = running_dispatch
+        start()
+        _stop("@worker", "--by", "Beo")
+        capsys.readouterr()
+
+        _stop("@worker", "--by", "Beo")
+
+        _, err = capsys.readouterr()
+        assert "no dispatch is running for @worker" in err and len(mails) == 1
+
+    def test_a_live_lock_pid_that_is_not_a_monitor_is_never_signalled(self, running_dispatch, capsys):
+        _, _, start, mails = running_dispatch
+        proc = start(mark="someone_else")
+
+        _stop("@worker", "--by", "Beo")
+
+        assert "no dispatch is running for @worker" in capsys.readouterr().err
+        assert proc.poll() is None and mails == []
+
+    def test_an_unknown_agent_fails_and_says_so(self, monkeypatch, capsys):
+        monkeypatch.setattr(f"{_H_WAKE}.resolve_branch", lambda email, admin=False: None)
+
+        _stop("@nobody", "--by", "Beo")
+
+        assert "unknown agent @nobody" in capsys.readouterr().err
+        assert display.command_failed()
+
+
+# ===========================================================================
+# dispatch close
+# ===========================================================================
+
+
+def _close(*args):
+    return handle_command("dispatch", ["close", *args])
+
+
+def _last_status(dispatch_id):
+    rows = [json.loads(line) for line in register.register_file().read_text(encoding="utf-8").splitlines()]
+    return [r["status"] for r in rows if r["dispatch_id"] == dispatch_id][-1]
+
+
+class TestDispatchClose:
+    def test_the_sender_closes_a_dead_row_by_its_short_id(self, running_dispatch, monkeypatch, capsys):
+        _, dispatch_id, _, _ = running_dispatch
+        monkeypatch.setattr(f"{_H_VERIFIED}.resolve_verified_caller", lambda: "@boss")
+
+        _close(dispatch_id[:8], "unit ended by hand")
+
+        assert capsys.readouterr().out == f"closed dispatch {dispatch_id} (@boss -> @worker): unit ended by hand\n"
+        assert register.outstanding() == []
+        assert _last_status(dispatch_id) == "closed: unit ended by hand"
+
+    def test_the_admin_closes_another_senders_row(self, running_dispatch, monkeypatch):
+        _, dispatch_id, _, _ = running_dispatch
+        monkeypatch.setattr(f"{_H_VERIFIED}.resolve_verified_caller", lambda: "@devpulse")
+        monkeypatch.setattr(f"{_H_VERIFIED}.ADMIN_HOLDER", "@devpulse")
+        monkeypatch.setattr(f"{_H_VERIFIED}.verify_admin_caller", lambda: (True, "admin grant verified"))
+
+        _close(dispatch_id, "ended by hand")
+
+        assert register.outstanding() == []
+
+    def test_a_caller_who_is_neither_sender_nor_admin_is_refused_and_the_row_stays(
+        self, running_dispatch, monkeypatch, capsys
+    ):
+        _, dispatch_id, _, _ = running_dispatch
+        monkeypatch.setattr(f"{_H_VERIFIED}.resolve_verified_caller", lambda: "@stranger")
+
+        _close(dispatch_id, "not mine")
+
+        assert "only its sender @boss or the admin may close it" in capsys.readouterr().err
+        assert display.command_failed()
+        assert [e["dispatch_id"] for e in register.outstanding()] == [dispatch_id]
+
+    @_posix_only
+    def test_a_row_still_running_is_refused_and_points_at_stop(self, running_dispatch, monkeypatch, capsys):
+        _, dispatch_id, start, _ = running_dispatch
+        proc = start()
+        monkeypatch.setattr(f"{_H_VERIFIED}.resolve_verified_caller", lambda: "@boss")
+
+        _close(dispatch_id, "too early")
+
+        assert "@worker is still running it; end it with dispatch stop @worker" in capsys.readouterr().err
+        assert [e["dispatch_id"] for e in register.outstanding()] == [dispatch_id]
+        assert proc.poll() is None
+
+    def test_an_id_matching_no_outstanding_row_is_refused(self, running_dispatch, monkeypatch, capsys):
+        monkeypatch.setattr(f"{_H_VERIFIED}.resolve_verified_caller", lambda: "@boss")
+
+        _close("ffffffff", "gone")
+
+        assert "0 outstanding dispatches match ffffffff" in capsys.readouterr().err
+        assert display.command_failed()

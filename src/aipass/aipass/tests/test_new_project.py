@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_new_project.py
 # Description: Tests for aipass new — project creation handler
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-07-17
-# Modified: 2026-10-29
+# Modified: 2026-11-01
 # =============================================
 
 """Tests for apps/handlers/new_project/__init__.py and apps/modules/new_project.py."""
@@ -1019,6 +1019,7 @@ def test_git_init_still_refuses_an_existing_repo(host_env, monkeypatch):
 
     def a_repo_appears(target, name):
         (target / ".git").mkdir()
+        (target / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
         return [], []
 
     with (
@@ -1027,6 +1028,20 @@ def test_git_init_still_refuses_an_existing_repo(host_env, monkeypatch):
     ):
         _born(host_env, monkeypatch)
     assert not (host_env / "projects" / "demo").exists()
+
+
+@requires_git
+def test_an_empty_dot_git_is_no_repo_so_the_birth_commit_lands_in_it(host_env, monkeypatch):
+    """Codex's sandbox leaves an empty .git in a cwd it starts in; it holds no history to refuse over."""
+
+    def an_empty_git_appears(target, name):
+        (target / ".git").mkdir()
+        return [], []
+
+    with patch("aipass.aipass.apps.handlers.new_project._scaffold_aipass", side_effect=an_empty_git_appears):
+        repo = _born(host_env, monkeypatch)
+
+    assert _branches(repo) == ["dev", "main"]
 
 
 def test_spawn_project_agent_passes_no_citizen_class(host_env, monkeypatch):

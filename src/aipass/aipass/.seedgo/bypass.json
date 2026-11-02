@@ -158,13 +158,13 @@
     {
       "file": "apps/modules/new_project.py",
       "standard": "logged_fallback",
-      "lines": [146],
+      "lines": [147],
       "reason": "_prompt_agent answers the no_agent flag. EOFError is end of input, which is no answer, so it takes the prompt's printed default Y (False = create the agent), the same as an empty Enter on the line below. That is the answer, not a failure. Ctrl-C raises to handle_command. Re-read in fleet green leg 7 (aipass's decision). Re-pinned 2026-10-17 (+14: the module door for the host API, FPLAN-0649)."
     },
     {
       "file": "apps/modules/install.py",
       "standard": "logged_fallback",
-      "lines": [127, 205, 623],
+      "lines": [127, 205, 624],
       "reason": "127: _clear_stale_lock answers whether the lock is now free. FileNotFoundError means another process removed it first, so it IS free (True is the fact); an unlink that fails returns False and refuses (caller acquire, install.py:152). 205: _pid_alive on POSIX, a PermissionError from signal 0 means the process exists under another user, so True is the answer; an unknown is None. 623: run_install's Ctrl-C at home resolution returns 1, the documented code for nothing installed; handle_command passes it to sys.exit, and no caller branches on cancel versus failure. Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-13 after DPLAN-0408 moved them; again 2026-10-24 (FPLAN-0665 moved them 4 down)."
     },
     {
@@ -222,7 +222,7 @@
     {
       "file": "tests/test_install.py",
       "standard": "through_the_command",
-      "lines": [22, 252, 1360, 1392],
+      "lines": [22, 252, 1364, 1396],
       "reason": "Ruling (c), fleet green leg 7: run_install, the one public door, clones the repo (_clone_repo), runs setup.sh (_run_setup), fixes ownership (_check_and_fix_owner), fetches baud (_install_phone_face), runs doctor (_run_doctor_preflight) and launches the chat (_end_in_chat, which prompts _ask_permission_mode and builds _build_install_prompt); _resolve_home and _looks_like_aipass_tree prompt and probe before the clone; _registry_user_name and _print_next_steps sit behind the chat launch. Every helper is pinned with the far side stubbed (lines re-pinned 2026-10-15, DPLAN-0409 C3). _resolve_source (--source) is a pure check before the clone, also pinned through run_install. 252: _pid_alive's Windows tasklist branch is unreachable from acquire_install_lock on a POSIX host; it is handed platform and runner instead. Re-pinned 2026-10-24 (FPLAN-0665 moved 246/1322/1354; 1392 is a second _clone_repo pin)."
     },
     {

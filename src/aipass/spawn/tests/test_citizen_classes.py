@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_citizen_classes.py
 # Description: Integration tests for citizen class system
-# Version: 1.3.3
+# Version: 1.3.4
 # Created: 2026-03-07
-# Modified: 2026-10-31
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/class_registry.py and the citizen-class-aware create and update paths."""
@@ -243,7 +243,8 @@ class TestMintNeedsARegistry:
         assert handle_create([str(tmp_path / "orphan")]) != 0
 
         out, err = capsys.readouterr()
-        assert f"No registry above {tmp_path / 'orphan'}" in " ".join((out + err).split())
+        # Rich wraps the long tmp path at a hyphen on macOS runners, so whitespace is dropped on both sides
+        assert "".join(f"No registry above {tmp_path / 'orphan'}".split()) in "".join((out + err).split())
         assert not (tmp_path / "orphan").exists()
         assert list(tmp_path.rglob("*_REGISTRY.json")) == []
 

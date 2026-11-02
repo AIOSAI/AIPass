@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: load.py
 # Description: Load Logging Configuration Handler
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2025-11-07
-# Modified: 2026-10-29
+# Modified: 2026-11-01
 # =============================================
 
 """
@@ -124,12 +124,7 @@ def _get_caller_module_name(depth: int = 1) -> str:
 
 
 def get_module_logs_dir(module_name: Optional[str] = None, branch_dir: Optional[Union[str, Path]] = None) -> Path:
-    """Get the branch-root logs directory for a module.
-
-    A known ``branch_dir`` is its own ``logs/``. A name alone is looked up under the
-    two source roots; unknown modules fall back to system_logs/external/, never
-    creating new directories inside the AIPass source tree.
-    """
+    """A known branch_dir's logs/; else by name, unknowns to system_logs/external/, never the source tree."""
     if module_name is None:
         module_name = _get_caller_module_name(depth=2)
 
@@ -168,7 +163,7 @@ def get_module_logs_dir(module_name: Optional[str] = None, branch_dir: Optional[
             (
                 c
                 for c in [caller_path, *caller_path.parents]
-                if (c / ".git").exists() or (c / "pyproject.toml").exists()
+                if (m := c / ".git").is_file() or (m.is_dir() and any(m.iterdir())) or (c / "pyproject.toml").exists()
             ),
             None,
         )

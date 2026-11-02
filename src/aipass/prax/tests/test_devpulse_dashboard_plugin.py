@@ -3,7 +3,7 @@
 # Description: Tests for devpulse dashboard plugin
 # Version: 1.4.1
 # Created: 2026-05-16
-# Modified: 2026-10-24
+# Modified: 2026-11-01
 # =============================================
 
 """Tests for apps/plugins/devpulse_dashboard/git_section.py, dispatch_section.py and refresh.py."""
@@ -104,6 +104,7 @@ def branch_with_trinity(branch_path):
 def branch_with_git(branch_path):
     """Branch path inside a fake git repo."""
     (branch_path / ".git").mkdir()
+    (branch_path / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
     return branch_path
 
 
@@ -139,6 +140,15 @@ class TestGitSection:
         assert cap - 4 < len(msg) <= cap
         assert msg.startswith("fix(memory): why")
         assert msg.endswith("...")
+
+    @patch("aipass.prax.apps.plugins.devpulse_dashboard.git_section.subprocess.run")
+    def test_an_empty_git_dir_is_no_repo_and_runs_no_git(self, mock_run, branch_path):
+        (branch_path / ".git").mkdir()
+        before = (branch_path / "DASHBOARD.local.json").read_text(encoding="utf-8")
+        with pytest.raises(FileNotFoundError, match="No .git found"):
+            dashboard_git_section.build_git_section(branch_path)
+        mock_run.assert_not_called()
+        assert (branch_path / "DASHBOARD.local.json").read_text(encoding="utf-8") == before
 
     @patch("aipass.prax.apps.plugins.devpulse_dashboard.git_section.subprocess.run")
     def test_subject_line_keeps_short_subjects_and_drops_the_body(self, mock_run, branch_with_git):

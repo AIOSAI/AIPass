@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: settings_backup.py
-# Version: 1.0.2
+# Version: 1.0.3
 # Description: Backs up ~/.claude/settings*.json and appends a receipt before any tool writes it (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-10-15
-# Modified: 2026-10-25
+# Modified: 2026-11-01
 # =============================================
 
 """The tool doors of the settings-backup contract (FPLAN-0645).
@@ -101,7 +101,9 @@ def _actor(cwd: str) -> str:
     while search.parent != search:
         if (search / ".trinity").is_dir() or (search / "apps").is_dir():
             return search.name
-        if (search / "pyproject.toml").exists() or (search / ".git").is_dir():
+        if (search / "pyproject.toml").exists() or (
+            (git := search / ".git").is_file() or (git.is_dir() and any(git.iterdir()))
+        ):
             break
         search = search.parent
     return str(here)

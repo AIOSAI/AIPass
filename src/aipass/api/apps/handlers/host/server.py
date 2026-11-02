@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: server.py
 # Description: Host API Server Handler — FastAPI app factory, auth dependency
-# Version: 1.1.8
+# Version: 1.1.9
 # Created: 2026-08-14
-# Modified: 2026-10-24
+# Modified: 2026-11-01
 # =============================================
 # pyright: reportMissingImports=false, reportInvalidTypeForm=false, reportOptionalCall=false
 # pyright: reportArgumentType=false
@@ -834,8 +834,11 @@ def create_app() -> Any:
     def hooks_sound_read(
         record: dict = Depends(require_scope("read")),
     ) -> dict:
-        """@hooks' mute switch, read live — the flag file is the only truth."""
-        return {"active": host_settings.hooks_sound_get()}
+        """@hooks' sound switch, read live — the flag file is the only truth."""
+        try:
+            return {"active": host_settings.hooks_sound_get()}
+        except host_settings.SettingsUnavailable as e:
+            raise _logged_denial(e, 503, "settings_unavailable") from e
 
     @app.post("/v1/hooks-sound")
     def hooks_sound_write(

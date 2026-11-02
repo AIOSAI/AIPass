@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: home_paths.py
 # Description: The home-paths verb — the developer_home standard over the whole tracked tree, for CI
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-04
-# Modified: 2026-10-17
+# Modified: 2026-11-01
 # =============================================
 
 """The `home-paths` verb. Scans every tracked text file of the repository for a
@@ -21,6 +21,7 @@ from aipass.cli.apps.modules import error, success
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.aipass_standards import developer_home_check
 from aipass.seedgo.apps.handlers.audit_tests import refusal
+from aipass.seedgo.apps.handlers.bypass.ignore_handler import find_repo_root
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.modules import CommandRefused
@@ -77,12 +78,8 @@ def _refuse(token: str, message: str) -> None:
 
 
 def _repo_root() -> Optional[Path]:
-    """The repository containing this branch: the nearest parent holding `.git`."""
-    here = Path(__file__).resolve().parent
-    for parent in (here, *here.parents):
-        if (parent / ".git").exists():
-            return parent
-    return None
+    """The repository containing this branch: the nearest parent holding a real `.git`."""
+    return find_repo_root(Path(__file__).resolve().parent)
 
 
 def _scan(root: Path) -> None:

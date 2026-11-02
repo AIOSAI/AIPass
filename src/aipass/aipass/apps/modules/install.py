@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: install.py
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + handoff)
-# Version: 1.5.2
+# Version: 1.5.3
 # Created: 2026-07-05
-# Modified: 2026-10-24
+# Modified: 2026-11-01
 # =============================================
 
 """
@@ -266,8 +266,9 @@ def _resolve_source(source: str | None) -> str:
         raise SourceRefused(f"{path} does not exist")
     if not path.is_dir():
         raise SourceRefused(f"{path} is not a directory")
-    if not (path / ".git").exists():
-        raise SourceRefused(f"{path} is not a repository (no .git)")
+    marker = path / ".git"
+    if not (marker.is_file() or (marker.is_dir() and any(marker.iterdir()))):
+        raise SourceRefused(f"{path} is not a repository (no .git, or an empty one)")
     return path.as_uri()
 
 

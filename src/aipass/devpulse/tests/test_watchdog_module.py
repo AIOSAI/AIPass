@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_module.py
 # Description: Tests for the watchdog module router
-# Version: 1.1.2
+# Version: 1.2.0
 # Created: 2026-04-14
-# Modified: 2026-10-29
+# Modified: 2026-11-01
 # =============================================
 
 """Tests for apps/modules/watchdog.py, the watchdog module router (Phase 1, FPLAN-0186)."""
@@ -16,6 +16,7 @@
 import json
 import os
 import sys
+from pathlib import Path
 from unittest.mock import patch
 
 import aipass.devpulse.apps.handlers.owner.guard as owner_guard
@@ -26,6 +27,7 @@ from aipass.cli.apps.modules import display as cli_display
 from aipass.devpulse.apps.handlers.watchdog import dispatches as wd_dispatches
 from aipass.devpulse.apps.handlers.watchdog import presenter as wd_presenter
 from aipass.devpulse.apps.handlers.watchdog import registry as wd_registry
+from aipass.devpulse.apps.handlers.watchdog import stop_gate as wd_stop_gate
 from aipass.devpulse.apps.handlers.watchdog import wire as wd_wire
 from aipass.devpulse.apps.modules import watchdog as wd_mod
 
@@ -492,7 +494,7 @@ def test_agent_subcommand_parses_timeout_flag(monkeypatch):
 def test_agent_subcommand_invalid_timeout(capsys):
     """Invalid --timeout value reports a clean error."""
     result = wd_mod.handle_command("watchdog", ["agent", "@flow", "--timeout", "notanumber"])
-    assert result is True
+    assert result is False
     captured = capsys.readouterr()
     combined = captured.out + captured.err
     assert "invalid --timeout value: notanumber" in combined.lower()
@@ -692,3 +694,33 @@ def test_baseline_daemon_is_still_refused_alongside_once(capsys, monkeypatch):
     assert recorder == {}
     combined = capsys.readouterr()
     assert "removed in watchdog r4" in combined.out + combined.err
+
+
+def test_hook_stop_allows_another_seat_and_blocks_devpulse_with_work_out_unwired(monkeypatch, tmp_path):
+    """The Stop door: another seat passes; devpulse with a dispatch out and no wire is blocked with the arm command."""
+    assert wd_mod.hook_stop({"cwd": str(tmp_path), "session_id": "s1"}) == {"exit_code": 0, "stdout": ""}
+
+    seat = tmp_path / "devpulse"
+    (seat / ".trinity").mkdir(parents=True)
+    (seat / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+    logged = []
+    monkeypatch.setattr(wd_stop_gate, "out_for", lambda seat_name: [{"target": "@dean", "subject": seat_name}])
+    monkeypatch.setattr(wd_stop_gate, "wire_live", lambda session: session == "armed")
+    monkeypatch.setattr(wd_stop_gate.json_handler, "log_operation", lambda name, data: logged.append((name, data)))
+
+    verdict = wd_mod.hook_stop({"cwd": str(seat), "session_id": "s1"})
+
+    assert verdict["exit_code"] == 2
+    body = json.loads(verdict["stdout"])
+    assert body["decision"] == "block"
+    assert "@dean (@devpulse)" in body["reason"] and wd_stop_gate.ARM in body["reason"]
+    assert logged == [("stop_gate_refused", {"out": 1})]
+
+
+def test_hooks_json_wires_the_stop_door_the_module_declares():
+    """The engine reaches hook_stop by the dotted path in .aipass/hooks.json; the module names the same door."""
+    hooks_json = Path(wd_mod.__file__).resolve().parents[5] / ".aipass" / "hooks.json"
+    gate = json.loads(hooks_json.read_text(encoding="utf-8"))["Stop"]["watchdog_wire_gate"]
+
+    assert gate["handler"] == wd_mod.STOP_DOOR == "aipass.devpulse.apps.modules.watchdog.hook_stop"
+    assert gate["enabled"] is True

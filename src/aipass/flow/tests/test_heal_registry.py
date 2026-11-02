@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_heal_registry.py
 # Description: Tests for heal_registry doctrine self-heal handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-07-29
-# Modified: 2026-10-17
+# Modified: 2026-11-01
 # =============================================
 
 """Tests for apps/handlers/registry/heal_registry.py."""
@@ -907,7 +907,7 @@ class TestAHealItCouldNotSaveReportsNothing:
         ]
 
     def test_orphan_location(self, tmp_path):
-        (tmp_path / ".git").mkdir()
+        _git_repo(tmp_path)
         seat = _seat(tmp_path, "src/aipass/commons")
         ghost = tmp_path / "src" / "commons"
         registries = {"fplan_registry.json": {"plans": {"0001": {"status": "closed", "location": str(ghost)}}}}
@@ -965,6 +965,12 @@ class TestNeverTouchesPlanFiles:
             assert path.read_text(encoding="utf-8") == content
 
 
+def _git_repo(root: Path) -> None:
+    """A repository root: an empty .git does not count, so the fixture writes HEAD."""
+    (root / ".git").mkdir(parents=True, exist_ok=True)
+    (root / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+
+
 def _seat(root: Path, rel: str) -> Path:
     """Create a live citizen seat — a directory carrying a passport."""
     seat = root / rel
@@ -981,7 +987,7 @@ class TestHealOrphanLocations:
     """
 
     def test_ghost_path_heals_to_the_live_seat(self, tmp_path):
-        (tmp_path / ".git").mkdir()
+        _git_repo(tmp_path)
         seat = _seat(tmp_path, "src/aipass/commons")
         ghost = tmp_path / "src" / "commons"
 
@@ -1001,7 +1007,7 @@ class TestHealOrphanLocations:
 
     def test_existing_path_without_a_passport_is_an_orphan_too(self, tmp_path):
         """The baud case: project root holds records, the seat lives beneath it."""
-        (tmp_path / ".git").mkdir()
+        _git_repo(tmp_path)
         seat = _seat(tmp_path, "projects/baud/src/baud/baud")
         root = tmp_path / "projects" / "baud"
         assert root.exists(), "root exists on disk — it is not a ghost"
@@ -1021,7 +1027,7 @@ class TestHealOrphanLocations:
 
     def test_unattributable_orphan_is_quarantined_not_guessed(self, tmp_path):
         """A /tmp scratch dir matches no citizen — it waits for a human."""
-        (tmp_path / ".git").mkdir()
+        _git_repo(tmp_path)
         seat = _seat(tmp_path, "src/aipass/commons")
         scratch = tmp_path / "tmp" / "flow_audit_scratch"
 
@@ -1044,8 +1050,8 @@ class TestHealOrphanLocations:
 
     def test_same_name_in_a_different_repo_is_not_attributed(self, tmp_path):
         """Name match alone is not evidence — the orphan must share the seat's repo."""
-        (tmp_path / "RepoA" / ".git").mkdir(parents=True)
-        (tmp_path / "RepoB" / ".git").mkdir(parents=True)
+        _git_repo(tmp_path / "RepoA")
+        _git_repo(tmp_path / "RepoB")
         seat = _seat(tmp_path, "RepoA/src/flow")
         foreign = tmp_path / "RepoB" / "src" / "flow"
 
@@ -1062,8 +1068,47 @@ class TestHealOrphanLocations:
         assert actions == []
         assert len(quarantined) == 1
 
-    def test_ambiguous_name_with_two_live_seats_is_quarantined(self, tmp_path):
+    def test_an_empty_git_dir_is_no_repository_so_a_name_match_is_quarantined(self, tmp_path):
+        """Codex's sandbox plants an empty .git; read as a repo, it attributed this orphan by name alone."""
         (tmp_path / ".git").mkdir()
+        seat = _seat(tmp_path, "src/aipass/commons")
+        ghost = tmp_path / "src" / "commons"
+
+        store = FakeRegistryStore(
+            {
+                "fplan_registry.json": {
+                    "plans": {"0001": {"subject": "old", "status": "closed", "location": str(ghost)}},
+                    "next_number": 2,
+                }
+            }
+        )
+        actions, quarantined = _heal_orphans(tmp_path, store, {"commons": [seat]})
+
+        assert actions == []
+        assert [q["reason"] for q in quarantined] == [f"cannot establish the repository of seat '{seat}'"]
+        assert store.registries["fplan_registry.json"]["plans"]["0001"]["location"] == str(ghost)
+
+    def test_a_git_file_worktree_is_a_repository_so_a_name_match_heals(self, tmp_path):
+        (tmp_path / ".git").write_text("gitdir: ../main/.git/worktrees/wt\n", encoding="utf-8")
+        seat = _seat(tmp_path, "src/aipass/commons")
+        ghost = tmp_path / "src" / "commons"
+
+        store = FakeRegistryStore(
+            {
+                "fplan_registry.json": {
+                    "plans": {"0001": {"subject": "old", "status": "closed", "location": str(ghost)}},
+                    "next_number": 2,
+                }
+            }
+        )
+        actions, quarantined = _heal_orphans(tmp_path, store, {"commons": [seat]})
+
+        assert quarantined == []
+        assert [a["to"] for a in actions] == [str(seat)]
+        assert store.registries["fplan_registry.json"]["plans"]["0001"]["location"] == str(seat)
+
+    def test_ambiguous_name_with_two_live_seats_is_quarantined(self, tmp_path):
+        _git_repo(tmp_path)
         seat_a = _seat(tmp_path, "src/a/twin")
         seat_b = _seat(tmp_path, "src/b/twin")
         ghost = tmp_path / "src" / "twin"
@@ -1083,7 +1128,7 @@ class TestHealOrphanLocations:
 
     def test_file_path_is_re_rooted_with_the_location(self, tmp_path):
         """A healed record must stay internally consistent, not half-moved."""
-        (tmp_path / ".git").mkdir()
+        _git_repo(tmp_path)
         seat = _seat(tmp_path, "src/aipass/commons")
         ghost = tmp_path / "src" / "commons"
 
@@ -1109,7 +1154,7 @@ class TestHealOrphanLocations:
         assert row["file_path"] == str(seat / "FPLAN-0001_x.md")
 
     def test_live_seats_are_left_alone(self, tmp_path):
-        (tmp_path / ".git").mkdir()
+        _git_repo(tmp_path)
         seat = _seat(tmp_path, "src/aipass/commons")
 
         store = FakeRegistryStore(
@@ -1127,7 +1172,7 @@ class TestHealOrphanLocations:
         assert store.saves == []
 
     def test_running_twice_changes_nothing_the_second_time(self, tmp_path):
-        (tmp_path / ".git").mkdir()
+        _git_repo(tmp_path)
         seat = _seat(tmp_path, "src/aipass/commons")
         ghost = tmp_path / "src" / "commons"
 
@@ -1186,7 +1231,7 @@ class TestOrphanDetectionIsNotOverBroad:
     """
 
     def test_repo_root_holding_many_seats_is_a_container_not_a_misfile(self, tmp_path):
-        (tmp_path / ".git").mkdir()
+        _git_repo(tmp_path)
         seats = {
             "alpha": [_seat(tmp_path, "src/alpha")],
             "beta": [_seat(tmp_path, "src/beta")],
@@ -1197,7 +1242,7 @@ class TestOrphanDetectionIsNotOverBroad:
 
     def test_subdirectory_inside_a_citizen_is_left_alone(self, tmp_path):
         """A plan filed in devpulse/docs.local is a filing, not debris."""
-        (tmp_path / ".git").mkdir()
+        _git_repo(tmp_path)
         seat = _seat(tmp_path, "src/aipass/devpulse")
         subdir = seat / "docs.local"
         subdir.mkdir()
@@ -1209,7 +1254,7 @@ class TestOrphanDetectionIsNotOverBroad:
         assert _is_orphan_through_heal(tmp_path, tmp_path / "vanished", {}) is True
 
     def test_root_holding_exactly_one_seat_is_a_misfile(self, tmp_path):
-        (tmp_path / ".git").mkdir()
+        _git_repo(tmp_path)
         seat = _seat(tmp_path, "projects/baud/src/baud/baud")
 
         assert _is_orphan_through_heal(tmp_path, tmp_path / "projects" / "baud", {"baud": [seat]}) is True
@@ -1225,7 +1270,7 @@ class TestOrphanDetectionIsNotOverBroad:
 
     def test_containment_beats_a_name_that_does_not_match(self, tmp_path):
         """The baud root is not named 'baud/src/baud/baud' — containment carries it."""
-        (tmp_path / ".git").mkdir()
+        _git_repo(tmp_path)
         seat = _seat(tmp_path, "projects/thing/src/inner/seatname")
         root = tmp_path / "projects" / "thing"
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_ratchet.py
 # Description: Template v1 — the ratchet verb, its pick and its series
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-10-12
-# Modified: 2026-10-25
+# Modified: 2026-11-01
 # =============================================
 
 """Tests for apps/modules/ratchet.py and the handlers it drives."""
@@ -247,6 +247,20 @@ class TestRun:
         out, err = capsys.readouterr()
         assert "alpha: probe not_applicable" in err + out
         assert "the unmutated suite is not green" in err + out
+
+    def test_a_red_baseline_names_its_first_failing_tests_in_the_output(self, fleet, probe, capsys):
+        """THE DEFECT: the 11-01 weekly mail said 27 failed and named none; the cause was in the archive only."""
+        document = _artifact(status="not_applicable")
+        failing = [{"nodeid": f"tests/test_x.py::test_{n}", "message": "AssertionError"} for n in range(7)]
+        document["groups"]["pytest.pseudo_tested"]["baseline"] = {"green": False, "failing": failing}
+        probe["document"] = document
+
+        ratchet.handle_command("ratchet", ["run"])
+
+        out, err = capsys.readouterr()
+        assert "tests/test_x.py::test_0" in out and "tests/test_x.py::test_4" in out
+        assert "tests/test_x.py::test_5" not in out
+        assert "2 more" in out
 
     def test_a_refused_run_with_a_clean_lane_code_still_exits_non_zero(self, fleet, probe):
         probe["document"] = _artifact(status="refused")

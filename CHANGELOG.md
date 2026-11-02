@@ -9,6 +9,24 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-11-01] — v2.8.33: an empty .git is not a repo, dispatch stop from the deck, hook sounds off by default, the Stop gate for the watchdog wire
+
+### Added
+- **devpulse**: a Stop hook (`watchdog_wire_gate`) refuses to end a devpulse turn while a dispatch it sent is out and no watchdog wire is armed for the session; the refusal is the arm command.
+- **ai_mail**: `drone @ai_mail dispatch stop @agent [--by <who>]` ends a running dispatch (TERM to the monitor's process group, a 5 s grace, then KILL), closes the register row as stopped and mails the dispatcher so the wake-back reads stopped, not failed; the session pointer survives for a later resume. Refusals exit 2. The verb resolves projects/* seats through the admin lane, as dispatch does.
+- **ai_mail**: `drone @ai_mail dispatch close <id> "reason"` closes an outstanding register row no monitor will close (one ended by hand, reading OVERDUE): status `closed: <reason>`, the row leaves outstanding. Only the row's sender or the admin may close it; a row whose monitor still runs is refused, `dispatch stop` ends that one. The stop's not-a-monitor refusal logs the `ps` answer.
+- **seedgo**: Host_Portability arm H flags product code that reads a bare `.git` existence probe as a repository; a `.git` file (worktree) or a function that reads `.git/HEAD` or lists `.git` is acquitted. `ratchet run` names the first failing tests of a red baseline.
+
+### Changed
+- **hooks**: the provider tool matchers name `Agent`, Claude Code's sub-agent tool, beside `Task`, so the engine logs a sub-agent's opening row; `aipass doctor` reports the drift and `--fix` rewires. `drone @hooks hooksound --json` prints `{"active": bool}`.
+- **hooks**: hook sounds are off by default. `drone @hooks hooksound on` creates `~/.aipass/aipass-hooks-sound-on`; `off` removes it. The old mute flags are removed on sight. Anyone who had sound on without a flag is silent until they run `hooksound on`.
+
+### Fixed
+- **seedgo, hooks, aipass, prax, flow, api**: an empty `.git` directory is not a repository. Codex's sandbox leaves one in `/tmp` and in every working directory it starts in, and 22 repo-root probes read it as a repo, turning @api and @prax suites red on any host where Codex had run.
+- **flow**: the merge playbook wakes @vera at the release tag with the version and its CHANGELOG section.
+- **devpulse**: `watchdog timer`, `schedule` and `agent --timeout` return False on a refused value, so a caller can tell a refusal from a served command; the module declares the Stop door `.aipass/hooks.json` wires, pinned by a test.
+- **hooks**: the presence gate's session age and start, and the email banner's unread count, return None when their source cannot be read, a value no readable source returns; the banner stays silent on None as it did on 0.
+
 ## [2026-11-01] — v2.8.32: compass recall for managers only, a hook mute that survives reboots, seedgo finds the tests that pin a file, spawn owner moves, api run with a scoped key
 
 ### Added

@@ -1,14 +1,14 @@
 # =================== AIPass ====================
 # Name: sound.py
-# Version: 1.3.0
+# Version: 2.0.0
 # Description: Shared sound utilities — Piper TTS and WAV playback with mute support
 # Branch: hooks
 # Layer: apps
 # Created: 2026-05-22
-# Modified: 2026-10-31
+# Modified: 2026-11-01
 # =============================================
 
-"""Shared sound functions for hook handlers. Checks mute flag before playing."""
+"""Shared sound functions for hook handlers. Silent unless hook sounds are switched on."""
 
 import subprocess
 import sys
@@ -19,7 +19,9 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import err_console
 
 CONSOLE = err_console
-# Per-user, outside the temp dir: /tmp clears at reboot and TMPDIR moves it per process.
+# Sound is the exception: off unless this flag exists. Per-user, outside the temp dir so a reboot keeps it.
+SOUND_FLAG = Path.home() / ".aipass" / "aipass-hooks-sound-on"
+# The mute flags of the sound-on-by-default era; is_muted() removes either on sight.
 MUTE_FLAG = Path.home() / ".aipass" / "aipass-hooks-muted"
 LEGACY_MUTE_FLAG = Path(tempfile.gettempdir()) / "aipass-hooks-muted"
 PIPER_BIN = Path.home() / ".local" / "share" / "piper" / "piper"
@@ -37,34 +39,33 @@ def print_introspection():
 
 
 def is_muted() -> bool:
-    """Check whether hook sounds are currently muted; a flag at the old temp-dir path moves here once."""
-    if LEGACY_MUTE_FLAG.exists():
-        try:
-            mute()
-            LEGACY_MUTE_FLAG.unlink(missing_ok=True)
-        except OSError as exc:
-            # A sandboxed seat cannot write the home: it stays muted and an unsandboxed one moves the flag.
-            logger.info("[HOOKS] sound: mute flag move deferred: %s", exc)
-            return True
-        logger.info("[HOOKS] sound: mute flag moved from %s to %s", LEGACY_MUTE_FLAG, MUTE_FLAG)
-    return MUTE_FLAG.exists()
+    """True unless SOUND_FLAG exists: hook sounds are off by default. An old mute flag is redundant and is removed."""
+    for old in (MUTE_FLAG, LEGACY_MUTE_FLAG):
+        if old.exists():
+            try:
+                old.unlink(missing_ok=True)
+            except OSError as exc:
+                # A sandboxed seat cannot write the home; it is muted either way, an unsandboxed seat removes it.
+                logger.info("[HOOKS] sound: old mute flag %s left in place: %s", old, exc)
+                continue
+            logger.info("[HOOKS] sound: removed old mute flag %s (muted is the default now)", old)
+    return not SOUND_FLAG.exists()
 
 
 def mute() -> bool:
-    """Mute all hook sounds. Idempotent.
+    """Turn hook sounds off. Idempotent.
 
     Returns the resulting muted state (always True); @api imports this directly.
     """
-    MUTE_FLAG.parent.mkdir(parents=True, exist_ok=True)
-    MUTE_FLAG.touch()
+    SOUND_FLAG.unlink(missing_ok=True)
     logger.info("[HOOKS] sound: muted")
     return True
 
 
 def unmute() -> bool:
-    """Unmute all hook sounds. Idempotent — a missing flag is already unmuted. The legacy flag goes too."""
-    MUTE_FLAG.unlink(missing_ok=True)
-    LEGACY_MUTE_FLAG.unlink(missing_ok=True)
+    """Turn hook sounds on. Idempotent."""
+    SOUND_FLAG.parent.mkdir(parents=True, exist_ok=True)
+    SOUND_FLAG.touch()
     logger.info("[HOOKS] sound: unmuted")
     return False
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: envcopy.py
 # Description: copy-first scratch environment for the pytest adapter (Law M10)
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-08-29
-# Modified: 2026-10-25
+# Modified: 2026-11-01
 # =============================================
 
 """The scratch environment a suite is measured inside. Law M10 made concrete.
@@ -24,6 +24,7 @@ from typing import List, Optional, Sequence, Tuple
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_git_marker
 from aipass.seedgo.apps.handlers.tests_pytest_standards.diff_scope import (
     DiffScope,
     DiffScopeError,
@@ -276,7 +277,7 @@ def tracked_root_files(repo_root: Path) -> Tuple[List[str], str]:
     Only tracked files: an ignored one (the registry, `.aipass/alerts.json`) is this machine's
     state. No `.git` means no clone to mirror, and says so.
     """
-    if not (repo_root / ".git").exists():
+    if not is_git_marker(repo_root / ".git"):
         return [], f"no .git at {repo_root}, so no repo-root file was copied"
     candidates = _root_candidates(repo_root)
     if not candidates:
