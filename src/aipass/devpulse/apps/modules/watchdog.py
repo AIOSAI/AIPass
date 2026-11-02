@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: watchdog.py
 # Description: Watchdog Module — directed wake system for devpulse
-# Version: 2.2.1
+# Version: 2.2.2
 # Created: 2026-04-14
-# Modified: 2026-10-28
+# Modified: 2026-11-01
 # =============================================
 
 """Watchdog Module — devpulse's personal directed-wake system.
@@ -90,6 +90,11 @@ Examples:
 """
 
 
+STOP_DOOR = (
+    "aipass.devpulse.apps.modules.watchdog.hook_stop"  # the handler .aipass/hooks.json names for watchdog_wire_gate
+)
+
+
 def hook_stop(hook_data: dict) -> dict:
     """The Stop hook's door (handlers are branch-internal): refuse the turn's end while work is out unwired."""
     return _stop_gate.handle(hook_data)
@@ -112,6 +117,7 @@ def print_introspection() -> None:
     console.print("    [dim]- agent.py (watch_agent — block until dispatched agent exits)[/dim]")
     console.print("    [dim]- wire.py (arm_wire — deliver MY dispatch completions into this session)[/dim]")
     console.print("    [dim]- dispatches.py (the register — which dispatches are this seat's)[/dim]")
+    console.print(f"    [dim]- stop_gate.py (the Stop hook door {STOP_DOOR})[/dim]")
     console.print()
 
 
@@ -209,7 +215,10 @@ def handle_command(command: str, args: List[str]) -> bool:
 
 
 def _handle_timer(sub_args: List[str]) -> bool:
-    """Route ``watchdog timer`` subcommands through the timer handler."""
+    """Route ``watchdog timer`` subcommands through the timer handler.
+
+    False when the duration is refused; every served path returns True.
+    """
     if not sub_args:
         console.print(_TIMER_HELP_TEXT)
         return True
@@ -252,7 +261,7 @@ def _handle_timer(sub_args: List[str]) -> bool:
     except ValueError as exc:
         logger.warning("[watchdog] invalid timer duration %r: %s", action, exc)
         error(f"Invalid duration: {action} ({exc})")
-        return True
+        return False
     presenter.print_timer_result(result)
     return True
 
@@ -261,6 +270,7 @@ def _handle_schedule(sub_args: List[str]) -> bool:
     """Route ``watchdog schedule`` through the schedule handler.
 
     The command is the whole second positional; the caller quotes a multi-token command.
+    False when the time is refused; every served path returns True.
     """
     if not sub_args:
         console.print(_SCHEDULE_HELP_TEXT)
@@ -280,7 +290,7 @@ def _handle_schedule(sub_args: List[str]) -> bool:
     except ValueError as exc:
         logger.warning("[watchdog] invalid schedule %r: %s", time_str, exc)
         error(f"Invalid schedule: {time_str} ({exc})")
-        return True
+        return False
 
     presenter.print_schedule_result(result)
     return True
@@ -343,7 +353,7 @@ def _handle_agent(sub_args: List[str]) -> bool:
             except ValueError as exc:
                 logger.warning("[watchdog] invalid --timeout value %r: %s", sub_args[i + 1], exc)
                 error(f"Invalid --timeout value: {sub_args[i + 1]}")
-                return True
+                return False  # the one refused path of ``watchdog agent``; served paths return True
             i += 2
             continue
         positional.append(arg)

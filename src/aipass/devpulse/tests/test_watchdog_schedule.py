@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_schedule.py
 # Description: Tests for the watchdog schedule handler + router integration
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-14
-# Modified: 2026-10-29
+# Modified: 2026-11-01
 # =============================================
 
 """Tests for apps/handlers/watchdog/schedule.py and the watchdog schedule command that drives it."""
@@ -340,7 +340,7 @@ def test_router_schedule_invalid_time(_bypass_caller_guard, capsys, monkeypatch)
     monkeypatch.setattr(schedule_handler, "wake_at", wake_at)
     result = wd_mod.handle_command("watchdog", ["schedule", "notatime"])
 
-    assert result is True
+    assert result is False
     captured = capsys.readouterr()
     combined = captured.out + captured.err
     assert "invalid" in combined.lower()
