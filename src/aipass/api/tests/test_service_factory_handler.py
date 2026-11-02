@@ -3,14 +3,14 @@
 # Description: Tests for Google API service factory handler
 # Version: 1.0.1
 # Created: 2026-05-12
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/google/service_factory.py, the Google API service object factory."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — googleapiclient.discovery.build and a live Google service; mocked, no network
-# seedgo: no-test-needed(covered_elsewhere) — handlers/google/auth.py credential loading; tests/test_google_client.py
+# sentry: no-test-needed(external) — googleapiclient.discovery.build and a live Google service; mocked, no network
+# sentry: no-test-needed(covered_elsewhere) — handlers/google/auth.py credential loading; tests/test_google_client.py
 
 from typing import Any
 from unittest.mock import patch, MagicMock

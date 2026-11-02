@@ -3,7 +3,7 @@
 # Description: The settings conformance corpus, python side — shared goldens both runtimes must satisfy
 # Version: 1.0.0
 # Created: 2026-08-18
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/host/settings.py's read and write doors against the shared conformance corpus."""
@@ -12,8 +12,8 @@
 # the JSON free of python. Case format: tests/conformance/settings/README.md.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered) — hooks_sound_get() and hooks_sound_set(), tests/test_host_settings.py
-# seedgo: no-test-needed(covered) — the rust side of the corpus, run by @baud's own suite against settings.rs
+# sentry: no-test-needed(covered) — hooks_sound_get() and hooks_sound_set(), tests/test_host_settings.py
+# sentry: no-test-needed(covered) — the rust side of the corpus, run by @baud's own suite against settings.rs
 
 import hashlib
 import json

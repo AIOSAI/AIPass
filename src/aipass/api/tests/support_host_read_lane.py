@@ -3,13 +3,13 @@
 # Description: Shared helpers for the read lane's test files (test_host_read_lane*.py)
 # Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-11-01
+# Modified: 2026-11-02
 # =============================================
 
 """Helpers shared by test_host_read_lane.py and its _feed, _changes and _history siblings."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(ruff) — that the module parses and imports
 
 import json
 from pathlib import Path

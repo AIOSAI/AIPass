@@ -3,7 +3,7 @@
 # Description: Unit tests for filesystem_handler's Codex session lane
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/filesystem_handler.py, its Codex session lane."""
@@ -15,7 +15,7 @@
 # _parse_codex_activity.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — _emit_agent_event, covered by test_filesystem_handler_agent_activity.py
+# sentry: no-test-needed(through_the_command) — _emit_agent_event, covered by test_filesystem_handler_agent_activity.py
 
 import json
 from pathlib import Path

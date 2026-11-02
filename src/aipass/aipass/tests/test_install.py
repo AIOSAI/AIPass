@@ -3,13 +3,13 @@
 # Description: Tests for aipass install — one-command bootstrap (DPLAN-0233)
 # Version: 1.4.3
 # Created: 2026-07-05
-# Modified: 2026-11-01
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/install.py (DPLAN-0233) and the install command it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
+# sentry: no-test-needed(ruff) — that every module this file imports parses and imports
 
 import os
 import subprocess as _sp

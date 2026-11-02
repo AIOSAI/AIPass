@@ -3,7 +3,7 @@
 # Description: Every api module must IMPORT on a platform it cannot run on
 # Version: 1.0.0
 # Created: 2026-08-18
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/host/attach.py and every apps/ module, importing without POSIX."""
@@ -16,8 +16,8 @@
 # would put this file in the import stack the cross-branch import gate reads.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(windows_compat) — that the PTY lane works on Windows; it cannot, PTY_AVAILABLE guards it
-# seedgo: no-test-needed(duplicate_test) — the PTY lane's behaviour on POSIX, covered by tests/test_host_attach.py
+# sentry: no-test-needed(windows_compat) — that the PTY lane works on Windows; it cannot, PTY_AVAILABLE guards it
+# sentry: no-test-needed(duplicate_test) — the PTY lane's behaviour on POSIX, covered by tests/test_host_attach.py
 
 import json
 import subprocess

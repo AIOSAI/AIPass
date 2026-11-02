@@ -3,7 +3,7 @@
 # Description: Tests for the host API fleet lane — baud --snapshot contract
 # Version: 1.1.5
 # Created: 2026-08-14
-# Modified: 2026-10-25
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/host/fleet.py, the baud --snapshot contract, and the host lane that serves it."""
@@ -12,9 +12,9 @@
 # runs the real binary (a GUI app); every test drives a mocked subprocess.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that fleet.py parses and imports
-# seedgo: no-test-needed(external) — the real baud binary; subprocess.run is scripted, a live probe covers it
-# seedgo: no-test-needed(constant) — SNAPSHOT_TIMEOUT_SECONDS and END_ROOM_TIMEOUT_SECONDS's values
+# sentry: no-test-needed(ruff) — that fleet.py parses and imports
+# sentry: no-test-needed(external) — the real baud binary; subprocess.run is scripted, a live probe covers it
+# sentry: no-test-needed(constant) — SNAPSHOT_TIMEOUT_SECONDS and END_ROOM_TIMEOUT_SECONDS's values
 
 import json
 import re
@@ -978,7 +978,7 @@ class TestTheRosterRoute:
         assert response.status_code == 503
         error = response.json()["error"]
         assert error["code"] == "fleet_unavailable"
-        # seedgo exception_text_in_response, PR #774: the code's sentence, never theirs.
+        # sentry exception_text_in_response, PR #774: the code's sentence, never theirs.
         assert error["message"] == host_denials.SENTENCES["fleet_unavailable"]
         assert re.fullmatch("[0-9a-f]{12}", error["ref"])
         assert "no project registry found" not in response.text
@@ -1103,7 +1103,7 @@ class TestTheMachineRoute:
 
         assert response.status_code == 503
         error = response.json()["error"]
-        # seedgo exception_text_in_response, PR #774: the code survives, the words do not.
+        # sentry exception_text_in_response, PR #774: the code survives, the words do not.
         assert error == {
             "code": "machine_refused",
             "message": host_denials.SENTENCES["machine_refused"],
@@ -1356,7 +1356,7 @@ class TestTheLockRoute:
         assert response.status_code == 503
         error = response.json()["error"]
         assert error["code"] == "lock_door_failed"
-        # seedgo exception_text_in_response, PR #774.
+        # sentry exception_text_in_response, PR #774.
         assert error["message"] == host_denials.SENTENCES["lock_door_failed"]
         assert re.fullmatch("[0-9a-f]{12}", error["ref"])
         assert host_lock.DOOR_RAISED not in response.text
@@ -1405,7 +1405,7 @@ class TestTheLockRoute:
         error = response.json()["error"]
         assert error["code"] == "lock_door_failed"
         # The shape fault is the operator's to read, in the host log under the ref
-        # (seedgo exception_text_in_response, PR #774).
+        # (sentry exception_text_in_response, PR #774).
         assert error["message"] == host_denials.SENTENCES["lock_door_failed"]
         assert re.fullmatch("[0-9a-f]{12}", error["ref"])
         assert "published shape" not in response.text

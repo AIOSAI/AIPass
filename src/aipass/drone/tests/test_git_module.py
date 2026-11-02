@@ -3,13 +3,13 @@
 # Description: Tests for the @git module — routing, help, auth, scope footer, merge gate, gh verbs, untrack, release, label, alerts
 # Version: 1.6.1
 # Created: 2026-04-21
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/git_module.py: command routing, help, the auth gate and the verbs it fronts."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — subprocess.run: a recorded stub (gh too), but untrack's git runs in a tmp_path repo
+# sentry: no-test-needed(stdlib) — subprocess.run: a recorded stub (gh too), but untrack's git runs in a tmp_path repo
 
 from __future__ import annotations
 
@@ -193,7 +193,7 @@ class TestGitModuleRealAuth:
 
     def test_global_tier_needs_no_ownership(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Read-only routing still works for a citizen who owns nothing."""
-        make_owner_project(tmp_path, branch="seedgo", citizen_class="builder", owner=False)
+        make_owner_project(tmp_path, branch="sentry", citizen_class="builder", owner=False)
         monkeypatch.chdir(tmp_path)
         result = handle_command("lock")
         assert result["exit_code"] == 0
@@ -1130,7 +1130,7 @@ class TestReleaseList:
     """release list reads a public repo's published releases through gh api, for every seat."""
 
     def test_a_citizen_with_no_ownership_reads_aipass_releases_newest_first_with_notes_indented(
-        self, seedgo_dir: Path
+        self, sentry_dir: Path
     ) -> None:
         """The real gate, a builder's passport: the global tier serves it. Drafts are not published."""
         calls: list[str] = []
@@ -1149,7 +1149,7 @@ class TestReleaseList:
         assert calls == ["repos/AIOSAI/AIPass", _PAGE.format(n=1)]
 
     def test_since_stops_before_its_tag_and_a_mistyped_tag_is_refused_even_past_the_limit(
-        self, seedgo_dir: Path
+        self, sentry_dir: Path
     ) -> None:
         """Mutant: the limit returns before --since is checked, so a typo came back as a full page."""
         since = _release(["list", "--since", "v1"], _AIPASS_RELEASES, [])
@@ -1164,7 +1164,7 @@ class TestReleaseList:
             "exit_code": 1,
         }
 
-    def test_a_since_tag_on_the_second_page_is_found(self, seedgo_dir: Path) -> None:
+    def test_a_since_tag_on_the_second_page_is_found(self, sentry_dir: Path) -> None:
         """Mutant: only page one is read — the tag is never seen and the read is refused."""
         newer = [
             {"tag_name": f"v1.{n}", "name": "", "published_at": "", "body": "", "draft": False}
@@ -1180,7 +1180,7 @@ class TestReleaseList:
             "v1.99",
         ]
 
-    def test_json_carries_the_raw_rows_and_a_refusal_is_a_document_too(self, seedgo_dir: Path) -> None:
+    def test_json_carries_the_raw_rows_and_a_refusal_is_a_document_too(self, sentry_dir: Path) -> None:
         result = _release(["list", "--json", "--limit", "1"], _AIPASS_RELEASES, [])
         refused = _release(["list", "--repo", "AIOSAI/gone", "--json"], _AIPASS_RELEASES, [])
 
@@ -1201,7 +1201,7 @@ class TestReleaseList:
         }
         assert refused["exit_code"] == 1
 
-    def test_a_private_repo_an_unknown_repo_and_a_missing_gh_are_refused_by_name(self, seedgo_dir: Path) -> None:
+    def test_a_private_repo_an_unknown_repo_and_a_missing_gh_are_refused_by_name(self, sentry_dir: Path) -> None:
         """Mutant: the privacy check removed — a private repo's releases are read and printed."""
         private_calls: list[str] = []
         answers = {"repos/AIOSAI/secret": {"private": True}, "repos/AIOSAI/secret/releases?per_page=100&page=1": []}
@@ -1216,7 +1216,7 @@ class TestReleaseList:
         assert missing["stderr"] == release_handler.REFUSE_NO_GH
         assert {private["exit_code"], unknown["exit_code"], missing["exit_code"]} == {1}
 
-    def test_repo_is_gh_owner_name_never_the_external_repo_door(self, seedgo_dir: Path) -> None:
+    def test_repo_is_gh_owner_name_never_the_external_repo_door(self, sentry_dir: Path) -> None:
         """Mutant: release left out of the door's exclusion — --repo is read as a path and refused for no grant."""
         calls: list[str] = []
         answers = {"repos/AIOSAI/other": _PUBLIC, "repos/AIOSAI/other/releases?per_page=100&page=1": []}
@@ -1238,7 +1238,7 @@ class TestReleaseList:
         ],
         ids=["slug", "limit", "no-value", "flag", "write", "bare"],
     )
-    def test_a_malformed_call_is_refused_before_gh_runs(self, seedgo_dir: Path, args: list[str], refusal: str) -> None:
+    def test_a_malformed_call_is_refused_before_gh_runs(self, sentry_dir: Path, args: list[str], refusal: str) -> None:
         calls: list[str] = []
 
         result = _release(args, _AIPASS_RELEASES, calls)
@@ -1342,7 +1342,7 @@ class TestLabel:
 
         result = _chore("label", ["create", "ci"], {}, calls)
 
-        assert result["exit_code"] == 1 and "seedgo" in result["stderr"]
+        assert result["exit_code"] == 1 and "sentry" in result["stderr"]
         assert calls == []
 
 
@@ -1453,5 +1453,5 @@ class TestAlerts:
 
         result = _chore("alerts", ["dismiss", "12", "--reason", "wont_fix", "--comment", "x"], {}, calls)
 
-        assert result["exit_code"] == 1 and "seedgo" in result["stderr"]
+        assert result["exit_code"] == 1 and "sentry" in result["stderr"]
         assert calls == []

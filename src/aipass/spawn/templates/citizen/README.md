@@ -60,7 +60,7 @@ the idea behind the layout.*
 
 The depth lives in [docs/](docs/README.md), one page per module or handler group, each
 indexed there on a line of its own. This README is measured against a cap by
-`drone @seedgo audit context @{{BRANCH}}`; past it, depth moves into `docs/`, never into
+`drone @sentry audit context @{{BRANCH}}`; past it, depth moves into `docs/`, never into
 the prompt.
 
 ---

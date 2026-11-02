@@ -3,13 +3,13 @@
 # Description: Pins the refusal-exit contract on the owner-gated modules (FPLAN-0455)
 # Version: 1.0.0
 # Created: 2026-08-28
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/feedback.py and apps/modules/admin_grant.py: a guard refusal marks the command failed."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — the text of HELP_TEXT in both modules; these pins read the failure mark
+# sentry: no-test-needed(constant) — the text of HELP_TEXT in both modules; these pins read the failure mark
 
 from unittest.mock import patch
 

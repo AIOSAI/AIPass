@@ -3,7 +3,7 @@
 # Description: Symbolic Memory Module — PARKED 2026-08-14
 # Version: 1.0.0
 # Created: 2026-03-17
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -57,7 +57,7 @@ def __getattr__(name: str) -> Any:
 
 
 def print_introspection() -> None:
-    """Display module introspection (seedgo standard: no args = structure/discovery)."""
+    """Display module introspection (sentry standard: no args = structure/discovery)."""
     console.print()
     console.print("[bold cyan]symbolic[/bold cyan] — Fragmented Memory Extraction [bold yellow](PARKED)[/bold yellow]")
     console.print(f"[dim]{_PARKED_REASON}[/dim]")

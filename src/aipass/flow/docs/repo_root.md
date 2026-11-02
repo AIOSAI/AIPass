@@ -54,7 +54,7 @@ diagnostic would land inside whichever test window triggers the first import.
 
 `handlers/json/json_handler.py` is the fleet **shim**: it binds
 `aipass.prax.json_handler`'s callables and adds nothing (byte-identical in every
-branch, seedgo accepts it by hash). `repo_root._record_fallback` resolves
+branch, sentry accepts it by hash). `repo_root._record_fallback` resolves
 `json_handler.log_operation` as a module attribute at **call** time, so the
 autouse `mock_json_handler` spy intercepts it. Containment is the autouse
 `mock_infrastructure`, which sets `AIPASS_TEST_LOG_DIR`: the service recomputes

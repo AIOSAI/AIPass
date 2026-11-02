@@ -3,7 +3,7 @@
 # Description: Drone - Command Router & Discovery
 # Version: 1.3.1
 # Created: 2026-03-05
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -156,7 +156,7 @@ def print_help() -> None:
     console.print()
     console.print("[bold cyan]EXAMPLES:[/bold cyan]")
     console.print()
-    console.print("  [green]drone @seedgo audit aipass[/green]")
+    console.print("  [green]drone @sentry audit aipass[/green]")
     console.print("  [green]drone @flow status[/green]")
     console.print("  [green]drone systems[/green]")
     console.print()
@@ -530,7 +530,7 @@ def _handle_target(args: List[str]) -> int:
 
     # Interactive mode exists only for branch routing (_handle_module is in-process), so a
     # module-only target (@git) never defers to branch routing: that costs a BranchNotFoundError
-    # per call. Module-and-branch names (@seedgo, @cli) needing a live terminal take the subprocess.
+    # per call. Module-and-branch names (@sentry, @cli) needing a live terminal take the subprocess.
     if is_module(module_name) and not (needs_interactive and branch_exists(target)):
         _report_inert_timeout(explicit_timeout, "module routing runs in-process and is not timed")
         return _handle_module(module_name, rest)
@@ -626,7 +626,7 @@ def main() -> int:
 
     if command == "scan":
         if len(args) < 2:
-            err_console.print("drone: scan requires a target (e.g., drone scan @seedgo)")
+            err_console.print("drone: scan requires a target (e.g., drone scan @sentry)")
             return 1
         from aipass.drone.apps.modules.scan import scan
 
@@ -638,7 +638,7 @@ def main() -> int:
             console.print("Usage: drone activate @branch")
             console.print()
             console.print("Scan a branch for available commands and register them as shortcuts.")
-            console.print("Example: drone activate @seedgo")
+            console.print("Example: drone activate @sentry")
             return 0
         return _handle_activate(args[1])
 

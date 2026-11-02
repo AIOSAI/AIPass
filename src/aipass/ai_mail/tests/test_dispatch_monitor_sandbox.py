@@ -3,7 +3,7 @@
 # Description: Tests for the dispatch monitor's sandbox gate and its broker-fd handshake
 # Version: 1.0.2
 # Created: 2026-10-08
-# Modified: 2026-10-25
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's sandbox gate and broker handshake (FPLAN-0250)."""
@@ -12,7 +12,7 @@
 # 1,200-line target: whether a dispatch runs sandboxed, and the fd it is handed.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(shared) — main()'s attempts and the bounce: tests/test_dispatch_monitor.py
+# sentry: no-test-needed(shared) — main()'s attempts and the bounce: tests/test_dispatch_monitor.py
 
 import os
 import subprocess

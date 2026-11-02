@@ -3,13 +3,13 @@
 # Description: Tests for absolute mailbox_path resolution in user functions
 # Version: 1.0.3
 # Created: 2026-03-17
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/users/user.py and apps/handlers/paths.py's find_repo_root()."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — json.JSONDecodeError's contract on a malformed file, not re-verified
+# sentry: no-test-needed(stdlib) — json.JSONDecodeError's contract on a malformed file, not re-verified
 
 import json
 import pytest

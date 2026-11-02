@@ -3,7 +3,7 @@
 # Description: Tests for the dispatch monitor's units - rate limit, fresh cmd, startup check, kill, logs, lock, JSONL
 # Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's units: startup check, kill, result logs, own lock, JSONL."""
@@ -12,8 +12,8 @@
 # 1,200-line target: the parts main() is built from, each pinned on its own.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — STARTUP_TIMEOUT and HARD_TIMEOUT: real timeout seconds, overridden by every test
-# seedgo: no-test-needed(shared) — main()'s attempts and the bounce: tests/test_dispatch_monitor.py
+# sentry: no-test-needed(constant) — STARTUP_TIMEOUT and HARD_TIMEOUT: real timeout seconds, overridden by every test
+# sentry: no-test-needed(shared) — main()'s attempts and the bounce: tests/test_dispatch_monitor.py
 
 import json
 import subprocess

@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-11-01
+# Modified: 2026-11-02
 # =============================================
 
 """Shared pytest fixtures for hooks tests.
@@ -260,9 +260,9 @@ def registered_projects(tmp_path: Path) -> dict:
     """
     projects = tmp_path / "Projects"
     aipass = projects / "AIPass"
-    for name in ("devpulse", "hooks", "memory", "seedgo", "spawn", "flow"):
+    for name in ("devpulse", "hooks", "memory", "sentry", "spawn", "flow"):
         (aipass / "src" / "aipass" / name).mkdir(parents=True)
-    rows: list[dict] = [{"name": name, "path": f"src/aipass/{name}"} for name in ("HOOKS", "seedgo", "spawn", "flow")]
+    rows: list[dict] = [{"name": name, "path": f"src/aipass/{name}"} for name in ("HOOKS", "sentry", "spawn", "flow")]
     rows.append({"name": "memory", "path": str(aipass / "src" / "aipass" / "memory")})
     rows.append({"name": "devpulse", "path": "src/aipass/devpulse", "owner": True, "admin": True})
     (aipass / "AIPASS_REGISTRY.json").write_text(json.dumps({"metadata": {}, "branches": rows}), encoding="utf-8")
@@ -277,7 +277,7 @@ def registered_projects(tmp_path: Path) -> dict:
 
     vera = projects / "Vera-Studio"
     vera_rows = {}
-    for name in ("vera", "writer", "seedgo"):
+    for name in ("vera", "writer", "sentry"):
         (vera / "src" / "vera_studio" / name).mkdir(parents=True)
         vera_rows[name.upper()] = {"name": name.upper(), "path": f"src/vera_studio/{name}"}
     vera_rows["VERA"]["owner"] = True
@@ -294,11 +294,11 @@ def registered_projects(tmp_path: Path) -> dict:
         "devpulse": str(seat / "devpulse"),
         "hooks": str(seat / "hooks"),
         "memory": str(seat / "memory"),
-        "seedgo": str(seat / "seedgo"),
+        "sentry": str(seat / "sentry"),
         "spawn": str(seat / "spawn"),
         "flow": str(seat / "flow"),
         "vera_seat": str(vera_seat / "vera"),
         "writer": str(vera_seat / "writer"),
-        "vera_seedgo": str(vera_seat / "seedgo"),
+        "vera_sentry": str(vera_seat / "sentry"),
         "baud_seat": str(baud / "src" / "baud" / "baud"),
     }

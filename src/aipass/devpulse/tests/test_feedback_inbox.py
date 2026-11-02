@@ -3,14 +3,14 @@
 # Description: Tests for feedback inbox — list, view, clear, summary
 # Version: 1.0.0
 # Created: 2026-04-14
-# Modified: 2026-09-27
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/feedback/inbox.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that inbox.py and storage.py parse and import
-# seedgo: no-test-needed(constant) — the Rich column styles list_messages() gives its Table
+# sentry: no-test-needed(ruff) — that inbox.py and storage.py parse and import
+# sentry: no-test-needed(constant) — the Rich column styles list_messages() gives its Table
 
 from unittest.mock import patch
 
@@ -37,7 +37,7 @@ def populated_inbox(mock_feedback_dir):
         "messages": [
             {
                 "id": "aaa11111",
-                "from": "seedgo",
+                "from": "sentry",
                 "subject": "Audit suggestion",
                 "body": "Consider adding a new checker.",
                 "timestamp": "2026-04-11T10:00:00",

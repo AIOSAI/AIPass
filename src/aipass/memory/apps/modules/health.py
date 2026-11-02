@@ -3,13 +3,13 @@
 # Description: Branch health module — public API (entry-count + entry-size)
 # Version: 1.1.0
 # Created: 2026-08-16
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """
 Branch Health Module — Public API
 
-Cross-branch surface: seedgo blocks importing another branch's handlers. Read-only.
+Cross-branch surface: sentry blocks importing another branch's handlers. Read-only.
 Consumer severity: should_rollover -> INFO (auto-fires at PreCompact), never WARNING;
 total_violations > 0 -> WARNING (a write got past the cap gate).
 """
@@ -107,7 +107,7 @@ def get_branch_health(branch_name: str) -> dict:
 
 
 def print_introspection() -> None:
-    """Display module introspection (seedgo standard)."""
+    """Display module introspection (sentry standard)."""
     from aipass.cli.apps.modules import console
 
     console.print()

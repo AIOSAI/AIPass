@@ -3,13 +3,13 @@
 # Description: Tests for branch command scanning
 # Version: 1.1.0
 # Created: 2026-03-17
-# Modified: 2026-10-13
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/scan.py and the scanning handlers it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module under test parses and imports
+# sentry: no-test-needed(ruff) — that the module under test parses and imports
 
 import subprocess
 from pathlib import Path

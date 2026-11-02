@@ -53,7 +53,7 @@ api/
  - One module per provider, one handler directory per provider. Module orchestrates, handlers implement.
  - No default models or configs — consumers provide their own. API provides the connection.
  - The server owns the pipe, never the meaning: a host route proxies the branch that owns the data (verbs.py D0).
- - Handlers never print. Facts belong in a handler, presentation in a module — seedgo refuses the other way round.
+ - Handlers never print. Facts belong in a handler, presentation in a module — sentry refuses the other way round.
 
 # Gotchas
 
@@ -69,6 +69,6 @@ api/
 # Habits
 
  - Before build or edit work: `drone @trigger medic mute @api`.
- - Before reporting complete: `drone @seedgo audit aipass @api`, plus `drone @seedgo checklist <file>` on each changed file.
+ - Before reporting complete: `drone @sentry audit aipass @api`, plus `drone @sentry checklist <file>` on each changed file.
  - Tests: edit existing files only — a hook gate refuses new test files. Mail @devpulse with the defect a new file would pin.
  - Prove a cure red-first, then green, and mutate the production line the test claims to hold.

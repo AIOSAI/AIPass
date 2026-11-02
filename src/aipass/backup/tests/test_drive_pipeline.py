@@ -3,15 +3,15 @@
 # Description: Tests for the Drive sync pipeline -- every Google edge sealed, zero live calls
 # Version: 3.1.3
 # Created: 2026-06-12
-# Modified: 2026-10-31
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/drive_sync.py and the apps/handlers/drive/ pipeline it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every file under handlers/drive/ parses and imports
-# seedgo: no-test-needed(constant) — BACKUP_FOLDER_NAME, FOLDER_MIME and TRACKER_FILENAME's strings
-# seedgo: no-test-needed(stdlib) — ThreadPoolExecutor's scheduling and mimetypes' extension table
+# sentry: no-test-needed(ruff) — that every file under handlers/drive/ parses and imports
+# sentry: no-test-needed(constant) — BACKUP_FOLDER_NAME, FOLDER_MIME and TRACKER_FILENAME's strings
+# sentry: no-test-needed(stdlib) — ThreadPoolExecutor's scheduling and mimetypes' extension table
 
 from __future__ import annotations
 

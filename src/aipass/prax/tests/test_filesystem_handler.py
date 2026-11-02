@@ -3,7 +3,7 @@
 # Description: Unit tests for filesystem_handler.py
 # Version: 1.3.0
 # Created: 2026-04-26
-# Modified: 2026-10-08
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/filesystem_handler.py, its watchdog events."""
@@ -16,10 +16,10 @@
 # have their own test_filesystem_handler_<topic>.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — should_monitor, covered by tests/test_monitoring_filters.py
-# seedgo: no-test-needed(through_the_command) — get_priority, covered by tests/test_monitoring_filters.py
-# seedgo: no-test-needed(through_the_command) — detect_branch_from_path, covered by tests/test_monitoring_handlers.py
-# seedgo: no-test-needed(json_structure) — the shape of __init__'s file_change_handled log_operation record
+# sentry: no-test-needed(through_the_command) — should_monitor, covered by tests/test_monitoring_filters.py
+# sentry: no-test-needed(through_the_command) — get_priority, covered by tests/test_monitoring_filters.py
+# sentry: no-test-needed(through_the_command) — detect_branch_from_path, covered by tests/test_monitoring_handlers.py
+# sentry: no-test-needed(json_structure) — the shape of __init__'s file_change_handled log_operation record
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch

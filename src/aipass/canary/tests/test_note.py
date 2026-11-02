@@ -3,14 +3,14 @@
 # Description: Tests for the note store - add, list, and refusing a store that will not parse
 # Version: 1.4.0
 # Created: 2026-09-12
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/note.py and the notes store it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(log_structure) — that a refusal also lands in the prax log
-# seedgo: no-test-needed(json_structure) — that each add and each list lands in the json trail
+# sentry: no-test-needed(log_structure) — that a refusal also lands in the prax log
+# sentry: no-test-needed(json_structure) — that each add and each list lands in the json trail
 import json
 import sys
 from datetime import datetime
@@ -76,7 +76,7 @@ def test_docs_local_is_ignored_by_the_repo_gitignore():
     if not (repo_root / ".git").exists():
         pytest.skip(
             f"no repo root at {repo_root} (no .git): a copy of src/aipass/ alone, "
-            "such as seedgo's audit-tests sandbox, excludes it by design"
+            "such as sentry's audit-tests sandbox, excludes it by design"
         )
 
     gitignore = repo_root / ".gitignore"

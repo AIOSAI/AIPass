@@ -3,14 +3,14 @@
 # Description: Tests for spawn lifecycle commands (delete, retire-project, sync-registry)
 # Version: 1.3.0
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/delete_ops.py and apps/handlers/sync_registry_ops.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every file in apps/handlers/ and apps/modules/ parses and imports
-# seedgo: no-test-needed(documentation) — that delete_branch, sync_registry and spawn_agent carry docstrings
+# sentry: no-test-needed(ruff) — that every file in apps/handlers/ and apps/modules/ parses and imports
+# sentry: no-test-needed(documentation) — that delete_branch, sync_registry and spawn_agent carry docstrings
 
 import io
 import json

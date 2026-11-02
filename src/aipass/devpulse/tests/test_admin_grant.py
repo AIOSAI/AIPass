@@ -3,14 +3,14 @@
 # Description: Tests for the birth-cert admin grant handler (FPLAN-0401)
 # Version: 1.0.0
 # Created: 2026-08-12
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/owner/admin_grant.py: keygen, mint, and every named refusal of the 5-leg verify."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — the text of ADMIN_HOLDER
-# seedgo: no-test-needed(stdlib) — hmac's digest arithmetic and secrets.token_hex's randomness
+# sentry: no-test-needed(constant) — the text of ADMIN_HOLDER
+# sentry: no-test-needed(stdlib) — hmac's digest arithmetic and secrets.token_hex's randomness
 
 import json
 import os

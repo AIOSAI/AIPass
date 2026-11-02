@@ -16,7 +16,7 @@ see it.
 **The service runs it, once.** `log_watcher_service.main()` calls
 `medic.run_error_catchup(trigger.fire)` **after** the watchers are up — through the
 medic *module*, because the service is an entry point and entry points import modules,
-not handlers (seedgo encapsulation rule 3). The order is deliberate: an error arriving
+not handlers (sentry encapsulation rule 3). The order is deliberate: an error arriving
 between the scan and the first watch would fall through a gap if the scan ran first,
 whereas overlap is safe because the registry dedupes on fingerprint.
 

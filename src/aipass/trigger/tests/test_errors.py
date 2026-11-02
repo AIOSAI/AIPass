@@ -3,14 +3,14 @@
 # Description: Unit tests for the errors module (error registry management CLI)
 # Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/errors.py: the errors command routing and its report_error re-export."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — registry storage and reads, in tests/test_error_registry.py
-# seedgo: no-test-needed(covered_elsewhere) — how report_error fingerprints and dispatches, in tests/test_error_reporter.py
+# sentry: no-test-needed(covered_elsewhere) — registry storage and reads, in tests/test_error_registry.py
+# sentry: no-test-needed(covered_elsewhere) — how report_error fingerprints and dispatches, in tests/test_error_reporter.py
 
 import time
 from typing import Any

@@ -3,7 +3,7 @@
 # Description: Entry-limits gateway — the public door to the shape, the caps and the budgets
 # Version: 1.0.0
 # Created: 2026-09-15
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -45,7 +45,7 @@ __all__ = [
 
 
 def print_introspection() -> None:
-    """Display module introspection (seedgo standard)."""
+    """Display module introspection (sentry standard)."""
     from aipass.cli.apps.modules import console
 
     console.print()

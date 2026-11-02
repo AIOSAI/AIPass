@@ -3,7 +3,7 @@
 # Description: Tests for config_loader handler (FPLAN-0271 Phase 1)
 # Version: 1.3.0
 # Created: 2026-06-13
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/json/config_loader.py and the budget arithmetic it seeds."""
@@ -11,10 +11,10 @@
 # The JSON file is the runtime authority; DEFAULT_CONFIG exists so the file can be regenerated.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — set_branch_limit and set_default_limit, in tests/test_entry_limits.py
-# seedgo: no-test-needed(covered_elsewhere) — push_defaults_to_per_branch fleet push, in tests/test_config_verbs.py
-# seedgo: no-test-needed(covered_elsewhere) — get_count_ceilings and get_effective_limits, in tests/test_config_verbs.py
-# seedgo: no-test-needed(shared) — the json_handler.log_operation audit entries load() writes; the json handler's lane
+# sentry: no-test-needed(covered_elsewhere) — set_branch_limit and set_default_limit, in tests/test_entry_limits.py
+# sentry: no-test-needed(covered_elsewhere) — push_defaults_to_per_branch fleet push, in tests/test_config_verbs.py
+# sentry: no-test-needed(covered_elsewhere) — get_count_ceilings and get_effective_limits, in tests/test_config_verbs.py
+# sentry: no-test-needed(shared) — the json_handler.log_operation audit entries load() writes; the json handler's lane
 
 import copy
 import importlib
@@ -181,7 +181,7 @@ class TestMissingFile:
 
 class TestMalformedJson:
     """A file that EXISTS but will not parse is the operator's problem to fix,
-    not the loader's to heal (DPLAN-0206 red flag, seedgo-consulted).  It may
+    not the loader's to heal (DPLAN-0206 red flag, sentry-consulted).  It may
     be one stray comma from correct and carry hand-tuned per_branch limits.
     load() logs an ERROR, serves defaults in memory, and leaves the bytes on
     disk untouched.
@@ -205,7 +205,7 @@ class TestMalformedJson:
         config_dir = tmp_path / "custom_config"
         config_dir.mkdir(parents=True, exist_ok=True)
         bad_config = config_dir / "memory.config.json"
-        garbage = '{"rollover": {"per_branch": {"seedgo": {"count": 99,}}}'
+        garbage = '{"rollover": {"per_branch": {"sentry": {"count": 99,}}}'
         bad_config.write_text(garbage, encoding="utf-8")
 
         mod = _get_module()

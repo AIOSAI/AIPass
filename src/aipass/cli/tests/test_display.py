@@ -3,14 +3,14 @@
 # Description: The display module — messages, header, routing, demo, exit seam, escape, live colour
 # Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/display.py — the render surface every branch imports."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(documentation) — that display.header and the other public functions carry docstrings
-# seedgo: no-test-needed(rich_markup) — that display.print_help's own literals keep their brackets
+# sentry: no-test-needed(documentation) — that display.header and the other public functions carry docstrings
+# sentry: no-test-needed(rich_markup) — that display.print_help's own literals keep their brackets
 
 import contextlib
 import importlib

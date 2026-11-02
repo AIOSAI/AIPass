@@ -3,7 +3,7 @@
 # Description: memory watcher handler — lifecycle, status, on_modified callback, branch-path walk
 # Version: 1.1.1
 # Created: 2026-04-25
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # Category: memory/tests
 # =============================================
 
@@ -12,8 +12,8 @@
 # All tests use mocks -- no live filesystem watchers or infrastructure access.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — watchdog.observers.Observer; a mock stands in for it, no live filesystem watch
-# seedgo: no-test-needed(external) — execute_rollover itself; the orchestrator is mocked, only the call is pinned
+# sentry: no-test-needed(external) — watchdog.observers.Observer; a mock stands in for it, no live filesystem watch
+# sentry: no-test-needed(external) — execute_rollover itself; the orchestrator is mocked, only the call is pinned
 
 import json
 import logging

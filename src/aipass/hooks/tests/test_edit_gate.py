@@ -4,7 +4,7 @@
 # Description: Tests for edit_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py and its PreToolUse sibling settings_backup.py."""
@@ -13,9 +13,9 @@
 # (.aipass/test_write_policy.json) and FPLAN-0645 named this file. A move is @devpulse's word.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that edit_gate.py parses and imports, ruff and collection cover it
-# seedgo: no-test-needed(documentation) — handle()'s docstring, the documentation checker covers it
-# seedgo: no-test-needed(stdlib) — tempfile.gettempdir's choice of directory, the stdlib's own
+# sentry: no-test-needed(ruff) — that edit_gate.py parses and imports, ruff and collection cover it
+# sentry: no-test-needed(documentation) — handle()'s docstring, the documentation checker covers it
+# sentry: no-test-needed(stdlib) — tempfile.gettempdir's choice of directory, the stdlib's own
 
 import datetime
 import hashlib
@@ -52,7 +52,7 @@ def _auto_fix_edit(target: Path, seat: dict, ruff: list, pyright: list) -> dict:
     """auto_fix's real entry after an Edit of *target*, the two structured checks answering as given."""
     with (
         patch.object(auto_fix, "_run_python_checks", return_value=[]),
-        patch.object(auto_fix, "_run_seedgo_checklist", return_value=[]),
+        patch.object(auto_fix, "_run_sentry_checklist", return_value=[]),
         patch.object(auto_fix, "_run_ruff_lint_structured", return_value=ruff),
         patch.object(auto_fix, "_run_pyright_check", return_value=pyright),
     ):
@@ -63,7 +63,7 @@ def _auto_fix_edit_pyright_times_out(target: Path, seat: dict) -> dict:
     """auto_fix's real entry after an Edit of *target*: ruff finds nothing, pyright times out."""
     with (
         patch.object(auto_fix, "_run_python_checks", return_value=[]),
-        patch.object(auto_fix, "_run_seedgo_checklist", return_value=[]),
+        patch.object(auto_fix, "_run_sentry_checklist", return_value=[]),
         patch.object(auto_fix, "_run_ruff_lint_structured", return_value=[]),
         patch.object(auto_fix.subprocess, "run", side_effect=_PYRIGHT_TIMES_OUT),
     ):
@@ -209,9 +209,9 @@ class TestEditGateHandler:
         assert "'alpha' cannot write to 'beta'" in json.loads(result["stdout"])["reason"]
         assert _write(str(root / "agents" / "alpha"), root / "agents" / "alpha" / "notes.md")["exit_code"] == 0
 
-    def test_seedgo_and_spawn_write_their_own_branch_like_everyone_else(self, registered_projects: dict):
+    def test_sentry_and_spawn_write_their_own_branch_like_everyone_else(self, registered_projects: dict):
         """DPLAN-0356 item 5: TRUSTED_CROSS_WRITERS let these two names write all of AIPass."""
-        for seat in ("seedgo", "spawn"):
+        for seat in ("sentry", "spawn"):
             for target in (
                 registered_projects["aipass"] / "src" / "aipass" / "hooks" / "apps" / "x.py",
                 registered_projects["aipass"] / "README.md",
@@ -376,15 +376,15 @@ class TestEditGateProjectBoundary:
             )
         assert result["exit_code"] == 0
 
-    def test_seedgo_and_spawn_never_reach_beyond_aipass(self, registered_projects: dict):
-        """ "seedgo and spawn edit any file inside AIPass and NEVER beyond AIPass." """
+    def test_sentry_and_spawn_never_reach_beyond_aipass(self, registered_projects: dict):
+        """ "sentry and spawn edit any file inside AIPass and NEVER beyond AIPass." """
         targets = (
             Path(registered_projects["writer"]) / "draft.md",
             registered_projects["vera"] / "README.md",
             Path(registered_projects["baud_seat"]) / "app.py",
         )
         with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=False):
-            for seat in ("seedgo", "spawn"):
+            for seat in ("sentry", "spawn"):
                 for target in targets:
                     result = _write(registered_projects[seat], target)
                     assert result["exit_code"] == 2, (seat, target)
@@ -399,7 +399,7 @@ class TestEditGateProjectBoundary:
         assert "Cross-branch" in json.loads(refused["stdout"])["reason"]
 
     def test_project_seat_named_like_a_trusted_writer_is_still_blocked(self, nested_projects: dict):
-        """A project seat cannot borrow the devpulse/seedgo/spawn exemption.
+        """A project seat cannot borrow the devpulse/sentry/spawn exemption.
 
         Those names are trusted inside the host tree only — a nested project
         with a src/<pkg>/devpulse directory resolves the same branch name.
@@ -465,7 +465,7 @@ def branch_tree(tmp_path: Path):
     anywhere so the project fence stays out of the way. The payloads here carry no
     session, so the state is written for the "nosession" seat.
     """
-    branch = tmp_path / "src" / "aipass" / "seedgo"
+    branch = tmp_path / "src" / "aipass" / "sentry"
     (branch / "tests").mkdir(parents=True)
     (branch / "apps" / "modules").mkdir(parents=True)
 
@@ -494,7 +494,7 @@ LOCAL_TYPO = {"line": 7, "message": '"undefinde" is not defined'}
 class TestEditGateDiagnosticsState:
     """The block must be satisfiable, and must be a live fact rather than a remembered one.
 
-    Reported by @seedgo with a live repro: a red test importing a symbol that does
+    Reported by @sentry with a live repro: a red test importing a symbol that does
     not exist yet is the mandated red-first shape, and the only edit that can clear
     it is in another file — which is exactly what the gate blocked.
     """
@@ -720,7 +720,7 @@ def seat_tree(tmp_path: Path) -> dict:
     checkers' answers are given, and revalidate answers "could not tell" so the gate
     decides on what was recorded.
     """
-    branch = tmp_path / "src" / "aipass" / "seedgo"
+    branch = tmp_path / "src" / "aipass" / "sentry"
     (branch / "tests").mkdir(parents=True)
     (branch / "apps" / "modules").mkdir(parents=True)
     red_test = branch / "tests" / "test_track_e.py"
@@ -907,8 +907,8 @@ class TestEditGateExternalProject:
             assert _write(writer, target)["exit_code"] == 2, target
 
     def test_a_trusted_writers_name_is_no_licence_outside_aipass(self, registered_projects: dict):
-        """A Vera branch called seedgo is not @seedgo: the grant is AIPass's, read from its registry."""
-        result = _write(registered_projects["vera_seedgo"], Path(registered_projects["writer"]) / "draft.md")
+        """A Vera branch called sentry is not @sentry: the grant is AIPass's, read from its registry."""
+        result = _write(registered_projects["vera_sentry"], Path(registered_projects["writer"]) / "draft.md")
         assert result["exit_code"] == 2
         assert "Cross-branch" in json.loads(result["stdout"])["reason"]
 

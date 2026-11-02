@@ -3,13 +3,13 @@
 # Description: Tests for heal_registry doctrine self-heal handler
 # Version: 1.1.0
 # Created: 2026-07-29
-# Modified: 2026-11-01
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/registry/heal_registry.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(ruff) — that the module parses and imports
 
 import copy
 from pathlib import Path
@@ -141,7 +141,7 @@ class TestBuildPlanFileIndex:
 class TestNotAPlanRows:
     """Case 6 (leg 9): an open row whose present file is not a plan is closed, registry only."""
 
-    REPORT = "FPLAN-0508 rows seedgo\n"
+    REPORT = "FPLAN-0508 rows sentry\n"
 
     def test_a_row_naming_a_report_is_closed_and_the_report_stays(self, tmp_path, quiet_cross_prefix):
         report = tmp_path / "devpulse" / "artifacts" / "reports" / "FPLAN-0516.md"
@@ -854,7 +854,7 @@ class TestAHealItCouldNotSaveReportsNothing:
 
     def test_not_a_plan(self, tmp_path, quiet_cross_prefix):
         report = tmp_path / "FPLAN-0516.md"
-        report.write_text("FPLAN-0508 rows seedgo\n", encoding="utf-8")
+        report.write_text("FPLAN-0508 rows sentry\n", encoding="utf-8")
         registries = {"fplan_registry.json": {"plans": {"0569": {"status": "open", "file_path": str(report)}}}}
 
         actions, errors, store = self._heal_refused(tmp_path, registries, {"f": {"prefix": "FPLAN"}})

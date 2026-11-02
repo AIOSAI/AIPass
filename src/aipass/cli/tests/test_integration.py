@@ -3,13 +3,13 @@
 # Description: Integration tests for CLI main() flow
 # Version: 2.2.0
 # Created: 2026-03-29
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/cli.py main() — the routed flow end to end."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(help_flag_safety) — that each module's handle_command calls wants_help before acting
+# sentry: no-test-needed(help_flag_safety) — that each module's handle_command calls wants_help before acting
 
 from unittest.mock import patch
 

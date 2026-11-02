@@ -3,15 +3,15 @@
 # Description: Tests for the host API read lane — file reads, the whole diff, and the read lane's /v1 routes
 # Version: 1.1.5
 # Created: 2026-08-14
-# Modified: 2026-10-25
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for the file and diff reads in apps/handlers/host/reads.py and git_reads.py, and their /v1 routes."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — drone's own diff output; read_diff's drone child is faked, drone tests it
-# seedgo: no-test-needed(covered_elsewhere) — token minting and the token store; tests/test_host_token_store.py
-# seedgo: no-test-needed(ruff) — that every module in apps/handlers/host/ parses and imports
+# sentry: no-test-needed(external) — drone's own diff output; read_diff's drone child is faked, drone tests it
+# sentry: no-test-needed(covered_elsewhere) — token minting and the token store; tests/test_host_token_store.py
+# sentry: no-test-needed(ruff) — that every module in apps/handlers/host/ parses and imports
 
 import io
 import re

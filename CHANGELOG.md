@@ -9,6 +9,12 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased] — seedgo is sentry
+
+### Changed
+- **sentry** (was seedgo): the standards citizen is renamed, whole, because the old name could not be said to a speech recognizer. Package `aipass.sentry`, address `@sentry`, directory `src/aipass/sentry`, every branch's `.sentry/` bypass dir and `.sentryignore`, `sentry_json/`, the CI audit script `.github/scripts/sentry_audit.py` and its job `sentry-audit`, the `# sentry: no-test-needed(...)` markers and the three checkers that parse them, the `SENTRY:` label on hook auto-fixes, the passport and registry row (registry_id unchanged). History keeps the old name: past CHANGELOG sections, closed plans, memory entries and @memory's archives are not rewritten. `drone @seedgo` is unknown. Branch protection must name the required check `sentry-audit`.
+- **devpulse**: `tools/rename_term.py` renames a term across a tree, paths then content, four case pairs, whole-word only, with the memory, archive, plan, lock and registry files excluded; dry run by default, `--apply` writes.
+
 ## [2026-11-01] — v2.8.33: an empty .git is not a repo, dispatch stop from the deck, hook sounds off by default, the Stop gate for the watchdog wire
 
 ### Added

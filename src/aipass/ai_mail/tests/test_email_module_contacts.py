@@ -3,13 +3,13 @@
 # Description: Tests for email.py's address book commands - contacts and register
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/email.py's address book: handle_contacts and handle_register."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(shared) — register_contact()'s own write: tests/test_contacts.py
+# sentry: no-test-needed(shared) — register_contact()'s own write: tests/test_contacts.py
 
 import pytest
 from unittest.mock import patch

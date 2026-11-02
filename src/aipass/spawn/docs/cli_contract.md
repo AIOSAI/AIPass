@@ -74,8 +74,8 @@ nothing.
 
 ## The docs page skeleton — one source, read live
 
-Every branch's `docs/*.md` pages share one shape, scored by @seedgo's `docs_page` standard.
-The skeleton that shows the shape is `templates/docs_page.md`, and seedgo renders it through
+Every branch's `docs/*.md` pages share one shape, scored by @sentry's `docs_page` standard.
+The skeleton that shows the shape is `templates/docs_page.md`, and sentry renders it through
 the same gateway on every call — neither side keeps a copy.
 
 ```python
@@ -89,10 +89,10 @@ The skeleton sits beside `templates/citizen/`, never inside it. Everything in th
 tree is stamped into every newborn, so a skeleton there would arrive as a placeholder page in
 every branch; beside it, no walk reaches it — not the copy, not the manifest a mint is
 verified against, not the update engine. The handler reads and returns and performs no
-operation of its own, so it logs nothing; the render is seedgo's operation.
+operation of its own, so it logs nothing; the render is sentry's operation.
 
 What a newborn does carry is the index: `templates/citizen/docs/README.md` is a back-link,
-a title and one line, and it names the standard rather than the size cap, which seedgo owns.
+a title and one line, and it names the standard rather than the size cap, which sentry owns.
 `tests/test_modules_gateway.py` pins the door, `tests/test_template_hygiene.py` pins the
 skeleton's shape and that no mint carries it, and `tests/test_birth_receipt.py` pins that the
 index copies no cap.

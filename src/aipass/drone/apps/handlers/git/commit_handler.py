@@ -1,15 +1,16 @@
 # =================== AIPass ====================
 # Name: commit_handler.py
 # Description: Commit handler with scoped staging
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-05-12
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """Commit handler with scoped staging."""
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -111,7 +112,9 @@ def _lint_gate(repo_root: Path) -> tuple[dict | None, list[str]]:
     if not changed:
         return None, []
     before = {path: (repo_root / path).read_bytes() for path in changed}
-    for argv in (["check", "--fix", *changed], ["format", *changed]):
+    # --force-exclude: a path named on the command line is otherwise formatted even when pyproject
+    # excludes it (sentry's frozen fixtures were rewritten the first time they were staged, 2026-11-02).
+    for argv in (["check", "--fix", "--force-exclude", *changed], ["format", "--force-exclude", *changed]):
         subprocess.run([ruff_bin, *argv], capture_output=True, text=True, cwd=str(repo_root))
     return None, [path for path in changed if (repo_root / path).read_bytes() != before[path]]
 
@@ -142,6 +145,9 @@ def _run_test_gate(repo_root: Path) -> dict | None:
     venv_python = repo_root / ".venv" / "bin" / "python"
     python_bin = str(venv_python) if venv_python.exists() else "python3"
 
+    # The suites are not a drone caller: drone's AIPASS_CALLER_* stamps, inherited, pose as the
+    # session cwd and identity inside hooks', prax's and ai_mail's tests (47 red on 2026-11-02).
+    env = {key: value for key, value in os.environ.items() if not key.startswith("AIPASS_CALLER_")}
     failed_branches: list[tuple[str, str]] = []
     for branch_name in sorted(changed_branches):
         test_dir = changed_branches[branch_name] / "tests"
@@ -154,6 +160,7 @@ def _run_test_gate(repo_root: Path) -> dict | None:
                 text=True,
                 cwd=str(repo_root),
                 timeout=TEST_GATE_TIMEOUT,
+                env=env,
             )
         except subprocess.TimeoutExpired:
             logger.warning("pytest timed out for branch %s (%ss limit)", branch_name, TEST_GATE_TIMEOUT)

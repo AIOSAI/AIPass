@@ -3,16 +3,16 @@
 # Description: Tests for shared/project_home.py — instruction-file ancestor fence helpers
 # Version: 1.4.0
 # Created: 2026-07-31
-# Modified: 2026-10-27
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for shared/project_home.py and the instruction-file ancestor-fence helpers it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
-# seedgo: no-test-needed(covered_elsewhere) — is_throwaway_path, _detect_aipass_home, _claude_settings;
-# seedgo: no-test-needed(covered_elsewhere) — _enroll_project; see tests/test_trust.py, tests/test_doctor.py
-# seedgo: no-test-needed(covered_elsewhere) — and tests/test_bootstrap.py, which also covers agents_md_seed
+# sentry: no-test-needed(ruff) — that every module this file imports parses and imports
+# sentry: no-test-needed(covered_elsewhere) — is_throwaway_path, _detect_aipass_home, _claude_settings;
+# sentry: no-test-needed(covered_elsewhere) — _enroll_project; see tests/test_trust.py, tests/test_doctor.py
+# sentry: no-test-needed(covered_elsewhere) — and tests/test_bootstrap.py, which also covers agents_md_seed
 
 import json
 import os

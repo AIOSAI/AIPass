@@ -3,14 +3,14 @@
 # Description: Tests for the timer_install module (systemd user timer installer)
 # Version: 1.1.1
 # Created: 2026-06-25
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/timer_install.py — install-timer and uninstall-timer, the systemd user timer."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — shutil.copy2's metadata copy; the copies are asserted on disk, not their mode bits
-# seedgo: no-test-needed(ruff) — that timer_install.py parses and imports; every test here imports it first
+# sentry: no-test-needed(stdlib) — shutil.copy2's metadata copy; the copies are asserted on disk, not their mode bits
+# sentry: no-test-needed(ruff) — that timer_install.py parses and imports; every test here imports it first
 
 import json
 import subprocess

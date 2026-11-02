@@ -3,14 +3,14 @@
 # Description: Tests for the plans_processor handler — chunking, manifest, memory python and process_plans
 # Version: 1.1.0
 # Created: 2026-04-26
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/intake/plans_processor.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — the embed_subprocess.py child _embed_texts() spawns; sealed at subprocess
-# seedgo: no-test-needed(covered_elsewhere) — chroma_subprocess.py's store: tests/test_chroma_source_match.py
+# sentry: no-test-needed(external) — the embed_subprocess.py child _embed_texts() spawns; sealed at subprocess
+# sentry: no-test-needed(covered_elsewhere) — chroma_subprocess.py's store: tests/test_chroma_source_match.py
 
 import hashlib
 import json
@@ -170,7 +170,7 @@ class TestUnfilledPlaceholderSectionsAreNotVectorized:
     def test_markdown_link_syntax_is_not_a_placeholder(self, monkeypatch):
         """`[text](url)` opens with a bracket and is real content."""
         mod = plans_processor
-        assert mod._is_placeholder_only("## Refs\n[the seedgo audit](./audit.md)\n") is False
+        assert mod._is_placeholder_only("## Refs\n[the sentry audit](./audit.md)\n") is False
 
 
 class TestManifest:

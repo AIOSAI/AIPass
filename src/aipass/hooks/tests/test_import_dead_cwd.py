@@ -3,7 +3,7 @@
 # Description: Pins hooks imports against a dead working directory (two worlds)
 # Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/__init__.py's guard: every hooks module imports without a readable cwd."""
@@ -12,8 +12,8 @@
 # Two worlds, each convicting half: A emulates ntpath (resolve), B denies realpath (inspect.stack()).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every hooks module parses; this file pins only import under a dead cwd
-# seedgo: no-test-needed(stdlib) — os.getcwd() raising once the working directory is gone; the worlds emulate it
+# sentry: no-test-needed(ruff) — that every hooks module parses; this file pins only import under a dead cwd
+# sentry: no-test-needed(stdlib) — os.getcwd() raising once the working directory is gone; the worlds emulate it
 
 import ast
 import subprocess

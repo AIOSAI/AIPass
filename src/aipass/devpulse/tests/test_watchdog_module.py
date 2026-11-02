@@ -3,15 +3,15 @@
 # Description: Tests for the watchdog module router
 # Version: 1.2.0
 # Created: 2026-04-14
-# Modified: 2026-11-01
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/watchdog.py, the watchdog module router (Phase 1, FPLAN-0186)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that modules/watchdog.py parses and imports
-# seedgo: no-test-needed(documentation) — that handle_command and print_introspection carry docstrings
-# seedgo: no-test-needed(constant) — the wording of _TIMER_HELP_TEXT and _SCHEDULE_HELP_TEXT
+# sentry: no-test-needed(ruff) — that modules/watchdog.py parses and imports
+# sentry: no-test-needed(documentation) — that handle_command and print_introspection carry docstrings
+# sentry: no-test-needed(constant) — the wording of _TIMER_HELP_TEXT and _SCHEDULE_HELP_TEXT
 
 import json
 import os

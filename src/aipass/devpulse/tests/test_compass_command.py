@@ -3,14 +3,14 @@
 # Description: Tests for the compass module command router (FPLAN P2)
 # Version: 1.0.0
 # Created: 2026-06-16
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/compass.py, driven through handle_command against a temp --db store."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(help_flag_safety) — that handle_command calls _wants_help before acting
-# seedgo: no-test-needed(constant) — the Rich colour tags in HELP_TEXT
+# sentry: no-test-needed(help_flag_safety) — that handle_command calls _wants_help before acting
+# sentry: no-test-needed(constant) — the Rich colour tags in HELP_TEXT
 
 import re
 from pathlib import Path

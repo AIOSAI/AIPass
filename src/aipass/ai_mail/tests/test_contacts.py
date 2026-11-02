@@ -3,13 +3,13 @@
 # Description: Tests for the contacts address book handler
 # Version: 1.0.4
 # Created: 2026-04-11
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/email/contacts.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — OSError handling around a disk write failure in json_handler
+# sentry: no-test-needed(stdlib) — OSError handling around a disk write failure in json_handler
 
 import json
 import pytest

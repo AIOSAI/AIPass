@@ -3,13 +3,13 @@
 # Description: Blocked is not ran — a wake that never started must not consume the period
 # Version: 1.2.0
 # Created:2026-08-30
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/run.py — blocked is not ran: a wake that never started must not consume the period."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — _BLOCKED_RETRY_MINUTES by value; the 09:54 / 09:58 pair measures its effect
+# sentry: no-test-needed(constant) — _BLOCKED_RETRY_MINUTES by value; the 09:54 / 09:58 pair measures its effect
 
 import errno
 from contextlib import ExitStack

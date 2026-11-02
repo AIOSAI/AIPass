@@ -3,13 +3,13 @@
 # Description: Registry CRUD operations for custom command shortcuts
 # Version: 1.0.3
 # Created: 2026-03-17
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Registry CRUD Operations for Custom Commands.
 
 The registry maps shortcut names to full drone commands (``audit`` for
-``drone @seedgo audit aipass``).
+``drone @sentry audit aipass``).
 """
 
 from __future__ import annotations

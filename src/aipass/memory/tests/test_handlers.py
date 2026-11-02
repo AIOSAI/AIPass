@@ -3,7 +3,7 @@
 # Description: Handler-layer tests — rollover extractor, normalize and the todos operational schema
 # Version: 1.1.1
 # Created: 2026-04-01
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/rollover/extractor.py and schema/normalize.py."""
@@ -18,8 +18,8 @@
 # All tests use mocks/tmp_path -- no live filesystem or infrastructure access.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — extract_with_metadata() wrapper, tests/test_unified_schema.py
-# seedgo: no-test-needed(covered_elsewhere) — the todos count cap, check_todos() in tests/test_detector.py
+# sentry: no-test-needed(covered_elsewhere) — extract_with_metadata() wrapper, tests/test_unified_schema.py
+# sentry: no-test-needed(covered_elsewhere) — the todos count cap, check_todos() in tests/test_detector.py
 
 import json
 from pathlib import Path

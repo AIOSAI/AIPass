@@ -3,7 +3,7 @@
 # Description: edit_gate's .trinity refusals: renamed fields, carried vs authored, field shapes, passport, logging
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py: what a .trinity refusal names, and what it carries."""
@@ -12,8 +12,8 @@
 # test_edit_gate_trinity_edit.py; the advisories and budgets are test_edit_gate_trinity.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that edit_gate.py parses and its imports resolve
-# seedgo: no-test-needed(stdlib) — json.loads' parsing of the proposed content; the gate's reading of it is pinned
+# sentry: no-test-needed(ruff) — that edit_gate.py parses and its imports resolve
+# sentry: no-test-needed(stdlib) — json.loads' parsing of the proposed content; the gate's reading of it is pinned
 
 import json
 import logging

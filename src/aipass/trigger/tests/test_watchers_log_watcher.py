@@ -3,14 +3,14 @@
 # Description: Unit tests for centralized system_logs log watcher
 # Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for the centralized system_logs watcher (apps/handlers/watchers/log_watcher.py)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — the live system_logs observer: test_branch_log_events.py
-# seedgo: no-test-needed(external) — WatchdogObserver's event delivery is the watchdog package's
+# sentry: no-test-needed(covered_elsewhere) — the live system_logs observer: test_branch_log_events.py
+# sentry: no-test-needed(external) — WatchdogObserver's event delivery is the watchdog package's
 
 import hashlib
 from pathlib import Path
@@ -81,8 +81,8 @@ class TestDetectBranchFromLog:
     """Tests for detect_branch_from_log."""
 
     def test_branch_module_pattern(self):
-        """seedgo_audit.log returns SEEDGO."""
-        assert wlw.detect_branch_from_log("seedgo_audit.log") == "SEEDGO"
+        """sentry_audit.log returns SENTRY."""
+        assert wlw.detect_branch_from_log("sentry_audit.log") == "SENTRY"
 
     def test_simple_log(self):
         """simple.log returns SIMPLE."""

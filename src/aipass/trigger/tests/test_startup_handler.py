@@ -3,15 +3,15 @@
 # Description: Tests for startup event handler
 # Version: 1.2.2
 # Created: 2026-04-25
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/events/startup.py and the error catch-up it runs."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — how get_entry and report store a row, in error_registry
-# seedgo: no-test-needed(covered_elsewhere) — what handle_error_detected does with the fired payload
-# seedgo: no-test-needed(stdlib) — datetime.fromisoformat parsing the persisted cursor
+# sentry: no-test-needed(covered_elsewhere) — how get_entry and report store a row, in error_registry
+# sentry: no-test-needed(covered_elsewhere) — what handle_error_detected does with the fired payload
+# sentry: no-test-needed(stdlib) — datetime.fromisoformat parsing the persisted cursor
 
 from datetime import datetime
 from pathlib import Path

@@ -84,7 +84,7 @@ drone @ai_mail email @branch "Question: [topic]" "I'm working on X and need guid
 **Common examples:**
 - Building something email? Ask @ai_mail how delivery works
 - Need routing or @ resolution? Ask @drone
-- Unsure about standards? Ask @seedgo reference code
+- Unsure about standards? Ask @sentry reference code
 - Need persistent storage or search? Ask @memory
 - Event-driven behavior? Ask @trigger about their event system
 - Dashboard integration? Ask @devpulse about update_section()
@@ -115,10 +115,10 @@ drone @flow close {prefix}-XXXX           # Close plan
 drone @flow list open                  # List active plans
 drone @flow --help                     # Full help
 
-# Seedgo - Quality gates
-drone @seedgo checklist <file>           # 10-point check on file
-drone @seedgo audit aipass @branch       # Full branch audit
-drone @seedgo --help                     # Full help
+# Sentry - Quality gates
+drone @sentry checklist <file>           # 10-point check on file
+drone @sentry audit aipass @branch       # Full branch audit
+drone @sentry --help                     # Full help
 
 # AI_Mail - Status updates
 drone @ai_mail email @devpulse "Subject" "Message"
@@ -187,7 +187,7 @@ You are working at [branch_path].
 - Reports/logs -> artifacts/reports/ or artifacts/logs/
 
 **Constraints:**
-- Follow Seedgo standards (3-layer architecture)
+- Follow Sentry standards (3-layer architecture)
 - Do not modify files outside your task scope
 - Cross-branch: never modify other branches' files unless explicitly authorized
 - Two-attempt rule: if something fails twice, note issue + move on
@@ -207,7 +207,7 @@ You are working at [branch_path].
 - [ ] Created {plan_number}
 - [ ] Agent deployed: [task]
 - [ ] Agent completed: [outcome]
-- [ ] Seedgo checklist passed: [file]
+- [ ] Sentry checklist passed: [file]
 - [ ] Memories updated
 
 **Log Pattern:** Task -> Agent -> Outcome -> Quality check -> Next
@@ -231,7 +231,7 @@ drone @ai_mail email @devpulse "Production stopped: {plan_number}" "Issue: [desc
 
 - [ ] All goals achieved
 - [ ] Agent output reviewed + verified
-- [ ] Seedgo checklist on ! code: `drone @seedgo checklist <file>`
+- [ ] Sentry checklist on ! code: `drone @sentry checklist <file>`
 - [ ] Branch memories updated:
   - [ ] `BRANCH.local.json` - session/work log
   - [ ] `BRANCH.observations.json` - patterns learned (if any)

@@ -3,13 +3,13 @@
 # Description: Tests for apps/handlers/plan/project_scope.py — project root resolution and register discrimination
 # Version: 1.0.1
 # Created: 2026-08-22
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/plan/project_scope.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(ruff) — that the module parses and imports
 
 import json
 import os

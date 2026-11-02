@@ -16,7 +16,7 @@ capped at **9,000** chars and each `apps/integrations/*/private_prompt.md` at **
 Over-budget content is **cut with a marker naming the source file**, never dropped — Claude Code
 persists a hook output over 10,000 UTF-16 units and shows the agent a 2,000-char preview, so a prompt
 that crosses that line is not read at all. Every cut logs a WARNING naming the file and both numbers.
-The `.trinity` caps and `passport.json`'s 6,000/600 are @memory's numbers; README 10,000 is @seedgo's.
+The `.trinity` caps and `passport.json`'s 6,000/600 are @memory's numbers; README 10,000 is @sentry's.
 
 **Degraded fail mode: kernel only, plus a warning.** When cadence cannot count turns — no
 `CLAUDE_CODE_SESSION_ID`, an unreadable state file, a cadence import that raises — only `DEGRADED_LOADERS`

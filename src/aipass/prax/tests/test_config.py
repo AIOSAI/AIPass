@@ -3,13 +3,13 @@
 # Description: Tests for prax config handlers (load + ignore_patterns)
 # Version: 1.5.0
 # Created: 2026-03-29
-# Modified: 2026-11-01
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/config/load.py and apps/handlers/config/ignore_patterns.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stderr_routing) — _warn_routing's warning when a log is routed away, covered by that row
+# sentry: no-test-needed(stderr_routing) — _warn_routing's warning when a log is routed away, covered by that row
 
 import json
 import os
@@ -160,6 +160,8 @@ class TestGetModuleLogsDir:
     def test_returns_path(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.setattr(load_mod, "_find_repo_root", lambda: tmp_path)
+        # drone exports AIPASS_CALLER_CWD; inherited, it routes the unknown module to the caller's repo.
+        monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
         result = load_mod.get_module_logs_dir("flow")
         assert isinstance(result, Path)
         # Which Path: no flow/ exists under either root here, so the

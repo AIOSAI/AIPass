@@ -3,7 +3,7 @@
 # Description: Tests for dispatch monitor lifecycle handler
 # Version: 1.5.0
 # Created: 2026-04-02
-# Modified: 2026-10-16
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's main(): the attempts, the bounce, the completion fire."""
@@ -12,13 +12,13 @@
 # and the session pointer are their own files.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — STARTUP_TIMEOUT and HARD_TIMEOUT: real timeout seconds, overridden by every test
-# seedgo: no-test-needed(constant) — POLL_INTERVAL and RATE_LIMIT_DELAY: real values, overridden by every test
-# seedgo: no-test-needed(shared) — the startup check, kill, logs, lock, JSONL: tests/test_dispatch_monitor_helpers.py
-# seedgo: no-test-needed(shared) — the sandbox gate and the broker handshake: tests/test_dispatch_monitor_sandbox.py
-# seedgo: no-test-needed(shared) — wake_sender, log_wake_result and the decline: tests/test_dispatch_monitor_wake.py
-# seedgo: no-test-needed(shared) — what each attempt leaves behind: tests/test_dispatch_monitor_artifacts.py
-# seedgo: no-test-needed(shared) — the session-pointer retry loop: tests/test_dispatch_monitor_pointer.py
+# sentry: no-test-needed(constant) — STARTUP_TIMEOUT and HARD_TIMEOUT: real timeout seconds, overridden by every test
+# sentry: no-test-needed(constant) — POLL_INTERVAL and RATE_LIMIT_DELAY: real values, overridden by every test
+# sentry: no-test-needed(shared) — the startup check, kill, logs, lock, JSONL: tests/test_dispatch_monitor_helpers.py
+# sentry: no-test-needed(shared) — the sandbox gate and the broker handshake: tests/test_dispatch_monitor_sandbox.py
+# sentry: no-test-needed(shared) — wake_sender, log_wake_result and the decline: tests/test_dispatch_monitor_wake.py
+# sentry: no-test-needed(shared) — what each attempt leaves behind: tests/test_dispatch_monitor_artifacts.py
+# sentry: no-test-needed(shared) — the session-pointer retry loop: tests/test_dispatch_monitor_pointer.py
 
 import json
 import subprocess

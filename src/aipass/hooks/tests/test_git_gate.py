@@ -4,16 +4,16 @@
 # Description: Tests for git_gate: raw git, gh and the secrets store refused for every seat; protected writes
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-10-31
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/security/git_gate.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that git_gate.py parses and imports, ruff and collection cover it
-# seedgo: no-test-needed(documentation) — handle()'s docstring, the documentation standard covers it
-# seedgo: no-test-needed(constant) — RAW_GIT_REFUSED's and GH_REDIRECT's full wording; block tests pin key phrases
-# seedgo: no-test-needed(stdlib) — re.compile's matching engine, the stdlib's own
+# sentry: no-test-needed(ruff) — that git_gate.py parses and imports, ruff and collection cover it
+# sentry: no-test-needed(documentation) — handle()'s docstring, the documentation standard covers it
+# sentry: no-test-needed(constant) — RAW_GIT_REFUSED's and GH_REDIRECT's full wording; block tests pin key phrases
+# sentry: no-test-needed(stdlib) — re.compile's matching engine, the stdlib's own
 
 import json
 import os
@@ -461,9 +461,9 @@ class TestGitGateEditProtection:
     def test_allow_edit_settings_from_the_verified_admin_seat(self):
         _assert_allowed(_edit(_provider_settings(), DEVPULSE_CWD, grant=True))
 
-    def test_a_seat_named_devpulse_or_seedgo_without_the_grant_is_refused(self):
+    def test_a_seat_named_devpulse_or_sentry_without_the_grant_is_refused(self):
         """TRUSTED_HOOK_EDITORS let these two names through until 2026-09-30, grant or none."""
-        for name in ("devpulse", "seedgo"):
+        for name in ("devpulse", "sentry"):
             _assert_blocked(_edit(_provider_settings(), str(_REPO / "src" / "aipass" / name), grant=False))
 
     def test_block_edit_hooks_dir(self):

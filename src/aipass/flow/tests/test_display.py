@@ -3,14 +3,14 @@
 # Description: Tests for apps/handlers/plan/display.py -- plan display formatting
 # Version: 1.0.0
 # Created: 2026-03-29
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/plan/display.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that display.py parses and imports
-# seedgo: no-test-needed(documentation) — the module's per-function docstrings
+# sentry: no-test-needed(ruff) — that display.py parses and imports
+# sentry: no-test-needed(documentation) — the module's per-function docstrings
 
 import aipass.flow.apps.handlers.plan.display as mod
 

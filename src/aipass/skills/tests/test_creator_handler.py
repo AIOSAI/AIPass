@@ -3,13 +3,13 @@
 # Description: Tests for skill creation handler
 # Version: 1.0.2
 # Created: 2026-04-03
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/creator_handler.py: is_valid_name and create_skill."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — how shutil.copytree() copies a template tree
+# sentry: no-test-needed(stdlib) — how shutil.copytree() copies a template tree
 
 import sys
 from pathlib import Path

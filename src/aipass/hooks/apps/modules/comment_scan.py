@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-16
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Counts a source file's full-line comment lines against the comment budget (docs/comments.md)."""
@@ -38,7 +38,7 @@ KINDS = {
     ".bash": "shell",
 }
 
-HASH_DIRECTIVES = ("!", "-*-", "noqa", "type:", "pyright:", "pragma", "fmt:", "ruff:", "pylint:", "seedgo:")
+HASH_DIRECTIVES = ("!", "-*-", "noqa", "type:", "pyright:", "pragma", "fmt:", "ruff:", "pylint:", "sentry:")
 # The fleet json shim is a byte-identical copy checked by hash in every branch: no branch can trim it.
 EXEMPT_PATHS = ("apps/handlers/json/json_handler.py",)
 SLASH_DIRECTIVES = ("eslint-", "@ts-", "prettier-ignore")

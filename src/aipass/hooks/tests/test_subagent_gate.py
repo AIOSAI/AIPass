@@ -4,22 +4,22 @@
 # Description: Tests for subagent_gate security handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-01
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/security/subagent_gate.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that subagent_gate.py parses and imports, ruff and collection cover it
-# seedgo: no-test-needed(documentation) — handle()'s docstring, the documentation standard covers it
-# seedgo: no-test-needed(stdlib) — subprocess.run's process launch and time.monotonic's clock, the stdlib's own
+# sentry: no-test-needed(ruff) — that subagent_gate.py parses and imports, ruff and collection cover it
+# sentry: no-test-needed(documentation) — handle()'s docstring, the documentation standard covers it
+# sentry: no-test-needed(stdlib) — subprocess.run's process launch and time.monotonic's clock, the stdlib's own
 
 import json
 from pathlib import Path, PureWindowsPath
 from unittest.mock import patch, MagicMock
 
 from aipass.hooks.apps.handlers.security.subagent_gate import handle
-from aipass.hooks.apps.handlers.security.subagent_gate import _run_seedgo_checklist
+from aipass.hooks.apps.handlers.security.subagent_gate import _run_sentry_checklist
 
 
 def _stop_in(repo, cwd, status: str) -> tuple[dict, list]:
@@ -92,10 +92,10 @@ class TestSubagentGateHandler:
         assert "sound" not in result
 
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._check_hook_readme_accountability", return_value=None)
-    @patch("aipass.hooks.apps.handlers.security.subagent_gate._run_seedgo_checklist", return_value=[])
+    @patch("aipass.hooks.apps.handlers.security.subagent_gate._run_sentry_checklist", return_value=[])
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._get_modified_py_files")
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._find_repo_root")
-    def test_modified_files_no_violations_allows(self, mock_root, mock_modified, mock_seedgo, mock_readme, tmp_path):
+    def test_modified_files_no_violations_allows(self, mock_root, mock_modified, mock_sentry, mock_readme, tmp_path):
         repo = tmp_path / "fake" / "repo"
         mock_root.return_value = repo
         mock_modified.return_value = [str(repo / "src" / "aipass" / "hooks" / "apps" / "test.py")]
@@ -105,14 +105,14 @@ class TestSubagentGateHandler:
         assert "sound" not in result
 
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._check_hook_readme_accountability", return_value=None)
-    @patch("aipass.hooks.apps.handlers.security.subagent_gate._run_seedgo_checklist")
+    @patch("aipass.hooks.apps.handlers.security.subagent_gate._run_sentry_checklist")
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._get_modified_py_files")
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._find_repo_root")
-    def test_violations_blocks(self, mock_root, mock_modified, mock_seedgo, mock_readme, tmp_path):
+    def test_violations_blocks(self, mock_root, mock_modified, mock_sentry, mock_readme, tmp_path):
         repo = tmp_path / "fake" / "repo"
         mock_root.return_value = repo
         mock_modified.return_value = [str(repo / "src" / "aipass" / "hooks" / "apps" / "bad.py")]
-        mock_seedgo.return_value = ["Missing docstring", "No tests"]
+        mock_sentry.return_value = ["Missing docstring", "No tests"]
         result = handle({"agent_type": "general-purpose", "cwd": str(repo / "src" / "aipass" / "hooks")})
         assert result["exit_code"] == 2
         parsed = json.loads(result["stdout"])
@@ -128,7 +128,7 @@ class TestSubagentGateHandler:
         assert result == {"stdout": "", "exit_code": 0}
         assert [argv[1] for argv, _kw in calls] == ["@git"]
 
-    def test_skip_claude_hooks_from_seedgo_checks(self, tmp_path):
+    def test_skip_claude_hooks_from_sentry_checks(self, tmp_path):
         """A .claude/ directory below the repo root passes the status filter; the checklist skips it."""
         nested = "src/aipass/hooks/.claude/hooks/gate.py"
         repo = _repo_with(tmp_path, "repo", nested)
@@ -140,15 +140,15 @@ class TestSubagentGateHandler:
     def test_skip_claude_hooks_in_the_windows_spelling(self, mock_run, tmp_path):
         """The caller hands str(repo_root / filepath): backslashes on Windows (compass 458, leg 2 item 2)."""
         repo = tmp_path / "repo"
-        result = _run_seedgo_checklist(str(PureWindowsPath(repo) / ".claude" / "hooks" / "gate.py"), repo)
+        result = _run_sentry_checklist(str(PureWindowsPath(repo) / ".claude" / "hooks" / "gate.py"), repo)
         assert result == []
         mock_run.assert_not_called()
 
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._check_hook_readme_accountability")
-    @patch("aipass.hooks.apps.handlers.security.subagent_gate._run_seedgo_checklist", return_value=[])
+    @patch("aipass.hooks.apps.handlers.security.subagent_gate._run_sentry_checklist", return_value=[])
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._get_modified_py_files")
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._find_repo_root")
-    def test_readme_accountability_advisory(self, mock_root, mock_modified, mock_seedgo, mock_readme, tmp_path):
+    def test_readme_accountability_advisory(self, mock_root, mock_modified, mock_sentry, mock_readme, tmp_path):
         repo = tmp_path / "fake" / "repo"
         mock_root.return_value = repo
         mock_modified.return_value = [str(repo / "src" / "aipass" / "hooks" / "apps" / "clean.py")]
@@ -170,7 +170,7 @@ class TestSubagentGateHandler:
         assert "sound" not in result
 
     def test_empty_agent_type_skips_heavy_work(self):
-        """Internal CC turns (empty agent_type) skip drone @git status + seedgo."""
+        """Internal CC turns (empty agent_type) skip drone @git status + sentry."""
         with patch("aipass.hooks.apps.handlers.security.subagent_gate._find_repo_root") as mock_root:
             result = handle({"agent_type": "", "cwd": "/fake/repo"})
         assert result["exit_code"] == 0
@@ -185,19 +185,19 @@ class TestSubagentGateHandler:
         mock_root.assert_not_called()
 
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._check_hook_readme_accountability", return_value=None)
-    @patch("aipass.hooks.apps.handlers.security.subagent_gate._run_seedgo_checklist")
+    @patch("aipass.hooks.apps.handlers.security.subagent_gate._run_sentry_checklist")
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._get_modified_py_files")
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._find_repo_root")
-    def test_real_agent_type_runs_full_check(self, mock_root, mock_modified, mock_seedgo, mock_readme, tmp_path):
-        """Real sub-agents (non-empty agent_type) get the full seedgo check."""
+    def test_real_agent_type_runs_full_check(self, mock_root, mock_modified, mock_sentry, mock_readme, tmp_path):
+        """Real sub-agents (non-empty agent_type) get the full sentry check."""
         repo = tmp_path / "fake" / "repo"
         mock_root.return_value = repo
         mock_modified.return_value = [str(repo / "src" / "aipass" / "hooks" / "apps" / "bad.py")]
-        mock_seedgo.return_value = ["Missing docstring"]
+        mock_sentry.return_value = ["Missing docstring"]
         result = handle({"agent_type": "general-purpose", "cwd": str(repo / "src" / "aipass" / "hooks")})
         assert result["exit_code"] == 2
         mock_root.assert_called_once()
-        mock_seedgo.assert_called_once()
+        mock_sentry.assert_called_once()
 
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._get_modified_py_files")
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._find_repo_root")
@@ -242,14 +242,14 @@ class TestSubagentGateExternalProject:
         assert calls == []
 
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._check_hook_readme_accountability", return_value=None)
-    @patch("aipass.hooks.apps.handlers.security.subagent_gate._run_seedgo_checklist")
+    @patch("aipass.hooks.apps.handlers.security.subagent_gate._run_sentry_checklist")
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._get_modified_py_files")
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._find_repo_root")
-    def test_violations_block_external_project(self, mock_root, mock_modified, mock_seedgo, mock_readme, tmp_path):
+    def test_violations_block_external_project(self, mock_root, mock_modified, mock_sentry, mock_readme, tmp_path):
         vera = tmp_path / "fake" / "vera"
         mock_root.return_value = vera
         mock_modified.return_value = [str(vera / "src" / "vera_studio" / "quality" / "apps" / "bad.py")]
-        mock_seedgo.return_value = ["Missing docstring"]
+        mock_sentry.return_value = ["Missing docstring"]
         result = handle({"agent_type": "general-purpose", "cwd": str(vera / "src" / "vera_studio" / "quality")})
         assert result["exit_code"] == 2
         parsed = json.loads(result["stdout"])
@@ -258,10 +258,10 @@ class TestSubagentGateExternalProject:
         assert result["sound"] == "subagent gate"
 
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._check_hook_readme_accountability", return_value=None)
-    @patch("aipass.hooks.apps.handlers.security.subagent_gate._run_seedgo_checklist", return_value=[])
+    @patch("aipass.hooks.apps.handlers.security.subagent_gate._run_sentry_checklist", return_value=[])
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._get_modified_py_files")
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._find_repo_root")
-    def test_clean_files_allow_external_project(self, mock_root, mock_modified, mock_seedgo, mock_readme, tmp_path):
+    def test_clean_files_allow_external_project(self, mock_root, mock_modified, mock_sentry, mock_readme, tmp_path):
         vera = tmp_path / "fake" / "vera"
         mock_root.return_value = vera
         mock_modified.return_value = [str(vera / "src" / "vera_studio" / "quality" / "apps" / "clean.py")]
@@ -278,18 +278,18 @@ class TestSubagentGateBudget:
     """The engine kills this hook at 60s; the gate must finish inside it on its own terms.
 
     Measured 2026-09-25 01:49:59: 60,002ms in @devpulse's tree, 20 timeouts since
-    08-13. One `drone @seedgo checklist` per modified file, serially, 15s each,
+    08-13. One `drone @sentry checklist` per modified file, serially, 15s each,
     with no total budget: four slow files and the engine kills the whole gate,
     so nothing is reported at all. And one checklist timeout used to fall into
     the outer except and abandon every file after it.
     """
 
     @patch(f"{_GATE}._check_hook_readme_accountability", return_value=None)
-    @patch(f"{_GATE}._run_seedgo_checklist", return_value=[])
+    @patch(f"{_GATE}._run_sentry_checklist", return_value=[])
     @patch(f"{_GATE}._get_modified_py_files")
     @patch(f"{_GATE}._find_repo_root")
     def test_stops_checking_when_the_budget_is_spent(
-        self, mock_root, mock_modified, mock_seedgo, mock_readme, caplog, tmp_path
+        self, mock_root, mock_modified, mock_sentry, mock_readme, caplog, tmp_path
     ):
         repo = tmp_path / "fake" / "repo"
         mock_root.return_value = repo
@@ -298,17 +298,17 @@ class TestSubagentGateBudget:
         with patch(f"{_GATE}._now", side_effect=lambda: next(ticks)):
             result = handle({"agent_type": "general-purpose", "cwd": str(repo / "src" / "aipass" / "hooks")})
         assert result["exit_code"] == 0
-        assert mock_seedgo.call_count < 8
+        assert mock_sentry.call_count < 8
         # Budget 35 from tick 0, a read every 12: f0 and f1 are checked, f2 onward has under 3s left.
         assert "6 of 8 modified file(s) unchecked" in caplog.text
         assert "f2.py, f3.py, f4.py, f5.py, f6.py, f7.py" in caplog.text
 
     @patch(f"{_GATE}._check_hook_readme_accountability", return_value=None)
-    @patch(f"{_GATE}._run_seedgo_checklist")
+    @patch(f"{_GATE}._run_sentry_checklist")
     @patch(f"{_GATE}._get_modified_py_files")
     @patch(f"{_GATE}._find_repo_root")
     def test_one_checklist_timeout_does_not_abandon_the_rest(
-        self, mock_root, mock_modified, mock_seedgo, mock_readme, tmp_path
+        self, mock_root, mock_modified, mock_sentry, mock_readme, tmp_path
     ):
         import subprocess
 
@@ -316,14 +316,14 @@ class TestSubagentGateBudget:
         apps = repo / "src" / "aipass" / "hooks" / "apps"
         mock_root.return_value = repo
         mock_modified.return_value = [str(apps / "slow.py"), str(apps / "bad.py")]
-        mock_seedgo.side_effect = [subprocess.TimeoutExpired(cmd="drone", timeout=15), ["Missing docstring"]]
+        mock_sentry.side_effect = [subprocess.TimeoutExpired(cmd="drone", timeout=15), ["Missing docstring"]]
         result = handle({"agent_type": "general-purpose", "cwd": str(repo / "src" / "aipass" / "hooks")})
         assert result["exit_code"] == 2
         reason = json.loads(result["stdout"])["reason"]
         assert "bad.py" in reason
         assert "slow.py" in reason
-        assert mock_seedgo.call_count == 2
-        assert [c.args[:2] for c in mock_seedgo.call_args_list] == [
+        assert mock_sentry.call_count == 2
+        assert [c.args[:2] for c in mock_sentry.call_args_list] == [
             (str(apps / "slow.py"), repo),
             (str(apps / "bad.py"), repo),
         ]

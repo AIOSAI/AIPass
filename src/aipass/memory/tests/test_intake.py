@@ -3,15 +3,15 @@
 # Description: Tests for the intake/pool_processor handler
 # Version: 1.0.1
 # Created: 2026-04-03
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/intake/pool_processor.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — _notify_failure() sends real mail to @devpulse; stubbed, its call is asserted
-# seedgo: no-test-needed(external) — _update_central_and_dashboard() rewrites the live central file; stubbed here
-# seedgo: no-test-needed(external) — the real chromadb and fastembed write path of process_file_to_vectors()
+# sentry: no-test-needed(external) — _notify_failure() sends real mail to @devpulse; stubbed, its call is asserted
+# sentry: no-test-needed(external) — _update_central_and_dashboard() rewrites the live central file; stubbed here
+# sentry: no-test-needed(external) — the real chromadb and fastembed write path of process_file_to_vectors()
 
 import json
 from unittest.mock import MagicMock

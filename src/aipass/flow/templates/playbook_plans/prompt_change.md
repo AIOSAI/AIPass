@@ -60,7 +60,7 @@ Any change to an injected prompt — the kernel, the navmap, a branch-local prom
 ## 5. Verify LIVE (don't trust the edit)
 - [ ] Watch it actually inject — right content, right turns. Tier0 every turn; periodic tiers on their cadence.
 - [ ] After a `/compact`, confirm the prompt you expect reloads (post-compaction is exactly when the map matters most).
-- [ ] **seedgo** the touched branches to 100%. ⚠️ importlib-dispatched prompt handlers trip dead-code / unused-function / json-structure false-positives — add **3 `bypass.json` entries per new handler**, mirroring an existing prompt handler (DPLAN-0191).
+- [ ] **sentry** the touched branches to 100%. ⚠️ importlib-dispatched prompt handlers trip dead-code / unused-function / json-structure false-positives — add **3 `bypass.json` entries per new handler**, mirroring an existing prompt handler (DPLAN-0191).
 
 ## 6. Tidy superseded prompts
 - [ ] Disable in `hooks.json` (`enabled:false` + `_retired` note pointing at the replacement).
@@ -83,7 +83,7 @@ Fill as you go — this becomes the vectorized trail.
 - **Layers touched:** (hooks.json · cadence · bridge · setup.sh · manifest · DEFAULTS · project_hooks · bootstrap · spawn)
 - **Dispatched to:** (@hooks / @aipass / @spawn …)
 - **Verified live:** (how — which turns, post-compaction reload)
-- **Seedgo:** (touched branches @ 100%?)
+- **Sentry:** (touched branches @ 100%?)
 - **Issues hit:**
 - **Notes for next run:** (refine this SOP — what was missing or wrong?)
 

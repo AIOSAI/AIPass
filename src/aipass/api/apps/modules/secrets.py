@@ -3,7 +3,7 @@
 # Description: Secrets Module — cross-branch in-process door
 # Version: 1.1.0
 # Created: 2026-06-15
-# Modified: 2026-10-22
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -23,7 +23,7 @@ if sys.platform == "win32":
             _reconfigure(encoding="utf-8", errors="replace")
 from typing import Any, List, Optional, Union
 
-from aipass.prax import logger  # noqa: F401 — seedgo imports standard
+from aipass.prax import logger  # noqa: F401 — sentry imports standard
 from aipass.cli.apps.modules import console, header, error, success, warning
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.auth import secrets as _handler

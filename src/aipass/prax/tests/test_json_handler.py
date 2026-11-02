@@ -3,7 +3,7 @@
 # Description: Tests for the fleet json service through prax's own shim
 # Version: 2.2.0
 # Created: 2026-03-28
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/json/json_handler.py and apps/handlers/json/json_service.py."""
@@ -11,7 +11,7 @@
 # Redirection is the AIPASS_TEST_LOG_DIR seam, never a patched attribute: the service resolves per call.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(json_handler) — that json_handler.py binds byte-identically fleet-wide
+# sentry: no-test-needed(json_handler) — that json_handler.py binds byte-identically fleet-wide
 
 import json
 import logging

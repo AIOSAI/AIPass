@@ -4,15 +4,15 @@
 # Description: Tests for pre_compact_prep lifecycle handler
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-10-25
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/lifecycle/pre_compact_prep.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — _git_snapshot's three git subprocess.run calls; their text is git's own
-# seedgo: no-test-needed(generated) — the logger.info line on each read failure; its text is the exception's own
-# seedgo: no-test-needed(constant) — _DEFAULT_SUMMARY_CAP's value, asserted only as the fallback it is
+# sentry: no-test-needed(stdlib) — _git_snapshot's three git subprocess.run calls; their text is git's own
+# sentry: no-test-needed(generated) — the logger.info line on each read failure; its text is the exception's own
+# sentry: no-test-needed(constant) — _DEFAULT_SUMMARY_CAP's value, asserted only as the fallback it is
 
 import contextlib
 import json

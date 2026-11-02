@@ -19,7 +19,7 @@ from aipass.prax import json_handler          # the entry point, the only sancti
   imports without the logger graph. No `resolve()`, no `getcwd()`, no
   `inspect.stack()`: it runs with a deleted working directory.
 - `apps/handlers/json/json_handler.py` — prax's own shim, byte-identical in
-  every branch; seedgo accepts it by hash, not by substring. It BINDS the
+  every branch; sentry accepts it by hash, not by substring. It BINDS the
   service's callables and never wraps them: a wrapper would add a stack frame and
   silently rename every entry in the operations log.
 - The default document is in code, not a template file — a default that lives in
@@ -100,7 +100,7 @@ answers `False` rather than raising, because it runs per event on threads where
 a raising writer is silent half-death.
 
 **A staged file's name does not read the clock.** Names come from `os.getpid()`
-+ `itertools.count()`: seedgo's cross-branch contract stubs the module's `time`
++ `itertools.count()`: sentry's cross-branch contract stubs the module's `time`
 to take the sleep out of the bounded retry, so a clock-derived name breaks every
 branch's contract tests.
 

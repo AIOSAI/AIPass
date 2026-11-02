@@ -3,13 +3,13 @@
 # Description: Tests for the gh passthrough verbs, release edit, restore and the external-repo door (--repo)
 # Version: 1.9.0
 # Created: 2026-10-08
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/git/repo_door.py, the gh verbs and release edit of apps/modules/git_module.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — subprocess.run; gh is stubbed, git runs only in the tmp_path repos of the door tests
+# sentry: no-test-needed(stdlib) — subprocess.run; gh is stubbed, git runs only in the tmp_path repos of the door tests
 
 from __future__ import annotations
 
@@ -59,14 +59,14 @@ class TestGhPassthroughTierConfig:
 class TestGhPassthroughAccess:
     """Global-tier access for passthrough commands."""
 
-    def test_issue_allowed_for_any_branch(self, seedgo_dir: Path) -> None:
-        assert verify_git_access("issue") == "seedgo"
+    def test_issue_allowed_for_any_branch(self, sentry_dir: Path) -> None:
+        assert verify_git_access("issue") == "sentry"
 
-    def test_run_allowed_for_any_branch(self, seedgo_dir: Path) -> None:
-        assert verify_git_access("run") == "seedgo"
+    def test_run_allowed_for_any_branch(self, sentry_dir: Path) -> None:
+        assert verify_git_access("run") == "sentry"
 
-    def test_workflow_allowed_for_any_branch(self, seedgo_dir: Path) -> None:
-        assert verify_git_access("workflow") == "seedgo"
+    def test_workflow_allowed_for_any_branch(self, sentry_dir: Path) -> None:
+        assert verify_git_access("workflow") == "sentry"
 
 
 class TestGhPassthroughRouting:
@@ -1293,7 +1293,7 @@ class TestReleaseEdit:
 
         result = _chore("release", ["edit", "v2.8.20"], {}, calls)
 
-        assert result["exit_code"] == 1 and "seedgo" in result["stderr"]
+        assert result["exit_code"] == 1 and "sentry" in result["stderr"]
         assert calls == []
 
 
@@ -1491,7 +1491,7 @@ class TestRestore:
         """Mutant: restore put in the global tier — a builder resets the owner's files."""
         result = handle_command("restore", ["app/a.txt"])
 
-        assert result["exit_code"] == 1 and "seedgo" in result["stderr"]
+        assert result["exit_code"] == 1 and "sentry" in result["stderr"]
         assert _restore_ledger(tmp_path) == []
 
 

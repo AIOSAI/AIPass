@@ -3,13 +3,13 @@
 # Description: Tests for trigger.py CLI entry point — line coverage
 # Version: 1.0.0
 # Created: 2026-04-26
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for the apps/trigger.py CLI entry point (discover, route, main)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(behaviour) — each command's own behaviour under apps/modules/; each has its own test file
+# sentry: no-test-needed(behaviour) — each command's own behaviour under apps/modules/; each has its own test file
 
 import re
 from pathlib import Path

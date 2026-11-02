@@ -3,7 +3,7 @@
 # Description: Memory Watcher Module
 # Version: 0.2.0
 # Created: 2026-08-13
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -41,7 +41,7 @@ from aipass.memory.apps.handlers.monitor.watch_runner import (
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """Handle the watch command with seedgo-compliant introspection."""
+    """Handle the watch command with sentry-compliant introspection."""
     # The entry point may still send top-level help here.
     if command in ("--help", "-h", "help"):
         print_help()
@@ -112,7 +112,7 @@ def _start_session() -> None:
 
 
 def print_introspection() -> None:
-    """Display module introspection info (seedgo standard); also the watcher's banner."""
+    """Display module introspection info (sentry standard); also the watcher's banner."""
     console.print()
     console.print("[bold cyan]watch Module[/bold cyan]")
     console.print("Starts the auto-rollover watcher over every registered branch")

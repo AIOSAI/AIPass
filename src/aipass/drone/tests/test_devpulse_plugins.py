@@ -3,13 +3,13 @@
 # Description: Tests for devpulse_ops plugins — merge, smart-sync, fix
 # Version: 1.0.4
 # Created: 2026-03-30
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/ merge, sync and fix, and their routing in apps/modules/git_module.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module under test parses and imports
+# sentry: no-test-needed(ruff) — that the module under test parses and imports
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ def devpulse_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture()
-def seedgo_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def sentry_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Create a temp directory with an unauthorized branch passport."""
     trinity = tmp_path / ".trinity"
     trinity.mkdir()
@@ -87,7 +87,7 @@ def repo_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 class TestAuthDenialMerge:
     """merge command should deny unauthorized callers."""
 
-    def test_merge_unauthorized(self, seedgo_dir: Path) -> None:
+    def test_merge_unauthorized(self, sentry_dir: Path) -> None:
 
         result = handle_command("merge", ["42"])
         assert result["exit_code"] == 1
@@ -97,7 +97,7 @@ class TestAuthDenialMerge:
 class TestAuthDenialSmartSync:
     """smart-sync command should deny unauthorized callers."""
 
-    def test_smart_sync_unauthorized(self, seedgo_dir: Path) -> None:
+    def test_smart_sync_unauthorized(self, sentry_dir: Path) -> None:
 
         result = handle_command("smart-sync", [])
         assert result["exit_code"] == 1
@@ -107,7 +107,7 @@ class TestAuthDenialSmartSync:
 class TestAuthDenialFix:
     """fix command should deny unauthorized callers."""
 
-    def test_fix_unauthorized(self, seedgo_dir: Path) -> None:
+    def test_fix_unauthorized(self, sentry_dir: Path) -> None:
 
         result = handle_command("fix", [])
         assert result["exit_code"] == 1

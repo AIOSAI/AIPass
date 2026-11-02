@@ -2,39 +2,39 @@
   "commands": {
     "checklist": {
       "name": "checklist",
-      "target": "@seedgo",
+      "target": "@sentry",
       "command": "checklist",
       "args": [],
       "description": "Per-File Standards Checklist Module",
       "created": "2026-03-17",
-      "source_branch": "seedgo"
+      "source_branch": "sentry"
     },
     "diagnostics_audit": {
       "name": "diagnostics_audit",
-      "target": "@seedgo",
+      "target": "@sentry",
       "command": "diagnostics_audit",
       "args": [],
       "description": "System-wide Type Error Diagnostics",
       "created": "2026-03-17",
-      "source_branch": "seedgo"
+      "source_branch": "sentry"
     },
     "standards_audit": {
       "name": "standards_audit",
-      "target": "@seedgo",
+      "target": "@sentry",
       "command": "standards_audit",
       "args": [],
       "description": "Standards Audit Module",
       "created": "2026-03-17",
-      "source_branch": "seedgo"
+      "source_branch": "sentry"
     },
     "standards_query": {
       "name": "standards_query",
-      "target": "@seedgo",
+      "target": "@sentry",
       "command": "standards_query",
       "args": [],
       "description": "Standards Query Module",
       "created": "2026-03-17",
-      "source_branch": "seedgo"
+      "source_branch": "sentry"
     }
   },
   "metadata": {

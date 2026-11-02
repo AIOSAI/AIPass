@@ -3,7 +3,7 @@
 # Description: Tests for init bootstrap handler (DPLAN-0164)
 # Version: 1.5.0
 # Created: 2026-05-04
-# Modified: 2026-10-27
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py and the init/update flows it drives."""
@@ -11,7 +11,7 @@
 # update_project lives in test_bootstrap_update.py; hooks.json and tier files in test_bootstrap_hooks.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
+# sentry: no-test-needed(ruff) — that every module this file imports parses and imports
 
 import json
 import uuid

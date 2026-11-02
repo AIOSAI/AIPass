@@ -3,7 +3,7 @@
 # Description: Tests for the branch log watcher's state: positions, seen hashes, start/stop and the debounced writer
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/log_watcher.py's persisted state and lifecycle (trigger_data.json, start/stop)."""
@@ -11,7 +11,7 @@
 # The watcher's live-state doors are closed by conftest's log_watcher_infrastructure.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — the daemon that starts start_branch_log_watcher: its own tests
+# sentry: no-test-needed(covered_elsewhere) — the daemon that starts start_branch_log_watcher: its own tests
 
 import json
 from datetime import datetime

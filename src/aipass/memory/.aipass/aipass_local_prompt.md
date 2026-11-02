@@ -67,7 +67,7 @@ memory/
 
  - `entry_limits.entry_types.<type>` — the container, the canonical text field and its cap.
  - `entry_limits.entry_types.<type>.fields` — the closed shape: every field an entry may carry, its type, whether it is required, its `max_chars` / `max_items`. Anything not listed is `unknown_field`.
- - `entry_limits.file_budgets` — local.json 25,000, observations.json 15,000, passport.json 6,000 file and 600 per string. Read by the keep-count ceiling and by seedgo's startup-budget pack.
+ - `entry_limits.file_budgets` — local.json 25,000, observations.json 15,000, passport.json 6,000 file and 600 per string. Read by the keep-count ceiling and by sentry's startup-budget pack.
  - `rollover.defaults` / `rollover.per_branch` — keep counts, resolved per file key, never deep-merged.
 
 Caps are read, never copied. A second copy of a number is a second source of truth.
@@ -83,7 +83,7 @@ Caps are read, never copied. A second copy of a number is a second source of tru
  - `drone @memory push --confirm` is the fleet lane and is @devpulse's to run, not this seat's.
  - A hook gate refuses a shell write that names a memory file path, reads included, because an interpreter could write any path it holds. Read `.trinity` with the Read tool, `cat` or `jq`.
  - The PreCompact lane shells `drone @memory rollover check|run` from the repo root, and drone re-stamps `AIPASS_CALLER_CWD` — own-branch work there needs an explicit `--branch`.
- - `rollover.py` is this branch's largest module. Before adding to it, check its size against seedgo's module ceiling (`drone @seedgo checklist`); split rather than cross it.
+ - `rollover.py` is this branch's largest module. Before adding to it, check its size against sentry's module ceiling (`drone @sentry checklist`); split rather than cross it.
  - A new test file is refused by policy. Editing an existing one is fine; a genuinely new file needs @devpulse's ruling first.
 
 # Memory + tracking

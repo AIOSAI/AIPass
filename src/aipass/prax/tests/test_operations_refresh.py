@@ -3,7 +3,7 @@
 # Description: Unit tests for the dashboard refresh and section writes
 # Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for the refresh and section writes: apps/handlers/dashboard/refresh.py and status.py."""
@@ -11,7 +11,7 @@
 # The conftest fixture _dashboard_quiet doubles the modules' logger and json service before every test.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — create_fresh_dashboard, covered by tests/test_operations.py
+# sentry: no-test-needed(through_the_command) — create_fresh_dashboard, covered by tests/test_operations.py
 
 import json
 import types

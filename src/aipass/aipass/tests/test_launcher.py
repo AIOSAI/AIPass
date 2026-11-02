@@ -3,13 +3,13 @@
 # Description: Tests for the repo-root ./aipass cold-clone launcher
 # Version: 1.1.0
 # Created: 2026-07-05
-# Modified: 2026-09-27
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for the repo-root ./aipass launcher (bash), which forwards to apps/aipass.py once installed."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — apps/aipass.py's own command routing; see tests/test_aipass_main.py
+# sentry: no-test-needed(covered_elsewhere) — apps/aipass.py's own command routing; see tests/test_aipass_main.py
 
 from __future__ import annotations
 

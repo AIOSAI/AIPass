@@ -3,7 +3,7 @@
 # Description: Tests for aipass.py entry point / CLI main
 # Version: 1.4.5
 # Created: 2026-05-12
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/aipass.py and the handlers it drives."""
@@ -11,8 +11,8 @@
 # main entry point and module discovery.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/aipass.py parses and imports
-# seedgo: no-test-needed(documentation) — that the public entry-point functions carry docstrings
+# sentry: no-test-needed(ruff) — that apps/aipass.py parses and imports
+# sentry: no-test-needed(documentation) — that the public entry-point functions carry docstrings
 
 from __future__ import annotations
 

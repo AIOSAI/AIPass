@@ -3,7 +3,7 @@
 # Description: Declared-roots module — the operator lane for AIPASS_ROOTS.json
 # Version: 1.0.0
 # Created: 2026-08-30
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -48,7 +48,7 @@ def show_roots() -> None:
 
 
 def print_introspection() -> None:
-    """Display module introspection (seedgo standard)."""
+    """Display module introspection (sentry standard)."""
     from aipass.cli.apps.modules import console
 
     console.print()

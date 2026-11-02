@@ -3,14 +3,14 @@
 # Description: Cross-platform durability pins for config.py's write + lock helpers
 # Version: 1.0.0
 # Created: 2026-08-18
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/config.py's durability helpers: atomic_write_json, json_file_lock and the retry reads."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — _acquire_lock_win32 against a real Windows host; driven here by injection
-# seedgo: no-test-needed(covered_elsewhere) — medic state's read-modify-writes over json_file_lock, test_medic_state.py
+# sentry: no-test-needed(external) — _acquire_lock_win32 against a real Windows host; driven here by injection
+# sentry: no-test-needed(covered_elsewhere) — medic state's read-modify-writes over json_file_lock, test_medic_state.py
 
 import os
 import sys

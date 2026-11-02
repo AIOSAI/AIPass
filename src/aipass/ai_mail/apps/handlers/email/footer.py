@@ -3,7 +3,7 @@
 # Description: Email Footer Handler
 # Version: 1.2.0
 # Created: 2026-01-29
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -17,7 +17,7 @@ STANDARD_FOOTER = """
 ▶ BUILD/EDIT task? First: drone @trigger medic mute @<your-branch> — auto-expires 24h, no unmute.
 
 ⚠️ TASK CHECKLIST (before marking complete):
-□ SEEDGO CHECK → drone @seedgo audit @branch (80%+)
+□ SENTRY CHECK → drone @sentry audit @branch (80%+)
 □ UPDATE MEMORIES → Your .trinity/local.json records this work
 □ CLOSE YOUR PLAN → drone @flow close <your_plan_id> — FPLAN/PPLAN only, never the master. APLANs STAY OPEN.
 □ EMAIL SENDER → drone @ai_mail email @<sender> "Subject" "Summary"

@@ -4,15 +4,15 @@
 # Description: Tests for compact lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-10-05
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/lifecycle/compact.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — _get_git_info's two git subprocess calls, patched at the edge in every test
-# seedgo: no-test-needed(constant) — the Recovery Protocol and SAVE STATE NOW bullet texts beyond their headings
-# seedgo: no-test-needed(generated) — the logger.info lines on each except path; the text is the exception's own
+# sentry: no-test-needed(stdlib) — _get_git_info's two git subprocess calls, patched at the edge in every test
+# sentry: no-test-needed(constant) — the Recovery Protocol and SAVE STATE NOW bullet texts beyond their headings
+# sentry: no-test-needed(generated) — the logger.info lines on each except path; the text is the exception's own
 
 import json
 from unittest.mock import patch

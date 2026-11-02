@@ -53,7 +53,7 @@ Captured ideas, brainstorms, future possibilities. Add freely.
 - **Related DPLANs:** None yet
 - **Related FPLANs:** None yet
 - **Owner branch:** Who builds this
-- **Seedgo standards:** `drone @seedgo audit aipass @branch` | `drone @seedgo standards_query aipass_standards`
+- **Sentry standards:** `drone @sentry audit aipass @branch` | `drone @sentry standards_query aipass_standards`
 
 ## Status
 - [x] Planning

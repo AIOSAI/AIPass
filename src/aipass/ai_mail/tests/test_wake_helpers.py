@@ -3,7 +3,7 @@
 # Description: Tests for the wake's small parts - dispatch status, the grant read, pid lock and branch resolution
 # Version: 1.3.0
 # Created: 2026-10-08
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's helpers and pid_lock.py: status, locks, pids, resolve_branch."""
@@ -12,7 +12,7 @@
 # target: the parts a wake is built from, each pinned on its own.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(shared) — wake_branch()'s own lanes and gates: tests/test_wake.py
+# sentry: no-test-needed(shared) — wake_branch()'s own lanes and gates: tests/test_wake.py
 
 import json
 import os

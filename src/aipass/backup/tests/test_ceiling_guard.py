@@ -3,16 +3,16 @@
 # Description: Tests for the per-run size/file-count ceiling (runaway guard)
 # Version: 1.0.6
 # Created: 2026-08-20
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for src/aipass/backup/apps/handlers/scan/ceiling.py and the per-run size/file-count ceiling."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that scan/ceiling and modules/snapshot, versioned, all parse and import
-# seedgo: no-test-needed(documentation) — that check_ceiling and breach methods carry docstrings
-# seedgo: no-test-needed(constant) — DEFAULT_MAX_TOTAL_GB and DEFAULT_MAX_FILES values (the latter tested as the limit)
-# seedgo: no-test-needed(stdlib) — the byte count os.path.getsize() returns; its OSError skip is tested here
+# sentry: no-test-needed(ruff) — that scan/ceiling and modules/snapshot, versioned, all parse and import
+# sentry: no-test-needed(documentation) — that check_ceiling and breach methods carry docstrings
+# sentry: no-test-needed(constant) — DEFAULT_MAX_TOTAL_GB and DEFAULT_MAX_FILES values (the latter tested as the limit)
+# sentry: no-test-needed(stdlib) — the byte count os.path.getsize() returns; its OSError skip is tested here
 
 import json
 from pathlib import Path

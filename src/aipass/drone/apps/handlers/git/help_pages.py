@@ -3,7 +3,7 @@
 # Description: The @git help pages, one per verb and the whole page
 # Version: 1.9.0
 # Created: 2026-10-04
-# Modified: 2026-10-30
+# Modified: 2026-11-02
 # =============================================
 
 """The @git help pages: one per verb, and the whole page.
@@ -117,7 +117,7 @@ def page(command: str | None = None) -> str:
                 ci_cure_handler.REFUSE_NO_CHANGE,
             )
             + '  Example: drone @git ci-cure 18712345678 @hooks "fix(hooks): bypass lines re-pinned, run 18712345678"'
-            " src/aipass/hooks/.seedgo/bypass.json CHANGELOG.md\n"
+            " src/aipass/hooks/.sentry/bypass.json CHANGELOG.md\n"
         )
     if command == "restore":
         return (

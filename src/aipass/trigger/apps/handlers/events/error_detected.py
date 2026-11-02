@@ -3,7 +3,7 @@
 # Description: Error detected event handler with Medic v2 dispatch gating
 # Version: 2.10.0
 # Created: 2026-02-10
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -224,10 +224,10 @@ DECISION TREE:
 - CRITICAL (data loss risk, security, system stability):
   -> STOP immediately, escalate to @devpulse with full context
 
-SEEDGO STANDARDS REMINDER:
-- Any code changes made during this investigation MUST follow Seedgo standards
-- After fixing, run: drone @seedgo checklist <modified_file>
-- Fixes scoring below 80% on Seedgo audit should NOT be shipped - clean up first
+SENTRY STANDARDS REMINDER:
+- Any code changes made during this investigation MUST follow Sentry standards
+- After fixing, run: drone @sentry checklist <modified_file>
+- Fixes scoring below 80% on Sentry audit should NOT be shipped - clean up first
 
 {closing_block}
 REPORT TO @devpulse:

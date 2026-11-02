@@ -3,13 +3,13 @@
 # Description: Tests for the init git-auth provisioning handler (DPLAN-0281 P2)
 # Version: 1.2.2
 # Created: 2026-08-04
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/init/git_auth.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that git_auth.py and the modules it imports parse and import
+# sentry: no-test-needed(ruff) — that git_auth.py and the modules it imports parse and import
 
 import json
 import logging

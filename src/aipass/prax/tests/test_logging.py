@@ -3,15 +3,15 @@
 # Description: Tests for prax logging subsystem
 # Version: 1.4.1
 # Created: 2026-03-29
-# Modified: 2026-11-01
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/logging/introspection.py and setup.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — get_calling_module_path, covered by tests/test_logging_handlers.py
-# seedgo: no-test-needed(through_the_command) — _resolve_caller_path on <stdin>, covered by tests/test_repo_root.py
-# seedgo: no-test-needed(stdlib) — get_captured_loggers_count, the size of _captured_loggers
+# sentry: no-test-needed(through_the_command) — get_calling_module_path, covered by tests/test_logging_handlers.py
+# sentry: no-test-needed(through_the_command) — _resolve_caller_path on <stdin>, covered by tests/test_repo_root.py
+# sentry: no-test-needed(stdlib) — get_captured_loggers_count, the size of _captured_loggers
 
 import copy
 import logging

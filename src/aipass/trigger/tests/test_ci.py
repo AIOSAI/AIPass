@@ -3,15 +3,15 @@
 # Description: Tests for the CI red lane module - poll, reply, verdict, status - and the handlers it drives
 # Version: 1.1.2
 # Created: 2026-10-23
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/ci.py and the handlers/ci/ handlers it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — medic's gates on the ci_red event, in test_ci_red.py
-# seedgo: no-test-needed(external) — drone's ci-cure door, ai_mail mail, wake and feed; AIPass tests its own files
-# seedgo: no-test-needed(constant) — the fixed prose seedgo_brief() wraps around the cure
+# sentry: no-test-needed(covered_elsewhere) — medic's gates on the ci_red event, in test_ci_red.py
+# sentry: no-test-needed(external) — drone's ci-cure door, ai_mail mail, wake and feed; AIPass tests its own files
+# sentry: no-test-needed(constant) — the fixed prose sentry_brief() wraps around the cure
 
 import json
 from pathlib import Path
@@ -21,11 +21,11 @@ from aipass.trigger.apps.handlers.ci import outbound, replies, triage
 from aipass.trigger.apps.modules import ci
 
 AUDIT_LOG = (
-    "seedgo-audit\tRun seedgo standards audit\t2026-10-23T05:22:30.1Z        ai_mail: 100%  (81 scored)\n"
-    "seedgo-audit\tRun seedgo standards audit\t2026-10-23T05:33:48.3Z FAILED: 1 branch(es) below 100%\n"
-    "seedgo-audit\tRun seedgo standards audit\t2026-10-23T05:33:48.3Z   hooks: 99%\n"
-    "seedgo-audit\tRun seedgo standards audit\t2026-10-23T05:33:48.3Z       └ logged_fallback: 98%  cadence.py:133\n"
-    "seedgo-audit\tRun seedgo standards audit\t2026-10-23T05:33:53.4Z ##[error]Process completed with exit code 1.\n"
+    "sentry-audit\tRun sentry standards audit\t2026-10-23T05:22:30.1Z        ai_mail: 100%  (81 scored)\n"
+    "sentry-audit\tRun sentry standards audit\t2026-10-23T05:33:48.3Z FAILED: 1 branch(es) below 100%\n"
+    "sentry-audit\tRun sentry standards audit\t2026-10-23T05:33:48.3Z   hooks: 99%\n"
+    "sentry-audit\tRun sentry standards audit\t2026-10-23T05:33:48.3Z       └ logged_fallback: 98%  cadence.py:133\n"
+    "sentry-audit\tRun sentry standards audit\t2026-10-23T05:33:53.4Z ##[error]Process completed with exit code 1.\n"
 )
 PYTEST_LOG = (
     "test (3.12)\tRun tests\t2026-10-23T05:30:00.0Z FAILED src/aipass/spawn/tests/test_lifecycle.py::test_x - assert\n"
@@ -34,7 +34,7 @@ PYTEST_LOG = (
 SETUP_LOG = "build\tSet up job\t2026-10-23T05:30:00.0Z ##[error]runner lost\n"
 UNOWNED_LOG = "lint\tRun lint\t2026-10-23T05:30:00.0Z ##[error]Process completed with exit code 1.\n"
 OWNER_REPLY = (
-    "FILES:\nsrc/aipass/hooks/.seedgo/bypass.json\n"
+    "FILES:\nsrc/aipass/hooks/.sentry/bypass.json\n"
     "CHANGELOG:\n- **hooks bypass lines re-pinned** (@hooks)\nNOTE:\nThe lines moved; re-pointed."
 )
 
@@ -81,7 +81,7 @@ class TestTriage:
     def test_an_audit_score_below_100_names_its_branch_and_a_full_score_or_subscore_does_not(self):
         facts = triage.triage_log(AUDIT_LOG)
         assert facts["owners"] == ["hooks"]
-        assert facts["step"] == "Run seedgo standards audit"
+        assert facts["step"] == "Run sentry standards audit"
         assert "  hooks: 99%" in facts["lines"]
 
     def test_a_failing_test_path_names_its_branch(self):
@@ -102,7 +102,7 @@ class TestTriage:
 class TestReplyShapes:
     def test_owner_reply_splits_into_files_changelog_and_note(self):
         reply = replies.parse_owner_reply(OWNER_REPLY)
-        assert reply["files"] == ["src/aipass/hooks/.seedgo/bypass.json"]
+        assert reply["files"] == ["src/aipass/hooks/.sentry/bypass.json"]
         assert reply["changelog"] == "- **hooks bypass lines re-pinned** (@hooks)"
         assert reply["note"] == "The lines moved; re-pointed."
 
@@ -267,11 +267,11 @@ class TestPoll:
 
 
 class TestReply:
-    def test_a_reply_with_files_sends_seedgo_the_diff(self, ci_lane):
+    def test_a_reply_with_files_sends_sentry_the_diff(self, ci_lane):
         _dispatched_hooks_red(ci_lane)
         assert ci.handle_command("ci", ["reply", "900", "@hooks", OWNER_REPLY]) is True
         review = ci_lane.mails[-1]
-        assert review["to_branch"] == "@seedgo" and "+cure" in review["message"]
+        assert review["to_branch"] == "@sentry" and "+cure" in review["message"]
         assert "VERDICT: OK" in review["message"]
         assert ci_lane.ledger()["cures"]["900@hooks"]["state"] == "reviewing"
 
@@ -297,7 +297,7 @@ class TestReply:
         ci_lane.awake = []
         ci.poll()
         assert ci_lane.ledger()["cures"]["900@hooks"]["state"] == "reviewing"
-        assert ci_lane.mails[-1]["to_branch"] == "@seedgo"
+        assert ci_lane.mails[-1]["to_branch"] == "@sentry"
 
     def test_a_reply_for_an_unknown_cure_is_refused(self, ci_lane, capsys):
         ci.handle_command("ci", ["reply", "999", "@hooks", OWNER_REPLY])
@@ -312,7 +312,7 @@ class TestVerdict:
         [cure_call] = [c for c in ci_lane.calls if c[1] == "ci-cure"]
         assert cure_call[2:4] == ["900", "@hooks"]
         assert cure_call[4] == "fix(hooks): hooks bypass lines re-pinned, run 900"
-        assert cure_call[5:] == ["src/aipass/hooks/.seedgo/bypass.json", "CHANGELOG.md"]
+        assert cure_call[5:] == ["src/aipass/hooks/.sentry/bypass.json", "CHANGELOG.md"]
         assert "- **hooks bypass lines re-pinned** (@hooks)\n- older bullet" in changelog.read_text(encoding="utf-8")
         cure = ci_lane.ledger()["cures"]["900@hooks"]
         assert cure["state"] == "pushed" and cure["sha"] == "abc1234def"

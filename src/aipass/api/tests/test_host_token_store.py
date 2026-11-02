@@ -3,7 +3,7 @@
 # Description: Tests for token provenance, revocation time and live/dormant telemetry
 # Version: 1.1.1
 # Created: 2026-08-14
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/host/tokens.py, the token store's accountability fields and its lock."""
@@ -12,9 +12,9 @@
 # holding a list read before a revoke would un-revoke the token. Telemetry never undoes security.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered) — scope_allows() and resolve_token(), tests/test_host_api.py
-# seedgo: no-test-needed(covered) — the failed-auth audit line, tests/test_host_auth_audit.py
-# seedgo: no-test-needed(stdlib) — secrets.token_urlsafe's randomness itself
+# sentry: no-test-needed(covered) — scope_allows() and resolve_token(), tests/test_host_api.py
+# sentry: no-test-needed(covered) — the failed-auth audit line, tests/test_host_auth_audit.py
+# sentry: no-test-needed(stdlib) — secrets.token_urlsafe's randomness itself
 
 import importlib.util
 import json
@@ -345,7 +345,7 @@ class TestOlderRecordsStillWork:
 
 
 # find_spec, not host_server.is_available(): the skip reads the machine, not the code under
-# test, so a broken is_available() cannot turn these into silent skips (seedgo self_skip).
+# test, so a broken is_available() cannot turn these into silent skips (sentry self_skip).
 fastapi_installed = pytest.mark.skipif(
     importlib.util.find_spec("fastapi") is None,
     reason="the [host] extra is not installed",
@@ -556,7 +556,7 @@ class TestTheLockIsRealNotDecorative:
         assert len(held) == len(refusals), "every refused unlink kept its handle open past the release"
         assert log.warning.call_count == 1
         message, *values = log.warning.call_args.args
-        # The lock's path stays off the line (seedgo clear_text_secret_logging).
+        # The lock's path stays off the line (sentry clear_text_secret_logging).
         assert "token store lock" in message
         assert len(values) == 1
         assert isinstance(values[0], OSError)

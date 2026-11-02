@@ -3,14 +3,14 @@
 # Description: Canaries for what the shipped templates are allowed to contain
 # Version: 1.0.1
 # Created: 2026-08-13
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for the shipped templates under templates/citizen/ and apps/handlers/file_ops.py's copy engine."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/handlers/mint_verify.py and apps/handlers/docs_page.py parse and import
-# seedgo: no-test-needed(documentation) — docstrings on the mint_verify and docs_page helpers
+# sentry: no-test-needed(ruff) — that apps/handlers/mint_verify.py and apps/handlers/docs_page.py parse and import
+# sentry: no-test-needed(documentation) — docstrings on the mint_verify and docs_page helpers
 
 from pathlib import Path
 
@@ -113,7 +113,7 @@ RETIRED_TEMPLATE_TESTS = ("test_json_handler.py",)
 def test_retired_starter_tests_are_not_reintroduced(class_name, filename):
     """A retired starter suite must not come back — the template stamps every newborn.
 
-    @seedgo's json handler contract suite covers every shim by globbing the installed package.
+    @sentry's json handler contract suite covers every shim by globbing the installed package.
     """
     template = get_template_dir(class_name)
 
@@ -121,7 +121,7 @@ def test_retired_starter_tests_are_not_reintroduced(class_name, filename):
 
     assert found == [], (
         f"{class_name} template ships retired starter tests: {found} — "
-        "these claims live in @seedgo's json handler contract suite now"
+        "these claims live in @sentry's json handler contract suite now"
     )
 
 
@@ -300,7 +300,7 @@ class TestExpectedMintPaths:
         assert verify_mint(template, target, {}, "minted") == ["artifacts/birth_certificate.json"]
 
     def test_the_docs_page_skeleton_is_never_stamped_into_a_newborn(self, tmp_path):
-        """The skeleton @seedgo renders lives beside the citizen tree, never in it.
+        """The skeleton @sentry renders lives beside the citizen tree, never in it.
 
         Inside templates/citizen/ it would be copied, claimed by the manifest, and scored as a page in every branch.
         """
@@ -337,9 +337,9 @@ class TestExpectedMintPaths:
         assert "{{" not in lines[2] and "INDEXED" in lines[2], "the branch placeholder was not rendered"
 
     def test_a_newborns_readme_has_the_fleet_shape(self, tmp_path):
-        """H1 the branch in capitals, seedgo's eight sections in order, a dated foot between rules.
+        """H1 the branch in capitals, sentry's eight sections in order, a dated foot between rules.
 
-        The section list is read from seedgo's readme_check at assert time, never copied here.
+        The section list is read from sentry's readme_check at assert time, never copied here.
         """
         import datetime
 
@@ -353,14 +353,14 @@ class TestExpectedMintPaths:
 
         assert [line for line in lines if line.startswith("# ")] == ["# SHAPED"]
         sections = [line[3:] for line in lines if line.startswith("## ")]
-        assert sections == _seedgo_readme_sections(), f"off seedgo's README shape: {sections}"
+        assert sections == _sentry_readme_sections(), f"off sentry's README shape: {sections}"
 
         assert lines[-3] == "---" and lines[-1] == "---", f"the foot is not between two rules: {lines[-3:]}"
         assert lines[-2].startswith("**Last Updated:** "), f"no Last Updated line at the foot: {lines[-2]!r}"
         datetime.date.fromisoformat(lines[-2].removeprefix("**Last Updated:** "))
 
     def test_every_link_in_a_newborns_readme_resolves_where_it_lands(self, tmp_path):
-        """seedgo's check 8, on the newborn: no relative link may dangle wherever the citizen is minted."""
+        """sentry's check 8, on the newborn: no relative link may dangle wherever the citizen is minted."""
         import re
 
         target = tmp_path / "deep" / "linked"
@@ -376,22 +376,22 @@ class TestExpectedMintPaths:
 
 README_BACK_LINK = "[<- Back to the README](../README.md)"
 
-SEEDGO_STANDARDS = (
-    Path(aipass.spawn.__file__).resolve().parents[1] / "seedgo" / "apps" / "handlers" / "aipass_standards"
+SENTRY_STANDARDS = (
+    Path(aipass.spawn.__file__).resolve().parents[1] / "sentry" / "apps" / "handlers" / "aipass_standards"
 )
-SEEDGO_README_CHECK = SEEDGO_STANDARDS / "readme_check.py"
+SENTRY_README_CHECK = SENTRY_STANDARDS / "readme_check.py"
 
 
-def _seedgo_readme_sections() -> list:
-    """seedgo's README_SECTIONS, parsed out of its source at call time - the one list."""
+def _sentry_readme_sections() -> list:
+    """sentry's README_SECTIONS, parsed out of its source at call time - the one list."""
     import ast
 
-    for node in ast.parse(SEEDGO_README_CHECK.read_text(encoding="utf-8")).body:
+    for node in ast.parse(SENTRY_README_CHECK.read_text(encoding="utf-8")).body:
         if isinstance(node, ast.AnnAssign) and getattr(node.target, "id", "") == "README_SECTIONS" and node.value:
             return list(ast.literal_eval(node.value))
         if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "README_SECTIONS" for t in node.targets):
             return list(ast.literal_eval(node.value))
-    raise AssertionError(f"seedgo no longer declares README_SECTIONS in {SEEDGO_README_CHECK}")
+    raise AssertionError(f"sentry no longer declares README_SECTIONS in {SENTRY_README_CHECK}")
 
 
 # What the standard's purpose check refuses as the first line under the H1.
@@ -400,7 +400,7 @@ NOT_PROSE = ("#", "-", "*", "|", ">", "```", "[", "---")
 OPTIONAL_SECTIONS = ["## Why it is this way", "## What is not verified", "## Related"]
 
 
-def test_the_docs_page_skeleton_has_the_shape_seedgo_scores():
+def test_the_docs_page_skeleton_has_the_shape_sentry_scores():
     """Back-link, one H1, a prose purpose line, depth <= 3, the three fixed names last and in order."""
 
     lines = [line for line in DOCS_PAGE_TEMPLATE.read_text(encoding="utf-8").splitlines() if line.strip()]

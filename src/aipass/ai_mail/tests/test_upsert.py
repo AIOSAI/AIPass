@@ -3,7 +3,7 @@
 # Description: Tests for upsert_key delivery (repeat-signal collapsing)
 # Version: 1.0.4
 # Created: 2026-08-10
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py's upsert_key handling."""
@@ -18,7 +18,7 @@
 # - upsert_key=None is byte-for-byte today's behavior
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — _auto_register_contact()'s broad except Exception around contact registration
+# sentry: no-test-needed(stdlib) — _auto_register_contact()'s broad except Exception around contact registration
 
 import json
 import pytest

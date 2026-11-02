@@ -3,15 +3,15 @@
 # Description: Tests for the watchdog agent handler
 # Version: 1.7.0
 # Created: 2026-04-14
-# Modified: 2026-10-29
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/watchdog/agent.py: watch_agent, TranscriptScanner and StallTracker."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that handlers/watchdog/agent.py parses and imports
-# seedgo: no-test-needed(documentation) — that watch_agent, TranscriptScanner and StallTracker carry docstrings
-# seedgo: no-test-needed(constant) — STALL_THRESHOLD, LONG_TOOL_THRESHOLD and REFRESH_INTERVAL values
+# sentry: no-test-needed(ruff) — that handlers/watchdog/agent.py parses and imports
+# sentry: no-test-needed(documentation) — that watch_agent, TranscriptScanner and StallTracker carry docstrings
+# sentry: no-test-needed(constant) — STALL_THRESHOLD, LONG_TOOL_THRESHOLD and REFRESH_INTERVAL values
 
 import json
 import os

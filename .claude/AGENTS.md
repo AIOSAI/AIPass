@@ -64,7 +64,7 @@ Patrick steers the vision. AI branch managers maintain context and orchestrate w
 
 Every branch is an expert in its domain. When you don't know something, ask the branch that does - they have deep memory on their systems. Trust the network.
 
-Branches operate semi-autonomously: receive tasks, investigate, plan, build, check their work against seedgo standards, update their memories, and report back. The system teaches itself through this cycle.
+Branches operate semi-autonomously: receive tasks, investigate, plan, build, check their work against sentry standards, update their memories, and report back. The system teaches itself through this cycle.
 
 ## Message from the AIPass Developer
 

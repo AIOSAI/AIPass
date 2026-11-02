@@ -3,7 +3,7 @@
 # Description: Entry point CLI for drone @memory
 # Version: 1.3.1
 # Created: 2026-03-08
-# Modified: 2026-10-18
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -146,7 +146,7 @@ def print_help():
 
     console.print("[bold cyan]SEARCH OPTIONS:[/bold cyan]")
     console.print()
-    console.print("  [cyan]--branch BRANCH[/cyan]    Filter by branch (e.g., SEEDGO, CLI)")
+    console.print("  [cyan]--branch BRANCH[/cyan]    Filter by branch (e.g., SENTRY, CLI)")
     console.print("  [cyan]--type TYPE[/cyan]        Filter by memory type (observations, local)")
     console.print("  [cyan]--n N[/cyan]              Number of results (default: 5)")
     console.print()
@@ -155,7 +155,7 @@ def print_help():
 
     console.print("[bold cyan]EXAMPLES:[/bold cyan]")
     console.print()
-    console.print('    [dim]drone @memory search "registry bugs" --branch SEEDGO --n 10[/dim]')
+    console.print('    [dim]drone @memory search "registry bugs" --branch SENTRY --n 10[/dim]')
     console.print("    [dim]drone @memory todo backlog[/dim]")
     console.print("    [dim]drone @memory lint[/dim]")
     console.print()

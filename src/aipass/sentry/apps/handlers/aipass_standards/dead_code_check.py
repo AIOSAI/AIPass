@@ -1,0 +1,368 @@
+# =================== AIPass ====================
+# Name: dead_code_check.py
+# Description: Dead Code Standards Checker Handler
+# Version: 1.5.0
+# Created: 2026-03-22
+# Modified: 2026-11-02
+# =============================================
+
+"""Dead Code Standards Checker Handler
+
+Reference: dead_code.md
+"""
+
+import re
+from pathlib import Path, PurePath
+
+from aipass.prax import logger
+from aipass.sentry.apps.handlers.json import json_handler
+from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
+from aipass.sentry.apps.handlers.bypass.ignore_handler import is_sentry_ignored, load_ignore_entries
+from aipass.sentry.apps.handlers.aipass_standards.skip_dirs import in_skipped_dir, is_disabled_file
+from aipass.sentry.apps.handlers.aipass_standards.modules_check import check_door
+
+# APPLIES_TO: pytest calls test functions by discovery, so every one would read unreferenced.
+APPLIES_TO = "production"
+AUDIT_SCOPE = "branch_level"
+
+# Skipped beside SOURCE_SKIP_DIRS (read through in_skipped_dir, which spares a
+# live package such as commons' apps/handlers/artifacts/), whatever they hold.
+_EXTRA_SKIP_DIRS = frozenset({"tests", "json_templates"})
+
+#: A project root holds one of these; hooks' config loader reads the same marker.
+_PROJECT_MARKER = "*_REGISTRY.json"
+
+#: The AIPass install, known by this file alone: AIPASS_REGISTRY.json is git-ignored.
+_INSTALL_CONFIG = Path(".aipass") / "hooks.json"
+_INSTALL_SOURCE = Path("src") / "aipass"
+
+
+def _is_shaped_door(py_file: Path) -> bool:
+    """Whether this is an ``apps/modules/door_*.py`` that passes Door shape (DPLAN-0404).
+
+    A door is called from other branches, never its own, so its branch's corpus
+    never names it; its shape is its reference, the way the entry point's name is.
+    A ``door_`` file that fails Door shape is read like any other module.
+    """
+    if not (py_file.name.startswith("door_") and py_file.parent.name == "modules"):
+        return False
+    content = py_file.read_text(encoding="utf-8", errors="ignore")
+    return check_door(content, py_file.as_posix())["passed"]
+
+
+def _should_skip(path: Path, branch_root: Path, ignore_entries: list) -> bool:
+    """Check whether a directory below the branch root is skipped, the file is
+    disabled, or the path is excluded via .sentryignore / the global default."""
+    return (
+        in_skipped_dir(path, branch_root)
+        or any(part in _EXTRA_SKIP_DIRS for part in path.relative_to(branch_root).parts)
+        or is_disabled_file(path.name)
+        or is_sentry_ignored(str(path), branch_root, ignore_entries)
+    )
+
+
+def _collect_scannable_files(apps_dir: Path, branch_root: Path, ignore_entries: list) -> list[Path]:
+    """Collect .py files from apps/modules/ and apps/handlers/ that should be checked for usage."""
+    targets: list[Path] = []
+    for subdir_name in ("modules", "handlers"):
+        subdir = apps_dir / subdir_name
+        if not subdir.is_dir():
+            continue
+        for py_file in subdir.rglob("*.py"):
+            if py_file.name == "__init__.py":
+                continue
+            if _should_skip(py_file, branch_root, ignore_entries):
+                continue
+            targets.append(py_file)
+    return sorted(targets)
+
+
+def _collect_source_text(apps_dir: Path, branch_root: Path, ignore_entries: list) -> str:
+    """Read ALL .py files under apps/ into a single string for searching."""
+    parts: list[str] = []
+    for py_file in apps_dir.rglob("*.py"):
+        if _should_skip(py_file, branch_root, ignore_entries):
+            continue
+        try:
+            parts.append(py_file.read_text(encoding="utf-8", errors="ignore"))
+        except OSError:
+            logger.info("Skipped unreadable file during source collection: %s", py_file)
+            continue
+    return "\n".join(parts)
+
+
+def _project_config_text(branch_root: Path) -> str:
+    """The project's ``.aipass/*.json`` text, read-only, or "" outside a project.
+
+    The project root holds ``*_REGISTRY.json``, or is the AIPass install (the hook config
+    beside ``src/aipass/``). Only a dotted module path in this text is a reference.
+    """
+    for root in (branch_root.resolve(), *branch_root.resolve().parents):
+        is_install = (root / _INSTALL_CONFIG).is_file() and (root / _INSTALL_SOURCE).is_dir()
+        if not (is_install or any(root.glob(_PROJECT_MARKER))):
+            continue
+        chunks: list[str] = []
+        for config in sorted((root / ".aipass").glob("*.json")):
+            try:
+                chunks.append(config.read_text(encoding="utf-8", errors="ignore"))
+            except OSError as exc:
+                logger.info("Skipped unreadable project config %s: %s", config, exc)
+        return "\n".join(chunks)
+    return ""
+
+
+def _named_in_config(import_path: str, config_text: str) -> bool:
+    """Whether the config names this module by its whole dotted path (``boot`` is not ``boot_extra``)."""
+    return re.search(rf"(?<![\w.]){re.escape(import_path)}(?!\w)", config_text) is not None
+
+
+def _build_import_path(py_file: Path, branch_path: Path, branch_name: str) -> str:
+    """Build the dotted import path for a file."""
+    try:
+        rel = py_file.relative_to(branch_path)
+    except ValueError:
+        logger.info("File %s not relative to branch %s, using stem", py_file, branch_path)
+        return py_file.stem
+
+    parts = list(rel.with_suffix("").parts)
+
+    if "aipass" in branch_path.parts:
+        return f"aipass.{branch_name}.{'.'.join(parts)}"
+    return f"{branch_name}.{'.'.join(parts)}"
+
+
+#: A parenthesised import, which may span lines: `from pkg import (\n    a,\n    b,\n)`.
+_PARENTHESISED_IMPORT = re.compile(r"from\s+\S+\s+import\s*\(([^)]*)\)")
+
+
+def _imported_in_parenthesised_block(stem: str, source_text: str) -> bool:
+    """True when the stem is a name inside a parenthesised, possibly multi-line, import.
+
+    The import-line pattern stops at the newline after ``(``; comments are stripped from the
+    block first, so a ``# repo_door moved`` note inside it is not an import.
+    """
+    name = re.compile(rf"\b{re.escape(stem)}\b")
+    for block in _PARENTHESISED_IMPORT.finditer(source_text):
+        if name.search(re.sub(r"#[^\n]*", "", block.group(1))):
+            return True
+    return False
+
+
+def _check_file_used(
+    py_file: Path,
+    branch_path: Path,
+    branch_name: str,
+    source_text: str,
+    entry_point_name: str,
+    config_text: str = "",
+) -> bool:
+    """Determine if a .py file is referenced anywhere in the branch source."""
+    stem = py_file.stem
+
+    if py_file.name == "__init__.py":
+        return True
+
+    if py_file.name == f"{entry_point_name}.py" and py_file.parent.name == "apps":
+        return True
+
+    if _is_shaped_door(py_file):
+        return True
+
+    for suffix_pattern in ("_check", "_content"):
+        glob_lit = f'glob("*{suffix_pattern}.py")'
+        glob_lit_sq = f"glob('*{suffix_pattern}.py')"
+        if stem.endswith(suffix_pattern) and (glob_lit in source_text or glob_lit_sq in source_text):
+            return True
+
+    import_path = _build_import_path(py_file, branch_path, branch_name)
+    if import_path in source_text:
+        return True
+
+    try:
+        rel = py_file.relative_to(branch_path / "apps")
+        rel_dotted = ".".join(rel.with_suffix("").parts)
+        if rel_dotted in source_text:
+            return True
+    except ValueError:
+        logger.info("File %s not relative to apps dir, skipping relative path check", py_file)
+
+    esc = re.escape(stem)
+    import_patterns = [
+        rf"from\s+\S*\.{esc}\s+import\b",
+        rf"import\s+\S*\.{esc}\b",
+        rf"from\s+\S+\s+import\s+[^#\n]*\b{esc}\b",
+    ]
+    for pat in import_patterns:
+        if re.search(pat, source_text):
+            return True
+    if _imported_in_parenthesised_block(stem, source_text):
+        return True
+
+    if re.search(
+        rf'import_module\([^)]*["\'].*\.{esc}["\']',
+        source_text,
+    ):
+        return True
+
+    try:
+        rel_to_apps = py_file.relative_to(branch_path / "apps")
+        parts = rel_to_apps.parts
+        if len(parts) == 2 and parts[0] == "modules":
+            if 'glob("*.py")' in source_text or "glob('*.py')" in source_text:
+                return True
+    except ValueError:
+        logger.info("File %s not relative to apps dir, skipping glob discovery check", py_file)
+
+    filename = py_file.name
+    if re.search(rf'["\']{re.escape(filename)}["\']', source_text):
+        return True
+
+    return bool(config_text) and _named_in_config(import_path, config_text)
+
+
+def _branch_relative(target: Path, branch_root: Path) -> str:
+    """The target as a posix path from the branch root (``apps/handlers/x.py``), else as given.
+
+    A bypass rule's ``file`` is a substring match, so both ``apps/handlers/x.py``
+    and ``handlers/x.py`` match this spelling.
+    """
+    try:
+        return target.relative_to(branch_root).as_posix()
+    except ValueError:
+        logger.info("[dead_code] %s is outside %s; its bypass is matched on the full path", target, branch_root)
+        return target.as_posix()
+
+
+def reported_path(path: PurePath, root: PurePath) -> str:
+    """The path from root as the finding prints it: ``handlers/x.py``, forward slashes on every host.
+
+    Raises:
+        ValueError: path is not below root.
+    """
+    return path.relative_to(root).as_posix()
+
+
+def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
+    """Check a branch for dead code (unreferenced modules and handlers)."""
+    bp = Path(branch_path)
+
+    if is_bypassed(branch_path, "dead_code", bypass_rules=bypass_rules):
+        result = {
+            "passed": True,
+            "checks": [
+                {
+                    "name": "Bypassed",
+                    "passed": True,
+                    "message": "Standard bypassed via .sentry/bypass.json",
+                }
+            ],
+            "score": 100,
+            "standard": "DEAD_CODE",
+        }
+        json_handler.log_operation(
+            "check_completed",
+            {"branch": branch_path, "score": 100, "standard": "dead_code"},
+        )
+        return result
+
+    apps_dir = bp / "apps"
+    if not apps_dir.is_dir():
+        result = {
+            "passed": True,
+            "checks": [
+                {
+                    "name": "Dead code files",
+                    "passed": True,
+                    "message": f"No apps/ directory found in {branch_path}",
+                }
+            ],
+            "score": 100,
+            "standard": "DEAD_CODE",
+        }
+        json_handler.log_operation(
+            "check_completed",
+            {"branch": branch_path, "score": 100, "standard": "dead_code"},
+        )
+        return result
+
+    branch_name = bp.name
+    entry_point_name = branch_name
+
+    ignore_entries = load_ignore_entries(bp)
+    targets = _collect_scannable_files(apps_dir, bp, ignore_entries)
+    if not targets:
+        result = {
+            "passed": True,
+            "checks": [
+                {
+                    "name": "Dead code files",
+                    "passed": True,
+                    "message": "No modules or handlers found to check",
+                }
+            ],
+            "score": 100,
+            "standard": "DEAD_CODE",
+        }
+        json_handler.log_operation(
+            "check_completed",
+            {"branch": branch_path, "score": 100, "standard": "dead_code"},
+        )
+        return result
+
+    source_text = _collect_source_text(apps_dir, bp, ignore_entries)
+    config_text = _project_config_text(bp)
+
+    total_files = len(targets)
+    dead_files: list[str] = []
+
+    for target in targets:
+        used = _check_file_used(target, bp, branch_name, source_text, entry_point_name, config_text)
+        if not used:
+            try:
+                rel = reported_path(target, apps_dir)
+            except ValueError:
+                logger.info("File %s not relative to apps dir, using full path", target)
+                rel = target.as_posix()
+            # The rule is matched against the BRANCH-relative path (apps/...), the spelling
+            # every other checker is handed and dead_rules reads.
+            if not is_bypassed(_branch_relative(target, bp), "dead_code", bypass_rules=bypass_rules):
+                dead_files.append(rel)
+
+    referenced_files = total_files - len(dead_files)
+    score = int(referenced_files / total_files * 100) if total_files > 0 else 100
+
+    if dead_files:
+        dead_list = ", ".join(dead_files[:10])
+        suffix = f" (+{len(dead_files) - 10} more)" if len(dead_files) > 10 else ""
+        # This names the frontier, not the closure: removing a file can strip the only
+        # reference to another and expose a new one.
+        message = (
+            f"{len(dead_files)}/{total_files} files unreferenced: {dead_list}{suffix}"
+            " -- re-run after removing any of these: each removal can expose its own referents"
+        )
+    else:
+        message = f"All {total_files} files referenced -- no dead code"
+
+    check_passed = len(dead_files) == 0
+    checks = [
+        {
+            "name": "Dead code files",
+            "passed": check_passed,
+            "message": message,
+        }
+    ]
+
+    overall_passed = score >= 75
+
+    result = {
+        "passed": overall_passed,
+        "checks": checks,
+        "score": score,
+        "standard": "DEAD_CODE",
+    }
+
+    json_handler.log_operation(
+        "check_completed",
+        {"branch": branch_path, "score": score, "standard": "dead_code"},
+    )
+    return result

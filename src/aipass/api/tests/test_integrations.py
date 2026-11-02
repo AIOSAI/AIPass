@@ -3,14 +3,14 @@
 # Description: Tests for bridge, registry, and integrations handlers
 # Version: 1.0.1
 # Created: 2026-04-15
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/bridge.py with the registry walker and integrations_manager's contract calls."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered) — handle_command() and print_help() CLI, tests/test_integrations_manager.py
-# seedgo: no-test-needed(covered) — _import_driver()'s namespaced module key, tests/test_registry.py
+# sentry: no-test-needed(covered) — handle_command() and print_help() CLI, tests/test_integrations_manager.py
+# sentry: no-test-needed(covered) — _import_driver()'s namespaced module key, tests/test_registry.py
 
 from unittest.mock import patch
 

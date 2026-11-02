@@ -3,15 +3,15 @@
 # Description: Tests for api.py entry point CLI
 # Version: 1.0.1
 # Created: 2026-05-12
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/api.py, the entry point CLI for drone @api."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — print_help's display text, beyond that it prints without error
-# seedgo: no-test-needed(windows_compat) — the win32 PYTHONUTF8 and stream reconfigure at import, the Windows CI lane
-# seedgo: no-test-needed(through_the_command) — each module's own commands, covered by that module's test file
+# sentry: no-test-needed(constant) — print_help's display text, beyond that it prints without error
+# sentry: no-test-needed(windows_compat) — the win32 PYTHONUTF8 and stream reconfigure at import, the Windows CI lane
+# sentry: no-test-needed(through_the_command) — each module's own commands, covered by that module's test file
 
 from unittest.mock import MagicMock, patch
 

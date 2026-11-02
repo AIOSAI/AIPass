@@ -3,7 +3,7 @@
 # Description: A help probe must never execute the thing it asks about
 # Version: 1.1.0
 # Created: 2026-08-13
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/log_audit.py, log_health.py, monitor.py and apps/handlers/cli/help_flags.py."""
@@ -12,8 +12,8 @@
 # only at position 0 (branch names, log filenames and grep patterns are free text).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — log_audit.py's enforce and sweep, covered by tests/test_log_audit.py
-# seedgo: no-test-needed(through_the_command) — monitor.py's run dispatch, covered by tests/test_monitor_module.py
+# sentry: no-test-needed(through_the_command) — log_audit.py's enforce and sweep, covered by tests/test_log_audit.py
+# sentry: no-test-needed(through_the_command) — monitor.py's run dispatch, covered by tests/test_monitor_module.py
 
 import contextlib
 from unittest.mock import MagicMock, patch
@@ -76,7 +76,7 @@ DESTRUCTIVE_CASES = [
     ("log-health", LOG_HEALTH_PATH, ["scan", "-h"]),
     ("monitor", MONITOR_PATH, ["run", "--help"]),
     ("monitor", MONITOR_PATH, ["run", "-h"]),
-    ("monitor", MONITOR_PATH, ["run", "seedgo,cli", "-h"]),
+    ("monitor", MONITOR_PATH, ["run", "sentry,cli", "-h"]),
 ]
 
 

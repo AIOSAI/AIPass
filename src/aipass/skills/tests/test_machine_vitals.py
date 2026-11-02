@@ -3,14 +3,14 @@
 # Description: The machine_vitals() contract
 # Version: 1.4.0
 # Created: 2026-09-12
-# Modified: 2026-10-16
+# Modified: 2026-11-02
 # Category: skills/tests
 # =============================================
 
 """Tests for lib/system_status/handler.py's machine_vitals() contract (FPLAN-0561 row 1)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the skill's handler module parses and imports
+# sentry: no-test-needed(ruff) — that the skill's handler module parses and imports
 
 import os
 from collections import namedtuple

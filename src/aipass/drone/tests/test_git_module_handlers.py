@@ -3,13 +3,13 @@
 # Description: Tests for the handlers @git drives — lock, repo root, status, sync, PR and remote set
 # Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-30
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for the lock, status, sync, PR and remote handlers that apps/modules/git_module.py drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — subprocess.run, which every git and gh call here reaches as a recorded stub
+# sentry: no-test-needed(stdlib) — subprocess.run, which every git and gh call here reaches as a recorded stub
 
 from __future__ import annotations
 

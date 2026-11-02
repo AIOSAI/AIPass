@@ -4,14 +4,14 @@
 # Description: Tests for the CC-native session file reader
 # Branch: hooks
 # Created: 2026-07-01
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/cc_sessions.py, the CC-native session file reader."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — HELP_COMMANDS' help rows
-# seedgo: no-test-needed(stdlib) — os.getpid and os.kill, stood in at the module seam wherever a live pid is needed
+# sentry: no-test-needed(constant) — HELP_COMMANDS' help rows
+# sentry: no-test-needed(stdlib) — os.getpid and os.kill, stood in at the module seam wherever a live pid is needed
 
 import json
 import os

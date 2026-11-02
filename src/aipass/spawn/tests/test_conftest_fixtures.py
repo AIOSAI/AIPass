@@ -3,14 +3,14 @@
 # Description: Pins that spawn's own mocking fixtures reach the code they claim to mock
 # Version: 1.0.2
 # Created: 2026-08-30
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests that tests/conftest.py's mocking fixtures actually reach apps/handlers/file_ops.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/handlers/file_ops.py and apps/handlers/json/json_handler.py parse and import
-# seedgo: no-test-needed(documentation) — docstrings on the conftest fixtures themselves
+# sentry: no-test-needed(ruff) — that apps/handlers/file_ops.py and apps/handlers/json/json_handler.py parse and import
+# sentry: no-test-needed(documentation) — docstrings on the conftest fixtures themselves
 
 import shutil
 from pathlib import Path

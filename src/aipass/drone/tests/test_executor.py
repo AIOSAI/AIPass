@@ -3,13 +3,13 @@
 # Description: Subprocess executor - capture, stream, timeout and kill paths
 # Version: 1.0.3
 # Created: 2026-03-14
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/executor.py, the subprocess executor."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — subprocess.Popen and the OS signal delivery beneath the kill path
+# sentry: no-test-needed(stdlib) — subprocess.Popen and the OS signal delivery beneath the kill path
 
 import subprocess
 import sys

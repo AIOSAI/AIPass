@@ -3,15 +3,15 @@
 # Description: Admin grant ceremony + permanent admin-class refusal (FPLAN-0401 P2)
 # Version: 1.1.1
 # Created: 2026-08-12
-# Modified: 2026-10-31
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/grant_admin.py, apps/handlers/registry.py and apps/handlers/class_registry.py: the seat-flag fences and the owner seat."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every handler and module this file imports parses and imports
-# seedgo: no-test-needed(documentation) — docstrings on ensure_admin, ensure_ci_cure, move_owner and the handlers
-# seedgo: no-test-needed(documentation) — docstrings on the class_registry refusal helpers
+# sentry: no-test-needed(ruff) — that every handler and module this file imports parses and imports
+# sentry: no-test-needed(documentation) — docstrings on ensure_admin, ensure_ci_cure, move_owner and the handlers
+# sentry: no-test-needed(documentation) — docstrings on the class_registry refusal helpers
 
 import json
 from unittest.mock import patch

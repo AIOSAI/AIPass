@@ -5,13 +5,13 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-08-23
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """A pytest plugin, not a test: runs a suite under ntpath's os.path.expanduser home rules, on Linux."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — ntpath.expanduser's home rules, restated here; proof: the PR 739 reproduction
+# sentry: no-test-needed(stdlib) — ntpath.expanduser's home rules, restated here; proof: the PR 739 reproduction
 
 import os
 import os.path

@@ -3,14 +3,14 @@
 # Description: CLI Routing Tests for DAEMON
 # Version: 1.1.0
 # Created: 2026-03-28
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/daemon.py — the router: help, introspection, unknown commands, the argument gate."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/daemon.py parses and imports
-# seedgo: no-test-needed(constant) — the version literal main() prints for --version
+# sentry: no-test-needed(ruff) — that apps/daemon.py parses and imports
+# sentry: no-test-needed(constant) — the version literal main() prints for --version
 
 from pathlib import Path
 from unittest.mock import call, patch
@@ -160,7 +160,7 @@ def test_help_after_junk_arg_does_not_fire_scheduler() -> None:
 # The router renders the gate's refusal through error(), so tests intercept it there.
 ROUTER = "aipass.daemon.apps.daemon"
 
-# _run_systemctl is patched as a literal at each site: seedgo's host_state rule only acquits
+# _run_systemctl is patched as a literal at each site: sentry's host_state rule only acquits
 # a seam patched IN the unit, and cannot follow a constant.
 
 # branch-health is absent: it gates its positional itself (test_activity_report.py).

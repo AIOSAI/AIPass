@@ -18,5 +18,5 @@ Operational JSON (`config.json`, `data.json`, `log.json`) belongs one level up i
 
 ---
 
-Source of truth for these rules: `drone @seedgo standards_query aipass_standards json_structure`
+Source of truth for these rules: `drone @sentry standards_query aipass_standards json_structure`
 Reference loader: `src/aipass/memory/apps/handlers/json/config_loader.py`

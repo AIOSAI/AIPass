@@ -3,14 +3,14 @@
 # Description: Tests for the compass SQLite/FTS5 storage core
 # Version: 1.1.0
 # Created: 2026-06-16
-# Modified: 2026-10-22
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/compass/store.py through the compass package API, on a tmp_path db_path."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — the text of VALID_RATINGS, VALID_SOURCES and VALID_STATUSES
-# seedgo: no-test-needed(stdlib) — sqlite3.connect() and the rank arithmetic SQLite computes for a MATCH
+# sentry: no-test-needed(constant) — the text of VALID_RATINGS, VALID_SOURCES and VALID_STATUSES
+# sentry: no-test-needed(stdlib) — sqlite3.connect() and the rank arithmetic SQLite computes for a MATCH
 
 import sqlite3
 from types import SimpleNamespace
@@ -472,7 +472,7 @@ class TestSetNote:
 
 
 class TestScoreRemoved:
-    """score is gone from every Python surface (DPLAN-0246 seedgo ruling)."""
+    """score is gone from every Python surface (DPLAN-0246 sentry ruling)."""
 
     # test_score_not_in_decision_columns retired 2026-10-04 (fleet green): it read the
     # private column list. The public query and review answers below carry no score

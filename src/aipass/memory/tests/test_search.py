@@ -3,13 +3,13 @@
 # Description: Tests for the search orchestration module
 # Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/search.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(documentation) — the wording of the print_help() panel
+# sentry: no-test-needed(documentation) — the wording of the print_help() panel
 
 from unittest.mock import MagicMock
 
@@ -179,9 +179,9 @@ class TestHandleCommandArgParsing:
         mock_show = MagicMock(return_value=True)
         monkeypatch.setattr(search_mod, "show_search_results", mock_show)
 
-        search_mod.handle_command("search", ["my", "query", "--branch", "SEEDGO"])
+        search_mod.handle_command("search", ["my", "query", "--branch", "SENTRY"])
 
-        mock_show.assert_called_once_with("my query", branch="SEEDGO", memory_type=None, n_results=5)
+        mock_show.assert_called_once_with("my query", branch="SENTRY", memory_type=None, n_results=5)
 
     def test_type_option_parsed(self, monkeypatch):
         """--type value should be forwarded to show_search_results."""
@@ -229,7 +229,7 @@ class TestHandleCommandArgParsing:
         """Options only, no query text, should call error() and return True."""
         search_mod, mocks = _import_search(monkeypatch)
 
-        result = search_mod.handle_command("search", ["--branch", "SEEDGO"])
+        result = search_mod.handle_command("search", ["--branch", "SENTRY"])
 
         assert result is True
         mocks["error"].assert_called_once_with("Search query required")
@@ -407,9 +407,9 @@ class TestShowSearchResults:
         """Branch, memory_type, and n_results should be forwarded."""
         search_mod, mocks = _import_search(monkeypatch)
 
-        search_mod.show_search_results("q", branch="SEEDGO", memory_type="local", n_results=3)
+        search_mod.show_search_results("q", branch="SENTRY", memory_type="local", n_results=3)
 
-        mocks["execute_search"].assert_called_once_with(query="q", branch="SEEDGO", memory_type="local", n_results=3)
+        mocks["execute_search"].assert_called_once_with(query="q", branch="SENTRY", memory_type="local", n_results=3)
 
     def test_handler_timeout_returns_false(self, monkeypatch):
         """When the handler returns a timeout error, show_search_results returns False."""

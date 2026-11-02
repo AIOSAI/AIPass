@@ -3,7 +3,7 @@
 # Description: Unit tests for the dashboard template lane
 # Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for the template lane: apps/handlers/dashboard/template_differ.py and template_pusher.py."""
@@ -15,7 +15,7 @@
 # their logger and json service before every test (prax, leg 12).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — handle_command's routing, covered by tests/test_operations_display.py
+# sentry: no-test-needed(through_the_command) — handle_command's routing, covered by tests/test_operations_display.py
 
 import json
 import types

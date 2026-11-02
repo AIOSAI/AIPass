@@ -3,14 +3,14 @@
 # Description: Tests for the monitor single-instance lock
 # Version: 2.0.0
 # Created: 2026-07-10
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/instance_lock.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(json_structure) — try_acquire's log_operation record, covered by that row
-# seedgo: no-test-needed(log_level) — try_acquire's info lines, covered by that row
+# sentry: no-test-needed(json_structure) — try_acquire's log_operation record, covered by that row
+# sentry: no-test-needed(log_level) — try_acquire's info lines, covered by that row
 
 import os
 import subprocess

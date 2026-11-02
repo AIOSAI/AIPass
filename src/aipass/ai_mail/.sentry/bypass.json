@@ -1,0 +1,356 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "created": "2026-03-07T22:43:23.230824",
+    "description": "Standards bypass configuration for this branch"
+  },
+  "bypass": [
+    {
+      "file": "apps/handlers/cli/help_flags.py",
+      "standard": "json_structure",
+      "pattern": "pure predicate — no json_handler import",
+      "reason": "Pure argument inspection: no I/O, no state, no imports beyond typing, by design. It is called as the FIRST statement in all three handle_command functions, ahead of everything — so a log_operation() here would make the help gate depend on the very JSON layer it must run in front of, and would write a line per CLI invocation into the operation log for a question that is a non-event on almost every call. The callers that ACT on the answer already log what they did. Same shape and same reason as the identical helpers in @memory, @trigger and @drone (all three bypassed json_structure on this file, 2026-08-13); @memory's is the standard's reference implementation.",
+      "measured": "2026-08-13 (S141) — added WITH the file, not inherited. Live rule, not a prune candidate: audit lane reports the violation with it off (99%) and clears with it on (100%)."
+    },
+    {
+      "file": "apps/modules/email.py",
+      "standard": "introspection",
+      "reason": "Multi-command module where inbox, sent, contacts work without args by design. Adding no-args gate would break primary mail workflow (drone @ai_mail inbox)."
+    },
+    {
+      "file": "apps/handlers/email/inbox_ops.py",
+      "standard": "deep_nesting",
+      "reason": "load_inbox() depth 5 — auto-migration between v1 and v2 inbox formats requires nested schema checks. (Was written as depth 4; the checker reports 5 at line 46 as of 2026-08-13, so the code drifted a level deeper than the reason claimed.)"
+    },
+    {
+      "file": "apps/handlers/email/inbox_lock.py",
+      "standard": "deep_nesting",
+      "reason": "inbox_lock() depth 6 — cross-platform file locking context manager (POSIX fcntl vs Windows msvcrt), platform branching is inherent"
+    },
+    {
+      "file": "apps/handlers/email/send.py",
+      "standard": "handlers",
+      "reason": "Imports trigger.apps.modules.core.trigger — cross-branch module import for firing email_sent events. trigger integration is by design."
+    },
+    {
+      "file": "apps/handlers/dispatch/dispatch_monitor.py",
+      "standard": "handlers",
+      "reason": "One cross-branch import, lazy and inside the function that needs it: hooks.apps.modules.sandbox.build_policy/build_srt_config/resolve_bwrap_command — the srt kernel sandbox wrap; @hooks owns the policy so this consumes their modules/ entry point rather than mirroring bwrap construction, which trips handler-imports-modules instead. It raises rather than falls back, so it cannot silently degrade a spawn. (The drone broker half expired in DPLAN-0404 leg 15: _connect_broker now reaches drone's door_broker.)"
+    },
+    {
+      "file": "apps/handlers/dispatch/dispatch_monitor.py",
+      "standard": "naming",
+      "reason": "dispatch_monitor.py in dispatch/ dir — renaming to monitor.py would break its callers (wake.py, MONITOR_SCRIPT references) and confuse with prax monitor."
+    },
+    {
+      "file": "apps/handlers/email/create.py",
+      "standard": "naming",
+      "reason": "False positive — _append_footer is a function reference stored in a local variable, not a module-level constant."
+    },
+    {
+      "file": "apps/handlers/email/inbox_cleanup.py",
+      "standard": "naming",
+      "reason": "False positive — _inbox_lock is a lazy-import function reference, not a module-level constant."
+    },
+    {
+      "file": "apps/handlers/email/inbox_ops.py",
+      "standard": "naming",
+      "reason": "False positive — _inbox_lock is a lazy-import function reference, not a module-level constant."
+    },
+    {
+      "file": "apps/handlers/dispatch/dispatch_monitor.py",
+      "standard": "deep_nesting",
+      "reason": "_send_bounce() depth 4, main() depth 5 — subprocess management with error handling and log rotation"
+    },
+    {
+      "file": "apps/modules/email_send.py",
+      "standard": "cli",
+      "reason": "Internal helper extracted from email.py for size compliance. Not a drone-routable command module — handle_send is called by email.py's handle_command()."
+    },
+    {
+      "file": "apps/handlers/dispatch/report.py",
+      "standard": "handlers",
+      "reason": "Imports trigger.apps.modules.core.trigger inside fire_completed() — the same cross-branch module import already bypassed for apps/handlers/email/send.py, for the same reason: @trigger's pub/sub bus IS its modules/ entry point and there is no handler-level door to it. FPLAN-0452 P1 explicitly forbids inventing a second push mechanism ('trigger.fire() already exists and your lane already speaks it — DO NOT invent a mechanism'), so consuming the existing one is the instruction, not a shortcut. Lazy, inside the one function that needs it, and its failure is caught and warned so a dead bus cannot take a completed dispatch down with it."
+    },
+    {
+      "file": "__init__.py",
+      "standard": "unused_function",
+      "pattern": "register_path, outstanding_dispatches",
+      "reason": "HALF OF THIS ENTRY HAS NOW EXPIRED, and it is recorded rather than quietly kept. Both doors were requested in writing by @devpulse (FPLAN-0452 P0 addendum, mail 8c9c65cb) for a watchdog wire that was unbuilt at the time. It is built now: outstanding_dispatches() is called in production by devpulse/apps/handlers/watchdog/dispatches.py:143, so sentry would no longer flag it and it needs no cover. register_path() is the half that still does — its only caller in the repo is devpulse's tests/conftest.py:75, which patches it; a door reached only by a test patch is a door with no production reader. It stays exported because @devpulse asked for it in writing and removing another branch's requested door on my own initiative is not mine to do, but the honest state is 'unused, kept on request', not 'unused, pending'. REMOVE THIS ENTRY the day register_path() gets a production caller — an unused_function bypass that outlives its cause is how a dead export becomes permanent.",
+      "measured": "2026-08-23 (S154) — re-checked against the built wire, not assumed. One of the two doors named here is now live; the entry survives only for register_path()."
+    },
+    {
+      "file": "tests/test_wake.py",
+      "standard": "stdlib_patch",
+      "reason": "Platform and pid simulation (ai_mail, fleet green leg 10, under @devpulse's leg 10 ruling a). stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Lines covered as of the 2026-10-08 split, measured by the checker (the platform, pid and lock lines moved to tests/test_wake_helpers.py, the manager lanes to tests/test_wake_managers.py, the shared helpers to tests/support_wake.py; each carries its own row): time.sleep 95 (the wait on a pid, no real waiting); shutil.which 260 288 (which tools the host has); Path.home 684 (the host home sent to tmp). A seam for any of these would exist for the test alone."
+    },
+    {
+      "file": "tests/test_wake_helpers.py",
+      "standard": "stdlib_patch",
+      "reason": "Platform and pid simulation, moved with its tests out of tests/test_wake.py in the 2026-10-08 split (ai_mail, fleet green leg 10, under @devpulse's leg 10 ruling a). stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Lines covered as of the split, measured by the checker: os.kill 183 190 196 212 394 453 467 (dead/alive answers of the kill(0) family); sys.platform 189 197 213 264 291 314 372 380 393 461 928 940 955 978 (the linux/darwin/win32 lanes); builtins.open 203 218 269 308 402 and os.readlink 266 293 347 382 935 948 963 989 (the /proc reads of a pid); shutil.which 731 (which claude the host has). One line is not platform or pid, 866 (an OSError injected into the lock open); it is named here, not hidden, and stays under this rule by @devpulse's leg 11 ruling a (ai_mail, leg 11). A seam for any of these would exist for the test alone."
+    },
+    {
+      "file": "tests/test_wake_managers.py",
+      "standard": "stdlib_patch",
+      "reason": "Host tool simulation, moved with its test out of tests/test_wake.py in the 2026-10-08 split (ai_mail, fleet green leg 10, under @devpulse's leg 10 ruling a). stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Lines covered as of the split, measured by the checker: shutil.which 782 (which tmux the host has). A seam would exist for the test alone."
+    },
+    {
+      "file": "tests/support_wake.py",
+      "standard": "stdlib_patch",
+      "reason": "Host tool and pid-wait simulation in the wake helpers shared by the test_wake*.py files, moved out of tests/test_wake.py in the 2026-10-08 split (ai_mail, fleet green leg 10, under @devpulse's leg 10 ruling a). stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Lines covered as of the split, measured by the checker: time.sleep 66 (the wait on a pid, no real waiting); shutil.which 121 (which tools the host has). A seam for any of these would exist for the test alone."
+    },
+    {
+      "file": "tests/test_dispatch_register.py",
+      "standard": "stdlib_patch",
+      "reason": "Platform simulation (ai_mail, fleet green leg 10, under @devpulse's leg 10 ruling a). stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Lines covered as of leg 10: 315 sys.platform set to win32, 317 os.kill replaced by a guard that fails the test if the POSIX probe is reached on win32. A seam would exist for the test alone."
+    },
+    {
+      "file": "tests/test_registry_case_sweep.py",
+      "standard": "stdlib_patch",
+      "reason": "Platform simulation (ai_mail, fleet green leg 10, under @devpulse's leg 10 ruling a). stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Lines covered as of leg 10: Path.glob 147 191 220 and Path.exists 190, which make a Linux run answer like a case-insensitive filesystem (macOS, Windows) so the case-exact registry walk is tested where CI cannot fold case. A seam would exist for the test alone."
+    },
+    {
+      "file": "apps/handlers/dispatch/report.py",
+      "standard": "logged_fallback",
+      "lines": [
+        196
+      ],
+      "reason": "The value is the true answer (ai_mail, fleet green leg 10): _prune_reports returns how many reports it removed, and a listing that failed removed none, so 0 is the count, not a stand-in. Its one caller, write_report, ignores the count and has already written the report; the failure is logged at warning. A raise here would turn a missed prune into a lost dispatch record."
+    },
+    {
+      "file": "tests/test_session_pointer.py",
+      "standard": "stdlib_patch",
+      "reason": "Filesystem-failure injection (ai_mail, fleet green leg 11, under @devpulse's leg 11 ruling b): a real filesystem cannot fail on demand, and a seam would be a door for the test alone. stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Lines covered as of leg 17: Path.read_text 253, tempfile.mkstemp 266, Path.mkdir 274, os.replace 297 312, Path.is_file 443 468 and Path.stat 444 (each made to raise, so the pointer's read and atomic-write failure arms run), Path.home 605 (made to raise, the no-home arm)."
+    },
+    {
+      "file": "tests/test_admin_lane.py",
+      "standard": "stdlib_patch",
+      "reason": "Import-failure injection (ai_mail, fleet green leg 11, under @devpulse's leg 11 ruling b): an installed module cannot be made missing on demand, and a seam would be a door for the test alone. stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Line covered as of leg 11: 194, builtins.__import__ replaced so the admin-grant import fails and the lane is seen to fail closed."
+    },
+    {
+      "file": "tests/test_email_module_send.py",
+      "standard": "stdlib_patch",
+      "reason": "Import-failure injection (ai_mail, fleet green leg 11, under @devpulse's leg 11 ruling b): an installed module cannot be made missing on demand, and a seam would be a door for the test alone. stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Line covered as of the 2026-10-08 split, which moved the row with its test out of tests/test_email_module.py (1447 there): 450, builtins.__import__ replaced so one import fails and the handler's answer to it is seen."
+    },
+    {
+      "file": "apps/modules/email.py",
+      "standard": "logged_fallback",
+      "lines": [
+        201,
+        205,
+        250,
+        254,
+        295,
+        329,
+        359,
+        379
+      ],
+      "reason": "CLI handler layer (ai_mail, fleet green leg 9). A handle_* return is 'command recognised', not 'it worked' (branch prompt, Critical Rules): the router stops on True. Failure is told by cli error(), which calls mark_command_failed() and sets the process exit; a BrokenPipeError is stdout closed early, not a failure. So True on these lines is the contract, and the checker reads it as an indistinguishable fallback."
+    },
+    {
+      "file": "apps/modules/email_send.py",
+      "standard": "logged_fallback",
+      "lines": [
+        248,
+        253
+      ],
+      "reason": "Same CLI handler contract as apps/modules/email.py (ai_mail, fleet green leg 9): 248 is a BrokenPipeError (stdout closed early); 253 has already called error() (mark_command_failed) and mailed the failure through dispatch_send_error, so the caller is told by the failure flag, not by the bool."
+    },
+    {
+      "file": "apps/modules/dispatch.py",
+      "standard": "logged_fallback",
+      "lines": [
+        350,
+        399,
+        472
+      ],
+      "reason": "Same CLI handler contract (ai_mail, fleet green legs 9 and 10): 472 is the send phase failing to resolve the sender, 350 is dispatch stop and 399 dispatch close meeting an unreadable registry; each has already called error() (mark_command_failed). True tells the router the command was recognised."
+    },
+    {
+      "file": "apps/handlers/email/send.py",
+      "standard": "logged_fallback",
+      "lines": [
+        236,
+        244,
+        260,
+        268
+      ],
+      "reason": "The value is the true answer (ai_mail, fleet green leg 10): collect_interactive_input documents None as 'cancelled', and these four arms are the user cancelling at a prompt (Ctrl-C, end of input, or a pick that is not a number), the same answer its in-try paths give for an out-of-range pick, an empty subject or a 'n' at the confirm. No system failure is hidden: its one caller, email_send.py:189, prints 'Cancelled' and sends nothing, and each arm logs what was typed or raised."
+    },
+    {
+      "file": "apps/handlers/dispatch/dispatch_monitor.py",
+      "standard": "logged_fallback",
+      "lines": [
+        156,
+        235,
+        691
+      ],
+      "reason": "The value is the true answer (ai_mail, fleet green leg 10; re-lined 2026-10-08 and 2026-10-16). 198: wake_sender returns an outcome word, and 'failed' is what its normal path also answers when the sender was not woken; a crash in the wake-back is that same outcome, it never reads as 'success', and log_wake_result plus the report's wake_result carry it. 299: _mail_wake_back returns True only when the mail went; False is its one failure answer, the same as a non-zero exit, and its caller turns it into 'failed_manager_mail'. 657: _parse_result_json documents {} for a stdout log that is missing or holds no JSON, which is what an unreadable log is to the report: build_report then records cost, tokens and turns as null, not as values."
+    },
+    {
+      "file": "apps/handlers/dispatch/wake.py",
+      "standard": "logged_fallback",
+      "lines": [
+        381
+      ],
+      "reason": "The value is the true answer (ai_mail, fleet green leg 11; re-lined in legs 13 and 16): is_manager's FileNotFoundError arm answers False because a branch with no passport has declared no class, which is what wake_branch's manager gate also does for a missing passport (pinned: test_missing_passport_continues). A passport that exists but cannot be read is the other arm, and since leg 11 it fails closed (True) under @devpulse's ruling e; since leg 12 an unreadable registry fails closed too."
+    },
+    {
+      "file": "apps/handlers/email/create.py",
+      "standard": "logged_fallback",
+      "lines": [
+        151
+      ],
+      "reason": "The caller names it (ai_mail, fleet green leg 12): load_email_file documents None for a file that cannot be read, and its one caller, the sent listing in modules/email.py 412, reaches it only for files its own glob just found, so None there means unreadable, and the listing prints that row as '[UNREADABLE FILE] <name>' and logs it rather than dropping it. Nothing is written behind it; a raise would end the whole listing at the first bad file."
+    },
+    {
+      "file": "apps/handlers/registry/read.py",
+      "standard": "logged_fallback",
+      "lines": [
+        74
+      ],
+      "reason": "Traced, the namesake is not reachable through this [] (ai_mail, fleet green leg 12, the commons-namesake re-read of the leg 11 HELD). get_all_branches answers [] for an unreadable AIPASS_REGISTRY.json. Its one resolver, deliver_email_to_branch, no longer trusts that: before the map widens to the caller's project, the admin sweep or the external tier, delivery asks check_registry_readable and refuses, naming the registry (pinned: test_an_unreadable_aipass_registry_refuses_rather_than_serving_a_hosted_namesake). The other callers list or match names, and every send they make goes through that delivery: email_send 181 (interactive list) and 306 (broadcast targets), email.handle_contacts 432 (display), reply.send_reply 151 (sender lookup), get_branch_by_email 146, delivery 632 (a path argument; a miss refuses). wake reads the registry itself and refuses since leg 12. A raise here would turn those CLI commands into 'not handled' through route_command."
+    },
+    {
+      "file": "apps/handlers/registry/read.py",
+      "standard": "logged_fallback",
+      "lines": [
+        243
+      ],
+      "reason": "Traced, the namesake is not reachable through this {} (ai_mail, fleet green leg 12). _residents_from_registry feeds get_resident_branches only, whose callers are email_send 315 (the @all broadcast target list) and @sentry's fresh_clone_check 13/40. An unreadable resident registry drops that project's residents from the broadcast; it adds no address and resolves no name, so no mail can reach another project's citizen through it. The failure is logged at error and names the registry. A raise would stop the whole broadcast to every other project and reach @sentry's check."
+    },
+    {
+      "file": "apps/handlers/dispatch/register.py",
+      "standard": "logged_fallback",
+      "lines": [
+        217,
+        368
+      ],
+      "reason": "The value is the true answer (ai_mail, fleet green leg 11; re-lined DPLAN-0404 leg 15). 368: record_monitor_pid returns True only when the annotation was appended; False is its documented failure answer, the same as for a bad pid, and its one caller (wake.py's spawn, after the monitor is already running) must not cancel a live dispatch over a lost annotation; the row then falls back to expected_by. 611: _is_overdue cannot read expected_by, so it cannot say the row is late; the row stays listed as outstanding, the warning names it, and the flag is read as a bool by @devpulse's watchdog (dispatches.py:164, wire.py:531), so a third value would reach another branch."
+    },
+    {
+      "file": "apps/handlers/email/format.py",
+      "standard": "logged_fallback",
+      "lines": [
+        51
+      ],
+      "reason": "The value is the true answer for display (ai_mail, fleet green leg 10): lookup_branch_alias returns None for 'no alias to show', and its one caller, format_sender_display, then shows the branch name, which is what a reader needs when the alias cannot be read. Nothing is written behind it; a raise would break the inbox view over a cosmetic suffix. The failure is logged at warning."
+    },
+    {
+      "file": "apps/handlers/notify.py",
+      "standard": "logged_fallback",
+      "lines": [
+        204,
+        219
+      ],
+      "reason": "The value is the true answer (ai_mail, fleet green leg 10; re-lined in leg 16): _trim_jsonl returns whether the log was trimmed, and a read or replace that failed trimmed nothing (320 also removes its temp file). Its one caller, notify.py:199, ignores the answer, under the lock, after the append has landed; the failure is logged at error. A raise would fail a notification that was already written."
+    },
+    {
+      "file": "apps/modules/email.py",
+      "standard": "logged_fallback",
+      "lines": [
+        93
+      ],
+      "reason": "The value is the answer (ai_mail, fleet green leg 10): the caller-identity gate returns '' when the caller resolves and the refusal text when it does not, as its docstring says; the except arm IS the refusal, carrying get_current_user()'s own RuntimeError text, and the entry point refuses on any non-empty answer."
+    },
+    {
+      "file": "apps/ai_mail.py",
+      "standard": "logged_fallback",
+      "lines": [
+        153
+      ],
+      "reason": "route_command (ai_mail, fleet green leg 9; re-lined DPLAN-0404 leg 3b and 2026-10-11): a BrokenPipeError is stdout closed early by the reader (e.g. piped to head); the command ran and was recognised, so True is the true answer."
+    },
+    {
+      "file": "apps/handlers/dispatch/pid_lock.py",
+      "standard": "logged_fallback",
+      "lines": [
+        300,
+        305,
+        308,
+        311
+      ],
+      "reason": "check_pid_alive (public since leg 15; ai_mail, fleet green legs 9 and 10, under @devpulse's leg 10 ruling b for the os.kill family; moved from wake.py to pid_lock.py unchanged in leg 13): os.kill(pid, 0) answers through its exception. ProcessLookupError IS 'no such process' (False, 246) and PermissionError IS 'it exists, owned by another user' (True, 249); neither is a fallback. The two guessed arms, named as guesses: 241, the Windows probe raised, answers alive, the fail-closed direction (an occupied branch is not woken over and its lock is not reclaimed); 252, any other OSError, answers dead, but POSIX defines no other error for signal 0 (EINVAL needs a bad signal, EPERM and ESRCH are the two arms above), so the arm is unreachable there and Windows never reaches it. Since leg 13 this is the liveness rule of the one dispatch lock check, the wake's."
+    },
+    {
+      "file": "apps/handlers/dispatch/wake.py",
+      "standard": "logged_fallback",
+      "lines": [
+        306,
+        327
+      ],
+      "reason": "The value is the true answer (ai_mail, fleet green leg 12; re-lined in legs 13 and 16). 362 and 386: _spawn_in_systemd_scope documents False as 'fall back to direct Popen', the same as a non-zero systemd-run, and its caller 1166 does exactly that."
+    },
+    {
+      "file": "apps/handlers/dispatch/pid_lock.py",
+      "standard": "json_structure",
+      "reason": "The dispatch lock is not a json_handler document (ai_mail, fleet green leg 13): it is the O_CREAT|O_EXCL protocol between the wake and dispatch_monitor, read and written with json for its three keys. pid_lock was split out of wake.py and asks the operating system about processes; the operations it gates are logged by their callers, wake_branch through json_handler.log_operation. A log_operation here would write an operation line on every lock check."
+    },
+    {
+      "file": "apps/handlers/dispatch/pid_lock.py",
+      "standard": "logged_fallback",
+      "lines": [
+        79,
+        128,
+        146,
+        183
+      ],
+      "reason": "The value is the true answer (ai_mail, fleet green legs 12 and 13; moved from wake.py in leg 13, public names since leg 15). 79: check_lock answers None when the lock file does not exist, which is a free lock, the same None it answers after removing a dead holder's lock; an unreadable lock answers held since leg 13. 128 and 146: _get_pid_cwd(_darwin) answers None for 'cwd not known', the same as an unsupported platform and a non-zero lsof; is_branch_occupied skips that pid. pgrep -x claude matches every user's processes; the one kind skipped is a claude whose cwd this user may not read, i.e. another user's session, which is the named gap of this answer. 183: _read_session_type_darwin answers 'interactive' on a failed ps, the blocking class, so a branch is not woken over a session it cannot classify."
+    },
+    {
+      "file": "apps/handlers/dispatch/register.py",
+      "standard": "logged_fallback",
+      "lines": [
+        126,
+        129
+      ],
+      "reason": "monitor_alive (ai_mail, fleet green legs 9 and 10, os.kill family): PermissionError from os.kill(pid, 0) means the process exists under another user, so True at 207 is the answer. 210 answers None, 'could not probe', a third value the success path never returns (it answers True or False), and the register's readers show it as unknown; the checker reads a tri-state as a fallback."
+    },
+    {
+      "file": "tests/test_notify.py",
+      "standard": "through_the_command",
+      "lines": [
+        259
+      ],
+      "reason": "No route reaches this arm (ai_mail, fleet green leg 16; a line bypass under @devpulse's ruling of 2026-10-04). _trim_jsonl's read-failure arm logs and answers False, and its one caller, append_jsonl, ignores the answer and reaches the trim only after writing the same file under the same lock one line before, so neither send_notification nor append_jsonl can bring the read to fail. A public door would exist for this test alone. The row pins the arm's log and its False directly."
+    },
+    {
+      "file": "tests/test_session_pointer.py",
+      "standard": "literal_path",
+      "lines": [
+        93
+      ],
+      "reason": "(ai_mail, fleet green leg 9; re-lined leg 17; its twin in test_dispatch_monitor_helpers.py retired 2026-10-10) transcript_dir encodes a cwd STRING ('/' '_' '.' to '-'); no file system answers it and tmp_path would make the oracle re-implement the encoding. Accepted as a string parse in the leg 7 ruling."
+    },
+    {
+      "file": "apps/handlers/dispatch/session_pointer.py",
+      "standard": "logged_fallback",
+      "lines": [
+        150,
+        153,
+        159
+      ],
+      "reason": "read_pointer (ai_mail, fleet green leg 9): the docstring states the contract - None, never a raise, when the pointer is missing, unreadable or malformed, because a pointer that cannot be trusted IS no pointer: every caller (wake.py fresh/resume decision, dispatch_monitor attempt 3) falls back to -c the same way. 208 is the plain truth (no file, no pointer); 211/217 are the documented equivalence. A raise here would cost the wake itself, which the module exists to avoid."
+    }
+  ],
+  "notes": {
+    "usage": "Add entries to 'bypass' list to exclude specific violations",
+    "example": {
+      "file": "apps/modules/logger.py",
+      "standard": "cli",
+      "reason": "Circular dependency - logger cannot import CLI",
+      "lines": [
+        146,
+        177
+      ],
+      "pattern": "if __name__ == '__main__'"
+    },
+    "fields": {
+      "file": "Relative path from branch root (required)",
+      "standard": "Standard name: cli, imports, naming, etc. (required)",
+      "lines": "Optional - specific line numbers to bypass",
+      "pattern": "Optional - pattern to match (e.g. 'if __name__')",
+      "reason": "Required - why this bypass exists"
+    }
+  }
+}

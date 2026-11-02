@@ -3,7 +3,7 @@
 # Description: Tests for provider_wire — hook merges per CLI, backup and receipt first; doctor's codex, opencode rows
 # Version: 1.12.0
 # Created: 2026-08-01
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/provider_wire.py and the manifest-driven hook merge it drives."""
@@ -14,7 +14,7 @@
 # reached through the three writer doors).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
+# sentry: no-test-needed(ruff) — that every module this file imports parses and imports
 
 import functools
 import hashlib

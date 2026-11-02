@@ -3,13 +3,13 @@
 # Description: A help flag anywhere in args must explain, never execute (DPLAN-0291 rule E)
 # Version: 1.0.1
 # Created: 2026-08-13
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for a trailing --help in apps/modules/feedback.py, admin_grant.py, watchdog.py and compass.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(help_flag_safety) — that each handle_command calls _wants_help before acting
+# sentry: no-test-needed(help_flag_safety) — that each handle_command calls _wants_help before acting
 
 from unittest.mock import patch
 

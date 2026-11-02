@@ -4,7 +4,7 @@
 # Description: Tests for the test-write gate and its JSON policy switch
 # Branch: hooks
 # Created: 2026-09-01
-# Modified: 2026-10-25
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/security/testwrite_gate.py and its JSON policy switch."""
@@ -13,8 +13,8 @@
 # A path put INTO a command string is spelled as_posix(): bash eats a Windows str()'s backslashes.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — EDIT_TOOLS and ADMIN_SEAT's literal values; the gate's use of them is pinned
-# seedgo: no-test-needed(generated) — bash_writes.write_targets' command parse, owned by tests/test_edit_gate_bash.py
+# sentry: no-test-needed(constant) — EDIT_TOOLS and ADMIN_SEAT's literal values; the gate's use of them is pinned
+# sentry: no-test-needed(generated) — bash_writes.write_targets' command parse, owned by tests/test_edit_gate_bash.py
 
 import json
 import os
@@ -130,7 +130,7 @@ class TestTheSwitch:
 
     def test_allow_names_one_branch_not_all_of_them(self, project: dict):
         """A canary that exempts the fleet is not a canary."""
-        _policy(project, allow=["seedgo"])
+        _policy(project, allow=["sentry"])
         assert _blocked(_run(project["seat"], file_path=project["new_test"]))
 
     def test_on_lifts_it_for_everyone(self, project: dict):
@@ -507,7 +507,7 @@ class TestNamingAPathIsNotWritingIt:
         assert not _blocked(_run(project["seat"], command='python3 -c "' + body + '"'))
 
     def test_a_heredoc_that_only_names_a_test_path_is_allowed(self, project):
-        """@canary's and @seedgo's shape: a path literal in a measuring script."""
+        """@canary's and @sentry's shape: a path literal in a measuring script."""
         _policy(project)
         body = "pa" + "th = '" + project["new_test"] + "'"
         assert not _blocked(_run(project["seat"], command=f"python3 - <<'EOF'\n{body}\nEOF"))
@@ -849,7 +849,7 @@ class TestAnOperandPathlibCannotExpand:
 
 
 class TestTheTemplatePointer:
-    """@seedgo's contract, this branch's hook — DPLAN-0354, devpulse c3ab29d2.
+    """@sentry's contract, this branch's hook — DPLAN-0354, devpulse c3ab29d2.
 
     A PostToolUse on tests/** gets one line naming the branch's LOCAL template page, or none without a page.
     The engine writes the returned document, so assertions read it through the handler's entry point.
@@ -858,7 +858,7 @@ class TestTheTemplatePointer:
     LINE_HEAD = "Test template v1: "
 
     def _stamp(self, project: dict, version: str = "1.0.0") -> Path:
-        """Give the branch a page and a receipt, the way seedgo's bump does."""
+        """Give the branch a page and a receipt, the way sentry's bump does."""
         page = project["tests_dir"] / "TEST_TEMPLATE.md"
         page.write_text("# Test template v1\n", encoding="utf-8")
         receipt = project["tests_dir"] / ".template_version.json"
@@ -887,7 +887,7 @@ class TestTheTemplatePointer:
         assert line.count("\n") == 0, "exactly one line, per the contract"
         assert line.endswith("tests/test_existing.py")
         assert "tests/TEST_TEMPLATE.md" in line
-        assert "drone @seedgo checklist " in line
+        assert "drone @sentry checklist " in line
 
     def test_the_line_is_suppressed_when_the_branch_has_no_page(self, project):
         """An unstamped branch. Pointing at a file that is not there is worse

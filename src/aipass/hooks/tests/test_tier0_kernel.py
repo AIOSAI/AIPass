@@ -4,15 +4,15 @@
 # Description: Tests for tier0_kernel prompt handler
 # Branch: hooks
 # Created: 2026-06-18
-# Modified: 2026-10-10
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/prompt/tier0_kernel.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — DEGRADED_HEADING's full wording beyond the prefix asserted here
-# seedgo: no-test-needed(generated) — the logger.warning DEGRADED line; its text is the joined failures
-# seedgo: no-test-needed(stdlib) — importlib.import_module resolving the real cadence module
+# sentry: no-test-needed(constant) — DEGRADED_HEADING's full wording beyond the prefix asserted here
+# sentry: no-test-needed(generated) — the logger.warning DEGRADED line; its text is the joined failures
+# sentry: no-test-needed(stdlib) — importlib.import_module resolving the real cadence module
 
 import contextlib
 import importlib

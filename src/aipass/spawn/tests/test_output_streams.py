@@ -3,14 +3,14 @@
 # Description: Stream-routing tests for spawn's user-facing output
 # Version: 1.0.1
 # Created: 2026-08-13
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/spawn.py's and apps/modules/*.py's --help and report stream routing (stdout vs stderr)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every handler module this file imports parses and imports
-# seedgo: no-test-needed(documentation) — docstrings on print_help and the handler --help paths
+# sentry: no-test-needed(ruff) — that every handler module this file imports parses and imports
+# sentry: no-test-needed(documentation) — docstrings on print_help and the handler --help paths
 
 import json
 from unittest.mock import patch

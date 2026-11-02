@@ -3,7 +3,7 @@
 # Description: Tests for the escalation digest: sending, the mail it carries, reporting and the CLI
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/escalation.py's digest (send, mail, reporting) and apps/modules/escalation.py."""
@@ -15,8 +15,8 @@
 # logger the lane writes through.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — the upsert key the digest carries to ai_mail: test_escalation_upsert.py
-# seedgo: no-test-needed(external) — ai_mail delivery of the digest; AIPass tests only its own files
+# sentry: no-test-needed(covered_elsewhere) — the upsert key the digest carries to ai_mail: test_escalation_upsert.py
+# sentry: no-test-needed(external) — ai_mail delivery of the digest; AIPass tests only its own files
 
 import json
 from types import SimpleNamespace

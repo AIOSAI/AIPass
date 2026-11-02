@@ -3,14 +3,14 @@
 # Description: Tests for owner/identity check and fix (DPLAN-0239 P4)
 # Version: 1.0.5
 # Created: 2026-07-11
-# Modified: 2026-10-31
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/sync_registry_ops.py and apps/modules/sync_registry.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(documentation) — docstrings on check_owner_identity, fix_owner_identity and pick_owner_branch
-# seedgo: no-test-needed(constant) — the flag-name strings ("no_owner", "multi_owner", "multi_ci_cure", etc.) sync_registry_ops emits
+# sentry: no-test-needed(documentation) — docstrings on check_owner_identity, fix_owner_identity and pick_owner_branch
+# sentry: no-test-needed(constant) — the flag-name strings ("no_owner", "multi_owner", "multi_ci_cure", etc.) sync_registry_ops emits
 
 import json
 

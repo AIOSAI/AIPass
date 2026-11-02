@@ -3,14 +3,14 @@
 # Description: Tests for OpenRouter client module
 # Version: 1.0.2
 # Created: 2026-03-24
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/openrouter_client.py and create_client in apps/handlers/openrouter/client.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — OPENROUTER_HEADERS' values; the test compares with the product's constant
-# seedgo: no-test-needed(through_the_command) — the real network request behind make_call(), mocked at the edge
+# sentry: no-test-needed(constant) — OPENROUTER_HEADERS' values; the test compares with the product's constant
+# sentry: no-test-needed(through_the_command) — the real network request behind make_call(), mocked at the edge
 
 import sys
 import types
@@ -21,7 +21,7 @@ import pytest
 from aipass.api.apps.handlers.openrouter.client import OPENROUTER_HEADERS, create_client
 from aipass.api.apps.modules import openrouter_client
 from aipass.api.apps.modules.openrouter_client import handle_command
-from aipass.api.apps.modules.openrouter_client import handle_command as _hc  # noqa: F401 — seedgo test_coverage detection
+from aipass.api.apps.modules.openrouter_client import handle_command as _hc  # noqa: F401 — sentry test_coverage detection
 
 
 _MOD = "aipass.api.apps.modules.openrouter_client"

@@ -3,14 +3,14 @@
 # Description: Unit tests for the error_registry handler
 # Version: 1.3.2
 # Created: 2026-03-24
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/error_registry.py: the dedup engine, circuit breaker and backoff."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — the errors command that reads this registry, in tests/test_errors.py
-# seedgo: no-test-needed(covered_elsewhere) — the dispatch gate on should_dispatch, in tests/test_error_detected.py
+# sentry: no-test-needed(covered_elsewhere) — the errors command that reads this registry, in tests/test_errors.py
+# sentry: no-test-needed(covered_elsewhere) — the dispatch gate on should_dispatch, in tests/test_error_detected.py
 
 import json
 import threading

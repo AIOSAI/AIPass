@@ -3,7 +3,7 @@
 # Description: Tests for apps/modules/drive_stats.py's Drive account quota lines, through a stub Drive service
 # Version: 1.0.0
 # Created: 2026-10-16
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/drive_stats.py's Drive account quota lines."""
@@ -11,7 +11,7 @@
 # Tests that need a Drive answer replace conftest's two sealed doors with a stub service.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — _human_bytes' unit arithmetic, which show_drive_quota only prints through
+# sentry: no-test-needed(stdlib) — _human_bytes' unit arithmetic, which show_drive_quota only prints through
 
 from pathlib import Path
 

@@ -3,7 +3,7 @@
 # Description: Tests for the orchestrator execute_rollover pipeline
 # Version: 1.1.0
 # Created: 2026-04-26
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # Category: memory/tests
 # =============================================
 
@@ -14,9 +14,9 @@
 # Covers: from aipass.memory.apps.handlers.rollover.orchestrator import execute_rollover
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — what @trigger does with the rollover_complete event trigger.fire sends
-# seedgo: no-test-needed(covered_elsewhere) — the stats update_central writes, in tests/test_central_writer.py
-# seedgo: no-test-needed(covered_elsewhere) — the pool run process_memory_pool does, in tests/test_intake.py
+# sentry: no-test-needed(external) — what @trigger does with the rollover_complete event trigger.fire sends
+# sentry: no-test-needed(covered_elsewhere) — the stats update_central writes, in tests/test_central_writer.py
+# sentry: no-test-needed(covered_elsewhere) — the pool run process_memory_pool does, in tests/test_intake.py
 
 import json
 import subprocess

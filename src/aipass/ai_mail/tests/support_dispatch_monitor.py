@@ -3,13 +3,13 @@
 # Description: Shared helpers for test_dispatch_monitor.py and its siblings - the one-identity send check, a main() run, a foreign project
 # Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Helper for the tests of apps/handlers/dispatch/dispatch_monitor.py (no test_ prefix: never collected)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(ruff) — that the module parses and imports
 
 import json
 import time

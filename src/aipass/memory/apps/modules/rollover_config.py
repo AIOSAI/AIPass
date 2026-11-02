@@ -3,7 +3,7 @@
 # Description: The `config` verb surface over rollover limits - get / set / set-default
 # Version: 1.4.0
 # Created: 2026-09-15
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -386,13 +386,13 @@ def _rerender(entry_type: str, before: dict) -> List[str]:
 def print_config_introspection() -> None:
     """Display config-verb introspection — the page under the CLI's name for it.
 
-    The alias, not the body: seedgo reads console.print calls inside print_introspection literally.
+    The alias, not the body: sentry reads console.print calls inside print_introspection literally.
     """
     print_introspection()
 
 
 def print_introspection() -> None:
-    """Display module introspection (seedgo standard)."""
+    """Display module introspection (sentry standard)."""
     console.print()
     console.print("[bold cyan]config Verb - Rollover Limits[/bold cyan]")
     console.print("Reads and writes the rollover entry-count limits in memory.config.json")

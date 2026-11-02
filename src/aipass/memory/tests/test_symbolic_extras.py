@@ -3,14 +3,14 @@
 # Description: Tests for symbolic handler recall and surfacing - the hook's context, recall format and session gates
 # Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/symbolic/hook.py — recall and surfacing: context, fragment recall, session gates."""
 
 # The storage half is test_symbolic_extras_storage.py; shared fixtures, support_symbolic_extras.py.
 #
-# Covers imports required by the seedgo test scanner:
+# Covers imports required by the sentry test scanner:
 #     from aipass.memory.apps.handlers.symbolic.hook import save_config
 #     from aipass.memory.apps.handlers.symbolic.hook import extract_conversation_context
 #     from aipass.memory.apps.handlers.symbolic.hook import find_relevant_fragments
@@ -24,7 +24,7 @@
 #     from aipass.memory.apps.handlers.symbolic.hook import process_hook
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — write_memory_file(), stood in here; tests/test_changed_entries.py
+# sentry: no-test-needed(covered_elsewhere) — write_memory_file(), stood in here; tests/test_changed_entries.py
 
 import pytest as _parked
 

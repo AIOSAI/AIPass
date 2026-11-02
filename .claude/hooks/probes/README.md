@@ -82,17 +82,17 @@ Use `$AIPASS_HOME` (set by provider settings) or replace with your actual repo r
 
 ---
 
-## How to run `drone @seedgo hooks probe`
+## How to run `drone @sentry hooks probe`
 
 ```bash
 # Display a table of recent probe entries
-drone @seedgo hooks probe
+drone @sentry hooks probe
 
 # Test whether PostToolUse and SubagentStop fire in headless mode
-drone @seedgo hooks probe --subagent
+drone @sentry hooks probe --subagent
 
 # Generate a full matrix report grouped by event type
-drone @seedgo hooks probe --matrix
+drone @sentry hooks probe --matrix
 ```
 
 ### Flag reference

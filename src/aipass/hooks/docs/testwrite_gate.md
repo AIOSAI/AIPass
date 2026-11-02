@@ -12,7 +12,7 @@ and the template pointer line it carries.
 ## The test-write gate — agents do not create tests
 
 Agents do not create tests on their own initiative: tests written to satisfy a checker rather than to
-pin a defect regrow faster than @seedgo's `test_quality` pack can cull them.
+pin a defect regrow faster than @sentry's `test_quality` pack can cull them.
 `security/testwrite_gate.py` is what stops the regrowth.
 
 **Blocked:** *creation* of a pytest-collectable file (`test_*.py`, `*_test.py`, `conftest.py`) inside
@@ -97,10 +97,10 @@ correct inside AIPass, wrong advice for an unrelated project that happens to own
 
 ## The template pointer — one line, PostToolUse
 
-@seedgo houses the fleet's test template (`src/aipass/seedgo/templates/`) and distributes it as a page
+@sentry houses the fleet's test template (`src/aipass/sentry/templates/`) and distributes it as a page
 in each branch's own `tests/TEST_TEMPLATE.md`, beside a receipt `tests/.template_version.json`. The
 contract this branch's hook keeps: on a PostToolUse touching `tests/**`,
-inject exactly one line — `Test template v1: <branch>/tests/TEST_TEMPLATE.md - then drone @seedgo
+inject exactly one line — `Test template v1: <branch>/tests/TEST_TEMPLATE.md - then drone @sentry
 checklist <file>`, both paths rendered project-relative.
 
 `template_pointer()` shares this file with the gate rather than growing a second reader: the gate's own
@@ -111,7 +111,7 @@ targets through `bash_writes` — and `testwrite_targets.in_test_tree()` is the 
 line, a collectable file outside one does not. A nested test tree is pointed at its OWN page — the
 page sits beside the suite it describes.
 
-**The page is the whole question, read per call.** No manifest of seedgo's is consulted and nothing is
+**The page is the whole question, read per call.** No manifest of sentry's is consulted and nothing is
 cached: a branch with no page is unstamped, and the line is SUPPRESSED rather than pointing at a file
 that is not there. The receipt only spells the version (`v<major>`, defaulting to `v1` when it is
 missing or unreadable), so a stamp that half-landed costs one word and never the pointer. Paths are

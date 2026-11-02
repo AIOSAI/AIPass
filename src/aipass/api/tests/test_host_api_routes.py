@@ -3,7 +3,7 @@
 # Description: Tests for the host API's live app — the extra guard, ping, bearer auth, scopes, the declared routes
 # Version: 1.2.3
 # Created: 2026-10-08
-# Modified: 2026-11-01
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for create_app(), its auth and the declared routes in apps/handlers/host/server.py."""
@@ -15,7 +15,7 @@
 # test_host_api_config.py; the host-api commands in test_host_api.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(duplicate_test) — read_agent_settings() and list_projects(), test_host_{settings,fleet}.py
+# sentry: no-test-needed(duplicate_test) — read_agent_settings() and list_projects(), test_host_{settings,fleet}.py
 
 import json
 import re
@@ -34,7 +34,7 @@ from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import settings as host_settings
 from aipass.api.apps.handlers.host import tokens as host_tokens
 
-# The patch target stays this file's own constant: seedgo's discarded_patch
+# The patch target stays this file's own constant: sentry's discarded_patch
 # rule reads a target imported from this branch's package as one it judges,
 # and this silences a logger on purpose.
 PATCH_SERVER_LOGGER = "aipass.api.apps.handlers.host.server.logger"
@@ -201,7 +201,7 @@ class TestTheDeclaredRoutesAnswerThroughTheRealApp:
     """
     Four routes that were declared and never reached by a test.
 
-    Found by seedgo's entry_point_diff on 2026-09-07, and it was right: the
+    Found by sentry's entry_point_diff on 2026-09-07, and it was right: the
     settings handler sat at 97% while not one of its six routes had ever been
     executed through the app. That is the gap this branch's own APLAN-0013 N1b
     item names, and a handler that is well tested behind a route nobody calls

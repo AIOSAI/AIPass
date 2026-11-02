@@ -3,13 +3,13 @@
 # Description: Tests for the host API's config, face dir, baud binary and tokens — the bind gate and the store
 # Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-22
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/host/config.py (bind gate, face dir, baud binary) and apps/handlers/host/tokens.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — hashlib.sha256 and secrets.token_urlsafe themselves, behind issue_token()
+# sentry: no-test-needed(stdlib) — hashlib.sha256 and secrets.token_urlsafe themselves, behind issue_token()
 
 import json
 import sys
@@ -24,7 +24,7 @@ from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.tests.support_host_api import TAILNET_SHAPED, UNHELD_ADDRESS, _baud_binary, _face_bundle
 
-# Kept local, not imported from the support module: seedgo's discarded_patch
+# Kept local, not imported from the support module: sentry's discarded_patch
 # rule judges a target imported from this package, and this silences on purpose.
 PATCH_CONFIG_LOGGER = "aipass.api.apps.handlers.host.config.logger"
 CONFIG_ENTRY = "host_api/config"

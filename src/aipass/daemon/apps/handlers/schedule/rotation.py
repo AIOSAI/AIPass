@@ -3,7 +3,7 @@
 # Description: Rounds roster, pointer state and prompt rendering
 # Version: 1.3.0
 # Created: 2026-08-12
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -49,7 +49,7 @@ ROUNDS_PROMPT_TEMPLATE = (
     "Fresh start, nothing to resume. "
     "Do, inside your own branch only: inbox to zero (answer what you can, close what is done); "
     "reconcile your .trinity todos against reality (delete done, rescope stale); "
-    "refresh and read your dashboard; review your logs for anomalies; run your seedgo self-audit; "
+    "refresh and read your dashboard; review your logs for anomalies; run your sentry self-audit; "
     "do the work that other citizens or devpulse have asked of you by mail IF it sits in your own "
     "domain and fits one session; small fixes in your own branch only, red-first, tests green. "
     "Budget, not negotiable: never dispatch or wake another citizen; at most 2 sub-agents, sonnet "

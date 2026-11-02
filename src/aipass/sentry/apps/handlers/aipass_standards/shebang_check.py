@@ -1,0 +1,79 @@
+# =================== AIPass ====================
+# Name: shebang_check.py
+# Description: Shebang Standards Checker Handler
+# Version: 1.0.0
+# Created: 2026-03-06
+# Modified: 2026-11-02
+# =============================================
+
+"""
+Shebang Standards Checker Handler
+
+Reference: shebang.md
+"""
+
+from pathlib import Path
+from typing import Dict
+from aipass.prax import logger
+from aipass.sentry.apps.handlers.json import json_handler
+from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
+
+# APPLIES_TO: a test file is library code - nothing executes it directly.
+APPLIES_TO = "everywhere"
+AUDIT_SCOPE = "all_files"
+
+
+def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
+    """Check if a Python file contains a shebang line."""
+    path = Path(module_path)
+
+    if is_bypassed(module_path, "shebang", bypass_rules=bypass_rules):
+        return {
+            "passed": True,
+            "checks": [{"name": "Bypassed", "passed": True, "message": "Standard bypassed via .sentry/bypass.json"}],
+            "score": 100,
+            "standard": "SHEBANG",
+        }
+
+    if not path.exists():
+        return {
+            "passed": False,
+            "checks": [{"name": "File exists", "passed": False, "message": f"File not found: {module_path}"}],
+            "score": 0,
+            "standard": "SHEBANG",
+        }
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            first_line = f.readline()
+    except Exception as e:
+        logger.info("Cannot read %s: %s", path, e)
+        return {
+            "passed": False,
+            "checks": [{"name": "File readable", "passed": False, "message": f"Error reading file: {e}"}],
+            "score": 0,
+            "standard": "SHEBANG",
+        }
+
+    if first_line.startswith("#!"):
+        return {
+            "passed": False,
+            "checks": [
+                {
+                    "name": "No shebang line",
+                    "passed": False,
+                    "message": "Shebang lines are not needed in pip packages -- remove #!/... from line 1",
+                }
+            ],
+            "score": 0,
+            "standard": "SHEBANG",
+        }
+
+    score = 100
+    json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "shebang"})
+    return {
+        "passed": True,
+        "checks": [{"name": "No shebang line", "passed": True, "message": "No shebang line found"}],
+        "score": score,
+        "standard": "SHEBANG",
+    }

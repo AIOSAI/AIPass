@@ -3,7 +3,7 @@
 # Description: Shared fixtures for the drone suite
 # Version: 1.3.2
 # Created: 2026-03-05
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """Shared pytest fixtures for drone tests."""
@@ -30,7 +30,7 @@ from aipass.drone.apps.handlers import registry_handler, router_handler
 from aipass.drone.apps.handlers.git import session_home
 from aipass.drone.apps.handlers.json import json_handler
 
-# Not imported from seedgo: its guard refuses another branch's caller.
+# Not imported from sentry: its guard refuses another branch's caller.
 SANDBOX_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
 
 # .archive/ holds verbatim disposal copies of old tests that must never be collected.
@@ -151,13 +151,13 @@ def devpulse_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture()
-def seedgo_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def sentry_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Create a temp directory with a non-owner passport."""
     trinity = tmp_path / ".trinity"
     trinity.mkdir()
     passport = trinity / "passport.json"
     passport.write_text(
-        json.dumps({"branch_info": {"branch_name": "seedgo"}}),
+        json.dumps({"branch_info": {"branch_name": "sentry"}}),
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
@@ -325,10 +325,10 @@ def aipass_github(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 @pytest.fixture()
 def builder_seat(aipass_github: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A citizen of the same project who owns nothing, standing in its own branch."""
-    seat = aipass_github / "src" / "aipass" / "seedgo"
+    seat = aipass_github / "src" / "aipass" / "sentry"
     (seat / ".trinity").mkdir(parents=True)
     (seat / ".trinity" / "passport.json").write_text(
-        json.dumps({"branch_info": {"branch_name": "seedgo"}}), encoding="utf-8"
+        json.dumps({"branch_info": {"branch_name": "sentry"}}), encoding="utf-8"
     )
     monkeypatch.chdir(seat)
     return seat

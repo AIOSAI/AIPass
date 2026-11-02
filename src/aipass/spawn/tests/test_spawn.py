@@ -3,14 +3,14 @@
 # Description: Test suite for spawn module
 # Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/core.py (spawn_agent) and apps/handlers/registry.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(documentation) — docstrings on get_branch_name, normalize_branch_name and detect_profile
-# seedgo: no-test-needed(stdlib) — uuid.uuid4()'s randomness, which apps/modules/core.py mints citizen_id from
+# sentry: no-test-needed(documentation) — docstrings on get_branch_name, normalize_branch_name and detect_profile
+# sentry: no-test-needed(stdlib) — uuid.uuid4()'s randomness, which apps/modules/core.py mints citizen_id from
 
 import json
 import shutil

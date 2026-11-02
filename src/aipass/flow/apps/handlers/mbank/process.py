@@ -3,7 +3,7 @@
 # Description: Memory Processing Handler
 # Version: 1.9.0
 # Created: 2025-11-25
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -92,7 +92,7 @@ def is_template_content(content: str) -> bool:
     user_content_signals = [
         "- [x] Agent deployed",
         "- [x] Agent completed",
-        "- [x] Seedgo checklist",
+        "- [x] Sentry checklist",
         "- [x] All goals achieved",
     ]
     for signal in user_content_signals:

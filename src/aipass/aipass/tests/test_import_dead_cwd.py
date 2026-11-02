@@ -3,7 +3,7 @@
 # Description: Pins every aipass module against an unreadable working directory
 # Version: 1.2.3
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests that apps/aipass.py and every module beneath it import without reading a dead working directory."""
@@ -13,8 +13,8 @@
 # counts is any resolve() reached at import, a default argument included.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — each module's own logic; see tests/test_read.py
-# seedgo: no-test-needed(stdlib) — os.path.realpath's real Windows codepath; emulated, not run on Windows
+# sentry: no-test-needed(covered_elsewhere) — each module's own logic; see tests/test_read.py
+# sentry: no-test-needed(stdlib) — os.path.realpath's real Windows codepath; emulated, not run on Windows
 
 from __future__ import annotations
 

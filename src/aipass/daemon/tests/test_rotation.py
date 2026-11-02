@@ -3,14 +3,14 @@
 # Description: Tests for the steward rotation handler and module
 # Version: 1.5.0
 # Created:2026-08-12
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/rotation.py and handlers/schedule/rotation.py — the nightly rounds (DPLAN-0287)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — wake_branch's own spawn and the scheduled lane itself; @ai_mail's dispatch tests
-# seedgo: no-test-needed(constant) — print_introspection()'s panel text; only the help's usage line is pinned here
+# sentry: no-test-needed(external) — wake_branch's own spawn and the scheduled lane itself; @ai_mail's dispatch tests
+# sentry: no-test-needed(constant) — print_introspection()'s panel text; only the help's usage line is pinned here
 
 import inspect
 import json
@@ -183,13 +183,13 @@ class TestBuildRoster:
         red here. The other fixtures happen to be sorted already and cannot tell
         the two apart.
         """
-        fleet = [citizen("@seedgo"), citizen("@flow"), citizen("@drone"), citizen("@ai_mail")]
+        fleet = [citizen("@sentry"), citizen("@flow"), citizen("@drone"), citizen("@ai_mail")]
         with (
             patch(f"{HANDLER}.active_citizens", return_value=fleet),
             patch(f"{HANDLER}.citizen_class_for", return_value="aipass_framework"),
         ):
             roster = build_roster()
-        assert [c["email"] for c in roster] == ["@ai_mail", "@drone", "@flow", "@seedgo"]
+        assert [c["email"] for c in roster] == ["@ai_mail", "@drone", "@flow", "@sentry"]
         assert roster[1]["path"] == FRAMEWORK / "drone", "sorting must carry each record whole"
 
     def test_an_unreadable_passport_is_left_off_the_roster(self, fleet, classes):
@@ -606,7 +606,7 @@ class TestRoundsNight:
     # a projects/* resident and an external-root citizen, both declaring the
     # framework class, so only the scope rule keeps them off the first night.
     FLEET = [
-        citizen("@seedgo"),
+        citizen("@sentry"),
         citizen("@devpulse"),
         citizen("@aardvark", source="projects/aardvark"),
         citizen("@ai_mail"),
@@ -615,7 +615,7 @@ class TestRoundsNight:
         citizen("@backup"),
     ]
     CLASSES = {
-        "@seedgo": "aipass_framework",
+        "@sentry": "aipass_framework",
         "@devpulse": "manager",
         "@aardvark": "aipass_framework",
         "@ai_mail": "aipass_framework",
@@ -650,7 +650,7 @@ class TestRoundsNight:
 
         assert results["fired"] == 1
         mock_wake.assert_called_once()
-        assert mock_wake.call_args.args[0] == "@ai_mail", "@aardvark/@abacus sort first; registry order picks @seedgo"
+        assert mock_wake.call_args.args[0] == "@ai_mail", "@aardvark/@abacus sort first; registry order picks @sentry"
         assert mock_save.called
 
     def test_the_wake_carries_the_owners_ruling(self):

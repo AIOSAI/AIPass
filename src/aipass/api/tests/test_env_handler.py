@@ -3,14 +3,14 @@
 # Description: Tests for .env template creation handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/auth/env.py -- .env template creation, and keys.py's no-key diagnosis."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(windows_compat) — the 0o600 / 0o700 modes on Windows, which has no Unix permission bits
-# seedgo: no-test-needed(ruff) — that env.py and keys.py parse and import
+# sentry: no-test-needed(windows_compat) — the 0o600 / 0o700 modes on Windows, which has no Unix permission bits
+# sentry: no-test-needed(ruff) — that env.py and keys.py parse and import
 
 from __future__ import annotations
 

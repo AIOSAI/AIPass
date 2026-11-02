@@ -3,7 +3,7 @@
 # Description: Pins the public cross-branch gateway for the fleet definition
 # Version: 1.0.1
 # Created: 2026-08-30
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/fleet.py."""
@@ -11,10 +11,10 @@
 # modules/ is the public gateway; handlers/ is private. The mechanics of finding residents are not re-exported.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — declared_residency answers, in tests/test_residency_scope.py
-# seedgo: no-test-needed(covered_elsewhere) — declared_roots values, in tests/test_declared_roots.py
-# seedgo: no-test-needed(covered_elsewhere) — find_repo_root's walk, in tests/test_repo_root.py
-# seedgo: no-test-needed(shared) — the json_handler.log_operation audit line; the json handler's lane
+# sentry: no-test-needed(covered_elsewhere) — declared_residency answers, in tests/test_residency_scope.py
+# sentry: no-test-needed(covered_elsewhere) — declared_roots values, in tests/test_declared_roots.py
+# sentry: no-test-needed(covered_elsewhere) — find_repo_root's walk, in tests/test_repo_root.py
+# sentry: no-test-needed(shared) — the json_handler.log_operation audit line; the json handler's lane
 
 from pathlib import Path
 

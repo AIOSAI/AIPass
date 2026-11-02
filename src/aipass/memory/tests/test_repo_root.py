@@ -3,7 +3,7 @@
 # Description: Pins for handlers/repo_root.py - one repo-root answer, never the cwd
 # Version: 1.3.0
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/repo_root.py."""
@@ -12,7 +12,7 @@
 # runs on every machine; STRUCTURAL pins sweep the tree so no lane keeps a private copy.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — module_file() on Windows, where resolve() reads the cwd; the sweep pins its callers
+# sentry: no-test-needed(external) — module_file() on Windows, where resolve() reads the cwd; the sweep pins its callers
 
 import importlib
 import inspect

@@ -3,7 +3,7 @@
 # Description: Repair handler — move branches, update registry paths, clean pollution
 # Version: 1.1.0
 # Created: 2026-05-15
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Repair handler implementation for project structure fixes.
@@ -24,6 +24,7 @@ from aipass.spawn.apps.handlers.registry import (
     save_registry,
     branches_as_list,
 )
+from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.json import json_handler
 
 # Rebuildable noise only: .git history and .chroma vectors go into the archive, since the original is removed.
@@ -284,6 +285,80 @@ def move_branch(branch_name, new_path, registry_path=None, dry_run=False, reloca
         "chroma_relocated": chroma_relocated,
         "chroma_error": chroma_error,
     }
+
+
+def rename_branch(old_name, new_name, registry_path=None, dry_run=True):
+    """Re-point a citizen's registry entry and passport at its already-renamed directory.
+
+    The entry keeps registry_id, created, owner and every other field; the passport keeps its ids.
+    Only names, path, email and module change: identity prose is the citizen's own to edit."""
+    old, new = old_name.lstrip("@").lower(), new_name.lstrip("@").lower()
+    registry_path = Path(registry_path) if registry_path else find_registry()
+    if registry_path is None:
+        return _rename_refused("No *_REGISTRY.json found above the current directory")
+    project_root = registry_path.resolve().parent
+
+    branches = branches_as_list(load_registry(registry_path).get("branches", []))
+    entry = next((b for b in branches if b.get("name", "").lower() == old), None)
+    if entry is None:
+        return _rename_refused(f"'{old}' is not in {registry_path.name}")
+    if any(b.get("name", "").lower() == new for b in branches):
+        return _rename_refused(f"'{new}' is already in {registry_path.name}")
+
+    old_abs = (project_root / entry.get("path", "")).resolve()
+    new_abs = old_abs.parent / new
+    if not new_abs.is_relative_to(project_root.resolve()):
+        return _rename_refused(f"{new_abs} is outside project root {project_root}")
+    new_rel = new_abs.relative_to(project_root.resolve()).as_posix()
+    if old_abs.exists():
+        return _rename_refused(f"{old_abs} still exists — rename the directory first, then the citizen")
+
+    passport_path = new_abs / ".trinity" / "passport.json"
+    passport = json_handler.read_json(passport_path) if passport_path.is_file() else None
+    if not isinstance(passport, dict):
+        return _rename_refused(f"no readable passport at {passport_path}")
+    # The entry's registry_id is the citizen's own id: it proves the directory is this citizen.
+    if passport.get("citizenship", {}).get("citizen_id") != entry.get("registry_id"):
+        return _rename_refused(f"the passport at {passport_path} is not the citizen of entry '{old}'")
+
+    result = {"success": True, "dry_run": dry_run, "old": old, "new": new, "new_path": new_rel}
+    if dry_run:
+        return result
+
+    original = passport_path.read_text(encoding="utf-8")
+    _update_passport_paths(new_abs, new_rel, _detect_project_package(new_rel))
+    passport = json_handler.read_json(passport_path)
+    if not isinstance(passport, dict):
+        raise ValueError(f"passport at {passport_path} could not be re-read after the path update")
+    passport["document_metadata"].update(
+        document_name=f"{new}.PASSPORT", managed_by=new, last_updated=datetime.now().strftime("%Y-%m-%d")
+    )
+    passport["branch_info"].update(branch_name=new, email=f"@{new}")
+    if not json_handler.write_json(passport_path, passport):
+        raise OSError(f"passport at {passport_path} could not be written")
+
+    with registry_lock(registry_path):
+        registry = load_registry(registry_path)
+        rows = branches_as_list(registry.get("branches", []))
+        for row in rows:
+            if row.get("name", "").lower() == old:
+                row.update(name=new.upper(), path=new_rel, email=f"@{new}")
+        registry["branches"] = rows
+        saved = save_registry(registry_path, registry)
+    if not saved:
+        # The passport must not name a citizen the registry does not know.
+        atomic_write_text(passport_path, original)
+        return _rename_refused(f"{registry_path.name} could not be written — the passport was restored")
+
+    logger.info("[repair] Renamed citizen %s -> %s at %s", old, new, new_rel)
+    json_handler.log_operation("branch_renamed", data={"old": old, "new": new, "path": new_rel})
+    return result
+
+
+def _rename_refused(reason):
+    """Log and return a rename refusal; nothing has been written."""
+    logger.warning("[repair] Rename refused: %s", reason)
+    return {"success": False, "error": reason}
 
 
 def _check_nested_pollution(nested_dir, label, project_root, registry_path):

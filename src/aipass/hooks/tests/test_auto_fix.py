@@ -4,7 +4,7 @@
 # Description: Tests for auto_fix lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/lifecycle/auto_fix.py."""
@@ -14,9 +14,9 @@
 # paths stay silent (no "sound" key).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — ruff's own lint and format verdicts; the tests stub its subprocess at the edge
-# seedgo: no-test-needed(documentation) — that auto_fix's functions carry docstrings
-# seedgo: no-test-needed(stdlib) — subprocess.run's timeout mechanics; the tests stub it at the edge
+# sentry: no-test-needed(ruff) — ruff's own lint and format verdicts; the tests stub its subprocess at the edge
+# sentry: no-test-needed(documentation) — that auto_fix's functions carry docstrings
+# sentry: no-test-needed(stdlib) — subprocess.run's timeout mechanics; the tests stub it at the edge
 
 import json
 import os
@@ -39,11 +39,11 @@ from aipass.hooks.apps.handlers.lifecycle.auto_fix import (
     _checklist_marker,
     _run_pyright_check,
     _run_ruff_lint_structured,
-    _run_seedgo_checklist,
+    _run_sentry_checklist,
     handle,
 )
 from aipass.prax.apps.modules.logger import system_logger
-from aipass.seedgo.apps.modules.checklist import FINDING_MARKER
+from aipass.sentry.apps.modules.checklist import FINDING_MARKER
 
 
 def _kept_redirect() -> dict[str, str]:
@@ -105,22 +105,22 @@ class TestAutoFixSkips:
 
 
 class TestAutofixPython:
-    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_seedgo_checklist", return_value=[])
+    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_sentry_checklist", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_pyright_check", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_ruff_lint_structured", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_python_checks", return_value=[])
-    def test_python_no_errors(self, mock_py, mock_ruff_s, mock_pyright, mock_seedgo, tmp_path):
+    def test_python_no_errors(self, mock_py, mock_ruff_s, mock_pyright, mock_sentry, tmp_path):
         result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "clean.py")}})
         assert result["exit_code"] == 0
         parsed = json.loads(result["stdout"])
         assert parsed["systemMessage"] == "[diagnostics] ok"
         assert "sound" not in result
 
-    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_seedgo_checklist", return_value=[])
+    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_sentry_checklist", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_pyright_check", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_ruff_lint_structured", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_python_checks")
-    def test_python_syntax_error(self, mock_py, mock_ruff_s, mock_pyright, mock_seedgo, tmp_path):
+    def test_python_syntax_error(self, mock_py, mock_ruff_s, mock_pyright, mock_sentry, tmp_path):
         mock_py.return_value = ["SYNTAX: invalid syntax at line 5"]
         result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "bad.py")}})
         assert result["exit_code"] == 0
@@ -133,34 +133,34 @@ class TestAutofixPython:
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_pyright_check", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_ruff_lint_structured", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_python_checks", return_value=[])
-    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_seedgo_checklist")
+    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_sentry_checklist")
     def test_a_long_error_list_fits_what_the_model_is_shown_whole(
-        self, mock_seedgo, mock_py, mock_ruff, mock_pyright, tmp_path
+        self, mock_sentry, mock_py, mock_ruff, mock_pyright, tmp_path
     ):
         """All 268 captured_ledger_store warnings since 09-27: this context over Claude Code's 10,000-unit line."""
-        mock_seedgo.return_value = [f"through_the_command: row {n} " + "x" * 400 for n in range(60)]
+        mock_sentry.return_value = [f"through_the_command: row {n} " + "x" * 400 for n in range(60)]
         result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "long.py")}})
         context = json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"]
         assert len(context.encode("utf-16-le")) // 2 <= 10_000
         assert context.startswith("[AUTO-FIX] 60 error(s) in long.py")
         assert "Do not skip or defer." in context
-        assert f"drone @seedgo checklist {tmp_path / 'long.py'} has every row" in context
+        assert f"drone @sentry checklist {tmp_path / 'long.py'} has every row" in context
 
-    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_seedgo_checklist", return_value=[])
+    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_sentry_checklist", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_pyright_check", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_ruff_lint_structured", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_python_checks")
-    def test_python_ruff_lint_errors(self, mock_py, mock_ruff_s, mock_pyright, mock_seedgo, tmp_path):
+    def test_python_ruff_lint_errors(self, mock_py, mock_ruff_s, mock_pyright, mock_sentry, tmp_path):
         mock_py.return_value = ["LINT: bad.py:10:1: F401 unused import"]
         result = handle({"tool_name": "Write", "tool_input": {"file_path": str(tmp_path / "bad.py")}})
         parsed = json.loads(result["stdout"])
         assert "LINT" in parsed["hookSpecificOutput"]["additionalContext"]
         assert result.get("sound") == "auto fix diagnostics"
 
-    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_seedgo_checklist", return_value=[])
+    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_sentry_checklist", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_ruff_lint_structured", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_python_checks", return_value=[])
-    def test_python_pyright_errors(self, mock_py, mock_ruff_s, mock_seedgo, tmp_path):
+    def test_python_pyright_errors(self, mock_py, mock_ruff_s, mock_sentry, tmp_path):
         with patch(
             "aipass.hooks.apps.handlers.lifecycle.auto_fix._run_pyright_check",
             return_value=[{"line": 42, "message": "Cannot assign to declared type"}],
@@ -174,24 +174,24 @@ class TestAutofixPython:
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_pyright_check", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_ruff_lint_structured", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_python_checks", return_value=[])
-    def test_seedgo_violations_surfaced(self, mock_py, mock_ruff_s, mock_pyright, tmp_path):
+    def test_sentry_violations_surfaced(self, mock_py, mock_ruff_s, mock_pyright, tmp_path):
         with patch(
-            "aipass.hooks.apps.handlers.lifecycle.auto_fix._run_seedgo_checklist",
+            "aipass.hooks.apps.handlers.lifecycle.auto_fix._run_sentry_checklist",
             return_value=["missing file header"],
         ):
             result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "noheader.py")}})
 
         parsed = json.loads(result["stdout"])
-        assert "SEEDGO: missing file header" in parsed["hookSpecificOutput"]["additionalContext"]
+        assert "SENTRY: missing file header" in parsed["hookSpecificOutput"]["additionalContext"]
         assert result.get("sound") == "auto fix diagnostics"
 
 
 class TestAutoFixStateFile:
-    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_seedgo_checklist", return_value=[])
+    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_sentry_checklist", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_pyright_check")
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_ruff_lint_structured")
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_python_checks", return_value=[])
-    def test_state_file_written_on_errors(self, mock_py, mock_ruff_s, mock_pyright, mock_seedgo, tmp_path):
+    def test_state_file_written_on_errors(self, mock_py, mock_ruff_s, mock_pyright, mock_sentry, tmp_path):
         mock_ruff_s.return_value = [{"line": 5, "message": "F401: unused import"}]
         mock_pyright.return_value = [{"line": 10, "message": "Type error here"}]
 
@@ -202,11 +202,11 @@ class TestAutoFixStateFile:
         assert state is not None
         assert [e["line"] for e in state["errors"]] == [5, 10]
 
-    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_seedgo_checklist", return_value=[])
+    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_sentry_checklist", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_pyright_check", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_ruff_lint_structured", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_python_checks", return_value=[])
-    def test_state_file_cleared_on_no_errors(self, mock_py, mock_ruff_s, mock_pyright, mock_seedgo, tmp_path):
+    def test_state_file_cleared_on_no_errors(self, mock_py, mock_ruff_s, mock_pyright, mock_sentry, tmp_path):
         ds.save_seat("nosession", str(tmp_path / "old.py"), [{"line": 1, "message": "old"}])
 
         result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "old.py")}})
@@ -214,12 +214,12 @@ class TestAutoFixStateFile:
         assert "sound" not in result
         assert ds.load_seat("nosession") == {}
 
-    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_seedgo_checklist", return_value=[])
+    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_sentry_checklist", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_pyright_check", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_ruff_lint_structured", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_python_checks", return_value=[])
     def test_a_clean_edit_elsewhere_keeps_another_files_errors(
-        self, mock_py, mock_ruff_s, mock_pyright, mock_seedgo, tmp_path
+        self, mock_py, mock_ruff_s, mock_pyright, mock_sentry, tmp_path
     ):
         ds.save_seat("nosession", str(tmp_path / "old.py"), [{"line": 1, "message": "old"}])
 
@@ -361,12 +361,12 @@ class TestAutoFixSubprocessChecks:
         assert _run_pyright_check(str(target)) == []
 
     @patch("subprocess.run")
-    def test_run_seedgo_checklist_returns_violations(self, mock_run):
+    def test_run_sentry_checklist_returns_violations(self, mock_run):
         """REVERSED 2026-08-30. This test pinned a marker nobody printed.
 
         It fed the parser a cross and asserted two findings came back, and it
         passed for months while the live path returned [] on every file — the
-        fixture was the only place the cross still existed. @seedgo reported the
+        fixture was the only place the cross still existed. @sentry reported the
         drift (checklist emits ``[FAIL]``); the output below is copied from a
         real run against a violating file.
         """
@@ -381,7 +381,7 @@ class TestAutoFixSubprocessChecks:
             ),
         )
         with patch.dict("os.environ", {"AIPASS_HOME": _FAKE_HOME}):
-            violations = _run_seedgo_checklist(_FAKE_PY)
+            violations = _run_sentry_checklist(_FAKE_PY)
         assert len(violations) == 2
         assert "debug_print" in violations[0]
         assert "hardcoded_path" in violations[1]
@@ -394,7 +394,7 @@ class TestAutoFixSubprocessChecks:
         """
         mock_run.return_value = MagicMock(returncode=0, stdout="✗ missing encoding param\n✗ bad import\n")
         with patch.dict("os.environ", {"AIPASS_HOME": _FAKE_HOME}):
-            assert _run_seedgo_checklist(_FAKE_PY) == []
+            assert _run_sentry_checklist(_FAKE_PY) == []
 
     @patch("subprocess.run")
     def test_a_nonzero_exit_no_longer_discards_the_findings(self, mock_run):
@@ -406,7 +406,7 @@ class TestAutoFixSubprocessChecks:
         """
         mock_run.return_value = MagicMock(returncode=1, stdout="  [FAIL] — meta: Missing META block\n")
         with patch.dict("os.environ", {"AIPASS_HOME": _FAKE_HOME}):
-            violations = _run_seedgo_checklist(_FAKE_PY)
+            violations = _run_sentry_checklist(_FAKE_PY)
         assert len(violations) == 1
         assert "meta" in violations[0]
 
@@ -422,11 +422,11 @@ class TestAutoFixSubprocessChecks:
             ),
         )
         with patch.dict("os.environ", {"AIPASS_HOME": _FAKE_HOME}):
-            violations = _run_seedgo_checklist(_FAKE_PY)
+            violations = _run_sentry_checklist(_FAKE_PY)
         assert len(violations) == 1
         assert violations[0].endswith("apps/handlers/)")
 
-    def test_the_marker_is_read_from_seedgo_not_restated_here(self):
+    def test_the_marker_is_read_from_sentry_not_restated_here(self):
         """One definition. The next marker change cannot silently disagree."""
         assert _checklist_marker() == FINDING_MARKER
 
@@ -445,36 +445,36 @@ class TestAutoFixSubprocessChecks:
             result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "x.py")}})
         return json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"], warned
 
-    def test_an_unreadable_seedgo_falls_back_loudly(self, tmp_path):
-        context, warned = self._edit_with_fallback_marker(tmp_path, side_effect=ImportError("no seedgo"))
-        assert "SEEDGO: meta: Missing META" in context
+    def test_an_unreadable_sentry_falls_back_loudly(self, tmp_path):
+        context, warned = self._edit_with_fallback_marker(tmp_path, side_effect=ImportError("no sentry"))
+        assert "SENTRY: meta: Missing META" in context
         assert [c.args[-1] for c in warned.call_args_list] == ["[FAIL]"]
 
-    def test_a_seedgo_publishing_no_marker_falls_back_loudly(self, tmp_path):
+    def test_a_sentry_publishing_no_marker_falls_back_loudly(self, tmp_path):
         context, warned = self._edit_with_fallback_marker(tmp_path, return_value=object())
-        assert "SEEDGO: meta: Missing META" in context
+        assert "SENTRY: meta: Missing META" in context
         assert [c.args[-1] for c in warned.call_args_list] == ["[FAIL]"]
 
     @pytest.mark.parametrize("spell", _HOOK_SPELLINGS)
     @patch("subprocess.run")
-    def test_run_seedgo_skips_claude_hooks(self, mock_run, tmp_path, spell):
+    def test_run_sentry_skips_claude_hooks(self, mock_run, tmp_path, spell):
         # AIPASS_HOME set, so the skip is what answers and not the missing home.
         home = {**_kept_redirect(), "AIPASS_HOME": str(tmp_path)}
         with patch.dict("os.environ", home, clear=True):
-            violations = _run_seedgo_checklist(spell(tmp_path / ".claude" / "hooks" / "myhook.py"))
+            violations = _run_sentry_checklist(spell(tmp_path / ".claude" / "hooks" / "myhook.py"))
         assert violations == []
         mock_run.assert_not_called()
 
-    def test_run_seedgo_skips_without_aipass_home(self, tmp_path):
+    def test_run_sentry_skips_without_aipass_home(self, tmp_path):
         with patch.dict("os.environ", _kept_redirect(), clear=True):
-            violations = _run_seedgo_checklist(str(tmp_path / "check.py"))
+            violations = _run_sentry_checklist(str(tmp_path / "check.py"))
         assert violations == []
 
 
 class TestRetiredLoggerDebugRule:
     """logger.debug() is supported by prax's SystemLogger — the rule is retired.
 
-    The rule told the fleet the opposite of what @seedgo teaches, on the same
+    The rule told the fleet the opposite of what @sentry teaches, on the same
     line of code, for as long as both existed. These pin the retirement so it
     cannot be re-added by reflex.
     """
@@ -638,7 +638,7 @@ class TestScratchIsNotJudged:
     )
     def test_a_tree_path_that_only_resembles_scratch_is_still_judged(self, parts, tmp_path, monkeypatch):
         monkeypatch.setattr(auto_fix, "_run_python_checks", lambda path: ["LINT: mod.py:1:1: F401 unused"])
-        monkeypatch.setattr(auto_fix, "_run_seedgo_checklist", lambda path: [])
+        monkeypatch.setattr(auto_fix, "_run_sentry_checklist", lambda path: [])
         monkeypatch.setattr(auto_fix, "_run_pyright_check", lambda path, unanswered: [])
         monkeypatch.setattr(auto_fix, "_run_ruff_lint_structured", lambda path, unanswered: [])
 

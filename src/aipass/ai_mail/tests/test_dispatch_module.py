@@ -9,8 +9,8 @@
 """Tests for apps/modules/dispatch.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the handler modules _orchestrate_dispatch_send reaches parse and import
-# seedgo: no-test-needed(constant) — DISPATCH_ID_ENV and the other literal env-var names dispatch.py reads
+# sentry: no-test-needed(ruff) — that the handler modules _orchestrate_dispatch_send reaches parse and import
+# sentry: no-test-needed(constant) — DISPATCH_ID_ENV and the other literal env-var names dispatch.py reads
 
 import json
 import os
@@ -404,11 +404,11 @@ class TestOrchestrateWake:
 
     def test_a_busy_target_fails_the_wake_verb_with_a_re_wake_line(self, monkeypatch, capsys):
         busy = DispatchStatus()
-        busy.warn(BUSY_STEP, "@seedgo busy (PID 166599, since 2026-10-25T15:16:22) — NOT woken; the mail waits")
+        busy.warn(BUSY_STEP, "@sentry busy (PID 166599, since 2026-10-25T15:16:22) — NOT woken; the mail waits")
         monkeypatch.setattr(f"{MOD}.console", _mock_console([]))
 
         with patch(f"{_H_WAKE}.wake_branch", MagicMock(return_value=(busy, True))):
-            _wake(["@seedgo"])
+            _wake(["@sentry"])
 
         assert "NOT woken" in capsys.readouterr().err
         assert display.command_failed() is True
@@ -476,11 +476,11 @@ class TestOrchestrateWake:
 
     def test_sender_flag_loses_to_the_verified_caller(self, monkeypatch):
         """With a rail, the wake is attributed to who actually ran it."""
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "sentry")
         monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
         wake_calls = self._run_sender_flag(monkeypatch)
         assert len(wake_calls) == 1
-        assert wake_calls[0]["sender"] == "@seedgo"
+        assert wake_calls[0]["sender"] == "@sentry"
 
     def test_custom_message(self, monkeypatch):
         """A custom message after the branch is passed to wake_branch."""
@@ -768,7 +768,7 @@ class TestOrchestrateDispatchSend:
 
     def test_a_busy_target_sends_the_mail_then_fails_the_command_and_says_re_wake(self, monkeypatch, capsys):
         busy = DispatchStatus()
-        busy.warn(BUSY_STEP, "@seedgo busy (PID 166599, since 2026-10-25T15:16:22) — NOT woken; the mail waits")
+        busy.warn(BUSY_STEP, "@sentry busy (PID 166599, since 2026-10-25T15:16:22) — NOT woken; the mail waits")
         send = MagicMock(return_value=(True, None))
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
@@ -776,11 +776,11 @@ class TestOrchestrateDispatchSend:
         with _send_patches(
             {f"{_ES}.send_to_single": send, f"{_H_WAKE}.wake_branch": MagicMock(return_value=(busy, True))}
         ):
-            _send(["@seedgo", "Subject", "Body"])
+            _send(["@sentry", "Subject", "Body"])
 
         send.assert_called_once()
         err = capsys.readouterr().err
-        assert "NOT woken" in err and "drone @ai_mail dispatch wake @seedgo" in err
+        assert "NOT woken" in err and "drone @ai_mail dispatch wake @sentry" in err
         assert display.command_failed() is True
         assert not any("Wake-back enabled" in line for line in printed)
 
@@ -959,7 +959,7 @@ class TestSpoofedSenderRefusal:
 
     def test_spoofed_daemon_from_flag_never_reaches_wake(self, monkeypatch):
         """THE canary: --from @daemon out of a non-daemon seat wakes nothing."""
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "sentry")
         errors: list[str] = []
         monkeypatch.setattr(f"{MOD}.error", lambda msg: errors.append(msg))
         printed: list[str] = []
@@ -975,11 +975,11 @@ class TestSpoofedSenderRefusal:
         wake.assert_not_called()
         send.assert_not_called()  # a refused dispatch must not send the email either
         assert errors, "refusal must be loud on stderr"
-        assert "@daemon" in errors[0] and "@seedgo" in errors[0]
+        assert "@daemon" in errors[0] and "@sentry" in errors[0]
 
     def test_spoofed_daemon_sender_flag_never_reaches_wake(self, monkeypatch):
         """Same hole, second door: `dispatch wake @x --sender @daemon`."""
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "sentry")
         errors: list[str] = []
         monkeypatch.setattr(f"{MOD}.error", lambda msg: errors.append(msg))
         printed: list[str] = []
@@ -1035,7 +1035,7 @@ class TestSpoofedSenderRefusal:
 
     def test_wake_sender_comes_from_the_rail_not_the_from_flag(self, monkeypatch):
         """A legal --from still moves the mail identity, never the wake identity."""
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "sentry")
         monkeypatch.setattr(f"{MOD}.error", lambda msg: None)
         monkeypatch.setattr(f"{MOD}.console", _mock_console([]))
 
@@ -1062,11 +1062,11 @@ class TestSpoofedSenderRefusal:
         # The mail is still authored by @spawn...
         assert resolve.call_args[0][0] == "@spawn"
         # ...and the wake is attributed to whoever actually ran the command.
-        assert wake_calls[0]["sender"] == "@seedgo"
+        assert wake_calls[0]["sender"] == "@sentry"
 
     def test_non_privileged_from_flag_still_dispatches(self, monkeypatch):
         """No collateral damage: an ordinary --from send is untouched."""
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "sentry")
         errors: list[str] = []
         monkeypatch.setattr(f"{MOD}.error", lambda msg: errors.append(msg))
         printed: list[str] = []
@@ -1180,7 +1180,7 @@ class TestBothVerbsAgreeAtTheManagerGate:
 
     def test_ordinary_seat_gets_one_verdict_from_both_verbs(self, monkeypatch):
         """The control: the gate is seen to CLOSE, so agreement above is not two Nones."""
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "sentry")
         verdicts = self._verdicts_from_both_verbs()
 
         assert len(verdicts) == 2

@@ -3,13 +3,13 @@
 # Description: module_registry orchestrator - handle_command routing
 # Version: 1.1.0
 # Created: 2026-04-05
-# Modified: 2026-10-22
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/module_registry.py and apps/handlers/module_registry_handler.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — importlib loading an adapter from its dotted path
+# sentry: no-test-needed(stdlib) — importlib loading an adapter from its dotted path
 
 from __future__ import annotations
 
@@ -223,22 +223,22 @@ class TestHandleCommandInfo:
     def test_info_valid_module_returns_true(self, capsys: pytest.CaptureFixture[str]) -> None:
         """'info' prints name, version and description (mutant: version dropped)."""
         info = _make_module_info(
-            name="seedgo",
+            name="sentry",
             version="2.1.0",
-            description="Seedgo audit system",
+            description="Sentry audit system",
         )
 
         with (
             patch(f"{_MOD}.get_module_info", return_value=info),
             patch(f"{_MOD}.json_handler", autospec=True),
         ):
-            result = handle_command("info", ["seedgo"])
+            result = handle_command("info", ["sentry"])
 
         assert result is True
         printed = capsys.readouterr().out
-        assert "seedgo" in printed
+        assert "sentry" in printed
         assert "2.1.0" in printed
-        assert "Seedgo audit system" in printed
+        assert "Sentry audit system" in printed
 
 
 class TestHandleCommandCheck:

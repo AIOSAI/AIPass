@@ -3,14 +3,14 @@
 # Description: metadata.id — the project credential a new registry is born with
 # Version: 1.0.2
 # Created: 2026-08-24
-# Modified: 2026-10-31
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/registry.py's project-credential mint (metadata.id)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(documentation) — docstrings on load_registry, resolve_project_credential and add_to_registry
-# seedgo: no-test-needed(stdlib) — uuid.uuid4's randomness and uuid.UUID's own validation, which the mint relies on
+# sentry: no-test-needed(documentation) — docstrings on load_registry, resolve_project_credential and add_to_registry
+# sentry: no-test-needed(stdlib) — uuid.uuid4's randomness and uuid.UUID's own validation, which the mint relies on
 
 import json
 import uuid

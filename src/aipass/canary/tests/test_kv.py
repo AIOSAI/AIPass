@@ -3,14 +3,14 @@
 # Description: Tests for the key/value store - drone @canary kv, its JSON form, its file and its refusals
 # Version: 1.1.0
 # Created: 2026-09-20
-# Modified: 2026-10-19
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/kv.py and the kv store it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(log_structure) — that a refusal also lands in the prax log
-# seedgo: no-test-needed(json_structure) — that each answer and each refusal lands in the json trail
+# sentry: no-test-needed(log_structure) — that a refusal also lands in the prax log
+# sentry: no-test-needed(json_structure) — that each answer and each refusal lands in the json trail
 
 import json
 import os
@@ -646,7 +646,7 @@ def test_a_key_spelled_like_a_flag_is_stored_not_obeyed(monkeypatch, capsys, tmp
 )
 def test_a_help_flag_anywhere_explains_and_never_executes(monkeypatch, capsys, tmp_path, argv_tail):
     """A question must never execute, including in a position that would be data."""
-    # seedgo's help_flag_safety rule; the cost is that a key spelled --help cannot be set from here.
+    # sentry's help_flag_safety rule; the cost is that a key spelled --help cannot be set from here.
     path = _store(tmp_path, "colour\tred\n")
     before = tmp_path.joinpath("store.txt").read_bytes()
 

@@ -3,15 +3,15 @@
 # Description: Tests for stale log sweep in log_audit
 # Version: 1.4.1
 # Created: 2026-07-10
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/logging/log_watchdog.py's sweep_stale_logs and apps/modules/log_audit.py's sweep route."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(error_handling) — _file_age_days answering 0.0 when the stat fails, covered by that row
-# seedgo: no-test-needed(error_handling) — _sweep_directory's warning when an unlink fails, covered by that row
-# seedgo: no-test-needed(json_structure) — sweep_stale_logs' log_sweep log_operation record, covered by that row
+# sentry: no-test-needed(error_handling) — _file_age_days answering 0.0 when the stat fails, covered by that row
+# sentry: no-test-needed(error_handling) — _sweep_directory's warning when an unlink fails, covered by that row
+# sentry: no-test-needed(json_structure) — sweep_stale_logs' log_sweep log_operation record, covered by that row
 
 import os
 import sys

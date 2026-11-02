@@ -3,7 +3,7 @@
 # Description: Unit tests for MonitoringEvent and MonitoringQueue
 # Version: 1.4.0
 # Created: 2026-03-24
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/event_queue.py and the branch_scope.py filter it drives."""
@@ -11,7 +11,7 @@
 # Tests for the thread-safe event queue used by the monitoring system.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — BranchScope's matching rules, covered by tests/test_branch_scope.py
+# sentry: no-test-needed(through_the_command) — BranchScope's matching rules, covered by tests/test_branch_scope.py
 
 import threading
 from datetime import datetime, timedelta
@@ -200,7 +200,7 @@ class TestMonitoringQueue:
             action="executed",
             message="plan step done",
             level="info",
-            caller="SEEDGO",
+            caller="SENTRY",
             pid=9999,
         )
         q.enqueue(original)
@@ -212,7 +212,7 @@ class TestMonitoringQueue:
         assert retrieved.action == "executed"
         assert retrieved.message == "plan step done"
         assert retrieved.level == "info"
-        assert retrieved.caller == "SEEDGO"
+        assert retrieved.caller == "SENTRY"
         assert retrieved.pid == 9999
 
     def test_priority_ordering_across_dequeues(self, monitoring_queue_cls, monitoring_event_cls):
@@ -574,25 +574,25 @@ class TestQueueScope:
     def test_default_queue_is_unscoped(self, monitoring_queue_cls, monitoring_event_cls):
         """No scope set — every branch still queues, unchanged behaviour."""
         q = monitoring_queue_cls(maxsize=10)
-        assert q.enqueue(monitoring_event_cls(priority=1, event_type="log", branch="SEEDGO", message="a")) is True
+        assert q.enqueue(monitoring_event_cls(priority=1, event_type="log", branch="SENTRY", message="a")) is True
         assert q.suppressed_count() == 0
 
     def test_in_scope_event_queues(self, monitoring_queue_cls, monitoring_event_cls):
         q = monitoring_queue_cls(maxsize=10)
-        q.set_scope(self._scope("SEEDGO"))
-        assert q.enqueue(monitoring_event_cls(priority=1, event_type="log", branch="SEEDGO", message="a")) is True
+        q.set_scope(self._scope("SENTRY"))
+        assert q.enqueue(monitoring_event_cls(priority=1, event_type="log", branch="SENTRY", message="a")) is True
         assert q.size() == 1
 
     def test_out_of_scope_event_is_dropped(self, monitoring_queue_cls, monitoring_event_cls):
         q = monitoring_queue_cls(maxsize=10)
-        q.set_scope(self._scope("SEEDGO"))
+        q.set_scope(self._scope("SENTRY"))
         assert q.enqueue(monitoring_event_cls(priority=1, event_type="log", branch="FLOW", message="a")) is False
         assert q.size() == 0
 
     def test_suppressed_events_are_counted(self, monitoring_queue_cls, monitoring_event_cls):
         """Status output can then say the screen is quiet because of the scope."""
         q = monitoring_queue_cls(maxsize=10)
-        q.set_scope(self._scope("SEEDGO"))
+        q.set_scope(self._scope("SENTRY"))
         for i in range(3):
             q.enqueue(monitoring_event_cls(priority=1, event_type="log", branch="FLOW", message=f"a{i}"))
         assert q.suppressed_count() == 3
@@ -602,7 +602,7 @@ class TestQueueScope:
     ):
         """Scoped-out events are wanted-gone, not lost — no warning, no error."""
         q = monitoring_queue_cls(maxsize=10)
-        q.set_scope(self._scope("SEEDGO"))
+        q.set_scope(self._scope("SENTRY"))
         q.enqueue(monitoring_event_cls(priority=1, event_type="log", branch="FLOW", message="a"))
         assert event_queue_module.logger.warning.call_count == 0
         assert event_queue_module.logger.error.call_count == 0
@@ -611,14 +611,14 @@ class TestQueueScope:
     def test_bypass_scope_always_queues(self, monitoring_queue_cls, monitoring_event_cls):
         """Monitor self-diagnostics ('file watcher unavailable') survive any scope."""
         q = monitoring_queue_cls(maxsize=10)
-        q.set_scope(self._scope("SEEDGO"))
+        q.set_scope(self._scope("SENTRY"))
         event = monitoring_event_cls(priority=1, event_type="log", branch="PRAX", message="watcher down")
         assert q.enqueue(event, bypass_scope=True) is True
         assert q.size() == 1
 
     def test_scope_can_be_cleared(self, monitoring_queue_cls, monitoring_event_cls):
         q = monitoring_queue_cls(maxsize=10)
-        q.set_scope(self._scope("SEEDGO"))
+        q.set_scope(self._scope("SENTRY"))
         q.set_scope(None)
         assert q.enqueue(monitoring_event_cls(priority=1, event_type="log", branch="FLOW", message="a")) is True
 

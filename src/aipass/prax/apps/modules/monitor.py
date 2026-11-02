@@ -3,7 +3,7 @@
 # Description: Unified Monitoring Module
 # Version: 0.5.1
 # Created: 2025-11-23
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """PRAX Monitor Module - Mission Control for Autonomous Branches."""
@@ -94,7 +94,7 @@ def print_help():
         ("drone @prax monitor run all", "Explicit all-branches monitoring"),
         (
             "drone @prax monitor run \\[branches]",
-            "Monitor specific branches (comma-separated)\n    Example: drone @prax monitor run seedgo,cli,flow",
+            "Monitor specific branches (comma-separated)\n    Example: drone @prax monitor run sentry,cli,flow",
         ),
         (
             "drone @prax monitor run commons",
@@ -118,7 +118,7 @@ def print_help():
     console.print("\n  [dim]# Monitor all branches[/dim]")
     console.print("  $ drone @prax monitor run")
     console.print("\n  [dim]# Monitor specific branches[/dim]")
-    console.print("  $ drone @prax monitor run seedgo,cli,flow")
+    console.print("  $ drone @prax monitor run sentry,cli,flow")
     console.print(
         "\n  [dim]A scope covers each named branch's logs, file changes and CLI sessions,"
         "\n  plus commands it issued or was targeted by. The scope is set at launch"
@@ -154,7 +154,7 @@ def _dispatch_run(run_args: List[str]) -> bool:
     """Route 'monitor run' — a bare 'commons' target opens the live social feed.
 
     'commons --logs' escapes back to the branch-log tail, and mixed lists
-    (e.g. 'seedgo,commons') keep treating commons as a branch (feed is
+    (e.g. 'sentry,commons') keep treating commons as a branch (feed is
     standalone-only in v1).
     """
     bad_flag = unknown_option(run_args, ("--logs",))
@@ -488,8 +488,8 @@ def _file_watcher_worker():
     from aipass.prax.apps.handlers.monitoring.filesystem_handler import MonitoringFileHandler
 
     COMMAND_INDICATOR_FILES = {
-        "standards_audit_log.json": "seedgo audit",
-        "standards_checklist_log.json": "seedgo checklist",
+        "standards_audit_log.json": "sentry audit",
+        "standards_checklist_log.json": "sentry checklist",
     }
 
     from aipass.prax.apps.handlers.config.load import _find_repo_root

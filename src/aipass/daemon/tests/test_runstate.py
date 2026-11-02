@@ -3,14 +3,14 @@
 # Description: Tests for the scheduler runstate — load/save, due-logic, catch-up, slots
 # Version: 1.1.0
 # Created: 2026-06-15
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/schedule/runstate.py — the scheduler's runstate and its due-logic."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — WINDOW_MINUTES' and MISSED_MARKER's values; the tests read them, never restate them
-# seedgo: no-test-needed(stdlib) — json's parse of the runstate file and datetime.fromisoformat's accepted forms
+# sentry: no-test-needed(constant) — WINDOW_MINUTES' and MISSED_MARKER's values; the tests read them, never restate them
+# sentry: no-test-needed(stdlib) — json's parse of the runstate file and datetime.fromisoformat's accepted forms
 
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
@@ -71,7 +71,7 @@ def interval_job():
 @pytest.fixture
 def daily_job():
     return {
-        "owner": "@seedgo",
+        "owner": "@sentry",
         "id": "daily-audit",
         "enabled": True,
         "schedule": {"type": "daily", "time": "04:00"},
@@ -351,7 +351,7 @@ class TestPruneOrphans:
 DAY = "2026-09-07"
 
 
-def windowed_job(time_str="03:00", catch_up=None, owner="@seedgo", job_id="nightly"):
+def windowed_job(time_str="03:00", catch_up=None, owner="@sentry", job_id="nightly"):
     """A daily job, optionally opted in to catch-up."""
     schedule = {"type": "daily", "time": time_str}
     if catch_up is not None:
@@ -418,7 +418,7 @@ class TestCatchUpDueness:
         job = windowed_job(catch_up=True)
         runstate = {
             "jobs": {
-                "@seedgo/nightly": {
+                "@sentry/nightly": {
                     "last_run": datetime(2026, 9, 7, 9, 1).isoformat(),
                     "last_success_at": datetime(2026, 9, 7, 9, 1).isoformat(),
                 }
@@ -457,21 +457,21 @@ class TestCaughtUpStamp:
         runstate = {"jobs": {}}
         update_job_runstate(
             runstate,
-            "@seedgo",
+            "@sentry",
             "nightly",
             {"type": "daily", "time": "03:00"},
             timestamp="2026-09-07T09:00:00",
             caught_up=True,
         )
-        assert runstate["jobs"]["@seedgo/nightly"]["caught_up"] == "2026-09-07T09:00:00"
+        assert runstate["jobs"]["@sentry/nightly"]["caught_up"] == "2026-09-07T09:00:00"
 
     def test_an_ordinary_run_clears_a_stale_marker(self):
         # A stale marker would report a healthy job as chronically late.
-        runstate = {"jobs": {"@seedgo/nightly": {"caught_up": "2026-08-30T09:00:00"}}}
+        runstate = {"jobs": {"@sentry/nightly": {"caught_up": "2026-08-30T09:00:00"}}}
         update_job_runstate(
-            runstate, "@seedgo", "nightly", {"type": "daily", "time": "03:00"}, timestamp="2026-09-07T03:02:00"
+            runstate, "@sentry", "nightly", {"type": "daily", "time": "03:00"}, timestamp="2026-09-07T03:02:00"
         )
-        assert runstate["jobs"]["@seedgo/nightly"]["caught_up"] is None
+        assert runstate["jobs"]["@sentry/nightly"]["caught_up"] is None
 
 
 class TestMissedWindowRecord:
@@ -482,19 +482,19 @@ class TestMissedWindowRecord:
     def test_first_note_is_new_and_the_rest_are_not(self):
         runstate = {"jobs": {}}
         now = datetime(2026, 9, 7, 9, 0)
-        assert note_missed_window(runstate, "@seedgo", "nightly", now) is True
-        assert note_missed_window(runstate, "@seedgo", "nightly", now) is False
-        assert runstate["jobs"]["@seedgo/nightly"][MISSED_MARKER] == DAY
+        assert note_missed_window(runstate, "@sentry", "nightly", now) is True
+        assert note_missed_window(runstate, "@sentry", "nightly", now) is False
+        assert runstate["jobs"]["@sentry/nightly"][MISSED_MARKER] == DAY
 
     def test_a_new_day_is_reported_again(self):
-        runstate = {"jobs": {"@seedgo/nightly": {MISSED_MARKER: "2026-09-06"}}}
-        assert note_missed_window(runstate, "@seedgo", "nightly", datetime(2026, 9, 7, 9, 0)) is True
+        runstate = {"jobs": {"@sentry/nightly": {MISSED_MARKER: "2026-09-06"}}}
+        assert note_missed_window(runstate, "@sentry", "nightly", datetime(2026, 9, 7, 9, 0)) is True
 
     def test_the_marker_does_not_make_a_job_look_run(self):
         # note_missed_window creates a row; read as a run, it would silence the catch-up it reports.
         runstate = {"jobs": {}}
         now = datetime(2026, 9, 7, 9, 0)
-        note_missed_window(runstate, "@seedgo", "nightly", now)
+        note_missed_window(runstate, "@sentry", "nightly", now)
         assert is_job_due(windowed_job(catch_up=True), runstate, now=now) is True
 
     def test_window_label_names_the_window(self):
@@ -504,7 +504,7 @@ class TestMissedWindowRecord:
 WEEK_MINUTES = 7 * 24 * 60
 
 
-def slotted_job(slot=None, minutes=WEEK_MINUTES, owner="@seedgo", job_id="shadow-cycle-weekly"):
+def slotted_job(slot=None, minutes=WEEK_MINUTES, owner="@sentry", job_id="shadow-cycle-weekly"):
     schedule = {"type": "interval", "interval_minutes": minutes}
     if slot is not None:
         schedule["slot"] = slot
@@ -540,14 +540,14 @@ class TestNeedsSlotSeed:
         assert needs_slot_seed(slotted_job(), {"jobs": {}}) is True
 
     def test_a_job_that_has_run_does_not(self):
-        runstate = {"jobs": {"@seedgo/shadow-cycle-weekly": {"last_run": "2026-09-06T03:00:00"}}}
+        runstate = {"jobs": {"@sentry/shadow-cycle-weekly": {"last_run": "2026-09-06T03:00:00"}}}
         assert needs_slot_seed(slotted_job(), runstate) is False
 
     def test_a_blocked_job_still_needs_seeding(self):
         # record_job_blocked creates a row with no last_run; a "no row" test would never seed it.
         runstate = {
             "jobs": {
-                "@seedgo/shadow-cycle-weekly": {"last_status": "blocked", "last_blocked_at": "2026-09-07T01:34:52"}
+                "@sentry/shadow-cycle-weekly": {"last_status": "blocked", "last_blocked_at": "2026-09-07T01:34:52"}
             }
         }
         assert needs_slot_seed(slotted_job(), runstate) is True
@@ -568,7 +568,7 @@ class TestSeedIntervalSlot:
         job = slotted_job(slot="2026-09-06T03:00:00")
         seeded = seed_interval_slot(runstate, job, now=datetime(2026, 9, 7, 1, 34))
         assert seeded == "2026-09-06T03:00:00"
-        entry = runstate["jobs"]["@seedgo/shadow-cycle-weekly"]
+        entry = runstate["jobs"]["@sentry/shadow-cycle-weekly"]
         assert entry["next_run"] == "2026-09-13T03:00:00"
         assert entry["seeded_from_slot"] == "2026-09-06T03:00:00"
 

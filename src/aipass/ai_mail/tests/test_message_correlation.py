@@ -3,7 +3,7 @@
 # Description: Tests that a delivered message can be traced back to the sender's sent record
 # Version: 1.0.1
 # Created: 2026-08-16
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py and the reply/inbox_ops/inbox_cleanup correlation it enables."""
@@ -12,7 +12,7 @@
 # as ``sent_id`` so either side can find the other. The recipient's id stays authoritative.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(notify) — delivery.py's _emit_notification_event call, silenced here; see tests/test_notify.py
+# sentry: no-test-needed(notify) — delivery.py's _emit_notification_event call, silenced here; see tests/test_notify.py
 
 import json
 from contextlib import contextmanager
@@ -73,8 +73,8 @@ def _setup_branch(tmp_path, email: str = "@target", name: str = "TARGET"):
 
 def _email_data(**extra) -> dict:
     data = {
-        "from": "@seedgo",
-        "from_name": "SEEDGO",
+        "from": "@sentry",
+        "from_name": "SENTRY",
         "to": "@target",
         "subject": "RE: Fix torn-write json_handler",
         "message": "final sweep leg SHIPPED",
@@ -93,7 +93,7 @@ class TestSentIdRidesAlong:
     """The sender's id must survive delivery."""
 
     def test_delivered_message_carries_the_senders_id(self, tmp_path, repo_root, noop_inbox_lock):
-        """The exact @seedgo/@devpulse failure: sent-side id must be findable."""
+        """The exact @sentry/@devpulse failure: sent-side id must be findable."""
         branches = _setup_branch(tmp_path)
 
         with patch.object(delivery_mod, "get_all_branches", return_value=branches):
@@ -165,10 +165,10 @@ class TestReplyLaneCorrelates:
     """
 
     def test_reply_sent_id_matches_the_senders_sent_record(self, tmp_path, repo_root, noop_inbox_lock):
-        """The @seedgo -> @devpulse path, end to end."""
+        """The @sentry -> @devpulse path, end to end."""
 
         branches = _setup_branch(tmp_path, email="@devpulse", name="DEVPULSE")
-        sender_path = tmp_path / "branches" / "seedgo"
+        sender_path = tmp_path / "branches" / "sentry"
         (sender_path / ".ai_mail.local").mkdir(parents=True)
         (sender_path / ".ai_mail.local" / "inbox.json").write_text(
             json.dumps({"mailbox": "inbox", "total_messages": 0, "unread_count": 0, "messages": []}),
@@ -186,7 +186,7 @@ class TestReplyLaneCorrelates:
             ),
             patch(
                 "aipass.ai_mail.apps.handlers.users.branch_detection.get_branch_info_from_registry",
-                return_value={"email": "@seedgo", "name": "SEEDGO"},
+                return_value={"email": "@sentry", "name": "SENTRY"},
             ),
         ):
             success, message, reply_id = send_reply(sender_path, original, "final sweep leg SHIPPED")

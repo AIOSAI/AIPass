@@ -3,13 +3,13 @@
 # Description: Tests for migrate_json_file - moving live state off trio-owned paths
 # Version: 1.0.0
 # Created: 2026-08-07
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/config.py: migrate_json_file and _archive_legacy_file."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(behaviour) — the trio regeneration in apps/handlers/json/json_handler.py; the json handler owns it
+# sentry: no-test-needed(behaviour) — the trio regeneration in apps/handlers/json/json_handler.py; the json handler owns it
 
 import json
 from pathlib import Path

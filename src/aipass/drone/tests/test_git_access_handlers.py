@@ -3,13 +3,13 @@
 # Description: Tests for the git door handlers — diff, log, show, commit, checkout, PR routing and help
 # Version: 1.0.3
 # Created: 2026-10-08
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/git/commit_handler.py and the diff, log, show and checkout handlers beside it."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — subprocess.run, which every git call here reaches as a recorded stub
+# sentry: no-test-needed(stdlib) — subprocess.run, which every git call here reaches as a recorded stub
 
 from __future__ import annotations
 
@@ -155,7 +155,7 @@ class TestLogHandler:
 class TestShowHandler:
     """git show — reading history at global read tier.
 
-    Requested by @seedgo via @devpulse 2026-08-13: auditing a bypass prune means
+    Requested by @sentry via @devpulse 2026-08-13: auditing a bypass prune means
     reading what was DELETED, and status/diff/log only show the present. Reading
     history is not a write, so every citizen auditing its own past can do it.
     """
@@ -175,15 +175,15 @@ class TestShowHandler:
         mock_result = MagicMock(returncode=0, stdout='{"bypass": []}\n', stderr="")
 
         with patch("aipass.drone.apps.handlers.git.show_handler.subprocess.run", return_value=mock_result) as run:
-            result = show_object("abc1234", "src/aipass/prax/.seedgo/bypass.json")
+            result = show_object("abc1234", "src/aipass/prax/.sentry/bypass.json")
 
         assert result["success"] is True
-        assert run.call_args[0][0] == ["git", "show", "abc1234:src/aipass/prax/.seedgo/bypass.json"]
+        assert run.call_args[0][0] == ["git", "show", "abc1234:src/aipass/prax/.sentry/bypass.json"]
 
     def test_show_is_not_scoped_to_callers_branch(self, repo_dir: Path) -> None:
         """A path outside the caller's own branch must be readable.
 
-        The whole point is @seedgo verifying @prax's prune. Scoping this to the
+        The whole point is @sentry verifying @prax's prune. Scoping this to the
         caller's directory the way status/diff/log do would refuse exactly the
         use case it was granted for.
         """
@@ -233,11 +233,11 @@ class TestShowCommandRouting:
         assert "show" in GIT_ACCESS_TIERS["global"]["commands"]
         assert "show" not in GIT_ACCESS_TIERS["owner"]["commands"]
 
-    def test_non_owner_may_show(self, seedgo_dir: Path) -> None:
+    def test_non_owner_may_show(self, sentry_dir: Path) -> None:
         """The requesting citizen is a non-owner — that is the whole point."""
-        assert verify_git_access("show") == "seedgo"
+        assert verify_git_access("show") == "sentry"
 
-    def test_show_dispatches_to_handler(self, seedgo_dir: Path) -> None:
+    def test_show_dispatches_to_handler(self, sentry_dir: Path) -> None:
         with patch("aipass.drone.apps.modules.git_module.show_handler.show_object") as mock_show:
             mock_show.return_value = {"success": True, "content": "file body", "message": "ok"}
             result = handle_command("show", ["abc1234", "some/path.py"])
@@ -246,7 +246,7 @@ class TestShowCommandRouting:
         assert result["exit_code"] == 0
         assert result["stdout"] == "file body"
 
-    def test_show_without_ref_returns_usage(self, seedgo_dir: Path) -> None:
+    def test_show_without_ref_returns_usage(self, sentry_dir: Path) -> None:
         result = handle_command("show", [])
         assert result["exit_code"] == 1
         assert "Usage" in result["stderr"]

@@ -3,14 +3,14 @@
 # Description: Tests for watchdog seat attribution (FPLAN-0452 P2 — only MY dispatches reach me)
 # Version: 2.0.2
 # Created: 2026-08-22
-# Modified: 2026-10-22
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/watchdog/dispatches.py: whose completion was that, and what is still out."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that handlers/watchdog/dispatches.py parses and imports
-# seedgo: no-test-needed(documentation) — that seat_email, is_mine and outstanding carry docstrings
+# sentry: no-test-needed(ruff) — that handlers/watchdog/dispatches.py parses and imports
+# sentry: no-test-needed(documentation) — that seat_email, is_mine and outstanding carry docstrings
 
 import json
 from datetime import datetime, timedelta, timezone
@@ -37,7 +37,7 @@ def test_my_own_dispatch_is_mine():
 
 
 def test_another_citizens_dispatch_is_not_mine():
-    """@flow dispatching @seedgo is @flow's wake, not this seat's."""
+    """@flow dispatching @sentry is @flow's wake, not this seat's."""
     assert dispatches.is_mine({"sender": "@flow"}, SEAT) is False
 
 

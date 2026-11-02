@@ -3,7 +3,7 @@
 # Description: Rollover pipeline — the rollover module's run, status and triggers, normalize
 # Version: 1.5.1
 # Created: 2026-04-25
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # Category: memory/tests
 # =============================================
 
@@ -13,7 +13,7 @@
 # carried-debt lane. Siblings: test_rollover_pipeline_{extraction,valve,todo}.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — orchestrator.execute_rollover(); tests/test_orchestrator_exec.py
+# sentry: no-test-needed(covered_elsewhere) — orchestrator.execute_rollover(); tests/test_orchestrator_exec.py
 
 import json
 import tempfile
@@ -600,7 +600,7 @@ class TestRolloverSurvivesCarriedDebt:
         return extractor
 
     @staticmethod
-    def _seedgo_shaped_file(tmp_path):
+    def _sentry_shaped_file(tmp_path):
         """A file over its session count with one over-cap summary in the HEAD, where rollover never archives."""
         trinity = tmp_path / "standin" / ".trinity"
         trinity.mkdir(parents=True)
@@ -620,7 +620,7 @@ class TestRolloverSurvivesCarriedDebt:
 
     def test_entries_actually_leave_the_file(self, ext, tmp_path):
         """Not "reported success" — MEASURED on disk, which is where the lie was."""
-        file_path = self._seedgo_shaped_file(tmp_path)
+        file_path = self._sentry_shaped_file(tmp_path)
         before_count = len(json.loads(file_path.read_text(encoding="utf-8"))["sessions"])
 
         result = ext.extract_items(file_path)
@@ -635,7 +635,7 @@ class TestRolloverSurvivesCarriedDebt:
 
     def test_the_carried_entry_is_still_there_and_still_over_cap(self, ext, tmp_path):
         """Rollover must not 'fix' the fat entry — editing text to satisfy a cap would be authoring memories."""
-        file_path = self._seedgo_shaped_file(tmp_path)
+        file_path = self._sentry_shaped_file(tmp_path)
         result = ext.extract_items(file_path)
 
         # The run must have archived something, or "still there" passes on a dead lane.
@@ -648,7 +648,7 @@ class TestRolloverSurvivesCarriedDebt:
 
     def test_a_second_run_is_not_re_archiving_the_same_entries(self, ext, tmp_path):
         """A file that shrank leaves the second run strictly less to do (no duplicate-work loop)."""
-        file_path = self._seedgo_shaped_file(tmp_path)
+        file_path = self._sentry_shaped_file(tmp_path)
         first = ext.extract_items(file_path)
         ext.commit_trimmed(file_path, first["trimmed"], first["source"])
         second = ext.extract_items(file_path)

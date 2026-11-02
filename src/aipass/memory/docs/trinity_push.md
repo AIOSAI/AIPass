@@ -9,7 +9,7 @@ standard. Per branch it does exactly three things:
 
 1. **Re-renders the machine frame.** `document_metadata` is rebuilt as a **CLOSED set** — any key
    the standard does not name is pruned, `status` with it; `managed_by` takes the exact branch
-   **directory** name (what @seedgo's checker compares against — the registry's own `name` field
+   **directory** name (what @sentry's checker compares against — the registry's own `name` field
    disagrees in casing for six citizens); `_usage` and the `guidelines` block come **verbatim** from
    the gold-source templates; all four `*_meta` lines are re-composed from config + template prose.
 2. **Prunes every non-canonical entry — and moves todos to a file, never to vectors.** See the law
@@ -72,7 +72,7 @@ derivation is mechanical: a field is required when the config says so, optional 
   per entry.
 - An unknown section returns `None` and **stays unknown** rather than quietly becoming an open one.
 
-@seedgo's `trinity_groups` scores the same standard; see [trinity_standard.md](trinity_standard.md).
+@sentry's `trinity_groups` scores the same standard; see [trinity_standard.md](trinity_standard.md).
 
 ---
 

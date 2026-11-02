@@ -3,13 +3,13 @@
 # Description: Tests for generic_adapter.capture_main()
 # Version: 1.0.1
 # Created: 2026-04-03
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/generic_adapter.py, capture_main()."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — the sys.stdout and sys.stderr swap beneath capture_main
+# sentry: no-test-needed(stdlib) — the sys.stdout and sys.stderr swap beneath capture_main
 
 from __future__ import annotations
 

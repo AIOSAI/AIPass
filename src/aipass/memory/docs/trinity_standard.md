@@ -7,8 +7,8 @@
 The standard has one rule: **numbers come from `memory.config.json`, prose comes from
 `memory/templates/*.template.json`, entry content comes from the agent**, and nothing holds a fact
 it can derive. This page is that rule as @memory's code holds it. The file shape it guards (sections,
-entry fields, the checker's scan groups and weights) is @seedgo's `trinity` standard,
-`seedgo/apps/handlers/aipass_standards/trinity.md`, enforced by `trinity_check.py`.
+entry fields, the checker's scan groups and weights) is @sentry's `trinity` standard,
+`sentry/apps/handlers/aipass_standards/trinity.md`, enforced by `trinity_check.py`.
 
 ---
 
@@ -84,7 +84,7 @@ CLOSED shape: every field an entry may carry, its type, whether it is required, 
 else may appear. There is no per-entry TOTAL, for the same reason: a total lets one field eat the
 entry.
 
-The canonical text field keeps its own top-level `field` / `max_chars` keys: @seedgo's
+The canonical text field keeps its own top-level `field` / `max_chars` keys: @sentry's
 `trinity_groups` and the state-tab renderer read them. `load_entry_limits` reconciles the two so they
 can never disagree at runtime: the top-level `max_chars` wins, because it is the number the agent is
 shown in its own `*_meta` line.
@@ -141,7 +141,7 @@ the limit loses nothing, and `detector._should_rollover` fires only above the li
 `entry_limits.resolve_entry_types()` is the single implementation that both the write gate
 (`load_entry_limits`) and `render_tab` call, so `entry_limits.per_branch` overrides apply to both,
 as `rollover.per_branch` does. A branch is never *told* one number in its `*_meta` line and
-*measured* against another, which would fail @seedgo's Meta-lines rule permanently because the
+*measured* against another, which would fail @sentry's Meta-lines rule permanently because the
 renderer would keep rewriting the line the checker keeps rejecting.
 
 ---
@@ -188,7 +188,7 @@ rollover's own scoped normalize.
 `template_versions` reports each template's **`document_metadata.schema_version`**, not its
 `version`: the two templates disagree on `version` (LOCAL 2.0.0, OBSERVATIONS 1.0.0) and agree on
 `schema_version` (3.0.0), and the receipt reports the *structure* a branch was stamped with. Pinned
-by a test; @seedgo's checker compares against the same field.
+by a test; @sentry's checker compares against the same field.
 
 Written by `handlers/templates/receipt.py`. Only three lanes may stamp it (`memory push`,
 `spawn birth`, `reset`) and any other value is refused. The push lane stamps **only branches it

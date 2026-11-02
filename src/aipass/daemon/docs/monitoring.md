@@ -17,7 +17,7 @@ name is a refusal on the same terms. It closes with an entry-health block source
 and entry-size (is any entry over its character cap).
 
 The call lives in `apps/modules/activity_report.py`, never in `apps/handlers/monitoring/memory_health.py`
-— seedgo blocks handler-to-other-branch imports, so the module layer is the only legal caller.
+— sentry blocks handler-to-other-branch imports, so the module layer is the only legal caller.
 
 Caps are **not** re-encoded on this side. They live in @memory's `memory.config.json`, where defaults
 are deep-merged with per-branch overrides; a copy here would be a snapshot that drifts.

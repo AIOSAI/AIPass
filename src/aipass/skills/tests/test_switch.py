@@ -3,7 +3,7 @@
 # Description: Skill off-switch tests
 # Version: 1.3.0
 # Created: 2026-08-18
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -20,8 +20,8 @@
 """Tests for apps/handlers/switch_handler.py and the runner door that reads it."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/handlers/switch_handler.py parses and carries no unused import
-# seedgo: no-test-needed(stdlib) — json's rejection of a malformed document; only the refusal built on it is pinned
+# sentry: no-test-needed(ruff) — that apps/handlers/switch_handler.py parses and carries no unused import
+# sentry: no-test-needed(stdlib) — json's rejection of a malformed document; only the refusal built on it is pinned
 
 import json
 import os

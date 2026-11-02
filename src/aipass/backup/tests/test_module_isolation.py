@@ -3,14 +3,14 @@
 # Description: drive/client.py resolving through a re-imported parent package (ordered pair)
 # Version: 1.0.4
 # Created: 2026-08-08
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/drive/client.py resolving through a re-imported parent package."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every file under handlers/drive/ parses and lints clean
-# seedgo: no-test-needed(documentation) — docstrings on module and class attributes
+# sentry: no-test-needed(ruff) — that every file under handlers/drive/ parses and lints clean
+# sentry: no-test-needed(documentation) — docstrings on module and class attributes
 
 import importlib
 import sys

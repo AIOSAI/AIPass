@@ -40,7 +40,7 @@ not a branch here falls back to module routing, logged at INFO. That lane resolv
 | Type | Modules | Routing |
 |------|---------|---------|
 | Internal | `git` | `importlib` import → `handle_command()` |
-| External | `seedgo`, `cli`, `spawn` | `generic_adapter.capture_main()` via `routing_config.json` |
+| External | `sentry`, `cli`, `spawn` | `generic_adapter.capture_main()` via `routing_config.json` |
 
 External modules are declared in `apps/handlers/routing_config.json` with entry points,
 descriptions and versions.
@@ -57,7 +57,7 @@ timeout.
 
 **Interactive mode is a property of BRANCH (subprocess) routing only.** It means "inherit the
 terminal instead of capturing the subprocess", and `_handle_module()` runs in-process and takes no
-interactive parameter — so a module target never receives it and never could. `@seedgo`, `@cli` and
+interactive parameter — so a module target never receives it and never could. `@sentry`, `@cli` and
 `@spawn` are both module and branch, so an interactive command against them takes the subprocess
 lane and renders live.
 
@@ -71,7 +71,7 @@ channel it fires on.
 plain when piped: bare `@branch` (no-args introspection), `@branch --help`, `@branch -h`.
 
 **Per-command allowlist** (`INTERACTIVE_COMMANDS` in `apps/drone.py`): `monitor` (prax live TUI),
-`audit` (seedgo progress bars), `watchdog` (devpulse live monitoring), `status` (Rich formatting).
+`audit` (sentry progress bars), `watchdog` (devpulse live monitoring), `status` (Rich formatting).
 
 **Per-branch allowlist** (`INTERACTIVE_BRANCHES`): `cli` (user-facing Rich output) and `backup`
 (snapshot/restore progress needs a live terminal). To add one, edit either tuple in `apps/drone.py`.
@@ -89,7 +89,7 @@ dispatching:
   branch to look up)
 
 Modules that own `help` as a real verb pass `bare_help=False`; `discovery` does, so
-`drone @discovery help @seedgo` keeps working while `... help @seedgo --help` still explains.
+`drone @discovery help @sentry` keeps working while `... help @sentry --help` still explains.
 
 The check lives **inside** each `handle_command()`, not in the router, because every module also
 has a standalone `__main__` path that takes raw argv and never touches the router. One predicate,
@@ -105,12 +105,12 @@ live verb is fired to prove the trap.
 ```python
 from aipass.drone import resolve_branch, list_branches, route_command
 
-path = resolve_branch("@seedgo")
+path = resolve_branch("@sentry")
 
 active = list_branches()                      # status defaults to "active" — the default IS a filter
 by_type = list_branches(branch_type="core")   # empty: no row carries a type — see below
 
-result = route_command("@seedgo", "audit", args=["aipass", "@drone"])
+result = route_command("@sentry", "audit", args=["aipass", "@drone"])
 print(result.stdout)
 print(result.exit_code)
 ```
@@ -152,7 +152,7 @@ except BranchNotFoundError:
     print("Branch not found in registry")
 
 try:
-    result = route_command("@seedgo", "audit", args=["aipass"], timeout=120)
+    result = route_command("@sentry", "audit", args=["aipass"], timeout=120)
 except CommandExecutionError as e:
     print(f"Command failed: {e}")
 ```
@@ -163,7 +163,7 @@ The hierarchy lives in `apps/handlers/exceptions.py`.
 
 ## External projects
 
-Infrastructure modules (`seedgo`, `cli`, `git`, `spawn`) work from external AIPass projects without
+Infrastructure modules (`sentry`, `cli`, `git`, `spawn`) work from external AIPass projects without
 per-project registration.
 
 - **Dual registry lookup.** `registry_handler.py` merges the local project registry with the AIPass

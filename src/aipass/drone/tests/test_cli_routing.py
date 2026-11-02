@@ -3,13 +3,13 @@
 # Description: CLI Routing Tests for Drone (adapted from universal template)
 # Version: 1.1.1
 # Created: 2026-03-27
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/drone.py, the drone CLI entry point and its routing."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — importlib.import_module() itself, beneath the bare-module lane
+# sentry: no-test-needed(stdlib) — importlib.import_module() itself, beneath the bare-module lane
 
 import json
 import sys
@@ -196,7 +196,7 @@ class TestMainScan:
     def test_scan_success(self) -> None:
         """scan with target delegates to scan module."""
         with (
-            patch("sys.argv", ["drone", "scan", "@seedgo"]),
+            patch("sys.argv", ["drone", "scan", "@sentry"]),
             patch(
                 "aipass.drone.apps.modules.scan.scan",
                 return_value=[{"name": "audit"}],
@@ -208,7 +208,7 @@ class TestMainScan:
     def test_scan_failure(self) -> None:
         """scan returning None means failure -> exit 1."""
         with (
-            patch("sys.argv", ["drone", "scan", "@seedgo"]),
+            patch("sys.argv", ["drone", "scan", "@sentry"]),
             patch("aipass.drone.apps.modules.scan.scan", return_value=None),
         ):
             result = main()
@@ -233,12 +233,12 @@ class TestMainActivate:
     def test_activate_with_target(self) -> None:
         """activate with target delegates to _handle_activate."""
         with (
-            patch("sys.argv", ["drone", "activate", "@seedgo"]),
+            patch("sys.argv", ["drone", "activate", "@sentry"]),
             patch(f"{_DRONE}._handle_activate", return_value=0) as mock_act,
         ):
             result = main()
         assert result == 0
-        mock_act.assert_called_once_with("@seedgo")
+        mock_act.assert_called_once_with("@sentry")
 
 
 class TestMainList:
@@ -281,12 +281,12 @@ class TestMainAtTarget:
     def test_at_target_delegates(self) -> None:
         """@target routes to _handle_target."""
         with (
-            patch("sys.argv", ["drone", "@seedgo", "audit"]),
+            patch("sys.argv", ["drone", "@sentry", "audit"]),
             patch(f"{_DRONE}._handle_target", return_value=0) as mock_tgt,
         ):
             result = main()
         assert result == 0
-        mock_tgt.assert_called_once_with(["@seedgo", "audit"])
+        mock_tgt.assert_called_once_with(["@sentry", "audit"])
 
 
 class TestMainModuleRouting:
@@ -448,7 +448,7 @@ class TestMainUnknownCommand:
     def test_unknown_bare_branch_name(self) -> None:
         """Bare branch name shows @ prefix hint."""
         with (
-            patch("sys.argv", ["drone", "seedgo"]),
+            patch("sys.argv", ["drone", "sentry"]),
             patch(f"{_DRONE}._discover_modules", return_value=[]),
             patch(f"{_DRONE}._handle_custom_command", return_value=-1),
             patch(
@@ -665,33 +665,33 @@ class TestHandleTarget:
 
     def test_no_args_introspection(self) -> None:
         """@target alone routes with interactive=True (mutant: introspection routes interactive=False)."""
-        ok = CommandResult(stdout="", stderr="", exit_code=0, branch="seedgo", command="")
-        rc, mock_route, _ = self._run(["@seedgo"], is_module=False, result=ok)
+        ok = CommandResult(stdout="", stderr="", exit_code=0, branch="sentry", command="")
+        rc, mock_route, _ = self._run(["@sentry"], is_module=False, result=ok)
         assert rc == 0
-        mock_route.assert_called_once_with("@seedgo", interactive=True)
+        mock_route.assert_called_once_with("@sentry", interactive=True)
 
     def test_help_flag(self) -> None:
         """@target --help routes with interactive=True (mutant: help routes interactive=False)."""
-        ok = CommandResult(stdout="", stderr="", exit_code=0, branch="seedgo", command="--help")
-        rc, mock_route, _ = self._run(["@seedgo", "--help"], is_module=False, result=ok)
+        ok = CommandResult(stdout="", stderr="", exit_code=0, branch="sentry", command="--help")
+        rc, mock_route, _ = self._run(["@sentry", "--help"], is_module=False, result=ok)
         assert rc == 0
-        mock_route.assert_called_once_with("@seedgo", "--help", interactive=True)
+        mock_route.assert_called_once_with("@sentry", "--help", interactive=True)
 
     def test_command_routing(self, capsys: pytest.CaptureFixture[str]) -> None:
         """@target verb routes with its args and writes the child's stdout (mutant: stdout write removed)."""
-        out = CommandResult(stdout="output", stderr="", exit_code=0, branch="seedgo", command="audit")
-        rc, mock_route, _ = self._run(["@seedgo", "audit", "aipass"], is_module=False, result=out)
+        out = CommandResult(stdout="output", stderr="", exit_code=0, branch="sentry", command="audit")
+        rc, mock_route, _ = self._run(["@sentry", "audit", "aipass"], is_module=False, result=out)
         assert rc == 0
-        assert mock_route.call_args.args == ("@seedgo", "audit")
+        assert mock_route.call_args.args == ("@sentry", "audit")
         assert mock_route.call_args.kwargs["args"] == ["aipass"]
         assert capsys.readouterr().out == "output"
 
     def test_short_help_flag(self) -> None:
         """@target -h routes with interactive=True (mutant: help routes interactive=False)."""
-        ok = CommandResult(stdout="", stderr="", exit_code=0, branch="seedgo", command="-h")
-        rc, mock_route, _ = self._run(["@seedgo", "-h"], is_module=False, result=ok)
+        ok = CommandResult(stdout="", stderr="", exit_code=0, branch="sentry", command="-h")
+        rc, mock_route, _ = self._run(["@sentry", "-h"], is_module=False, result=ok)
         assert rc == 0
-        mock_route.assert_called_once_with("@seedgo", "-h", interactive=True)
+        mock_route.assert_called_once_with("@sentry", "-h", interactive=True)
 
     def test_status_routes_interactive(self) -> None:
         """status routes with interactive=True for Rich color output (mutant: `interactive = False`)."""
@@ -701,19 +701,19 @@ class TestHandleTarget:
         assert mock_route.call_args.kwargs["interactive"] is True
 
     def test_help_for_a_module_that_is_not_a_local_branch(self) -> None:
-        """@seedgo --help where seedgo is a module and no branch goes to the module (mutant: lane `if False`)."""
+        """@sentry --help where sentry is a module and no branch goes to the module (mutant: lane `if False`)."""
         # Once pinned via the exception fallback (route_command raised, the handler re-routed);
         # the lane is now DECIDED before any branch call, not discovered by failing one (DPLAN-0315 item 1).
-        rc, mock_route, mock_hm = self._run(["@seedgo", "--help"], is_module=True)
+        rc, mock_route, mock_hm = self._run(["@sentry", "--help"], is_module=True)
         assert rc == 0
-        mock_hm.assert_called_once_with("seedgo", ["--help"])
+        mock_hm.assert_called_once_with("sentry", ["--help"])
         mock_route.assert_not_called()
 
     def test_command_for_a_module_that_is_not_a_local_branch(self) -> None:
         """Same for a real verb: degradation outside AIPass stays intact (mutant: lane `if False`)."""
-        rc, mock_route, mock_hm = self._run(["@seedgo", "audit"], is_module=True)
+        rc, mock_route, mock_hm = self._run(["@sentry", "audit"], is_module=True)
         assert rc == 0
-        mock_hm.assert_called_once_with("seedgo", ["audit"])
+        mock_hm.assert_called_once_with("sentry", ["audit"])
         mock_route.assert_not_called()
 
     @staticmethod
@@ -784,11 +784,11 @@ class TestHandleCustomCommand:
     def test_matched_routes_success(self, capsys: pytest.CaptureFixture[str]) -> None:
         """A matched shortcut routes its stored target, verb and args (mutant: stored args dropped)."""
         cmd_data = {
-            "target": "@seedgo",
+            "target": "@sentry",
             "command": "audit",
             "args": ["aipass"],
         }
-        mock_result = CommandResult(stdout="ok", stderr="", exit_code=0, branch="seedgo", command="audit")
+        mock_result = CommandResult(stdout="ok", stderr="", exit_code=0, branch="sentry", command="audit")
         with (
             patch("sys.argv", ["drone", "audit"]),
             patch(self._MATCH, return_value=(cmd_data, [])),
@@ -797,7 +797,7 @@ class TestHandleCustomCommand:
         ):
             result = main()
         assert result == 0
-        assert mock_route.call_args.args == ("@seedgo", "audit")
+        assert mock_route.call_args.args == ("@sentry", "audit")
         assert mock_route.call_args.kwargs["args"] == ["aipass"]
         mock_hm.assert_not_called()
         assert capsys.readouterr().out == "ok"
@@ -1078,7 +1078,7 @@ class TestInertTimeoutIsReported:
     """Two lanes take no timeout: module routing and interactive commands.
 
     The flag parses in both, so before this the operator's number vanished in
-    silence — `drone @seedgo audit ... --drone-timeout 5` ran unbounded and
+    silence — `drone @sentry audit ... --drone-timeout 5` ran unbounded and
     said nothing. A silently discarded cap is the same species of defect as a
     silent kill, which is what the rest of this change removes.
     """
@@ -1086,7 +1086,7 @@ class TestInertTimeoutIsReported:
     def test_a_dropped_timeout_is_logged(self, caplog: pytest.LogCaptureFixture) -> None:
         """An interactive route logs the dropped number (mutant: the logger.warning removed)."""
         with caplog.at_level("WARNING"):
-            _route(["@seedgo", "audit", "aipass", "--drone-timeout", "5"])
+            _route(["@sentry", "audit", "aipass", "--drone-timeout", "5"])
         assert any("--drone-timeout 5" in record.getMessage() for record in caplog.records)
 
     def test_the_reason_travels_with_the_warning(self, caplog: pytest.LogCaptureFixture) -> None:
@@ -1098,7 +1098,7 @@ class TestInertTimeoutIsReported:
     def test_no_flag_means_no_noise(self, caplog: pytest.LogCaptureFixture) -> None:
         """No flag, no warning (mutant: the None guard tests `== 0`)."""
         with caplog.at_level("WARNING"):
-            _route(["@seedgo", "audit", "aipass"])
+            _route(["@sentry", "audit", "aipass"])
         assert not [r for r in caplog.records if r.levelname == "WARNING"]
 
     def test_the_operator_is_told_not_just_the_log(self, capsys: pytest.CaptureFixture[str]) -> None:
@@ -1109,7 +1109,7 @@ class TestInertTimeoutIsReported:
     def test_an_interactive_route_reports_before_running(self, capsys: pytest.CaptureFixture[str]) -> None:
         """The interactive lane reports the dropped cap (mutant: its report call removed)."""
         # End to end through _handle_target: this is the lane that was silent.
-        _, mock_route, _ = _route(["@seedgo", "audit", "aipass", "--drone-timeout", "5"])
+        _, mock_route, _ = _route(["@sentry", "audit", "aipass", "--drone-timeout", "5"])
         assert "--drone-timeout 5 not applied" in capsys.readouterr().err
         assert mock_route.call_args.kwargs["interactive"] is True
 

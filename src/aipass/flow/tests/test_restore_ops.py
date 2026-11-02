@@ -3,13 +3,13 @@
 # Description: Tests for restore_ops handler -- plan restore business logic, and validator
 # Version: 1.1.0
 # Created: 2026-03-29
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/plan/restore_ops.py and apps/handlers/plan/validator.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(ruff) — that the module parses and imports
 
 import os
 import tempfile

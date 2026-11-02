@@ -8,7 +8,7 @@ files. Tests that exercise real production paths therefore contend on those
 shared files, and under pytest-xdist two tests of the same branch on
 different workers race: a reader catches the file mid-truncate and dies with
 ``JSONDecodeError: Expecting value`` (seen live in daemon runstate, hooks
-trust_registry, seedgo bypass utils), and a torn write leaves debris that
+trust_registry, sentry bypass utils), and a torn write leaves debris that
 breaks later runs deterministically until an ``ensure_*`` path regenerates
 the file.
 

@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-01
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Reads the test-write policy: may agents create new test files here?
@@ -88,7 +88,7 @@ def _missing(start: str | Path) -> Policy:
             "This gate fails CLOSED on an absent policy: a switch that unlocks when its own "
             "config disappears is repealed by deleting one file.\n"
             "The ruling it stands in for: the owner, 2026-09-01 (DPLAN-0323) — agents do not create "
-            "tests while @seedgo's test_quality v5 pack lands. EDITING an existing test is untouched.\n"
+            "tests while @sentry's test_quality v5 pack lands. EDITING an existing test is untouched.\n"
             f'Cure: create {expected} with {{"agent_test_writing": "on"}} to permit test '
             'creation here, or "off" plus an "allow" array to enforce the fleet ruling.'
         ),

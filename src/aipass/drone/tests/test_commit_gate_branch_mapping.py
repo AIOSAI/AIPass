@@ -3,13 +3,13 @@
 # Description: Commit gate maps changed files to real citizens, never template trees; --all lints what exists
 # Version: 1.1.0
 # Created: 2026-08-13
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/git/commit_handler.py's commit --all gates: the branch a changed file maps to, and lint."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — pathlib's own parent walk and is_relative_to
+# sentry: no-test-needed(stdlib) — pathlib's own parent walk and is_relative_to
 
 from __future__ import annotations
 

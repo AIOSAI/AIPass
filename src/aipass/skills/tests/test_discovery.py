@@ -3,15 +3,15 @@
 # Description: Unit tests for skills discovery
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # Category: skills/tests
 # =============================================
 
 """Tests for apps/modules/discovery.py, apps/handlers/discovery_handler.py and the skill discovery they power."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that discovery_handler.py and module_paths.py parse and import
-# seedgo: no-test-needed(constant) — the "discovery_scan" log-operation name json_handler records
+# sentry: no-test-needed(ruff) — that discovery_handler.py and module_paths.py parse and import
+# sentry: no-test-needed(constant) — the "discovery_scan" log-operation name json_handler records
 
 import pytest
 import tempfile

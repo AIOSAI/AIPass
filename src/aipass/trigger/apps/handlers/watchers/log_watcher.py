@@ -3,7 +3,7 @@
 # Description: Centralized log file watcher for system_logs directory
 # Version: 1.3.0
 # Created: 2026-01-31
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -51,7 +51,7 @@ def generate_error_hash(module_name: str, message: str) -> str:
 
 
 def detect_branch_from_log(log_file: str) -> str:
-    """Detect branch from log filename: seedgo_audit.log -> SEEDGO."""
+    """Detect branch from log filename: sentry_audit.log -> SENTRY."""
     try:
         name = Path(log_file).stem
         if "_" in name:

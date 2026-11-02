@@ -3,13 +3,13 @@
 # Description: Shared helpers for the attach lane's test files (test_host_attach*.py)
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Helpers shared by test_host_attach.py, test_host_attach_pump.py and test_host_attach_route.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(ruff) — that the module parses and imports
 
 import ast
 import threading

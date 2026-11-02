@@ -3,7 +3,7 @@
 # Description: Tests that an out-of-scope address is refused honestly, not reported as unknown
 # Version: 1.1.0
 # Created: 2026-08-14
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py -- honest refusal of hosted-project addresses."""
@@ -13,7 +13,7 @@
 # the hosted registries to the resolution map.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(shared) — _describe_unresolved_address(), private: its wording is pinned through the send here
+# sentry: no-test-needed(shared) — _describe_unresolved_address(), private: its wording is pinned through the send here
 
 import json
 import re

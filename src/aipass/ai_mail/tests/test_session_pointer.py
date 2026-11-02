@@ -3,7 +3,7 @@
 # Description: Tests for the durable per-branch session pointer
 # Version: 1.2.0
 # Created: 2026-08-20
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/dispatch/session_pointer.py -- encoding, round trip, atomicity, resume."""
@@ -13,7 +13,7 @@
 # the real ``~/.claude`` or inside a live branch.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — _BYTES_PER_MB, the internal MB conversion factor
+# sentry: no-test-needed(constant) — _BYTES_PER_MB, the internal MB conversion factor
 
 import json
 import sqlite3

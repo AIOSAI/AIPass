@@ -3,13 +3,13 @@
 # Description: Unit tests for trigger event bus core module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/core.py, the Trigger event bus."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(behaviour) — handlers wired by registry.setup_handlers; each has its own test file
+# sentry: no-test-needed(behaviour) — handlers wired by registry.setup_handlers; each has its own test file
 
 import sys
 

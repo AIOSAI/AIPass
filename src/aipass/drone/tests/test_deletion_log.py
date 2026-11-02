@@ -3,14 +3,14 @@
 # Description: Every drone delete, and every refused one, leaves a deletion record
 # Version: 1.1.1
 # Created: 2026-08-14
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/deletion_log.py, the safe_delete path writing it and apps/modules/door_deletion_log.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — json's line encoding of a record; the tests read records back through json
-# seedgo: no-test-needed(covered_elsewhere) — the broker daemon's own records, pinned in tests/test_broker.py
+# sentry: no-test-needed(stdlib) — json's line encoding of a record; the tests read records back through json
+# sentry: no-test-needed(covered_elsewhere) — the broker daemon's own records, pinned in tests/test_broker.py
 
 import json
 import os

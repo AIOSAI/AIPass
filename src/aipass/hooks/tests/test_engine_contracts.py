@@ -3,13 +3,13 @@
 # Description: The hook engine's contracts and resilience: bad config, log writes, fixtures, CLI routing, paths
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/engine.py: its contracts and error resilience."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — subprocess.run's process spawn and timeout mechanics; the tests stub it at the edge
+# sentry: no-test-needed(stdlib) — subprocess.run's process spawn and timeout mechanics; the tests stub it at the edge
 
 import importlib
 import json
@@ -76,7 +76,7 @@ class TestErrorResilience:
         assert "bad config" in loader_logger.error.call_args[0][0]
 
     def test_a_registry_bootstrap_lands_in_the_sandbox(self, temp_test_dir, tmp_path, monkeypatch, mock_logger):
-        """seedgo's runtime probe, 2026-09-14: this class created ~/.aipass/trusted_projects.json.
+        """sentry's runtime probe, 2026-09-14: this class created ~/.aipass/trusted_projects.json.
 
         The sandbox is checked BEFORE the call, so a run without the guard fails without touching the live file.
         """

@@ -3,7 +3,7 @@
 # Description: Tests for the branch log watcher's file reading, rotation drain and inode detection
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/log_watcher.py's file reading and rotation (_read_new_lines, on_modified)."""
@@ -11,7 +11,7 @@
 # How the watcher reads a log: position, rotated-tail drain across backups, inode detection.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — WatchdogObserver's event delivery is the watchdog package's
+# sentry: no-test-needed(external) — WatchdogObserver's event delivery is the watchdog package's
 
 import json
 from datetime import datetime

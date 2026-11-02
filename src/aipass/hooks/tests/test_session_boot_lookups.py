@@ -4,15 +4,15 @@
 # Description: Tests for session boot's lookups: claude binary, tmux, process tree, labels, home resolution
 # Branch: hooks
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_boot.py: the lookups the menu stands on."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/handlers/lifecycle/session_boot.py parses and imports
-# seedgo: no-test-needed(stdlib) — shutil.which and subprocess.run's own process-launch mechanics, stubbed at the edge
-# seedgo: no-test-needed(log_level) — logger.info, logger.warning and logger.error prose; that row judges them
+# sentry: no-test-needed(ruff) — that apps/handlers/lifecycle/session_boot.py parses and imports
+# sentry: no-test-needed(stdlib) — shutil.which and subprocess.run's own process-launch mechanics, stubbed at the edge
+# sentry: no-test-needed(log_level) — logger.info, logger.warning and logger.error prose; that row judges them
 
 import signal
 from pathlib import Path
@@ -257,7 +257,7 @@ class TestTmuxLookupsSurviveAMachineWithoutTmux:
     def test_kill_session_answers_false_when_tmux_is_absent(self):
         """check=False ignores an exit code; a missing binary never reaches one.
 
-        seedgo host_portability arm B, FPLAN-0554: the three kill-session calls
+        sentry host_portability arm B, FPLAN-0554: the three kill-session calls
         ran tmux with no probe and no handler, so FileNotFoundError came out of
         exec and took the caller with it.
         """

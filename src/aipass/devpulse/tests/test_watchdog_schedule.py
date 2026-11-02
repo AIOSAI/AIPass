@@ -3,15 +3,15 @@
 # Description: Tests for the watchdog schedule handler + router integration
 # Version: 1.1.1
 # Created: 2026-04-14
-# Modified: 2026-11-01
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/watchdog/schedule.py and the watchdog schedule command that drives it."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that handlers/watchdog/schedule.py parses and imports
-# seedgo: no-test-needed(documentation) — that parse_schedule, format_wait and wake_at carry docstrings
-# seedgo: no-test-needed(constant) — the wording of _SCHEDULE_HELP_TEXT
+# sentry: no-test-needed(ruff) — that handlers/watchdog/schedule.py parses and imports
+# sentry: no-test-needed(documentation) — that parse_schedule, format_wait and wake_at carry docstrings
+# sentry: no-test-needed(constant) — the wording of _SCHEDULE_HELP_TEXT
 
 import sys
 from datetime import datetime, timedelta

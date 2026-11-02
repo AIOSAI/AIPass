@@ -3,13 +3,13 @@
 # Description: Tests for apps/handlers/plan/create_ops.py and sibling plan handlers
 # Version: 1.3.0
 # Created: 2026-04-05
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/plan/create_ops.py and sibling plan handlers."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(ruff) — that the module parses and imports
 
 import os
 import tempfile

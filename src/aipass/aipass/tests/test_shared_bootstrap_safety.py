@@ -3,7 +3,7 @@
 # Description: Guard test — shared/'s four modules must stay stdlib-only (pre-drone)
 # Version: 1.1.0
 # Created: 2026-06-10
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests that shared/project_home.py and its sibling shared/ modules import with no branch dependency."""
@@ -11,8 +11,8 @@
 # bootstrap.py imports shared/ at `aipass init`, before drone/prax/trigger exist: no branch imports.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — project_home, registry_discovery and scaffold_content's
-# seedgo: no-test-needed(covered_elsewhere) — own return values; see tests/test_project_home.py and tests/test_adopt.py
+# sentry: no-test-needed(covered_elsewhere) — project_home, registry_discovery and scaffold_content's
+# sentry: no-test-needed(covered_elsewhere) — own return values; see tests/test_project_home.py and tests/test_adopt.py
 
 import subprocess
 import sys

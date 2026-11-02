@@ -18,7 +18,7 @@ lines. Three handlers hold what is not the tick lane itself:
 | `handlers/schedule/job_reference.py` | the static job-authoring reference `run --help` prints, as data | It is reference text, not logic; run.py still does the printing |
 
 **`catch_up_lane` fires nothing itself.** `fire` and `log` arrive as callables from
-`run.py`. A handler may not import a module — that is seedgo's encapsulation rule and
+`run.py`. A handler may not import a module — that is sentry's encapsulation rule and
 the circular import it exists to prevent — so injection is what keeps the dependency
 arrow pointing one way. It also means the lane is testable without a tick.
 
@@ -31,7 +31,7 @@ re-point the suite at the live lock.
 not redefined there: the drain branches on the same three words the fire returns, and
 one definition means they cannot drift.
 
-**The fire logic stays in run.py.** seedgo's module cap is 600 lines (600 or more fails as
+**The fire logic stays in run.py.** sentry's module cap is 600 lines (600 or more fails as
 "too large"), but prax names a log file after the nearest calling frame, so the FIRE and DONE
 lines reach `logs/run.log` only when run.py writes them.
 

@@ -4,14 +4,14 @@
 # Description: Tests for the comment budget: counter, PostToolUse handler, comments verb
 # Branch: hooks
 # Created: 2026-10-16
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/lifecycle/comment_budget.py, apps/modules/comment_scan.py and apps/modules/comments.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(documentation) — that the three files' functions carry docstrings
-# seedgo: no-test-needed(stdlib) — tokenize's own token stream and append_jsonl's rotation
+# sentry: no-test-needed(documentation) — that the three files' functions carry docstrings
+# sentry: no-test-needed(stdlib) — tokenize's own token stream and append_jsonl's rotation
 
 import json
 import os
@@ -70,8 +70,8 @@ class TestPythonCounter:
         text = "#!/bin/bash\n# ==== AIPass ====\n# Name: x.sh\n# =====\necho a\n# why\necho b\n"
         assert (comment_scan.scan(text, "shell").body, comment_scan.scan(text, "shell").comments) == (4, 1)
 
-    def test_a_seedgo_marker_is_a_directive(self):
-        text = "# seedgo: no-test-needed(stdlib) - covered elsewhere\n# a why\n" + _code(3)
+    def test_a_sentry_marker_is_a_directive(self):
+        text = "# sentry: no-test-needed(stdlib) - covered elsewhere\n# a why\n" + _code(3)
         assert comment_scan.scan(text, "python").runs == [(2, 2)]
 
     def test_a_header_lower_in_the_file_is_counted(self):

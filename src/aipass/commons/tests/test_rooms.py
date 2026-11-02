@@ -5,7 +5,7 @@
 # Date: 2026-03-24
 # Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -21,8 +21,8 @@
 """Tests for apps/handlers/rooms/room_ops.py and apps/modules/space.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every file in handlers/rooms/ parses and imports
-# seedgo: no-test-needed(library) — the colour rich.panel.Panel paints for a style name; a spy pins the name handed over
+# sentry: no-test-needed(ruff) — that every file in handlers/rooms/ parses and imports
+# sentry: no-test-needed(library) — the colour rich.panel.Panel paints for a style name; a spy pins the name handed over
 
 import sqlite3
 from typing import Any

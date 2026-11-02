@@ -3,7 +3,7 @@
 # Description: The todo lane of the verbs - the todos count shown never set, the rollover pad, the todo verbs
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/todo.py and the todo lane of apps/modules/rollover.py and rollover_config.py."""
@@ -15,7 +15,7 @@
 # same minted config and registry.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — push_defaults_to_per_branch() itself, tests/test_config_loader.py
+# sentry: no-test-needed(covered_elsewhere) — push_defaults_to_per_branch() itself, tests/test_config_loader.py
 
 import importlib
 import json
@@ -376,7 +376,7 @@ class TestTodoVerbs:
             todo,
             [
                 _todo_record(
-                    7, "Check on seedgo's errors in logs", reason="non-canonical", priority="high", status=log
+                    7, "Check on sentry's errors in logs", reason="non-canonical", priority="high", status=log
                 ),
                 _todo_record(9, "fix drone help", rolled="2026-09-15T02:00:00+10:00"),
             ],
@@ -388,7 +388,7 @@ class TestTodoVerbs:
         assert out.splitlines() == [
             "memory backlog: 2 record(s), oldest roll first (.backup/todo/memory/backlog.json)",
             "  #7 · 2026-09-01 · priority high · rolled 2026-09-15T01:00:00+10:00 · non-canonical"
-            " · Check on seedgo's errors in logs",
+            " · Check on sentry's errors in logs",
             "  #9 · 2026-09-01 · rolled 2026-09-15T02:00:00+10:00 · overflow · fix drone help",
         ], out
         assert "LOG-MARKER" not in out + captured.err
@@ -422,19 +422,19 @@ class TestTodoVerbs:
     def test_restore_renumbers_to_max_of_pad_and_backlog_plus_one(self, todo, capsys) -> None:
         _todo_pad(todo, range(9, 2, -1))
         _todo_backlog(
-            todo, [_todo_record(1, "Check on seedgo's errors in logs", priority="high"), _todo_record(2, "b")]
+            todo, [_todo_record(1, "Check on sentry's errors in logs", priority="high"), _todo_record(2, "b")]
         )
         capsys.readouterr()
         assert _todo_exit(todo, "restore", "1") == 0
         out = _ANSI.sub("", capsys.readouterr().out)
         assert out.splitlines() == [
-            "@memory todo restored: #1 -> #10 · Check on seedgo's errors in logs · pad now 8/10"
+            "@memory todo restored: #1 -> #10 · Check on sentry's errors in logs · pad now 8/10"
         ]
         pad = json.loads(todo.local.read_text(encoding="utf-8"))["todos"]
         assert pad[0] == {
             "number": 10,
             "date": "2026-09-01",
-            "task": "Check on seedgo's errors in logs",
+            "task": "Check on sentry's errors in logs",
             "priority": "high",
         }, "lists are newest-first: the restored todo carries the highest number, so it goes on top"
         assert [t["number"] for t in pad] == [10, 9, 8, 7, 6, 5, 4, 3]

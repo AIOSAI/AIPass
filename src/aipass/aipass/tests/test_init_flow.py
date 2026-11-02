@@ -3,14 +3,14 @@
 # Description: Tests for aipass init_flow Phase 3
 # Version: 1.3.0
 # Created: 2026-04-16
-# Modified: 2026-10-31
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/init_flow.py and the handlers it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every stage function and helper in init_flow.py parses and imports
-# seedgo: no-test-needed(documentation) — that the public stage_* functions carry docstrings
+# sentry: no-test-needed(ruff) — that every stage function and helper in init_flow.py parses and imports
+# sentry: no-test-needed(documentation) — that the public stage_* functions carry docstrings
 
 import json
 from pathlib import Path

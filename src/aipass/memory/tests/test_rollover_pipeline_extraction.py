@@ -3,14 +3,14 @@
 # Description: Rollover pipeline - the orchestrator's subprocess lanes and chroma path, and extraction
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # Category: memory/tests
 # =============================================
 
 """Tests for apps/handlers/rollover/orchestrator.py and extractor.py — subprocess lanes, chroma path, extraction."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — the real encoder and vector store behind store_vectors_subprocess()
+# sentry: no-test-needed(external) — the real encoder and vector store behind store_vectors_subprocess()
 
 import json
 import subprocess

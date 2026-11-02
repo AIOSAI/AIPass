@@ -3,7 +3,7 @@
 # Description: Rollover Orchestration Module
 # Version: 0.10.1
 # Created: 2025-11-16
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -181,7 +181,7 @@ def _handle_rollover_verb(args: List[str]) -> bool:
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """Handle rollover and config commands with seedgo-compliant introspection."""
+    """Handle rollover and config commands with sentry-compliant introspection."""
     # The entry point may still route top-level help here.
     if command in ("--help", "-h", "help"):
         print_help()
@@ -613,7 +613,7 @@ def _discover_handlers() -> dict[str, list[str]]:
 
 
 def print_introspection() -> None:
-    """Display module introspection info (seedgo standard)."""
+    """Display module introspection info (sentry standard)."""
     console.print()
     console.print("[bold cyan]rollover Module[/bold cyan]")
     console.print("Orchestrates memory rollover workflow: trigger detection, extraction, embedding, and vector storage")

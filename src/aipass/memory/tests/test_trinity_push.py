@@ -3,7 +3,7 @@
 # Description: Red-first pins for the trinity push — the archive-verify-prune law above all
 # Version: 1.3.1
 # Created: 2026-08-27
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/templates/trinity_push.py and the push lane that drives it."""
@@ -12,8 +12,8 @@
 # opinion, the read-back is the evidence; without it NOTHING leaves the live file.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — the real store behind get_by_ids_subprocess(); a fake store_client stands in
-# seedgo: no-test-needed(covered_elsewhere) — compose_meta() text the push writes: tests/test_tab_renderer.py
+# sentry: no-test-needed(external) — the real store behind get_by_ids_subprocess(); a fake store_client stands in
+# sentry: no-test-needed(covered_elsewhere) — compose_meta() text the push writes: tests/test_tab_renderer.py
 
 import copy
 import json
@@ -31,7 +31,7 @@ from aipass.memory.apps.handlers.rollover import orchestrator
 from aipass.memory.apps.handlers.templates import push_report
 from aipass.memory.apps.handlers.tracking import tab_renderer
 from aipass.memory.apps.modules import push as push_module
-from aipass.seedgo.apps.modules.door_trinity import check_branch, expected_meta_line
+from aipass.sentry.apps.modules.door_trinity import check_branch, expected_meta_line
 from aipass.memory.apps.handlers.rollover import todo_roll
 from aipass.memory.apps.handlers.templates import trinity_push as tp
 
@@ -189,8 +189,8 @@ def _config(max_chars: int = 300, todos_count: int = 10) -> dict:
     }
 
 
-def _seedgo_renders_the_retired_todos_tab() -> bool:
-    """True while seedgo's trinity checker still expects the pre-DPLAN-0345 todos tab.
+def _sentry_renders_the_retired_todos_tab() -> bool:
+    """True while sentry's trinity checker still expects the pre-DPLAN-0345 todos tab.
 
     A changed mirror signature counts as landed: the checker pin then runs strict.
     """
@@ -460,7 +460,7 @@ class TestTheMachineFrame:
         assert meta["created"] == meta["last_updated"]
 
     def test_managed_by_is_the_exact_branch_directory_name(self):
-        """The owner's ruling, and what seedgo's checker compares against."""
+        """The owner's ruling, and what sentry's checker compares against."""
         assert tp.build_doc_metadata({}, "local", "ai_mail")["managed_by"] == "ai_mail"
         assert tp.build_doc_metadata({}, "local", "aipass_site")["managed_by"] == "aipass_site"
 
@@ -758,7 +758,7 @@ class TestThePushedFileIsCanonical:
     """The output is measured by the standard's own checker, not by opinion."""
 
     def test_a_pushed_branch_satisfies_the_trinity_checker(self, tmp_path, monkeypatch):
-        pytest.importorskip("aipass.seedgo.apps.modules.door_trinity")
+        pytest.importorskip("aipass.sentry.apps.modules.door_trinity")
         local = {
             "document_metadata": {"created": "2026-01-01", "status": {"health": "healthy"}},
             "sessions": [_entry(2), _entry(1, findings=["drift"])],
@@ -788,11 +788,11 @@ class TestThePushedFileIsCanonical:
         result = check_branch(str(root))
         failing = [check["name"] for check in result["checks"] if check["score"] < 100]
         messages = [str(check.get("message")) for check in result["checks"] if check["score"] < 100]
-        if failing == ["Meta lines & _usage"] and _seedgo_renders_the_retired_todos_tab():
-            # Until seedgo's mirror renders the pad tab, the ONLY allowed miss is the
+        if failing == ["Meta lines & _usage"] and _sentry_renders_the_retired_todos_tab():
+            # Until sentry's mirror renders the pad tab, the ONLY allowed miss is the
             # todos_meta byte-match; once it lands this pin runs strict on its own.
             assert all("todos_meta" in message and "_usage does not" not in message for message in messages), messages
-            pytest.xfail("seedgo's todos tab mirror (DPLAN-0345 row 6) not landed - docs/todos_v2_shape_contract.md")
+            pytest.xfail("sentry's todos tab mirror (DPLAN-0345 row 6) not landed - docs/todos_v2_shape_contract.md")
         assert failing == [], f"{failing}: {messages}"
 
     def test_canonical_entries_carry_over_byte_identical(self, tmp_path):
@@ -936,7 +936,7 @@ class TestTodosMoveToTheBacklog:
         return {"number": number, "date": "2026-09-01", "task": task, "priority": "high", "status": "open"}
 
     @staticmethod
-    def _todo(number: int, task: str = "Check on seedgo's errors in logs") -> dict:
+    def _todo(number: int, task: str = "Check on sentry's errors in logs") -> dict:
         return {"number": number, "date": "2026-09-15", "task": task, "priority": "medium"}
 
     def _backlog(self, tmp_path: Path) -> Path:
@@ -1378,7 +1378,7 @@ class TestThePushReportSaysWhyThereIsNoLocalStore:
 class TestEntryRulesReadTheConfig:
     """ENTRY_RULES was a second copy of a contract that lives in memory.config.json.
 
-    Three copies of one shape — here, the config, and @seedgo's trinity_groups
+    Three copies of one shape — here, the config, and @sentry's trinity_groups
     — is three chances for a push to prune an entry the write gate would have
     accepted. These pin that this module now derives its split rather than
     holding one.

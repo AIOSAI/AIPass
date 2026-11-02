@@ -3,15 +3,15 @@
 # Description: Tests for wake dispatch handler
 # Version: 1.6.0
 # Created: 2026-03-29
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's wake_branch: the spawn, session pointer, model, provider and marking."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — DEFAULT_PROMPT's exact literal text
-# seedgo: no-test-needed(shared) — DispatchStatus, pid_lock and resolve_branch(): tests/test_wake_helpers.py
-# seedgo: no-test-needed(shared) — the manager lanes and the dashboard refresh: tests/test_wake_managers.py
+# sentry: no-test-needed(constant) — DEFAULT_PROMPT's exact literal text
+# sentry: no-test-needed(shared) — DispatchStatus, pid_lock and resolve_branch(): tests/test_wake_helpers.py
+# sentry: no-test-needed(shared) — the manager lanes and the dashboard refresh: tests/test_wake_managers.py
 
 import json
 import sqlite3
@@ -326,7 +326,7 @@ class TestWakeBranch:
         assert any(s[0] == "fail" and "lock" in s[1] for s in status.steps)
 
     def test_a_held_lock_warns_not_woken_logs_it_and_promises_nothing(self, tmp_path, monkeypatch):
-        """15:17:08 @seedgo: a live lock printed an info row, logged nothing, and the mail was never read."""
+        """15:17:08 @sentry: a live lock printed an info row, logged nothing, and the mail was never read."""
         _make_wake_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(
             monkeypatch,
@@ -535,8 +535,8 @@ class TestWakeBranch:
         prompt = claude_part[p_idx + 1]
         spec_at = prompt.find("Before you build:")
         assert spec_at != -1
-        assert "src/aipass/seedgo/docs/aipass_standards.md" in prompt
-        assert "src/aipass/seedgo/templates/test_template_v1.md" in prompt
+        assert "src/aipass/sentry/docs/aipass_standards.md" in prompt
+        assert "src/aipass/sentry/templates/test_template_v1.md" in prompt
         assert spec_at < prompt.find("IMPORTANT: run any sub-agents")
         assert prompt.find("checklist last") > spec_at
 
@@ -1158,7 +1158,7 @@ class TestCodexWake:
         assert ok is True
         args = _claude_args(calls["popen"][0]["cmd"])
         assert args == ["codex", "exec", "-m", "gpt-6.1-sol", *self._tail(branch_path, args)]
-        assert args[-1].startswith("Hi. Check inbox") and "seedgo" in args[-1]
+        assert args[-1].startswith("Hi. Check inbox") and "sentry" in args[-1]
         assert wake_mod.session_pointer.read_pointer(branch_path) is None
         assert status.find_step("provider") == ("ok", "provider", "codex")
         assert status.find_step("model") == ("ok", "model", "gpt-6.1-sol")
@@ -1310,7 +1310,7 @@ class TestOpenCodeWake:
         assert ok is True
         args = _claude_args(calls["popen"][0]["cmd"])
         assert args == [*self.HEAD, "-m", "opencode/glm-5.3-flash-free", args[-1]]
-        assert args[-1].startswith("Hi. Check inbox") and "seedgo" in args[-1]
+        assert args[-1].startswith("Hi. Check inbox") and "sentry" in args[-1]
         assert wake_mod.session_pointer.read_pointer(branch_path) is None
         assert status.find_step("provider") == ("ok", "provider", "opencode")
         assert status.find_step("model") == ("ok", "model", "opencode/glm-5.3-flash-free")

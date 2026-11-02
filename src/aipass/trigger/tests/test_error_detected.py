@@ -3,17 +3,17 @@
 # Description: Tests for error_detected event handler with Medic v2 dispatch gating
 # Version: 1.3.2
 # Created: 2026-04-25
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/events/error_detected.py and the dispatch gates it runs."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — what should_dispatch and is_suppressed decide, in error_registry
-# seedgo: no-test-needed(covered_elsewhere) — the digest body and the aged lane, in test_escalation.py
-# seedgo: no-test-needed(covered_elsewhere) — the two producers of this event, log_watcher and the catch-up scan
-# seedgo: no-test-needed(external) — ai_mail delivery and wake_branch; AIPass tests only its own files
-# seedgo: no-test-needed(constant) — the fixed investigation-step prose _build_notification_message() wraps
+# sentry: no-test-needed(covered_elsewhere) — what should_dispatch and is_suppressed decide, in error_registry
+# sentry: no-test-needed(covered_elsewhere) — the digest body and the aged lane, in test_escalation.py
+# sentry: no-test-needed(covered_elsewhere) — the two producers of this event, log_watcher and the catch-up scan
+# sentry: no-test-needed(external) — ai_mail delivery and wake_branch; AIPass tests only its own files
+# sentry: no-test-needed(constant) — the fixed investigation-step prose _build_notification_message() wraps
 
 import json
 import sys
@@ -1048,21 +1048,21 @@ class TestOneMuteRule:
     """A mute reads the same in every gate, however it was stored."""
 
     def test_a_mute_stored_with_an_at_suppresses_dispatch(self) -> None:
-        """medic status reads "@seedgo" as seedgo muted; the dispatch gate must agree.
+        """medic status reads "@sentry" as sentry muted; the dispatch gate must agree.
         Red first: the gate compared the raw entry and dispatched to a muted branch.
         """
         mod = _import_module()
         real_is_branch_muted = mod._is_branch_muted
         send = _setup_happy_path(mod)
         mod._is_branch_muted = real_is_branch_muted  # type: ignore[attr-defined]
-        mod._get_registered_emails = MagicMock(return_value={"@seedgo"})  # type: ignore[attr-defined]
+        mod._get_registered_emails = MagicMock(return_value={"@sentry"})  # type: ignore[attr-defined]
         medic_state.MEDIC_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         medic_state.MEDIC_STATE_FILE.write_text(
-            json.dumps({"config": {"muted_branches": [{"name": "@seedgo", "expires_at": None}]}}), encoding="utf-8"
+            json.dumps({"config": {"muted_branches": [{"name": "@sentry", "expires_at": None}]}}), encoding="utf-8"
         )
 
         mod.handle_error_detected(
-            branch="SEEDGO", module="cfg", message="err", error_hash="h1", count=2, fingerprint="fp_at"
+            branch="SENTRY", module="cfg", message="err", error_hash="h1", count=2, fingerprint="fp_at"
         )
 
         send.assert_not_called()

@@ -45,7 +45,7 @@ paying a global cost per recipient.
 **The router's timeout is a limit on broadcasts.** A broadcast that outruns
 drone's routing timeout is killed after its deliveries land, and the caller sees a
 timeout for a send that worked. `resolve_timeout(branch, command, explicit)` never
-sees the command's arguments, so no per-verb integer can tell `email @seedgo` from
+sees the command's arguments, so no per-verb integer can tell `email @sentry` from
 `email @all`; keeping the per-recipient work small is this branch's half.
 
 ## Repeat Signals (`upsert_key`)

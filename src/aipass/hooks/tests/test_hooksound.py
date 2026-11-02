@@ -4,7 +4,7 @@
 # Description: Tests for hooksound module (drone @hooks hooksound)
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-01
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/hooksound.py."""
@@ -12,8 +12,8 @@
 # Mute/unmute hook audio.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — HELP_COMMANDS' display strings
-# seedgo: no-test-needed(ruff) — that modules/hooksound.py parses and imports sound.py and help_flags
+# sentry: no-test-needed(constant) — HELP_COMMANDS' display strings
+# sentry: no-test-needed(ruff) — that modules/hooksound.py parses and imports sound.py and help_flags
 
 import json
 from unittest.mock import patch

@@ -3,13 +3,13 @@
 # Description: Tests for the shared owner-capability caller guard (#681)
 # Version: 1.2.0
 # Created: 2026-07-10
-# Modified: 2026-10-22
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/owner/guard.py through guard_owner_caller, against a stubbed sealed registry."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — Path.parents' walk order behind the passport and devpulse-tree lookups
+# sentry: no-test-needed(stdlib) — Path.parents' walk order behind the passport and devpulse-tree lookups
 
 import pytest
 

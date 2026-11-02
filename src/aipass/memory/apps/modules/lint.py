@@ -3,7 +3,7 @@
 # Description: Lint module — CLI routing for entry limit auditing
 # Version: 1.2.0
 # Created: 2026-06-13
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -357,7 +357,7 @@ def _display_field_results(result: dict[str, Any], branch_filter: str | None) ->
 
 
 def print_introspection() -> None:
-    """Display module introspection (seedgo standard)."""
+    """Display module introspection (sentry standard)."""
     console.print()
     console.print("[bold cyan]lint Module[/bold cyan]")
     console.print("Audits .trinity entries for over-limit character violations (read-only)")

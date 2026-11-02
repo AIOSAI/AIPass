@@ -3,13 +3,13 @@
 # Description: Tests for memory_pool_auto_processed event handler
 # Version: 1.1.0
 # Created: 2026-06-06
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/events/memory_pool.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(behaviour) — the event wiring in apps/handlers/events/registry.py; the bus tests cover delivery
+# sentry: no-test-needed(behaviour) — the event wiring in apps/handlers/events/registry.py; the bus tests cover delivery
 
 import pytest
 from types import SimpleNamespace

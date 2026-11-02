@@ -4,7 +4,7 @@
 # Description: Tests for edit_gate .trinity char-limit + rollover-budget checks (FPLAN-0270 Phase 4)
 # Branch: hooks
 # Created: 2026-06-13
-# Modified: 2026-10-08
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's .trinity character-limit check (Write/Edit/MultiEdit)."""
@@ -15,9 +15,9 @@
 # test_edit_gate_trinity_tripwire.py, the refusal wording test_edit_gate_trinity_refusals.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(documentation) — that edit_gate's functions carry docstrings
-# seedgo: no-test-needed(ruff) — that edit_gate.py parses and its imports resolve
-# seedgo: no-test-needed(stdlib) — json.loads' parsing of the proposed content; the gate's reading of it is pinned
+# sentry: no-test-needed(documentation) — that edit_gate's functions carry docstrings
+# sentry: no-test-needed(ruff) — that edit_gate.py parses and its imports resolve
+# sentry: no-test-needed(stdlib) — json.loads' parsing of the proposed content; the gate's reading of it is pinned
 
 import importlib
 import json

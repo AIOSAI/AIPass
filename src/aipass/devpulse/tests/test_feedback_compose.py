@@ -3,15 +3,15 @@
 # Description: Tests for feedback compose — send, reply, ai_mail delivery
 # Version: 1.1.0
 # Created: 2026-04-14
-# Modified: 2026-10-22
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/feedback/compose.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that compose.py and storage.py parse and import
-# seedgo: no-test-needed(constant) — the Rich colour tags send_feedback() and reply_to() print
-# seedgo: no-test-needed(stdlib) — secrets.token_hex's randomness behind generate_id()
+# sentry: no-test-needed(ruff) — that compose.py and storage.py parse and import
+# sentry: no-test-needed(constant) — the Rich colour tags send_feedback() and reply_to() print
+# sentry: no-test-needed(stdlib) — secrets.token_hex's randomness behind generate_id()
 
 import json
 import re
@@ -74,7 +74,7 @@ class TestSendFeedback:
 
     def test_creates_message(self, empty_inbox, mock_feedback_dir):
         """Should add a message to the inbox."""
-        msg_id = compose.send_feedback("seedgo", "Test subject", "Test body")
+        msg_id = compose.send_feedback("sentry", "Test subject", "Test body")
 
         data = storage.load_inbox()
         assert data["total_messages"] == 1
@@ -83,7 +83,7 @@ class TestSendFeedback:
 
         msg = data["messages"][0]
         assert msg["id"] == msg_id
-        assert msg["from"] == "seedgo"
+        assert msg["from"] == "sentry"
         assert msg["subject"] == "Test subject"
         assert msg["body"] == "Test body"
         assert msg["read"] is False
@@ -131,7 +131,7 @@ class TestReplyTo:
                 "messages": [
                     {
                         "id": "aaa11111",
-                        "from": "seedgo",
+                        "from": "sentry",
                         "subject": "Test feedback",
                         "body": "Original message.",
                         "timestamp": "2026-04-11T10:00:00",
@@ -175,7 +175,7 @@ class TestAiMailDelivery:
 
     @pytest.fixture
     def inbox_with_message(self, mock_feedback_dir):
-        """Create inbox with a message from seedgo."""
+        """Create inbox with a message from sentry."""
         storage.save_inbox(
             {
                 "mailbox": "feedback",
@@ -184,7 +184,7 @@ class TestAiMailDelivery:
                 "messages": [
                     {
                         "id": "aaa11111",
-                        "from": "seedgo",
+                        "from": "sentry",
                         "subject": "Test feedback",
                         "body": "Original.",
                         "timestamp": "2026-04-11T10:00:00",
@@ -197,7 +197,7 @@ class TestAiMailDelivery:
 
     def test_delivers_to_ai_mail(self, inbox_with_message, mock_aipass_root, door):
         """The reply reaches the sender's ai_mail inbox through ai_mail's door, in the replyable v2 shape."""
-        ai_mail_inbox = mock_aipass_root / "seedgo" / ".ai_mail.local" / "inbox.json"
+        ai_mail_inbox = mock_aipass_root / "sentry" / ".ai_mail.local" / "inbox.json"
         ai_mail_inbox.parent.mkdir(parents=True)
         ai_mail_inbox.write_text('{"messages": []}', encoding="utf-8")
 
@@ -205,7 +205,7 @@ class TestAiMailDelivery:
 
         assert [path for path, _ in door] == [ai_mail_inbox]
         mail_msg = door[0][1]
-        assert mail_msg["to"] == "@seedgo"
+        assert mail_msg["to"] == "@sentry"
         # '@'-prefixed from + reply_path are what make the message REPLYABLE:
         # ai_mail's reply verb matches from against branch emails, then falls
         # back to the stored reply_path for cross-project delivery (wall-2,
@@ -237,7 +237,7 @@ class TestAiMailDelivery:
         two timestamp shapes in one file (BAUD report e8c235f8, 2026-08-24).
         One store, one format — and local wall-clock, not UTC wearing it.
         """
-        ai_mail_inbox = mock_aipass_root / "seedgo" / ".ai_mail.local" / "inbox.json"
+        ai_mail_inbox = mock_aipass_root / "sentry" / ".ai_mail.local" / "inbox.json"
         ai_mail_inbox.parent.mkdir(parents=True)
         ai_mail_inbox.write_text('{"messages": []}', encoding="utf-8")
 
@@ -267,7 +267,7 @@ class TestHonestDeliveryReporting:
 
     @pytest.fixture
     def inbox_with_message(self, mock_feedback_dir):
-        """Inbox seeded with one message from seedgo."""
+        """Inbox seeded with one message from sentry."""
         storage.save_inbox(
             {
                 "mailbox": "feedback",
@@ -276,7 +276,7 @@ class TestHonestDeliveryReporting:
                 "messages": [
                     {
                         "id": "aaa11111",
-                        "from": "seedgo",
+                        "from": "sentry",
                         "subject": "Test feedback",
                         "body": "Original message.",
                         "timestamp": "2026-04-11T10:00:00",
@@ -290,7 +290,7 @@ class TestHonestDeliveryReporting:
 
     def test_a_delivered_reply_is_reported_as_delivered(self, inbox_with_message, mock_aipass_root, capsys):
         """A delivered reply is reported as delivered, never as NOT delivered (mutant: `if delivered` -> `if False`)."""
-        ai_mail_dir = mock_aipass_root / "seedgo" / ".ai_mail.local"
+        ai_mail_dir = mock_aipass_root / "sentry" / ".ai_mail.local"
         ai_mail_dir.mkdir(parents=True)
         inbox_path = ai_mail_dir / "inbox.json"
         with open(inbox_path, "w", encoding="utf-8") as f:
@@ -298,7 +298,7 @@ class TestHonestDeliveryReporting:
 
         assert compose.reply_to("aaa11111", "Body") is True
         out, err = capsys.readouterr()
-        assert "Delivered to seedgo's ai_mail inbox." in out
+        assert "Delivered to sentry's ai_mail inbox." in out
         assert "NOT delivered" not in err
 
     def test_an_undelivered_reply_names_the_missing_inbox(self, mock_feedback_dir, tmp_path, capsys):
@@ -341,7 +341,7 @@ class TestHonestDeliveryReporting:
         inbox_path.parent.mkdir(parents=True)
         inbox_path.write_text("{}", encoding="utf-8")
         with patch.object(compose, "warning") as mock_warning:
-            compose.send_feedback("seedgo", "Subj", "Body", str(inbox_path))
+            compose.send_feedback("sentry", "Subj", "Body", str(inbox_path))
         mock_warning.assert_not_called()
 
     def test_reply_reports_undelivered(self, inbox_with_message, mock_aipass_root):

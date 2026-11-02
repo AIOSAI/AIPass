@@ -3,7 +3,7 @@
 # Description: Unified config loader for memory.config.json
 # Version: 1.8.0
 # Created: 2026-06-13
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -41,7 +41,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "templates/trinity_push.py",
             ],
             "purpose": "The closed entry shape: entry_types.<type>.fields is every field an entry may carry,"
-            " its type and its cap (FPLAN-0593). file_budgets is the whole-file ceiling seedgo and the"
+            " its type and its cap (FPLAN-0593). file_budgets is the whole-file ceiling sentry and the"
             " keep-count check read.",
         },
         "plans": {
@@ -73,7 +73,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "enabled": True,
         # true = regenerate what the fleet operates; a reborn warn-only file would silently drop enforcement.
         "enforce": True,
-        # Percent of each cap an agent drafts to; @seedgo's meta line reads it, never mirrors it.
+        # Percent of each cap an agent drafts to; @sentry's meta line reads it, never mirrors it.
         "draft_percent": 80,
         # The gate refuses past cap * (100 + this) // 100: a writer estimates length, it cannot count it.
         "tolerance_percent": 10,
@@ -132,7 +132,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 },
             },
         },
-        # Read, never copied: seedgo's startup_budget and the keep-count check read these.
+        # Read, never copied: sentry's startup_budget and the keep-count check read these.
         # passport.json is SIZE only: @spawn owns its schema.
         "file_budgets": {
             "local.json": {"max_chars": 25000},

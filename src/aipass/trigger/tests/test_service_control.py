@@ -3,14 +3,14 @@
 # Description: Tests for the systemd unit lifecycle of the log watcher
 # Version: 1.1.1
 # Created: 2026-08-31
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/service_control.py, the systemd control surface extracted from medic.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — medic's start/stop decisions on top of systemctl, in test_medic.py
-# seedgo: no-test-needed(external) — what systemctl itself does with SERVICE_NAME; AIPass tests only its own files
+# sentry: no-test-needed(covered_elsewhere) — medic's start/stop decisions on top of systemctl, in test_medic.py
+# sentry: no-test-needed(external) — what systemctl itself does with SERVICE_NAME; AIPass tests only its own files
 
 import subprocess
 import tempfile
@@ -204,7 +204,7 @@ class TestEnsureServiceInstalled:
 class TestNoSystemdHost:
     """The 2026-09-12 cure: no systemctl is a named refusal, never a False.
 
-    seedgo host_portability, arm B. macOS and Windows have no systemctl and a
+    sentry host_portability, arm B. macOS and Windows have no systemctl and a
     Linux container may have none; a missing binary raises FileNotFoundError
     out of exec, so ``check=False`` does not save the caller. Every case here
     fails on the pre-cure code, which shelled out blind.

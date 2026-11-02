@@ -4,16 +4,16 @@
 # Description: Tests for sandbox wrapper module
 # Branch: hooks
 # Created: 2026-06-09
-# Modified: 2026-11-01
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/sandbox.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that sandbox.py parses and every import resolves
-# seedgo: no-test-needed(documentation) — that build_policy and sandbox_launch carry docstrings
-# seedgo: no-test-needed(constant) — HELP_COMMANDS' display text and the CONSOLE binding
-# seedgo: no-test-needed(stdlib) — shutil.which and tempfile.gettempdir's own path-resolution correctness
+# sentry: no-test-needed(ruff) — that sandbox.py parses and every import resolves
+# sentry: no-test-needed(documentation) — that build_policy and sandbox_launch carry docstrings
+# sentry: no-test-needed(constant) — HELP_COMMANDS' display text and the CONSOLE binding
+# sentry: no-test-needed(stdlib) — shutil.which and tempfile.gettempdir's own path-resolution correctness
 
 import sys
 import tempfile
@@ -375,17 +375,17 @@ class TestBuildPolicy:
         return sibling
 
     def test_builder_includes_own_tree(self, tmp_path):
-        branch = self._make_branch(tmp_path, "seedgo")
+        branch = self._make_branch(tmp_path, "sentry")
         policy = build_policy(branch)
         assert str(branch) in policy["allow_write"]
 
     def test_builder_includes_tmp(self, tmp_path):
-        branch = self._make_branch(tmp_path, "seedgo")
+        branch = self._make_branch(tmp_path, "sentry")
         policy = build_policy(branch)
         assert tempfile.gettempdir() in policy["allow_write"]
 
     def test_builder_includes_shared_channels(self, tmp_path):
-        branch = self._make_branch(tmp_path, "seedgo")
+        branch = self._make_branch(tmp_path, "sentry")
         repo = tmp_path / "repo"
         policy = build_policy(branch)
         assert str(repo / "system_logs") in policy["allow_write"]
@@ -394,18 +394,18 @@ class TestBuildPolicy:
 
     def test_an_empty_git_in_the_branch_is_not_the_repo_root(self, tmp_path):
         """Codex's sandbox plants an empty .git in every cwd it starts in; the walk must pass it by."""
-        branch = self._make_branch(tmp_path, "seedgo")
+        branch = self._make_branch(tmp_path, "sentry")
         (branch / ".git").mkdir()
         policy = build_policy(branch)
         assert str(tmp_path / "repo" / "system_logs") in policy["allow_write"]
 
     def test_a_worktree_git_file_is_still_the_repo_root(self, tmp_path):
-        branch = self._make_branch(tmp_path, "seedgo", worktree=True)
+        branch = self._make_branch(tmp_path, "sentry", worktree=True)
         policy = build_policy(branch)
         assert str(tmp_path / "repo" / "system_logs") in policy["allow_write"]
 
     def test_builder_excludes_git(self, tmp_path):
-        branch = self._make_branch(tmp_path, "seedgo")
+        branch = self._make_branch(tmp_path, "sentry")
         repo = tmp_path / "repo"
         policy = build_policy(branch)
         assert str(repo / ".git") not in policy["allow_write"]
@@ -417,25 +417,25 @@ class TestBuildPolicy:
         assert str(repo / ".git") in policy["allow_write"]
 
     def test_sibling_mail_writable(self, tmp_path):
-        branch = self._make_branch(tmp_path, "seedgo")
+        branch = self._make_branch(tmp_path, "sentry")
         sibling = self._make_sibling(branch, "hooks")
         policy = build_policy(branch)
         assert str(sibling / ".ai_mail.local") in policy["allow_write"]
 
     def test_sibling_dashboard_writable(self, tmp_path):
-        branch = self._make_branch(tmp_path, "seedgo")
+        branch = self._make_branch(tmp_path, "sentry")
         sibling = self._make_sibling(branch, "hooks")
         policy = build_policy(branch)
         assert str(sibling / "DASHBOARD.local.json") in policy["allow_write"]
 
     def test_sibling_source_not_writable(self, tmp_path):
-        branch = self._make_branch(tmp_path, "seedgo")
+        branch = self._make_branch(tmp_path, "sentry")
         sibling = self._make_sibling(branch, "hooks")
         policy = build_policy(branch)
         assert str(sibling) not in policy["allow_write"]
 
     def test_policy_shape(self, tmp_path):
-        branch = self._make_branch(tmp_path, "seedgo")
+        branch = self._make_branch(tmp_path, "sentry")
         policy = build_policy(branch)
         assert "allow_write" in policy
         assert "deny_write" in policy
@@ -448,7 +448,7 @@ class TestBuildPolicy:
         """The broker secret sits inside writable .ai_central — it must be
         deny_read AND deny_write for every role, or a sandboxed agent could
         read it and forge a devpulse identity to the broker."""
-        for name in ("seedgo", "devpulse"):
+        for name in ("sentry", "devpulse"):
             base = tmp_path / f"case_{name}"
             base.mkdir()
             branch = self._make_branch(base, name)
@@ -460,7 +460,7 @@ class TestBuildPolicy:
             assert str(repo_root / ".ai_central") in policy["allow_write"]
 
     def test_claude_project_dir_included(self, tmp_path, monkeypatch):
-        branch = self._make_branch(tmp_path, "seedgo")
+        branch = self._make_branch(tmp_path, "sentry")
         encoded = str(branch.resolve()).replace("/", "-")
         claude_proj = tmp_path / ".claude" / "projects" / encoded
         claude_proj.mkdir(parents=True)

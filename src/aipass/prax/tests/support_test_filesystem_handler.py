@@ -3,13 +3,13 @@
 # Description: Shared helpers for test_filesystem_handler.py and its split siblings
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Helpers shared by the filesystem_handler test files (no test_ prefix: never collected)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — MonitoringFileHandler, covered by tests/test_filesystem_handler.py
+# sentry: no-test-needed(through_the_command) — MonitoringFileHandler, covered by tests/test_filesystem_handler.py
 
 from pathlib import Path
 

@@ -3,14 +3,14 @@
 # Description: Tests for the leaderboard reader - drone @canary top, its JSON form and its refusals
 # Version: 1.3.0
 # Created: 2026-09-19
-# Modified: 2026-10-21
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/top.py and the leaderboard reader it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(log_structure) — that a refusal also lands in the prax log
-# seedgo: no-test-needed(json_structure) — that each answer and each refusal lands in the json trail
+# sentry: no-test-needed(log_structure) — that a refusal also lands in the prax log
+# sentry: no-test-needed(json_structure) — that each answer and each refusal lands in the json trail
 
 import json
 import sys

@@ -3,7 +3,7 @@
 # Description: Plan Verification Module
 # Version: 0.1.0
 # Created: 2026-03-18
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -111,7 +111,7 @@ def _discover_handlers() -> dict[str, list[str]]:
 
 
 def print_introspection() -> None:
-    """Display module introspection info (seedgo standard)."""
+    """Display module introspection info (sentry standard)."""
     console.print()
     console.print("[bold cyan]verify Module[/bold cyan]")
     console.print("Checks whether a plan has been vectorized in ChromaDB")

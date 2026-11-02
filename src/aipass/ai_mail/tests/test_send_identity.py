@@ -3,7 +3,7 @@
 # Description: Tests for sender identity detection chain
 # Version: 1.2.2
 # Created: 2026-03-10
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/users/branch_detection.py and the sender identity chain in apps/handlers/email/send.py."""
@@ -11,7 +11,7 @@
 # The identity chain is ai_mail's most critical and most fragile path.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — os.environ.setdefault on the win32 import-time branch, unreachable on POSIX
+# sentry: no-test-needed(stdlib) — os.environ.setdefault on the win32 import-time branch, unreachable on POSIX
 
 import json
 import os

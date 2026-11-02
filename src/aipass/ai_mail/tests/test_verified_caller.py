@@ -3,7 +3,7 @@
 # Description: Tests for the verified-caller rail (FPLAN-0401 Phase 1)
 # Version: 1.0.2
 # Created: 2026-08-12
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/users/verified_caller.py."""
@@ -12,7 +12,7 @@
 # may only come from the env drone stamps from real process ancestry.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(windows_compat) — the win32 console re-encoding guard at import time
+# sentry: no-test-needed(windows_compat) — the win32 console re-encoding guard at import time
 
 import re
 from pathlib import Path
@@ -50,13 +50,13 @@ class TestResolveVerifiedCaller:
 
     def test_caller_branch_env_is_primary(self, monkeypatch):
         """AIPASS_CALLER_BRANCH wins — drone sets it from real process ancestry."""
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
-        assert resolve_verified_caller() == "@seedgo"
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "sentry")
+        assert resolve_verified_caller() == "@sentry"
 
     def test_caller_branch_is_normalized(self, monkeypatch):
         """Address form is @lowercase whatever the env carries."""
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "@SeedGo")
-        assert resolve_verified_caller() == "@seedgo"
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "@Sentry")
+        assert resolve_verified_caller() == "@sentry"
 
     def test_caller_cwd_passport_walk_is_the_fallback(self, tmp_path, monkeypatch):
         """No branch env — walk AIPASS_CALLER_CWD up to a passport."""
@@ -70,8 +70,8 @@ class TestResolveVerifiedCaller:
         """Both signals present and disagreeing: the assigned identity wins."""
         branch = _make_branch(tmp_path, "daemon")
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch))
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
-        assert resolve_verified_caller() == "@seedgo"
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "sentry")
+        assert resolve_verified_caller() == "@sentry"
 
     def test_no_rail_returns_empty(self):
         """No caller env at all — unprovable, and that is not an error."""
@@ -96,11 +96,11 @@ class TestSenderClaimRefusal:
     """A privilege-bearing claim must be proven; everything else is free."""
 
     def test_privileged_claim_from_other_caller_is_refused(self, monkeypatch):
-        """The live hole: @seedgo claiming @daemon."""
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        """The live hole: @sentry claiming @daemon."""
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "sentry")
         reason = sender_claim_refusal("@daemon")
         assert reason is not None
-        assert "@daemon" in reason and "@seedgo" in reason
+        assert "@daemon" in reason and "@sentry" in reason
 
     def test_privileged_claim_from_the_real_caller_is_allowed(self, monkeypatch):
         """@daemon claiming @daemon, proven by the rail."""
@@ -126,18 +126,18 @@ class TestSenderClaimRefusal:
 
     def test_claim_is_normalized_before_comparison(self, monkeypatch):
         """Case and the leading @ are not a bypass."""
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "sentry")
         assert str(sender_claim_refusal("DAEMON")).startswith(f"sender @daemon {_REFUSED}")
         assert str(sender_claim_refusal("@DaEmOn")).startswith(f"sender @daemon {_REFUSED}")
 
     def test_non_privileged_claim_is_never_refused(self, monkeypatch):
-        """--from @spawn from @seedgo stays legal: it gates nothing."""
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        """--from @spawn from @sentry stays legal: it gates nothing."""
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "sentry")
         assert sender_claim_refusal("@spawn") is None
 
     def test_empty_claim_is_never_refused(self, monkeypatch):
         """No --from at all is not a claim."""
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "sentry")
         assert sender_claim_refusal("") is None
         assert sender_claim_refusal(None) is None
 
@@ -147,8 +147,8 @@ class TestResolveWakeSender:
 
     def test_verified_caller_wins_over_the_claim(self, monkeypatch):
         """The claimed identity is display metadata; the rail decides the wake."""
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
-        assert resolve_wake_sender("@spawn") == "@seedgo"
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "sentry")
+        assert resolve_wake_sender("@spawn") == "@sentry"
 
     def test_claim_is_the_fallback_when_unverifiable(self):
         """No rail: fall back to the claim, which the refusal has already

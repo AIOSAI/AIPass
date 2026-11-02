@@ -3,7 +3,7 @@
 # Description: Tests for a serve that outlives the shell that started it
 # Version: 1.1.2
 # Created: 2026-08-20
-# Modified: 2026-10-22
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/host/lifetime.py, a detached serve, its record and its log."""
@@ -12,10 +12,10 @@
 # validated BEFORE anything spawns, and the log is APPENDED, never truncated.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that lifetime.py parses and imports
-# seedgo: no-test-needed(constant) — STOP_POLL_SECONDS and SETTLE_SECONDS's values
-# seedgo: no-test-needed(external) — a real detached uvicorn; subprocess.Popen is patched, no server is spawned
-# seedgo: no-test-needed(covered_elsewhere) — the systemd unit text itself, tests/test_host_autostart.py
+# sentry: no-test-needed(ruff) — that lifetime.py parses and imports
+# sentry: no-test-needed(constant) — STOP_POLL_SECONDS and SETTLE_SECONDS's values
+# sentry: no-test-needed(external) — a real detached uvicorn; subprocess.Popen is patched, no server is spawned
+# sentry: no-test-needed(covered_elsewhere) — the systemd unit text itself, tests/test_host_autostart.py
 
 import json
 import os

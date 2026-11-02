@@ -42,7 +42,7 @@ These can be verified automatically with 4 regex rules against any `.aipass/*.md
  - No `^---$` lines (dividers)
  - No fenced code blocks longer than ~15 lines in body (excluding directory trees)
 
-Seedgo does not enforce them: prompt format is an editorial convention, not a code quality standard.
+Sentry does not enforce them: prompt format is an editorial convention, not a code quality standard.
 
 # Reference files
 

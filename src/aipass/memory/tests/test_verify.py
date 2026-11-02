@@ -3,15 +3,15 @@
 # Description: Tests for verify module (plan vectorization check)
 # Version: 1.0.1
 # Created: 2026-03-24
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/verify.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — the check_plan operation itself, in tests/test_chroma_source_match.py
-# seedgo: no-test-needed(documentation) — print_help() text; it is prose for a reader, pinned only by its routing here
-# seedgo: no-test-needed(shared) — the json_handler.log_operation entries _verify_plan writes; the json handler's lane
+# sentry: no-test-needed(covered_elsewhere) — the check_plan operation itself, in tests/test_chroma_source_match.py
+# sentry: no-test-needed(documentation) — print_help() text; it is prose for a reader, pinned only by its routing here
+# sentry: no-test-needed(shared) — the json_handler.log_operation entries _verify_plan writes; the json handler's lane
 
 import json
 import subprocess

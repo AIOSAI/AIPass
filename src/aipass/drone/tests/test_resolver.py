@@ -3,13 +3,13 @@
 # Description: Branch resolution, @name to path, and the resolver commands
 # Version: 1.0.1
 # Created: 2026-03-14
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/resolver.py: @name to path resolution and its commands."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module under test parses and imports
+# sentry: no-test-needed(ruff) — that the module under test parses and imports
 
 import json
 from pathlib import Path

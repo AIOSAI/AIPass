@@ -5,7 +5,7 @@
 # Date: 2026-03-29
 # Version: 1.0.1
 # Created: 2026-03-29
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -21,7 +21,7 @@
 """Tests for apps/handlers/rooms/space_ops.py, room_state_ops.py and apps/handlers/search/search_queries.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every file in handlers/rooms/, search/, database/ parses and imports
+# sentry: no-test-needed(ruff) — that every file in handlers/rooms/, search/, database/ parses and imports
 
 import sqlite3
 from unittest.mock import patch, MagicMock

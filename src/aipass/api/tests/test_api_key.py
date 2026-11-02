@@ -3,16 +3,16 @@
 # Description: Tests for API Key Management Module
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-10-31
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/api_key.py, the API key management module."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that api_key.py parses and imports
-# seedgo: no-test-needed(covered_elsewhere) — fetch_api_key and fetch_validate_key, tests/test_critical_paths.py
-# seedgo: no-test-needed(covered_elsewhere) — get_secret_cmd's secret read, tests/test_secrets.py
-# seedgo: no-test-needed(hardcoded_key) — any real key; the keyring is conftest's dict and the env writer is stubbed
+# sentry: no-test-needed(ruff) — that api_key.py parses and imports
+# sentry: no-test-needed(covered_elsewhere) — fetch_api_key and fetch_validate_key, tests/test_critical_paths.py
+# sentry: no-test-needed(covered_elsewhere) — get_secret_cmd's secret read, tests/test_secrets.py
+# sentry: no-test-needed(hardcoded_key) — any real key; the keyring is conftest's dict and the env writer is stubbed
 
 import os
 import sys

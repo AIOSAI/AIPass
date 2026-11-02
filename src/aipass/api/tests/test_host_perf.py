@@ -3,7 +3,7 @@
 # Description: Tests for the host API's cost doctrine — threadpool, cache, pin
 # Version: 1.0.5
 # Created: 2026-08-18
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/host/server.py's cost doctrine: threadpool routes, the fleet cache, the pump cap."""
@@ -11,9 +11,9 @@
 # NOTHING HERE INVOKES THE REAL BINARY (the standing rule in test_host_fleet.py): every exec is a counted fake.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that server.py parses and imports
-# seedgo: no-test-needed(covered_elsewhere) — what each route returns, tests/test_host_fleet.py
-# seedgo: no-test-needed(external) — the real baud binary; every subprocess.run here is a counted fake
+# sentry: no-test-needed(ruff) — that server.py parses and imports
+# sentry: no-test-needed(covered_elsewhere) — what each route returns, tests/test_host_fleet.py
+# sentry: no-test-needed(external) — the real baud binary; every subprocess.run here is a counted fake
 
 import contextlib
 import json

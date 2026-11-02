@@ -3,7 +3,7 @@
 # Description: Tests for failed-auth auditing with peer address (security C1)
 # Version: 1.0.2
 # Created: 2026-08-14
-# Modified: 2026-10-25
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/host/server.py, its failed-auth audit with the peer address."""
@@ -12,8 +12,8 @@
 # the RESPONSE does not (that difference is a probing oracle). Neither carries the token.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(duplicate_test) — issue_token() and revoke_token() themselves, tests/test_host_api_config.py
-# seedgo: no-test-needed(duplicate_test) — _audit_socket_refusal on the websocket lane, tests/test_host_attach.py
+# sentry: no-test-needed(duplicate_test) — issue_token() and revoke_token() themselves, tests/test_host_api_config.py
+# sentry: no-test-needed(duplicate_test) — _audit_socket_refusal on the websocket lane, tests/test_host_attach.py
 
 from pathlib import Path
 from typing import Any

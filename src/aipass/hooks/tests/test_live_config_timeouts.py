@@ -4,7 +4,7 @@
 # Description: Pins against the live .aipass/hooks.json, .aipass/project_hooks.json and the provider manifest
 # Branch: hooks
 # Created: 2026-08-13
-# Modified: 2026-11-01
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for the live .aipass/ hook configs that apps/handlers/config/loader.py hands the engine."""
@@ -12,8 +12,8 @@
 # Reads the REAL repo-root configs on purpose (a copied tree fails here); new live-config pins go here.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — _run_handler's timeout_s default of 30, owned by tests/test_engine.py
-# seedgo: no-test-needed(stdlib) — json.loads reading the files; a malformed file fails every test here at once
+# sentry: no-test-needed(constant) — _run_handler's timeout_s default of 30, owned by tests/test_engine.py
+# sentry: no-test-needed(stdlib) — json.loads reading the files; a malformed file fails every test here at once
 
 
 class TestLiveProjectConfigTimeouts:

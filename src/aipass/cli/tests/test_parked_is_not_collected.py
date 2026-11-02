@@ -3,13 +3,13 @@
 # Description: The parked directory contributes no tests, proven by running collection
 # Version: 1.2.0
 # Created: 2026-08-19
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for tests/parked/conftest.py — the barrier that keeps the park at zero collected tests."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the parked scaffold still parses; it is a template copy that never runs here
+# sentry: no-test-needed(ruff) — that the parked scaffold still parses; it is a template copy that never runs here
 import subprocess
 import sys
 from pathlib import Path

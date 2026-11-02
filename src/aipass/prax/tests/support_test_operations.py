@@ -3,13 +3,13 @@
 # Description: Helpers shared by the test_operations split files
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Helpers shared by the test_operations files; product: apps/handlers/dashboard and apps/modules/dashboard.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — create_fresh_dashboard, covered by tests/test_operations.py
+# sentry: no-test-needed(through_the_command) — create_fresh_dashboard, covered by tests/test_operations.py
 
 import sys
 import types

@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: docs_page.py
-# Description: The docs page skeleton read — the one source @seedgo's docs_page standard renders
+# Description: The docs page skeleton read — the one source @sentry's docs_page standard renders
 # Version: 1.0.0
 # Created: 2026-09-19
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
-"""The docs/*.md page skeleton, read live for @seedgo (DPLAN-0351)."""
+"""The docs/*.md page skeleton, read live for @sentry (DPLAN-0351)."""
 
 from pathlib import Path
 

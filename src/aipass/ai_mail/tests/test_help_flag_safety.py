@@ -3,17 +3,17 @@
 # Description: Tests for whole-sequence help-flag detection across the three CLI modules
 # Version: 1.0.1
 # Created: 2026-08-13
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py's wants_help() and the three CLI modules it gates."""
 
-# seedgo ``help_flag_safety``: a question must never run as an instruction. Each test asserts help
+# sentry ``help_flag_safety``: a question must never run as an instruction. Each test asserts help
 # printed AND the side-effecting target never ran. ``--help``/``-h`` count anywhere (exact match);
 # bare ``help`` only at position 0, since a subject can legitimately be the word "help".
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(shared) — print_help()'s rendered wording; patched here, rendered in tests/test_cli_routing.py
+# sentry: no-test-needed(shared) — print_help()'s rendered wording; patched here, rendered in tests/test_cli_routing.py
 
 from unittest.mock import patch
 

@@ -3,7 +3,7 @@
 # Description: Guard that test fixtures never appear in real citizens' mailboxes
 # Version: 1.0.2
 # Created: 2026-08-16
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/paths.py's find_repo_root(), guarding live mailboxes for fixture leakage."""
@@ -12,7 +12,7 @@
 # Z-suffixed timestamp in a live inbox signals fixture data. Reads live mailboxes deliberately.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — json.JSONDecodeError's contract on a malformed file, not re-verified
+# sentry: no-test-needed(stdlib) — json.JSONDecodeError's contract on a malformed file, not re-verified
 
 import json
 import re
@@ -88,7 +88,7 @@ class TestNoFixturesInLiveMailboxes:
             ),
             encoding="utf-8",
         )
-        torn = tmp_path / "src" / "aipass" / "seedgo" / ".ai_mail.local"
+        torn = tmp_path / "src" / "aipass" / "sentry" / ".ai_mail.local"
         torn.mkdir(parents=True)
         (torn / "inbox.json").write_text("{not json", encoding="utf-8")
         monkeypatch.setattr(guard_mod, "find_repo_root", lambda: tmp_path)
@@ -96,7 +96,7 @@ class TestNoFixturesInLiveMailboxes:
         with pytest.raises(AssertionError, match="42284adc") as failure:
             self.test_no_fixture_shaped_timestamps_in_live_inboxes()
         unchecked = str(failure.value).split("Unread, not checked:")[1].split()
-        assert unchecked[0] == "seedgo:"
+        assert unchecked[0] == "sentry:"
 
     def test_the_signature_matches_this_suites_own_fixture_default(self):
         """Pin the guard to the shape it is guarding against (test_delivery.py's default)."""

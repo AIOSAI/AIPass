@@ -14,7 +14,7 @@ on:
 # 2026-09-08 this was cancel-in-progress: true, and eight landings pushed
 # within hours on 2026-09-07/08 erased every in-flight verdict; the first
 # completed matrix showed 13 reds with no wave to attribute them to
-# (RPLAN-0004 in seedgo, finding 2.5). A verdict that finishes is worth the
+# (RPLAN-0004 in sentry, finding 2.5). A verdict that finishes is worth the
 # runner minutes it costs on a public repo.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -83,7 +83,7 @@ jobs:
       - run: pytest -v --tb=short --rootdir=. --ignore=tests/e2e -n auto --dist loadscope --timeout 300 --timeout-method thread --max-worker-restart 0
 
   standards:
-    name: seedgo-audit
+    name: sentry-audit
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -111,9 +111,9 @@ jobs:
       # Public repo: no developer's home path in any tracked text file (the owner,
       # 2026-10-04). Reads git ls-files; exit 1 on a hit, 2 when it could not measure.
       - name: No developer home path in tracked files
-        run: python -m aipass.seedgo.apps.seedgo home-paths scan
-      - name: Run seedgo standards audit
-        run: python .github/scripts/seedgo_audit.py
+        run: python -m aipass.sentry.apps.sentry home-paths scan
+      - name: Run sentry standards audit
+        run: python .github/scripts/sentry_audit.py
 
   coverage:
     name: coverage

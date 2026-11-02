@@ -3,13 +3,13 @@
 # Description: Tests for miscellaneous small handlers
 # Version: 1.0.2
 # Created: 2026-04-25
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/central_writer.py and two other small handlers it sits beside."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — the CENTRAL_FILE path constant
+# sentry: no-test-needed(constant) — the CENTRAL_FILE path constant
 
 import json
 import pytest

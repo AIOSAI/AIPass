@@ -3,13 +3,13 @@
 # Description: Tests for close's self-heal of an unregistered plan, split from test_close_ops.py (oversize, leg 12)
 # Version: 1.1.0
 # Created: 2026-10-06
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for close_plan_impl's self-heal in apps/handlers/plan/close_ops.py and close_helpers.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(ruff) — that the module parses and imports
 
 import json
 from pathlib import Path

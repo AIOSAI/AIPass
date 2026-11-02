@@ -3,14 +3,14 @@
 # Description: Tests for doctor structure scanner (DPLAN-0177)
 # Version: 1.2.5
 # Created: 2026-05-14
-# Modified: 2026-10-21
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/structure_scan/structure_scanner.py and the handlers it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/handlers/structure_scan/structure_scanner.py parses and imports
-# seedgo: no-test-needed(documentation) — that the public scan and check functions carry docstrings
+# sentry: no-test-needed(ruff) — that apps/handlers/structure_scan/structure_scanner.py parses and imports
+# sentry: no-test-needed(documentation) — that the public scan and check functions carry docstrings
 
 import json
 import sys

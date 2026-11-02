@@ -3,7 +3,7 @@
 # Description: telegram_response's delivery lane: retry, branch prefix, chunk delivery, cursor advance, delivery log
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/notification/telegram_response.py: its delivery lane."""
@@ -12,8 +12,8 @@
 # test_telegram_response.py; mirror sessions are test_telegram_response_mirror.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that telegram_response.py parses and imports, ruff and collection cover it
-# seedgo: no-test-needed(stdlib) — urlopen()'s HTTP transport, the stdlib's own
+# sentry: no-test-needed(ruff) — that telegram_response.py parses and imports, ruff and collection cover it
+# sentry: no-test-needed(stdlib) — urlopen()'s HTTP transport, the stdlib's own
 
 import json
 from pathlib import Path

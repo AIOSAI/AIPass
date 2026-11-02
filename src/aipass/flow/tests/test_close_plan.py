@@ -3,14 +3,14 @@
 # Description: Tests for apps/modules/close_plan.py -- handle_command routing
 # Version: 1.0.1
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/close_plan.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that close_plan.py parses and imports
-# seedgo: no-test-needed(constant) — print_introspection's and print_help's literal banner text
+# sentry: no-test-needed(ruff) — that close_plan.py parses and imports
+# sentry: no-test-needed(constant) — print_introspection's and print_help's literal banner text
 
 import pytest
 from unittest.mock import patch

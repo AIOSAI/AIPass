@@ -3,14 +3,14 @@
 # Description: Tests for CLI routing and help output
 # Version: 1.1.0
 # Created: 2026-03-27
-# Modified: 2026-10-31
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/spawn.py's CLI routing, help output, and introspection."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/spawn.py parses and imports
-# seedgo: no-test-needed(documentation) — docstrings on print_help, print_introspection, and handle_create
+# sentry: no-test-needed(ruff) — that apps/spawn.py parses and imports
+# sentry: no-test-needed(documentation) — docstrings on print_help, print_introspection, and handle_create
 
 import logging
 from unittest.mock import patch

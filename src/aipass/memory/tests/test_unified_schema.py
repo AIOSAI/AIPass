@@ -3,7 +3,7 @@
 # Description: Tests for the unified entry schema: normalize, extractor trim, entry_limits
 # Version: 1.0.2
 # Created: 2026-06-13
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # Category: memory/tests
 # =============================================
 
@@ -17,8 +17,8 @@
 #   - entry_limits.py: list-kind key_learnings char-limit enforcement via changed_entries
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — entry_limits.check_file_budget(): tests/test_entry_limits.py
-# seedgo: no-test-needed(covered_elsewhere) — entry_limits.check_fields() per-field rules: tests/test_changed_entries.py
+# sentry: no-test-needed(covered_elsewhere) — entry_limits.check_file_budget(): tests/test_entry_limits.py
+# sentry: no-test-needed(covered_elsewhere) — entry_limits.check_fields() per-field rules: tests/test_changed_entries.py
 
 import json
 from pathlib import Path

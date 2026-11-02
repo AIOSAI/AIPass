@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-06-15
-# Modified: 2026-10-08
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/notification/telegram_response.py."""
@@ -15,10 +15,10 @@
 # test_telegram_response_mirror.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that telegram_response.py parses and imports, ruff and collection cover it
-# seedgo: no-test-needed(documentation) — handle()'s docstring, the documentation checker covers it
-# seedgo: no-test-needed(constant) — PENDING_TTL's and TELEGRAM_CHAR_LIMIT's values, fixed literals
-# seedgo: no-test-needed(stdlib) — urlopen()'s HTTP transport, the stdlib's own
+# sentry: no-test-needed(ruff) — that telegram_response.py parses and imports, ruff and collection cover it
+# sentry: no-test-needed(documentation) — handle()'s docstring, the documentation checker covers it
+# sentry: no-test-needed(constant) — PENDING_TTL's and TELEGRAM_CHAR_LIMIT's values, fixed literals
+# sentry: no-test-needed(stdlib) — urlopen()'s HTTP transport, the stdlib's own
 
 import io
 import json

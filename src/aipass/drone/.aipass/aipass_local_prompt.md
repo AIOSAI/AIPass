@@ -1,6 +1,6 @@
 # DRONE — Branch Prompt
 <!-- Before editing or adding to this file: read .aipass/PROMPT_STYLE.md (repo root) — the prompt format rules. -->
-<!-- File: src/aipass/drone/.aipass/aipass_local_prompt.md — Injected every prompt when in drone directory. Cap: 9,000 chars (hooks BRANCH_CHAR_BUDGET), measured by `drone @seedgo audit context @drone`. -->
+<!-- File: src/aipass/drone/.aipass/aipass_local_prompt.md — Injected every prompt when in drone directory. Cap: 9,000 chars (hooks BRANCH_CHAR_BUDGET), measured by `drone @sentry audit context @drone`. -->
 
 Command router and symbolic addressing for AIPass. Resolves `@branch` names to paths, routes commands to entry points, and owns all git operations behind a tier-based access gate. The only git interface in the system — raw git and gh are blocked by a hook.
 
@@ -51,7 +51,7 @@ Three paths, checked in order. The lane is decided before the call, never discov
 
  - Built-ins first: `systems`, `scan`, `activate`, `list`, `remove`, `rm` — handled in `drone.py`.
  - `@target`: resolve via `AIPASS_REGISTRY.json`, dispatch as a subprocess. No module fallback on the error path — a `BranchNotFoundError` from a listed branch is a real fault and fails loud.
- - Module lane: internal (`git`) via importlib, external (`seedgo`, `cli`, `spawn`) via `generic_adapter` and `routing_config.json`.
+ - Module lane: internal (`git`) via importlib, external (`sentry`, `cli`, `spawn`) via `generic_adapter` and `routing_config.json`.
 
 One fallback survives, in the custom-command lane only, logged at INFO. It resolves its target from `drone_command_registry.json` rather than from argv, so the look-before-route check does not reach it.
 

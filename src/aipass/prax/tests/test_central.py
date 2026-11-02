@@ -3,13 +3,13 @@
 # Description: Tests for central file reader handler
 # Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/central/reader.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(json_structure) — the shape of read_all_centrals' log_operation record, covered by that row
+# sentry: no-test-needed(json_structure) — the shape of read_all_centrals' log_operation record, covered by that row
 
 import json
 from types import SimpleNamespace

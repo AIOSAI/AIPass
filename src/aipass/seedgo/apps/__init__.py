@@ -1,1 +1,0 @@
-# SEEDGO apps package

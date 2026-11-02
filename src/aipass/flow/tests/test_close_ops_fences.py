@@ -3,13 +3,13 @@
 # Description: Tests for close_all's project-scope fence, split from test_close_ops.py (oversize, leg 12)
 # Version: 1.0.0
 # Created: 2026-10-06
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for the project-scope fence of close_all_plans_impl in apps/handlers/plan/close_ops.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(ruff) — that the module parses and imports
 
 import json
 from pathlib import PurePath, PurePosixPath, PureWindowsPath

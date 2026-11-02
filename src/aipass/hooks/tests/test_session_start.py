@@ -4,15 +4,15 @@
 # Description: Tests for the SessionStart handlers: cadence reset, the culture file, the session pointer
 # Branch: hooks
 # Created: 2026-07-07
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_start.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — _SKIP_SOURCES' member strings, pinned by the resume/compact tests' effect
-# seedgo: no-test-needed(documentation) — that handle() carries a docstring
-# seedgo: no-test-needed(ruff) — that the module parses and its logger import resolves
+# sentry: no-test-needed(constant) — _SKIP_SOURCES' member strings, pinned by the resume/compact tests' effect
+# sentry: no-test-needed(documentation) — that handle() carries a docstring
+# sentry: no-test-needed(ruff) — that the module parses and its logger import resolves
 
 import json
 import os

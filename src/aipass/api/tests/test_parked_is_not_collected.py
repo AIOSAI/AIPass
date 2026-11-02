@@ -3,7 +3,7 @@
 # Description: The parked directory contributes no tests, and can be proven to
 # Version: 1.0.0
 # Created: 2026-08-19
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for tests/parked/conftest.py, the barrier that keeps the park out of collection."""
@@ -12,7 +12,7 @@
 # name is no barrier, so these run collection rather than check the conftest.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the parked capture-lane file still parses; ruff lints the park, pytest does not
+# sentry: no-test-needed(ruff) — that the parked capture-lane file still parses; ruff lints the park, pytest does not
 
 import subprocess
 import sys

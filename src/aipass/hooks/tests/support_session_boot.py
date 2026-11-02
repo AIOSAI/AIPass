@@ -3,13 +3,13 @@
 # Description: Helpers shared by the session_boot test files: patch target, env redirects, transcripts, pointers
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Helpers for the session_boot tests (no test_ prefix: never collected)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(ruff) — that the module parses and imports
 
 import os
 from pathlib import Path

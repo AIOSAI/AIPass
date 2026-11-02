@@ -3,15 +3,15 @@
 # Description: Tests for integrations_manager command handler
 # Version: 1.0.1
 # Created: 2026-05-12
-# Modified: 2026-10-22
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/integrations_manager.py, the integrations command handler."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that integrations_manager.py parses and imports
-# seedgo: no-test-needed(covered_elsewhere) — fetch_contracts and call_contract, tests/test_integrations.py
-# seedgo: no-test-needed(covered_elsewhere) — the bridge registry itself, tests/test_bridge_module.py
+# sentry: no-test-needed(ruff) — that integrations_manager.py parses and imports
+# sentry: no-test-needed(covered_elsewhere) — fetch_contracts and call_contract, tests/test_integrations.py
+# sentry: no-test-needed(covered_elsewhere) — the bridge registry itself, tests/test_bridge_module.py
 
 import pytest
 from unittest.mock import patch, MagicMock

@@ -5,7 +5,7 @@
 # Date: 2026-03-28
 # Version: 1.0.0
 # Created: 2026-03-28
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -20,8 +20,8 @@
 """Tests for apps/handlers/social/leaderboard_ops.py and apps/modules/explore.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every file in handlers/social/ parses and imports
-# seedgo: no-test-needed(covered) — what explore_rooms() and list_secrets() return: test_curation_explore_welcome_ops
+# sentry: no-test-needed(ruff) — that every file in handlers/social/ parses and imports
+# sentry: no-test-needed(covered) — what explore_rooms() and list_secrets() return: test_curation_explore_welcome_ops
 
 import sqlite3
 from typing import Any, Dict, List

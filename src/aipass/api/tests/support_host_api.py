@@ -3,13 +3,13 @@
 # Description: Shared helpers for the host API's test files (test_host_api*.py)
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Helpers shared by test_host_api.py and test_host_api_config.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(ruff) — that the module parses and imports
 
 from pathlib import Path
 

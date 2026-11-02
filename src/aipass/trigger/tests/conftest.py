@@ -3,7 +3,7 @@
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for trigger tests
 # Created: 2025-11-08
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # Version: 1.6.2
 # Category: trigger/tests
 #
@@ -316,7 +316,7 @@ def ci_lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
         return True
 
     registry = tmp_path / "AIPASS_REGISTRY.json"
-    emails = ["@hooks", "@spawn", "@seedgo", "@devpulse", "@trigger"]
+    emails = ["@hooks", "@spawn", "@sentry", "@devpulse", "@trigger"]
     registry.write_text(json.dumps({"branches": [{"email": e} for e in emails]}), encoding="utf-8")
     monkeypatch.setattr(error_detected, "BRANCH_REGISTRY_FILE", registry)
     monkeypatch.setattr(medic_state, "MEDIC_STATE_FILE", tmp_path / "medic_state.json")

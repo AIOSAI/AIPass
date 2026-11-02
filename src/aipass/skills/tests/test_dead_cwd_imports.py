@@ -3,7 +3,7 @@
 # Description: Dead-cwd import pins
 # Version: 1.1.1
 # Created: 2026-08-31
-# Modified: 2026-10-22
+# Modified: 2026-11-02
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -20,7 +20,7 @@
 """Tests that every skills module, and the guard in apps/handlers/__init__.py, survive a dead cwd."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — posixpath and ntpath realpath() themselves; only whether a world reaches them
+# sentry: no-test-needed(stdlib) — posixpath and ntpath realpath() themselves; only whether a world reaches them
 
 import ast
 import os
@@ -362,7 +362,7 @@ from aipass.skills.apps.handlers import creator_handler, discovery_handler
 exec(os.environ["SKILLS_WORLD_TEXT"])
 import pathlib as _pl
 
-# An arming probe must ask the call ITS OWN world denies (@seedgo's rule).
+# An arming probe must ask the call ITS OWN world denies (@sentry's rule).
 try:
     _pl.Path.cwd()
 except OSError:

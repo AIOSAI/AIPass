@@ -3,13 +3,13 @@
 # Description: Helpers shared by test_bootstrap.py and test_bootstrap_update.py (no test_ prefix: never collected)
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-11-02
 # =============================================
 
 """Helpers shared by the bootstrap test files: the AIPASS_HOME the detector must find."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(ruff) — that the module parses and imports
 
 from pathlib import Path
 

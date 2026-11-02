@@ -3,7 +3,7 @@
 # Description: Todo module — the pad at a glance, its backlog, and restore (CLI routing only)
 # Version: 1.0.0
 # Created: 2026-09-15
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -138,7 +138,7 @@ def _restore(tokens: List[str]) -> None:
 
 
 def print_introspection() -> None:
-    """Display module introspection (seedgo standard): handlers, subcommands, next steps."""
+    """Display module introspection (sentry standard): handlers, subcommands, next steps."""
     console.print()
     console.print("[bold cyan]todo Module[/bold cyan]")
     console.print("[dim]The sticky-note pad and its backlog file: count, list, restore[/dim]")

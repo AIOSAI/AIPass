@@ -3,15 +3,15 @@
 # Description: Surfacing governance module — state API, rejection paths, command exit seam
 # Version: 1.0.2
 # Created: 2026-07-16
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/governance.py (pure state-in/state-out API)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — the win32-only os.environ.setdefault() and stream reconfigure at import
-# seedgo: no-test-needed(shared) — handle_command's --help lane: the same print_introspection() the bare verb reads
-# seedgo: no-test-needed(shared) — json_handler.log_operation() audit line on each command; the memory log writer
+# sentry: no-test-needed(external) — the win32-only os.environ.setdefault() and stream reconfigure at import
+# sentry: no-test-needed(shared) — handle_command's --help lane: the same print_introspection() the bare verb reads
+# sentry: no-test-needed(shared) — json_handler.log_operation() audit line on each command; the memory log writer
 
 import pytest
 

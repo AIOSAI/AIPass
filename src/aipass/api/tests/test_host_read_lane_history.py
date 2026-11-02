@@ -3,13 +3,13 @@
 # Description: Tests for the read lane's per-file diff, commit patch, log, commit detail and remote link-cards
 # Version: 1.1.2
 # Created: 2026-10-08
-# Modified: 2026-11-01
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for read_diff, read_git_log, read_commit and read_git_remote in apps/handlers/host/git_reads.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — drone's own diff, show, log and remote output; subprocess.run and the diff door's Popen are faked here
+# sentry: no-test-needed(external) — drone's own diff, show, log and remote output; subprocess.run and the diff door's Popen are faked here
 
 import io
 import json
@@ -36,7 +36,7 @@ from aipass.api.tests.support_host_read_lane import (
     show_document,
 )
 
-# This file's own constants, not conftest's: seedgo's discarded_patch rule judges an imported target.
+# This file's own constants, not conftest's: sentry's discarded_patch rule judges an imported target.
 PATCH_READS_LOGGER = "aipass.api.apps.handlers.host.reads.logger"
 PATCH_READS_JSON = "aipass.api.apps.handlers.host.reads.json_handler"
 PATCH_READS_DRONE = "aipass.api.apps.handlers.host.reads.drone"

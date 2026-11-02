@@ -3,11 +3,11 @@
 # Description: Skills test configuration
 # Version: 3.3.0
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
-#   - v3.3.0 (2026-10-10): sample_data retired - requested only by the .archive scaffold (seedgo, PR #774)
+#   - v3.3.0 (2026-10-10): sample_data retired - requested only by the .archive scaffold (sentry, PR #774)
 #   - v3.2.0 (2026-10-04): audit_guard - file denials ride an audit hook, no stdlib name replaced
 #   - v3.1.0 (2026-09-27): C1 console width pin, C2 command-state reset; unused temp_dir, mock_logger removed
 #   - v3.0.0 (2026-09-03): The json redirect is the AIPASS_TEST_LOG_DIR seam - no attribute to patch (DPLAN-0325)

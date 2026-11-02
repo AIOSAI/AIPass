@@ -3,13 +3,13 @@
 # Description: Shared event payloads and lane helpers for test_escalation.py and test_escalation_digest.py
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Helpers for the tests of apps/handlers/escalation.py (no test_ prefix: never collected)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(ruff) — that the module parses and imports
 
 import json
 from datetime import datetime, timedelta

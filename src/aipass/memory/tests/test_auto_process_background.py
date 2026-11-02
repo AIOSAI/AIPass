@@ -3,7 +3,7 @@
 # Description: Tests for auto_process background spawn, single-flight lock and run_once
 # Version: 1.1.1
 # Created: 2026-08-14
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # Category: memory/tests
 # =============================================
 
@@ -12,9 +12,9 @@
 # auto_process runs detached, never on the prompt lane: its stdout is empty and it took 78-120s.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — run_pool_processing and auto_process() work, in tests/test_auto_process.py
-# seedgo: no-test-needed(external) — what the detached child writes to _CHILD_LOG; that is the child's own run
-# seedgo: no-test-needed(external) — the win32 branch of spawn_background(); only a Windows run takes it
+# sentry: no-test-needed(covered_elsewhere) — run_pool_processing and auto_process() work, in tests/test_auto_process.py
+# sentry: no-test-needed(external) — what the detached child writes to _CHILD_LOG; that is the child's own run
+# sentry: no-test-needed(external) — the win32 branch of spawn_background(); only a Windows run takes it
 
 import json
 import os

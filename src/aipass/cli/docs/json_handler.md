@@ -13,7 +13,7 @@ the caller's document.
 
 The three-file pattern (config, data, log), atomic writes, validation,
 provisioning and rotation all live in the service, and are pinned once for
-the whole fleet by seedgo's cross-branch contract rather than re-tested per
+the whole fleet by sentry's cross-branch contract rather than re-tested per
 branch. Under pytest the writes are redirected by the `AIPASS_TEST_LOG_DIR` seam
 that `conftest.mock_infrastructure` sets; the shim has no attribute to patch, and
 that is the point.
@@ -29,13 +29,13 @@ json_handler.save_json("cli", "data", {"key": "value"})
 json_handler.ensure_module_jsons("cli")  # Create all 3 if missing
 ```
 
-Import it as a module, not as loose names — seedgo's AST checker matches that
+Import it as a module, not as loose names — sentry's AST checker matches that
 exact shape.
 
 ## Why this is allowed to import prax
 
 `apps/modules/` cannot import `aipass.prax`: prax depends on cli, so the import
-is circular, and the ban is bypassed in `.seedgo/bypass.json`.
+is circular, and the ban is bypassed in `.sentry/bypass.json`.
 
 `handlers/json/json_handler.py` is the exception, and it is not a loophole:
 prax's `__init__` is lazy (PEP 562), so `from aipass.prax import json_handler`

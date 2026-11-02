@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-10-30
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/engine.py: the dispatcher core and the hook dispatch it drives."""
@@ -16,7 +16,7 @@
 # the fail-closed gates are test_engine_safeguards.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — subprocess.run's process spawn and timeout mechanics; the tests stub it at the edge
+# sentry: no-test-needed(stdlib) — subprocess.run's process spawn and timeout mechanics; the tests stub it at the edge
 
 import json
 import subprocess

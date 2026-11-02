@@ -3,13 +3,13 @@
 # Description: Tests for cli's entry point routing, help and introspection
 # Version: 1.2.0
 # Created: 2026-09-03
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/cli.py — routing, help, introspection and the exit seam."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(documentation) — that route_command and print_help in apps/cli.py carry docstrings
+# sentry: no-test-needed(documentation) — that route_command and print_help in apps/cli.py carry docstrings
 
 import pytest
 

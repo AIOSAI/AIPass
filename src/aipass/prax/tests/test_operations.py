@@ -3,7 +3,7 @@
 # Description: Unit tests for dashboard operations handler
 # Version: 1.5.0
 # Created: 2026-03-24
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for the dashboard file and its budget: apps/handlers/dashboard/operations.py."""
@@ -17,8 +17,8 @@
 # test_operations_template.py and test_operations_display.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(json_structure) — write_section's log_operation("section_updated") record, covered by that row
-# seedgo: no-test-needed(through_the_command) — merge_quick_status, covered by tests/test_dashboard_merge.py
+# sentry: no-test-needed(json_structure) — write_section's log_operation("section_updated") record, covered by that row
+# sentry: no-test-needed(through_the_command) — merge_quick_status, covered by tests/test_dashboard_merge.py
 
 import json
 from pathlib import Path

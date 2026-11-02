@@ -3,7 +3,7 @@
 # Description: Rollover Trigger Detection Handler
 # Version: 0.7.0
 # Created: 2025-11-16
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -422,7 +422,7 @@ def check_single_file(file_path: Path) -> Dict[str, Any]:
             branch_name = file_path.parents[1].name
             memory_type = file_path.stem  # "local" or "observations"
         else:
-            # Legacy flat files: SEEDGO.observations.json
+            # Legacy flat files: SENTRY.observations.json
             parts = file_path.stem.split(".")
             branch_name = parts[0] if len(parts) > 0 else "UNKNOWN"
             memory_type = parts[1] if len(parts) > 1 else "unknown"

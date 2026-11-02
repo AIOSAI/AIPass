@@ -3,16 +3,16 @@
 # Description: Tests for email send handler and send_args dispatch resolution
 # Version: 1.0.4
 # Created: 2026-04-25
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/email/send.py and apps/handlers/email/send_args.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(logging) — send_to_single()'s exact console/log wording, only its return value
-# seedgo: no-test-needed(logging) — send_to_single()'s trigger-import warning; its central-update warning is pinned
-# seedgo: no-test-needed(shared) — send_to_single()'s refused path: tests/test_refused_sends.py
-# seedgo: no-test-needed(shared) — send_to_single()'s upsert key: tests/test_upsert.py
+# sentry: no-test-needed(logging) — send_to_single()'s exact console/log wording, only its return value
+# sentry: no-test-needed(logging) — send_to_single()'s trigger-import warning; its central-update warning is pinned
+# sentry: no-test-needed(shared) — send_to_single()'s refused path: tests/test_refused_sends.py
+# sentry: no-test-needed(shared) — send_to_single()'s upsert key: tests/test_upsert.py
 
 import io
 

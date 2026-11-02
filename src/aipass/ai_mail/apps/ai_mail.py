@@ -3,7 +3,7 @@
 # Description: Entry point CLI for drone @ai_mail — inter-branch email system
 # Version: 1.3.1
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -70,7 +70,7 @@ def print_help():
     console.print("[yellow]EXAMPLES:[/yellow]")
     console.print('  [cyan]drone @ai_mail dispatch @branch "Subject" "Body"[/cyan]')
     console.print('  [cyan]drone @ai_mail dispatch @branch "Subject" "Body" --fresh[/cyan]')
-    console.print('  [cyan]drone @ai_mail email @seedgo "Subject" "Msg"[/cyan]  [dim]Send to branch[/dim]')
+    console.print('  [cyan]drone @ai_mail email @sentry "Subject" "Msg"[/cyan]  [dim]Send to branch[/dim]')
     console.print('  [cyan]drone @ai_mail email @all "Subject" "Msg"[/cyan]     [dim]Broadcast to all[/dim]')
     console.print("  [cyan]drone @ai_mail inbox[/cyan]                          [dim]List all emails[/dim]")
     console.print("  [cyan]drone @ai_mail view abc123[/cyan]                    [dim]View email[/dim]")
@@ -82,7 +82,7 @@ def print_help():
 
 
 def print_introspection():
-    """Display discovered modules only (seedgo pattern)"""
+    """Display discovered modules only (sentry pattern)"""
     console.print()
     console.print("[bold cyan]AI_Mail - Branch Communication System[/bold cyan]")
     console.print()

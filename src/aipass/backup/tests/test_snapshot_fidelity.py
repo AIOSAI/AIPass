@@ -3,15 +3,15 @@
 # Description: Tests for the snapshot handlers -- BackupResult error semantics, mirror-delete cleanup, snapshot copy
 # Version: 2.2.1
 # Created: 2026-06-12
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for the snapshot handlers in apps/handlers/: report/result.py, cleanup/mirror.py, copy/snapshot.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — cleanup/, copy/, report/ handlers parse without errors
-# seedgo: no-test-needed(documentation) — handler functions carry docstrings
-# seedgo: no-test-needed(stdlib) — shutil, pathlib, os standard library usage
+# sentry: no-test-needed(ruff) — cleanup/, copy/, report/ handlers parse without errors
+# sentry: no-test-needed(documentation) — handler functions carry docstrings
+# sentry: no-test-needed(stdlib) — shutil, pathlib, os standard library usage
 
 import json
 import os

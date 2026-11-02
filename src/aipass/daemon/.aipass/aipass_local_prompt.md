@@ -1,7 +1,7 @@
 # DAEMON — Branch Context
 <!-- Before editing or adding to this file: read .aipass/PROMPT_STYLE.md (repo root) — the prompt format rules. -->
 <!-- File: src/aipass/daemon/.aipass/aipass_local_prompt.md — Injected on every prompt when in daemon directory. -->
-<!-- Cap: 9,000 chars (hooks BRANCH_CHAR_BUDGET), measured by `drone @seedgo audit context @daemon`. -->
+<!-- Cap: 9,000 chars (hooks BRANCH_CHAR_BUDGET), measured by `drone @sentry audit context @daemon`. -->
 
 The fleet's scheduler. A systemd user timer fires a tick every couple of minutes; the tick discovers every citizen's `.daemon/schedule.json`, fires what is due, and reports fleet activity. The face for strangers is README.md; the depth is docs/.
 

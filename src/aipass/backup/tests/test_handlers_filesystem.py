@@ -3,16 +3,16 @@
 # Description: Backup handlers: scan/{walk,filter}.py, ignore/patterns.py, audit/trail.py, project/, path/, report/
 # Version: 1.2.6
 # Created: 2026-06-12
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Backup handlers: scan/{walk,filter}.py, ignore/patterns.py, audit/trail.py, project/, path/, report/."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — scan/, ignore/, project/, path/, report/, audit/ parse without errors
-# seedgo: no-test-needed(documentation) — handler functions carry docstrings
-# seedgo: no-test-needed(constant) — project/config.py DEFAULTS' max_file_size_mb and drive_sync values
-# seedgo: no-test-needed(stdlib) — os.walk, os.path.islink and os.path.getsize in scan/walk.py and scan/filter.py
+# sentry: no-test-needed(ruff) — scan/, ignore/, project/, path/, report/, audit/ parse without errors
+# sentry: no-test-needed(documentation) — handler functions carry docstrings
+# sentry: no-test-needed(constant) — project/config.py DEFAULTS' max_file_size_mb and drive_sync values
+# sentry: no-test-needed(stdlib) — os.walk, os.path.islink and os.path.getsize in scan/walk.py and scan/filter.py
 
 import json
 import os

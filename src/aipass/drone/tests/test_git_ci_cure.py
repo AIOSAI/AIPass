@@ -3,13 +3,13 @@
 # Description: Tests for the ci-cure tier and its verb — own file, as test_git_module.py nears the size cap
 # Version: 1.0.0
 # Created: 2026-10-22
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/git/ci_cure_handler.py through apps/modules/git_module.py, and its tier in auth.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — subprocess.run; git runs only in tmp_path repos, origin is a local bare repo
+# sentry: no-test-needed(stdlib) — subprocess.run; git runs only in tmp_path repos, origin is a local bare repo
 
 from __future__ import annotations
 

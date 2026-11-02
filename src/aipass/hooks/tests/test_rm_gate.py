@@ -4,15 +4,15 @@
 # Description: Tests for rm_gate security handler, the DPLAN-0356 lockdown since 2.0.0
 # Branch: hooks
 # Created: 2026-06-02
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/security/rm_gate.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(documentation) — that the gate's functions carry docstrings
-# seedgo: no-test-needed(ruff) — that the module parses and its logger import resolves
-# seedgo: no-test-needed(stdlib) — shlex's tokenising itself; the gate's reading of the tokens is pinned here
+# sentry: no-test-needed(documentation) — that the gate's functions carry docstrings
+# sentry: no-test-needed(ruff) — that the module parses and its logger import resolves
+# sentry: no-test-needed(stdlib) — shlex's tokenising itself; the gate's reading of the tokens is pinned here
 
 import json
 import logging

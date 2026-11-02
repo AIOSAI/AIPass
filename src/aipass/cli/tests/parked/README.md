@@ -18,11 +18,11 @@ guarantee is proven by running collection, not inferred from the filename.
 
 | Park | Ruling | What it holds |
 |---|---|---|
-| `scaffold(disabled).py` | @cli, DPLAN-0304 item 4, 2026-08-18 | The spawn/seedgo template's scaffold smoke test — see below |
+| `scaffold(disabled).py` | @cli, DPLAN-0304 item 4, 2026-08-18 | The spawn/sentry template's scaffold smoke test — see below |
 
 ## scaffold(disabled).py
 
-A spawn/seedgo TEMPLATE file, shipped to every new branch. Its job is to prove pytest
+A spawn/sentry TEMPLATE file, shipped to every new branch. Its job is to prove pytest
 infrastructure works in a branch that still has the template conftest.
 
 In @cli it never ran. It resolves `temp_test_dir` and `sample_test_data` through
@@ -38,7 +38,7 @@ works here — is proven many times over by the real suite.
 
 **Not a criticism of the template.** In a fresh branch the file is correct and useful; the
 skip path is deliberate and well-commented. The narrow finding is that a permanently-skipping
-test should not keep a slot in a branch with a real suite. Raised with @seedgo (their wave-2
+test should not keep a slot in a branch with a real suite. Raised with @sentry (their wave-2
 sweep) and reported to @devpulse.
 
 **Restore** with `mv "tests/parked/scaffold(disabled).py" tests/test_scaffold.py` (drop the

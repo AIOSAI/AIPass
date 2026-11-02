@@ -104,7 +104,7 @@ def _guard_branch_access():
         f"    from {MY_BRANCH}.apps.modules.logger import logger\n"
         f"\n"
         f"  For full standards guide:\n"
-        f"    drone @seedgo handlers\n"
+        f"    drone @sentry handlers\n"
         f"{'='*60}"
     )
 

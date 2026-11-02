@@ -3,25 +3,25 @@
 # Description: A line-scoped standards waiver must still point at what it claims
 # Version: 1.0.1
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
-"""Tests for .seedgo/bypass.json: each line-scoped waiver still points at its anchor, e.g. apps/plugins/devpulse_ops/auth.py."""
+"""Tests for .sentry/bypass.json: each line-scoped waiver still points at its anchor, e.g. apps/plugins/devpulse_ops/auth.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — whether seedgo honours a waiver at all, pinned by @seedgo in tests/test_bypass.py
+# sentry: no-test-needed(covered_elsewhere) — whether sentry honours a waiver at all, pinned by @sentry in tests/test_bypass.py
 
 import json
 from pathlib import Path
 
 import pytest
 
-# A line-scoped waiver drifts silently on any edit above it; seedgo matches on ``lines`` alone,
+# A line-scoped waiver drifts silently on any edit above it; sentry matches on ``lines`` alone,
 # so this file is the only thing that enforces the ``anchor`` key.
 
 # No module-level ``.resolve()``: it is an import-time cwd/symlink defect, and ``__file__`` is absolute.
 BRANCH_ROOT = Path(__file__).parents[1]
-BYPASS_FILE = BRANCH_ROOT / ".seedgo" / "bypass.json"
+BYPASS_FILE = BRANCH_ROOT / ".sentry" / "bypass.json"
 
 
 def _line_scoped_entries() -> list[dict]:

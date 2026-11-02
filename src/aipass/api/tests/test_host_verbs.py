@@ -3,7 +3,7 @@
 # Description: Tests for the host API verb lane — wake, kill, lock (FPLAN-0411 Phase 3)
 # Version: 1.0.3
 # Created: 2026-08-14
-# Modified: 2026-10-25
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/host/verbs.py and the server routes that reach it: wake, kill, lock."""
@@ -11,9 +11,9 @@
 # D0: every verb proxies the branch that owns the mechanism; the source-reading checks below are crude on purpose.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that verbs.py parses and imports
-# seedgo: no-test-needed(external) — drone's real wake and baud's real end_room; both doors are patched
-# seedgo: no-test-needed(covered_elsewhere) — resolve_branch_root itself, tests/test_host_read_lane.py
+# sentry: no-test-needed(ruff) — that verbs.py parses and imports
+# sentry: no-test-needed(external) — drone's real wake and baud's real end_room; both doors are patched
+# sentry: no-test-needed(covered_elsewhere) — resolve_branch_root itself, tests/test_host_read_lane.py
 
 from pathlib import Path
 from typing import Any

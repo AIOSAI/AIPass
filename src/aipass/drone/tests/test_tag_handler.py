@@ -3,13 +3,13 @@
 # Description: Tests for the tag handler — release tagging with safety guards
 # Version: 1.0.2
 # Created: 2026-07-02
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/git/tag_handler.py, reached through apps/modules/git_module.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — subprocess.run, which every git call here reaches as a recorded stub
+# sentry: no-test-needed(stdlib) — subprocess.run, which every git call here reaches as a recorded stub
 
 from __future__ import annotations
 

@@ -4,7 +4,7 @@
 # Description: Shared pytest fixtures for daemon tests - host-state seals, sentinels, console pin
 # Version: 1.3.0
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # Category: daemon/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -17,7 +17,7 @@
 #   - Error handling: Use error handler system (apps/handlers/error/)
 # =============================================
 #
-# @Meta header not seedgo standards
+# @Meta header not sentry standards
 
 """Shared pytest fixtures for daemon tests
 

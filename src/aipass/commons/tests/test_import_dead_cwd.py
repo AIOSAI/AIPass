@@ -4,14 +4,14 @@
 # Description: Pins that commons imports with a deleted cwd, and the sys.path[0] repair in apps/commons.py
 # Version: 1.2.0
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # Category: commons/tests
 # =============================================
 
 """Tests for apps/commons.py and every module under apps/: each imports without a readable working directory."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — ntpath.realpath's getcwd read; injected as a condition here, Windows CI measures it
+# sentry: no-test-needed(stdlib) — ntpath.realpath's getcwd read; injected as a condition here, Windows CI measures it
 
 import ast
 import os

@@ -3,7 +3,7 @@
 # Description: Email Send Orchestration (extracted from email.py)
 # Version: 1.3.0
 # Created: 2026-04-22
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -316,7 +316,7 @@ def _send_broadcast(subject, message, user_info, auto_execute, no_memory_save, r
 
 
 def print_introspection():
-    """Print module introspection for seedgo compliance."""
+    """Print module introspection for sentry compliance."""
     console.print()
     console.print("[bold cyan]email_send Module[/bold cyan]")
     console.print("[dim]Send orchestration — direct, interactive, and broadcast email delivery.[/dim]")

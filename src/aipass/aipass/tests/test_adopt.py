@@ -3,7 +3,7 @@
 # Description: Tests for aipass adopt — project adoption handler
 # Version: 1.3.2
 # Created: 2026-07-20
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/new_project/adopt.py and apps/modules/adopt.py."""
@@ -12,7 +12,7 @@
 # filesystem. dry_run tests assert zero filesystem mutation.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — spawn_agent's own behavior; @spawn's function, mocked here
+# sentry: no-test-needed(covered_elsewhere) — spawn_agent's own behavior; @spawn's function, mocked here
 
 import json
 import subprocess

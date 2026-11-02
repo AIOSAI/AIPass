@@ -3,7 +3,7 @@
 # Description: Tests for the verified-admin cross-project bridge + reply return path (FPLAN-0401 ph5/5b)
 # Version: 1.1.2
 # Created: 2026-08-12
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py and the cross-project bridge across wake.py and registry/read.py."""
@@ -12,7 +12,7 @@
 # The 5-leg verifier is devpulse's (test_admin_lane.py); here it is a seam patched to a verdict.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(shared) — _is_private_branch_email(), unrelated to the bridge: tests/test_delivery.py
+# sentry: no-test-needed(shared) — _is_private_branch_email(), unrelated to the bridge: tests/test_delivery.py
 
 import json
 from pathlib import Path
@@ -354,7 +354,7 @@ class TestIsVerifiedAdminCaller:
 
     def test_non_holder_short_circuits_without_verifying(self, monkeypatch):
         """16 other citizens do zero file I/O on every send."""
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "sentry")
         verifier = MagicMock(return_value=(True, "patched"))
         with patch(f"{_H_VERIFIED}.verify_admin_caller", verifier):
             assert is_verified_admin_caller() is False

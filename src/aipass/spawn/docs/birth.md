@@ -112,7 +112,7 @@ name instead of silently making a branch called WIZARD in `./wizard`.
 
 A newborn's startup files are measured against caps owned by other branches, and
 `tests/test_birth_receipt.py` pins that the template stays under them: README against
-@seedgo's published cap, the branch prompt against @hooks' `BRANCH_CHAR_BUDGET`,
+@sentry's published cap, the branch prompt against @hooks' `BRANCH_CHAR_BUDGET`,
 `.trinity/` files and per-string length against @memory's `file_budgets`, and the dashboard
 against @prax's budget. Every number is read from its owner at assert time; a cap copied
 into the test as a literal fails the suite by design.
@@ -173,12 +173,12 @@ To know what a newborn scores, mint a throwaway citizen and run the audit agains
 score is written here.
 
 The starter suite that ships at birth (`tests/test_cli_routing.py`) is listed in the
-template's `.spawn/.registry_ignore.json`: seedgo's architecture baseline treats every
+template's `.spawn/.registry_ignore.json`: sentry's architecture baseline treats every
 template file as a structural requirement of **every** branch of that class, so adding one
 without that entry drops existing branches below the gate. The exclusion is what keeps a
 template addition from becoming a fleet-wide mandate.
 
-The template ships no json shim test (`test_json_handler.py`): @seedgo's parametrised
+The template ships no json shim test (`test_json_handler.py`): @sentry's parametrised
 contract suite covers the shim by globbing the installed package, and the newborn ships the
 exact path it globs, so a per-citizen copy would only duplicate it. The one gap: a citizen
 minted into ANOTHER project's tree is outside that glob and gets no contract coverage from

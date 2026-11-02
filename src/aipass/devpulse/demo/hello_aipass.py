@@ -28,7 +28,7 @@ CLEAR = "\033[2J\033[H"
 # ── Branch Data ──────────────────────────────────────────────────────
 BRANCHES = [
     ("drone", "Command Router", "Routes commands to branches", CYAN),
-    ("seedgo", "Standards Engine", "21-standard compliance pack", GREEN),
+    ("sentry", "Standards Engine", "21-standard compliance pack", GREEN),
     ("prax", "Logging System", "Stack-aware dual routing", YELLOW),
     ("cli", "CLI Framework", "Argument parsing & registry", BLUE),
     ("flow", "Plan Manager", "FPLANs + DPLANs", MAGENTA),
@@ -42,7 +42,7 @@ BRANCHES = [
 
 ACTIVITIES = [
     "Processing dispatch...",
-    "Running seedgo audit...",
+    "Running sentry audit...",
     "Indexing memories...",
     "Routing command...",
     "Checking standards...",
@@ -104,7 +104,7 @@ def animate_startup():
         ("Connecting AI Mail network", 0.3),
         ("Mounting .trinity/ memories", 0.4),
         ("Starting Prax logging", 0.2),
-        ("Seedgo standards: 33 loaded", 0.3),
+        ("Sentry standards: 33 loaded", 0.3),
         ("System ready", 0.1),
     ]
 
@@ -182,7 +182,7 @@ def show_dispatch_demo():
         "Creating FPLAN-0099...",
         "Deploying build agent...",
         "Writing src/aipass/spawn/apps/handlers/greeting.py...",
-        "Running seedgo audit... 100% compliant",
+        "Running sentry audit... 100% compliant",
         "Emailing results back to @devpulse...",
     ]
 
@@ -201,7 +201,7 @@ def show_stats():
     """Final stats box."""
     stats = [
         f"{WHITE}Branches:    {CYAN}11 registered, 11 operational{RESET}",
-        f"{WHITE}Standards:   {GREEN}33 seedgo checks active{RESET}",
+        f"{WHITE}Standards:   {GREEN}33 sentry checks active{RESET}",
         f"{WHITE}Sessions:    {YELLOW}86 completed (devpulse alone){RESET}",
         f"{WHITE}Architecture:{MAGENTA} Citizens + Agents + Dispatch{RESET}",
         f"{WHITE}Built with:  {CYAN}Python, Rich, Claude Code{RESET}",

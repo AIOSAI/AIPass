@@ -42,7 +42,7 @@ A todo finished in a past session often never gets deleted. Before writing the s
 - **Re-scope what's partially done** → record which sub-items landed, keep the rest open.
 - **Leave deferred / pending-decision todos open** — but confirm they're still real.
 
-Quick checks beat assumptions: `ls`/`find` for files, `git ls-files`/`grep` for code/docs, `drone @seedgo audit` for standards. This step is the whole point of "close whats done."
+Quick checks beat assumptions: `ls`/`find` for files, `git ls-files`/`grep` for code/docs, `drone @sentry audit` for standards. This step is the whole point of "close whats done."
 
 ## 2. Active Plans
 

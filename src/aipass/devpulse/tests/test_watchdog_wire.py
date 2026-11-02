@@ -3,15 +3,15 @@
 # Description: Tests for the watchdog wire handler (DPLAN-0317 r4 — report, filter, deliver)
 # Version: 2.4.1
 # Created: 2026-08-19
-# Modified: 2026-10-27
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/watchdog/wire.py: arm_wire delivering THIS seat's dispatch completions."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that handlers/watchdog/wire.py parses and imports
-# seedgo: no-test-needed(documentation) — that arm_wire and find_repo_root carry docstrings
-# seedgo: no-test-needed(constant) — the WRAPPER_* names and the BASELINE DEAD wording
+# sentry: no-test-needed(ruff) — that handlers/watchdog/wire.py parses and imports
+# sentry: no-test-needed(documentation) — that arm_wire and find_repo_root carry docstrings
+# sentry: no-test-needed(constant) — the WRAPPER_* names and the BASELINE DEAD wording
 
 import json
 import os
@@ -219,7 +219,7 @@ def test_one_completion_delivers_one_line(tmp_path, capsys, monkeypatch):
 
 
 def test_another_citizens_completion_is_not_delivered(tmp_path, capsys, monkeypatch):
-    """Rule 5: if @flow dispatched @seedgo, that is @flow's wake; only ``sender`` can tell."""
+    """Rule 5: if @flow dispatched @sentry, that is @flow's wake; only ``sender`` can tell."""
     root = _repo(tmp_path)
     store = _store(tmp_path)
     _write_feed(root, [])
@@ -230,7 +230,7 @@ def test_another_citizens_completion_is_not_delivered(tmp_path, capsys, monkeypa
             root,
             [
                 _completion("flow", "mine"),
-                _completion("seedgo", "theirs", sender="@flow"),
+                _completion("sentry", "theirs", sender="@flow"),
             ],
         )
 
@@ -239,7 +239,7 @@ def test_another_citizens_completion_is_not_delivered(tmp_path, capsys, monkeypa
 
     out = capsys.readouterr().out
     assert "@flow" in out
-    assert "@seedgo" not in out, "another citizen's dispatch must never reach this seat"
+    assert "@sentry" not in out, "another citizen's dispatch must never reach this seat"
 
 
 def test_a_completion_without_a_sender_is_not_mine(tmp_path, capsys, monkeypatch):

@@ -3,7 +3,7 @@
 # Description: Windows dead-cwd import defect - two-world child pins, live-injection controls, AST ban on inspect.stack
 # Version: 1.3.0
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/__init__.py and every canary package, imported under a dead cwd."""
@@ -284,7 +284,7 @@ def test_ast_ban_ignores_an_unrelated_stack_attribute():
 
 
 # The quiet species (a path resolving fine to the wrong place) has no site here: canary computes no
-# cwd-sensitive module-level path, and seedgo's cross-branch contract pins the json write destination.
+# cwd-sensitive module-level path, and sentry's cross-branch contract pins the json write destination.
 
 
 # The fence reads frame paths, and a path read must not kill an import whose cwd is gone. The child runs

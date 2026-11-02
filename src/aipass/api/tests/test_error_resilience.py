@@ -1,16 +1,16 @@
 # =================== AIPass ====================
 # Name: test_error_resilience.py
-# Description: Error Resilience Tests (from seedgo template)
+# Description: Error Resilience Tests (from sentry template)
 # Version: 1.0.0
 # Created: 2026-03-27
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/json/json_handler.py under missing, corrupt and empty files."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — the prax json service that json_handler delegates to; @prax's tests
-# seedgo: no-test-needed(ruff) — that apps/handlers/json/json_handler.py parses and imports
+# sentry: no-test-needed(covered_elsewhere) — the prax json service that json_handler delegates to; @prax's tests
+# sentry: no-test-needed(ruff) — that apps/handlers/json/json_handler.py parses and imports
 
 import importlib
 import json

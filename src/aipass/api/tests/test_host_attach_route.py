@@ -3,14 +3,14 @@
 # Description: Tests for the attach route and its seats — opening, socket auth, watches, outside rooms, the ping
 # Version: 1.0.3
 # Created: 2026-10-08
-# Modified: 2026-10-19
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for the WS /v1/room/attach route in apps/handlers/host/server.py and open_attach/open_monitor in attach.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered) — issue_token() and the token store's own locking, tests/test_host_token_store.py
-# seedgo: no-test-needed(generated) — the tmux client that attach_command() builds; these tests spawn cat, never tmux
+# sentry: no-test-needed(covered) — issue_token() and the token store's own locking, tests/test_host_token_store.py
+# sentry: no-test-needed(generated) — the tmux client that attach_command() builds; these tests spawn cat, never tmux
 
 import ast
 import errno
@@ -88,11 +88,11 @@ class TestOpeningAnAttach:
         """The desktop holds the no-keyboard line twice — xterm's `disableStdin`
         up top and `pty_write`'s refusal underneath; the SESSION refusing is what makes tier-0 a contract."""
         with patch.object(host_attach, "monitor_command", lambda target: ["cat"]):
-            session = host_attach.open_monitor("seedgo", cwd=tmp_path)
+            session = host_attach.open_monitor("sentry", cwd=tmp_path)
 
         try:
             assert session.read_only
-            assert session.room == "watch-seedgo"
+            assert session.room == "watch-sentry"
             with pytest.raises(host_attach.AttachRefused):
                 session.write(b"echo hijacked\n")
         finally:
@@ -102,7 +102,7 @@ class TestOpeningAnAttach:
         """A refused target never reaches a PTY, let alone a process."""
         with patch.object(host_attach.subprocess, "Popen") as spawn:
             with pytest.raises(host_attach.AttachRefused):
-                host_attach.open_monitor("seedgo; rm -rf /")
+                host_attach.open_monitor("sentry; rm -rf /")
 
         spawn.assert_not_called()
 
@@ -441,7 +441,7 @@ class TestGlobalMissionControlIsReachable:
 
     @pytest.mark.parametrize(
         "garbage",
-        ["seedgo; rm -rf /", "SEEDGO", "a b", "../etc", "seedgo && curl evil", "$(whoami)", "run all", "--relay", "-x"],
+        ["sentry; rm -rf /", "SENTRY", "a b", "../etc", "sentry && curl evil", "$(whoami)", "run all", "--relay", "-x"],
     )
     def test_garbage_is_still_refused_before_anything_spawns(self, quiet: Any, garbage: str, monkeypatch) -> None:
         """Making absence reachable must not make anything ELSE reachable."""
@@ -463,7 +463,7 @@ class TestGlobalMissionControlIsReachable:
         with patch.object(host_attach, "PTY_AVAILABLE", False):
             with patch.object(host_attach.subprocess, "Popen") as spawn:
                 with pytest.raises(host_attach.AttachUnavailable) as refusal:
-                    host_attach.open_monitor("seedgo")
+                    host_attach.open_monitor("sentry")
 
         assert "PTY is a POSIX object" in str(refusal.value)
         spawn.assert_not_called()

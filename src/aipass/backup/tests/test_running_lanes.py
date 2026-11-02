@@ -3,7 +3,7 @@
 # Description: Tests for the running-lane progress files every lane writes under .backup/running/
 # Version: 1.0.1
 # Created: 2026-10-16
-# Modified: 2026-10-31
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/state/progress.py as snapshot, versioned, all and drive_sync drive it."""
@@ -13,7 +13,7 @@
 # The reader's side, status --json's "running" list, is pinned in test_status_json.py.
 #
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — os.replace's atomicity; the json service's write_json is the one writer
+# sentry: no-test-needed(stdlib) — os.replace's atomicity; the json service's write_json is the one writer
 
 from __future__ import annotations
 

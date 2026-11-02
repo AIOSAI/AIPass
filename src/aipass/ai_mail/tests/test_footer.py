@@ -3,13 +3,13 @@
 # Description: Tests for email footer handler
 # Version: 1.0.1
 # Created: 2026-04-25
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/email/footer.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(generated) — the __main__ block's console preview of get_footer()'s output
+# sentry: no-test-needed(generated) — the __main__ block's console preview of get_footer()'s output
 
 import pytest
 from unittest.mock import MagicMock
@@ -35,7 +35,7 @@ def test_get_footer_contains_checklist():
     """Footer contains the task checklist markers."""
     result = mod.get_footer()
     assert "TASK CHECKLIST" in result
-    assert "SEEDGO CHECK" in result
+    assert "SENTRY CHECK" in result
     assert "UPDATE MEMORIES" in result
     assert "CLOSE YOUR PLAN" in result
     assert "EMAIL SENDER" in result

@@ -91,8 +91,8 @@ citizen run `dispatch @manager --from @daemon` and wake a manager.
   exits `2`.
 - **`resolve_wake_sender(claimed)`** — verified caller first, the claim only as a
   fallback, which the refusal has already guaranteed is not privilege-bearing.
-  So `--from @spawn` from @seedgo's seat still authors the mail as `@spawn` while
-  the wake — and therefore wake-back — is attributed to `@seedgo`.
+  So `--from @spawn` from @sentry's seat still authors the mail as `@spawn` while
+  the wake — and therefore wake-back — is attributed to `@sentry`.
 - **`PRIVILEGED_SENDERS`** lives at the boundary that enforces it, because
   `wake_branch` cannot: its in-process callers (@daemon's `run.py`) have no
   caller env and are trusted by import instead. A test scans `wake.py` for
@@ -194,7 +194,7 @@ every `Path.resolve()` falls back to the raw spelling on `OSError`.
 
 **A limit.** The fence fires on the first import in a process. Once kin code has
 imported the package, a later foreign import is served from `sys.modules`. The write-time
-rule (`drone @seedgo audit`: handlers and encapsulation) is the wall.
+rule (`drone @sentry audit`: handlers and encapsulation) is the wall.
 
 ## Registry Globs Are Re-Checked in Python
 

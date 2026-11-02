@@ -4,7 +4,7 @@
 # Description: Tests for cadence module (DPLAN-0200): the fire decision; regroup and counter in test_cadence_regroup.py
 # Branch: hooks
 # Created: 2026-06-08
-# Modified: 2026-10-25
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/cadence.py: the fire decision."""
@@ -15,9 +15,9 @@
 # debounce window (= a real prior turn, not a sibling in the same turn).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that cadence.py parses and imports, ruff and collection cover it
-# seedgo: no-test-needed(documentation) — is_automated(), reset_counter() and should_fire() carry docstrings
-# seedgo: no-test-needed(stdlib) — fcntl, unavailable on Windows; the platform fallback never runs on this CI
+# sentry: no-test-needed(ruff) — that cadence.py parses and imports, ruff and collection cover it
+# sentry: no-test-needed(documentation) — is_automated(), reset_counter() and should_fire() carry docstrings
+# sentry: no-test-needed(stdlib) — fcntl, unavailable on Windows; the platform fallback never runs on this CI
 
 import contextlib
 import json

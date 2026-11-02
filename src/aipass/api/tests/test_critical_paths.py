@@ -3,14 +3,14 @@
 # Description: Critical path tests for API branch core functions
 # Version: 1.1.2
 # Created: 2026-03-31
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/api_key.py and apps/modules/openrouter_client.py, the request pipeline."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — the real OpenRouter request; make_api_request is mocked, no network in tests
-# seedgo: no-test-needed(ruff) — that api_key.py and openrouter_client.py parse and import
+# sentry: no-test-needed(external) — the real OpenRouter request; make_api_request is mocked, no network in tests
+# sentry: no-test-needed(ruff) — that api_key.py and openrouter_client.py parse and import
 
 import threading
 from unittest.mock import patch, MagicMock

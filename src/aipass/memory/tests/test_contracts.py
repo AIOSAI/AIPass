@@ -3,16 +3,16 @@
 # Description: Contract tests for the memory entry point and its data handling
 # Version: 1.1.1
 # Created: 2026-03-28
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # Category: memory/tests
 # =============================================
 
 """Tests for apps/memory.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — discover_modules() per module, pinned in tests/test_fleet_gateway.py
-# seedgo: no-test-needed(documentation) — the wording of print_help() and print_introspection() panels
-# seedgo: no-test-needed(external) — resolve_exit and console from @cli; only the exit codes they yield are pinned
+# sentry: no-test-needed(covered_elsewhere) — discover_modules() per module, pinned in tests/test_fleet_gateway.py
+# sentry: no-test-needed(documentation) — the wording of print_help() and print_introspection() panels
+# sentry: no-test-needed(external) — resolve_exit and console from @cli; only the exit codes they yield are pinned
 
 from pathlib import Path
 from unittest.mock import patch

@@ -3,7 +3,7 @@
 # Description: Tests for email.py's mailbox handlers - inbox, view, close, reply, sent
 # Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/email.py's mailbox handlers: inbox, view, close, reply, sent."""
@@ -15,9 +15,9 @@
 # logic, not business logic.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that print_help, caller_refusal and resolve_broadcast_targets parse and import
-# seedgo: no-test-needed(shared) — handle_send() and handle_command(): tests/test_email_module_send.py
-# seedgo: no-test-needed(shared) — handle_contacts() and handle_register(): tests/test_email_module_contacts.py
+# sentry: no-test-needed(ruff) — that print_help, caller_refusal and resolve_broadcast_targets parse and import
+# sentry: no-test-needed(shared) — handle_send() and handle_command(): tests/test_email_module_send.py
+# sentry: no-test-needed(shared) — handle_contacts() and handle_register(): tests/test_email_module_contacts.py
 
 import json
 import pytest

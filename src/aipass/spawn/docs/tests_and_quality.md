@@ -2,7 +2,7 @@
 
 # Tests and quality — what is pinned, and how to measure it
 
-**Branch** spawn · **Code** `tests/`, `.seedgo/bypass.json`
+**Branch** spawn · **Code** `tests/`, `.sentry/bypass.json`
 
 Nothing here states a current score. The numbers move with the code, so this page names the
 command that produces each one instead of a snapshot that starts rotting the day it is
@@ -16,12 +16,12 @@ written.
 |---|---|
 | Does the suite pass, and how many cases? | `pytest -q` from this directory, and again from the repository root — both rootdirs must agree |
 | The CI shape | `pytest -q -p no:cacheprovider` |
-| Standards score, violations, bypasses | `drone @seedgo audit aipass @spawn` |
-| The honest score with every bypass off | `drone @seedgo audit aipass @spawn --no-bypass` |
-| Which public functions have no test | `drone @seedgo test_map @spawn` |
-| Startup cost against each layer's cap | `drone @seedgo audit context @spawn` |
+| Standards score, violations, bypasses | `drone @sentry audit aipass @spawn` |
+| The honest score with every bypass off | `drone @sentry audit aipass @spawn --no-bypass` |
+| Which public functions have no test | `drone @sentry test_map @spawn` |
+| Startup cost against each layer's cap | `drone @sentry audit context @spawn` |
 
-A test count claimed in prose is a number with no owner. The AST count seedgo measures and a
+A test count claimed in prose is a number with no owner. The AST count sentry measures and a
 `grep` for `def test_` disagree by a handful, because grep counts lines inside docstrings and
 comments. One number, one method, produced live.
 
@@ -82,7 +82,7 @@ comments. One number, one method, produced live.
 
 ## Bypasses
 
-`.seedgo/bypass.json` holds this branch's standards exemptions, each with a written reason.
+`.sentry/bypass.json` holds this branch's standards exemptions, each with a written reason.
 The pure-utility handlers carry a `json_structure` bypass because they perform no operation
 to log; the operation they inform is logged at the site that performs it. The list and the
 reasons are read with the audit — a bypass whose reason no longer holds is a finding, not

@@ -3,7 +3,7 @@
 # Description: Tests for the rollover module's command routing and SUBCOMMANDS
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # Category: memory/tests
 # =============================================
 
@@ -12,9 +12,9 @@
 # Covers: from aipass.memory.apps.modules.rollover import handle_command
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — execute_rollover behind run_rollover, in tests/test_orchestrator_exec.py
-# seedgo: no-test-needed(covered_elsewhere) — the rollover_config verbs re-exported here, in tests/test_config_verbs.py
-# seedgo: no-test-needed(covered_elsewhere) — check_all_branches behind check_triggers, in tests/test_detector.py
+# sentry: no-test-needed(covered_elsewhere) — execute_rollover behind run_rollover, in tests/test_orchestrator_exec.py
+# sentry: no-test-needed(covered_elsewhere) — the rollover_config verbs re-exported here, in tests/test_config_verbs.py
+# sentry: no-test-needed(covered_elsewhere) — check_all_branches behind check_triggers, in tests/test_detector.py
 
 import importlib
 import sys

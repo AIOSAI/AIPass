@@ -4,15 +4,15 @@
 # Description: Tests for session boot's resume doors: the session pointer and the dispatched-job guard
 # Branch: hooks
 # Created: 2026-10-08
-# Modified: 2026-10-25
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_boot.py: the session-pointer doors and the dispatch guard."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/handlers/lifecycle/session_boot.py parses and imports
-# seedgo: no-test-needed(constant) — _RECLAIM_WAIT_S and _RECLAIM_POLL_S defaults; tests patch both to short intervals
-# seedgo: no-test-needed(log_level) — logger.info, logger.warning and logger.error prose; that row judges them
+# sentry: no-test-needed(ruff) — that apps/handlers/lifecycle/session_boot.py parses and imports
+# sentry: no-test-needed(constant) — _RECLAIM_WAIT_S and _RECLAIM_POLL_S defaults; tests patch both to short intervals
+# sentry: no-test-needed(log_level) — logger.info, logger.warning and logger.error prose; that row judges them
 
 import time
 from pathlib import Path

@@ -3,7 +3,7 @@
 # Description: Tests for apps/modules/status.py's --json and --sizes, the backup door's status contract
 # Version: 1.1.1
 # Created: 2026-10-16
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/status.py's --json [--sizes], the backup door's status contract."""
@@ -13,7 +13,7 @@
 # (DPLAN-0411); the gate is open for new test files on this build.
 #
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — json.dumps' encoding of the object once it is built
+# sentry: no-test-needed(stdlib) — json.dumps' encoding of the object once it is built
 
 import json
 from datetime import datetime, timezone

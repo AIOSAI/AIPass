@@ -4,17 +4,17 @@
 # Description: Tests for shared context_window module (model-aware window since 1.1.0)
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/context_window.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that context_window.py parses and imports, ruff and collection cover it
-# seedgo: no-test-needed(documentation) — print_introspection()'s console text, the introspection standard covers it
-# seedgo: no-test-needed(constant) — _DEFAULT_WINDOW and _TAIL_BYTES' values, pinned through the defaults asserted here
-# seedgo: no-test-needed(constant) — NATIVE_1M_MODELS' membership, pinned through the ids model_window is asserted on
-# seedgo: no-test-needed(stdlib) — json.loads' handling of malformed lines, the stdlib's own
+# sentry: no-test-needed(ruff) — that context_window.py parses and imports, ruff and collection cover it
+# sentry: no-test-needed(documentation) — print_introspection()'s console text, the introspection standard covers it
+# sentry: no-test-needed(constant) — _DEFAULT_WINDOW and _TAIL_BYTES' values, pinned through the defaults asserted here
+# sentry: no-test-needed(constant) — NATIVE_1M_MODELS' membership, pinned through the ids model_window is asserted on
+# sentry: no-test-needed(stdlib) — json.loads' handling of malformed lines, the stdlib's own
 
 import json
 

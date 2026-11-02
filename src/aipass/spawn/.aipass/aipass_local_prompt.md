@@ -49,7 +49,7 @@ apps/
 ├── handlers/
 │   ├── class_registry.py        # class → template dir, retired names refuse
 │   ├── file_ops.py              # template copy and path rename
-│   ├── docs_page.py             # docs page skeleton read, seedgo's door
+│   ├── docs_page.py             # docs page skeleton read, sentry's door
 │   ├── placeholders.py          # {{PLACEHOLDER}} engine
 │   ├── meta_ops.py              # branch meta, template registry, hashes
 │   ├── mint_verify.py           # a mint is verified against the manifest

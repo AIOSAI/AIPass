@@ -3,14 +3,14 @@
 # Description: Unit tests for skills validator
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # Category: skills/tests
 # =============================================
 
 """Tests for apps/handlers/validator.py, the requires-block check behind validate."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — how shutil.which() and importlib.util.find_spec() search
+# sentry: no-test-needed(stdlib) — how shutil.which() and importlib.util.find_spec() search
 
 from aipass.skills.apps.handlers.validator import validate_skill
 

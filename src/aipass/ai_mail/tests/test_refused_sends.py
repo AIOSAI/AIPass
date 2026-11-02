@@ -3,7 +3,7 @@
 # Description: Tests for refused-send bookkeeping and the handled-vs-worked routing contract
 # Version: 1.0.4
 # Created: 2026-08-12
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/email/create.py, format.py and send.py."""
@@ -13,8 +13,8 @@
 # never for "it worked"; failure goes through error(), which main() maps to exit 2.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — format.py's other formatters (lookup_branch_alias, format_sender_display) parse
-# seedgo: no-test-needed(stdlib) — json.dump/json.load's own serialization inside create_email_file
+# sentry: no-test-needed(ruff) — format.py's other formatters (lookup_branch_alias, format_sender_display) parse
+# sentry: no-test-needed(stdlib) — json.dump/json.load's own serialization inside create_email_file
 
 import json
 

@@ -3,7 +3,7 @@
 # Description: Unit tests for the dashboard display and command handlers
 # Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for the display and command handlers of apps/modules/dashboard.py."""
@@ -11,7 +11,7 @@
 # conftest's _dashboard_quiet doubles the dashboard module's logger and json service per test.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — refresh_all_dashboards, covered by tests/test_operations_refresh.py
+# sentry: no-test-needed(through_the_command) — refresh_all_dashboards, covered by tests/test_operations_refresh.py
 
 import json
 

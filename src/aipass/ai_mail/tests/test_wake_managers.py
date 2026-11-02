@@ -3,7 +3,7 @@
 # Description: Tests for the wake's manager lanes, the wake-back opt-out, the Fable grant read and the dashboard refresh
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-25
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's manager lanes, wake-back and wake_dashboard.py's refresh."""
@@ -11,7 +11,7 @@
 # Who may be woken and how, and what the wake promises other branches.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(shared) — wake_branch()'s spawn, session pointer and model: tests/test_wake.py
+# sentry: no-test-needed(shared) — wake_branch()'s spawn, session pointer and model: tests/test_wake.py
 
 import json
 import sys

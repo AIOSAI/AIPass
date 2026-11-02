@@ -3,7 +3,7 @@
 # Description: Red-first pins for marker 7 — self-healing triggers and the aftercare rulings
 # Version: 1.2.2
 # Created: 2026-08-27
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/rollover.py, apps/modules/templates.py and the handlers they drive."""
@@ -11,8 +11,8 @@
 # Self-healing is TRIGGER-DRIVEN, never a daemon: a lane heals because something happened.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — rollover.show_status(), driven by tests/test_rollover_pipeline.py
-# seedgo: no-test-needed(covered_elsewhere) — trinity_push.build_frame(), the push's write; tests/test_trinity_push.py
+# sentry: no-test-needed(covered_elsewhere) — rollover.show_status(), driven by tests/test_rollover_pipeline.py
+# sentry: no-test-needed(covered_elsewhere) — trinity_push.build_frame(), the push's write; tests/test_trinity_push.py
 
 import hashlib
 import json

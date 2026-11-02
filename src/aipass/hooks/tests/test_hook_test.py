@@ -5,15 +5,15 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-10
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/hook_test.py and the parity and smoke handlers it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — MOCK_EVENTS' sample payloads and HELP_COMMANDS' display strings
-# seedgo: no-test-needed(stdlib) — tempfile.gettempdir() choosing where the synthetic file lands
-# seedgo: no-test-needed(ruff) — that modules/hook_test.py parses and imports the engine it drives
+# sentry: no-test-needed(constant) — MOCK_EVENTS' sample payloads and HELP_COMMANDS' display strings
+# sentry: no-test-needed(stdlib) — tempfile.gettempdir() choosing where the synthetic file lands
+# sentry: no-test-needed(ruff) — that modules/hook_test.py parses and imports the engine it drives
 
 import json
 import os

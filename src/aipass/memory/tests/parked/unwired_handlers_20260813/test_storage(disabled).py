@@ -66,9 +66,9 @@ class TestChromaServiceCollectionName:
         mock_chromadb.PersistentClient.return_value = mock_client
 
         service = chroma.ChromaService(db_path=tmp_path / ".chroma")
-        result = service.get_collection_name("SEEDGO", "Observations")
+        result = service.get_collection_name("SENTRY", "Observations")
 
-        assert result == "seedgo_observations"
+        assert result == "sentry_observations"
 
     def test_handles_already_lowercase(self, monkeypatch, tmp_path):
         chroma, mock_chromadb = _import_chroma(monkeypatch)
@@ -115,9 +115,9 @@ class TestChromaServiceStoreVectors:
         documents = ["doc1", "doc2", "doc3"]
         metadatas = [{"k": "v1"}, {"k": "v2"}, {"k": "v3"}]
 
-        result = service.store_vectors("SEEDGO", "observations", embeddings, documents, metadatas)
+        result = service.store_vectors("SENTRY", "observations", embeddings, documents, metadatas)
 
-        assert result["collection"] == "seedgo_observations"
+        assert result["collection"] == "sentry_observations"
         assert result["count"] == 3
         assert result["total_vectors"] == 3
         assert len(result["ids"]) == 3
@@ -139,11 +139,11 @@ class TestChromaServiceGetCollectionStats:
         mock_chromadb.PersistentClient.return_value = mock_client
 
         service = chroma.ChromaService(db_path=tmp_path / ".chroma")
-        result = service.get_collection_stats("seedgo", "observations")
+        result = service.get_collection_stats("sentry", "observations")
 
         assert result["exists"] is True
         assert result["vector_count"] == 42
-        assert result["collection"] == "seedgo_observations"
+        assert result["collection"] == "sentry_observations"
 
     def test_returns_not_exists_when_collection_missing(self, monkeypatch, tmp_path):
         chroma, mock_chromadb = _import_chroma(monkeypatch)
@@ -168,7 +168,7 @@ class TestChromaServiceListCollections:
         _reset_globals(chroma)
 
         mock_col1 = MagicMock()
-        mock_col1.name = "seedgo_observations"
+        mock_col1.name = "sentry_observations"
         mock_col2 = MagicMock()
         mock_col2.name = "cli_local"
 
@@ -179,7 +179,7 @@ class TestChromaServiceListCollections:
         service = chroma.ChromaService(db_path=tmp_path / ".chroma")
         result = service.list_all_collections()
 
-        assert result == ["seedgo_observations", "cli_local"]
+        assert result == ["sentry_observations", "cli_local"]
 
 
 # ===========================================================================
@@ -194,7 +194,7 @@ class TestPublicStoreVectors:
         chroma, _ = _import_chroma(monkeypatch)
         _reset_globals(chroma)
 
-        result = chroma.store_vectors("SEEDGO", "observations", [], [], [])
+        result = chroma.store_vectors("SENTRY", "observations", [], [], [])
 
         assert result["success"] is True
         assert result["count"] == 0
@@ -204,7 +204,7 @@ class TestPublicStoreVectors:
         _reset_globals(chroma)
 
         result = chroma.store_vectors(
-            "SEEDGO",
+            "SENTRY",
             "observations",
             embeddings=[[0.1, 0.2]],
             documents=["doc1", "doc2"],
@@ -226,17 +226,17 @@ class TestPublicStoreVectors:
         mock_chromadb.PersistentClient.return_value = mock_client
 
         result = chroma.store_vectors(
-            "SEEDGO",
+            "SENTRY",
             "observations",
             embeddings=[[0.1, 0.2], [0.3, 0.4]],
             documents=["doc1", "doc2"],
-            metadatas=[{"branch": "SEEDGO"}, {"branch": "SEEDGO"}],
+            metadatas=[{"branch": "SENTRY"}, {"branch": "SENTRY"}],
             db_path=tmp_path / ".chroma",
         )
 
         assert result["success"] is True
         assert result["count"] == 2
-        assert result["collection"] == "seedgo_observations"
+        assert result["collection"] == "sentry_observations"
 
     def test_string_db_path_converts_to_path(self, monkeypatch, tmp_path):
         chroma, mock_chromadb = _import_chroma(monkeypatch)
@@ -270,7 +270,7 @@ class TestPublicStoreVectors:
         mock_chromadb.PersistentClient.side_effect = RuntimeError("DB error")
 
         result = chroma.store_vectors(
-            "SEEDGO",
+            "SENTRY",
             "observations",
             embeddings=[[0.1]],
             documents=["doc1"],
@@ -303,7 +303,7 @@ class TestPublicGetCollectionStats:
         # Pre-create the global service so _get_service uses our mock
         setattr(chroma, "_chroma_service", chroma.ChromaService(db_path=tmp_path / ".chroma"))
 
-        result = chroma.get_collection_stats("seedgo", "observations")
+        result = chroma.get_collection_stats("sentry", "observations")
 
         assert result["success"] is True
         assert result["exists"] is True
@@ -339,7 +339,7 @@ class TestPublicListAllCollections:
         _reset_globals(chroma)
 
         mock_col = MagicMock()
-        mock_col.name = "seedgo_observations"
+        mock_col.name = "sentry_observations"
 
         mock_client = MagicMock()
         mock_client.list_collections.return_value = [mock_col]
@@ -350,7 +350,7 @@ class TestPublicListAllCollections:
         result = chroma.list_all_collections()
 
         assert result["success"] is True
-        assert result["collections"] == ["seedgo_observations"]
+        assert result["collections"] == ["sentry_observations"]
         assert result["count"] == 1
 
 
@@ -367,7 +367,7 @@ class TestPublicGetDatabaseInfo:
         _reset_globals(chroma)
 
         mock_col1 = MagicMock()
-        mock_col1.name = "seedgo_observations"
+        mock_col1.name = "sentry_observations"
         mock_col2 = MagicMock()
         mock_col2.name = "cli_local"
 
@@ -383,7 +383,7 @@ class TestPublicGetDatabaseInfo:
         assert result["success"] is True
         assert result["db_path"] == str(db_path)
         assert result["collections_count"] == 2
-        assert result["collections"] == ["seedgo_observations", "cli_local"]
+        assert result["collections"] == ["sentry_observations", "cli_local"]
 
 
 # ===========================================================================
@@ -401,7 +401,7 @@ class TestPublicSearchVectors:
         mock_collection = MagicMock()
         mock_collection.query.return_value = {
             "documents": [["doc1", "doc2"]],
-            "metadatas": [[{"branch": "SEEDGO"}, {"branch": "SEEDGO"}]],
+            "metadatas": [[{"branch": "SENTRY"}, {"branch": "SENTRY"}]],
             "distances": [[0.1, 0.3]],
             "ids": [["id1", "id2"]],
         }
@@ -415,7 +415,7 @@ class TestPublicSearchVectors:
         setattr(chroma, "_chroma_service", chroma.ChromaService(db_path=db_path))
 
         query_emb = [0.1] * 384
-        result = chroma.search_vectors(query_emb, branch="SEEDGO", memory_type="observations")
+        result = chroma.search_vectors(query_emb, branch="SENTRY", memory_type="observations")
 
         assert result["success"] is True
         assert result["collections_searched"] == 1
@@ -428,7 +428,7 @@ class TestPublicSearchVectors:
         _reset_globals(chroma)
 
         mock_col1 = MagicMock()
-        mock_col1.name = "seedgo_observations"
+        mock_col1.name = "sentry_observations"
         mock_col2 = MagicMock()
         mock_col2.name = "cli_local"
 

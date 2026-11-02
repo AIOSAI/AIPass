@@ -3,7 +3,7 @@
 # Description: Unit tests for the branch detector's external project and path strategies
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_detector.py, its external project detection and path strategies."""
@@ -16,7 +16,7 @@
 # - branch_detector: detect_branch_from_path, detect_branch_from_log
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — _load_registry, covered by tests/test_monitoring_handlers.py
+# sentry: no-test-needed(through_the_command) — _load_registry, covered by tests/test_monitoring_handlers.py
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -32,7 +32,7 @@ from aipass.prax.tests.support_test_monitoring_handlers import (
 pytestmark = pytest.mark.usefixtures("_branch_detector_fresh")
 
 # Fake home base used across external-project tests to avoid
-# hardcoded /home/ paths that trip the SEEDGO log-structure checker.
+# hardcoded /home/ paths that trip the SENTRY log-structure checker.
 _FAKE_HOME = Path(str(_HOME / "user"))
 _FAKE_PROJECTS = _FAKE_HOME / "Projects"
 
@@ -230,17 +230,17 @@ class TestDetectFromClaudeProject:
         """Should fall back to segment scanning for unknown external paths."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
-        detector.known_branches.add("SEEDGO")
+        detector.known_branches.add("SENTRY")
 
         with patch.object(
             detector,
             "_parse_external_project_path",
             return_value=(None, None),
         ):
-            path = str(_FAKE_HOME) + "/.claude/projects/some-random-seedgo/file.jsonl"
+            path = str(_FAKE_HOME) + "/.claude/projects/some-random-sentry/file.jsonl"
             result = detector._detect_from_claude_project(path)
 
-        assert result == "SEEDGO"
+        assert result == "SENTRY"
 
     def test_old_fallback_returns_none_for_empty_segments(self):
         """Should return None when folder parses to no segments."""

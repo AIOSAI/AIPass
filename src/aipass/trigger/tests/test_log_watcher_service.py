@@ -3,14 +3,14 @@
 # Description: Tests for the log watcher service entry point
 # Version: 1.1.1
 # Created: 2026-04-26
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/log_watcher_service.py — the persistent service entry point."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — the reload decision behind reload_sentinel.start, in test_reload_sentinel.py
-# seedgo: no-test-needed(covered_elsewhere) — the branch watcher start_branch_watcher drives, in test_log_watcher.py
+# sentry: no-test-needed(covered_elsewhere) — the reload decision behind reload_sentinel.start, in test_reload_sentinel.py
+# sentry: no-test-needed(covered_elsewhere) — the branch watcher start_branch_watcher drives, in test_log_watcher.py
 
 import signal
 import threading

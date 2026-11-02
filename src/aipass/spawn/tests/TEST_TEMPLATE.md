@@ -1,23 +1,23 @@
 # Test template v1
 
-**Version 1.1.0** (1.0.0 → 1.1.0 on 2026-09-24: conftest C0, the log redirect above the imports, stated as item 8's one exception) · gold source: `src/aipass/seedgo/templates/` · model file: `readme_update_model.py.txt` · plan of record: DPLAN-0354.
+**Version 1.1.0** (1.0.0 → 1.1.0 on 2026-09-24: conftest C0, the log redirect above the imports, stated as item 8's one exception) · gold source: `src/aipass/sentry/templates/` · model file: `readme_update_model.py.txt` · plan of record: DPLAN-0354.
 
-Housed and distributed by @seedgo (owner 22:50: *"Seedgo will house the test template. It will distribute it fleetwide right, kinda like how memory houses and manages your trinity memory files."*). The machine-readable version lives in `templates.json` beside this page; a branch's receipt is `tests/.template_version.json`, written by `drone @seedgo tests template bump --confirm`.
+Housed and distributed by @sentry (owner 22:50: *"Sentry will house the test template. It will distribute it fleetwide right, kinda like how memory houses and manages your trinity memory files."*). The machine-readable version lives in `templates.json` beside this page; a branch's receipt is `tests/.template_version.json`, written by `drone @sentry tests template bump --confirm`.
 
-Authored by @devpulse, 2026-09-20 22:35, amended 23:15. Every line below is either the owner's ruling (marked OWNER, with the time) or what the readme_update trial proved. **Items 1 to 23 are reproduced unchanged**; the `conftest.py` section is seedgo's, added when the page was housed.
+Authored by @devpulse, 2026-09-20 22:35, amended 23:15. Every line below is either the owner's ruling (marked OWNER, with the time) or what the readme_update trial proved. **Items 1 to 23 are reproduced unchanged**; the `conftest.py` section is sentry's, added when the page was housed.
 
 ## Grain
 
 1. **One test file per module.** `tests/test_<module>.py`. The module's handlers are exercised through it, the way a user reaches them. OWNER 20:51 "per module", 22:11 "we already agreed module not handlers".
 2. **No product file is owed a test file.** Every test file names its subject. No subject demands a test. A handler with nothing reachable through its module and nothing worth pinning has no test, and that is correct.
-3. **Seedgo is the one exception, handled in seedgo.** Its checkers are the unit a reader debugs, so seedgo tests per checker. That is seedgo's own layout, not a second kind of branch, and the fleet template says nothing about it. OWNER 22:11 "Seedgo is unique, its not a template."
+3. **Sentry is the one exception, handled in sentry.** Its checkers are the unit a reader debugs, so sentry tests per checker. That is sentry's own layout, not a second kind of branch, and the fleet template says nothing about it. OWNER 22:11 "Sentry is unique, its not a template."
 4. **AIPass tests only its own files.** Never an external project's code. Projects house their own tests. OWNER 22:11.
 
 ## File shape, top to bottom
 
 5. **The META header block first**, the same block product files carry. For a test file the banner word is `META`. OWNER 22:06 "header on top".
 6. **Then the module docstring: one line naming the subject as a path.** `"""Tests for apps/modules/readme_update.py and the handlers it drives."""`
-7. **Then the declared pass**: what is NOT tested here and which seedgo standard, or `constant` / `stdlib` / `generated`, covers it. One marker per line, the gold standard's form. In the trial this slot is where six tests got dropped: writing it does the deciding.
+7. **Then the declared pass**: what is NOT tested here and which sentry standard, or `constant` / `stdlib` / `generated`, covers it. One marker per line, the gold standard's form. In the trial this slot is where six tests got dropped: writing it does the deciding.
 8. **Product imports at the top of the file**, never inside a test. This is not tidiness. It removes the option of faking the unit under test. The trial showed it is the single biggest quality change: the old files stubbed `sys.modules` and re-imported per test, and two product mutants passed all 27 of them. Cost: one import per process, measured 0.12 s for the whole readme_update stack, paid once.
 9. **One Test class per command or behaviour**, named for it.
 
@@ -86,7 +86,7 @@ def clean_command_state() -> Generator[None, None, None]:
 
 **C4. `host_state_snapshot`** — snapshot and restore around a test that must touch real host state. Kept because it carries the owner's 2026-09-08 narrowing: entering the host is allowed, *not restoring it* is not.
 
-A branch whose product writes outside `tmp_path` adds its own redirect fixture, autouse, pointing that write into `tmp_path` — a **real** redirect, not a mock. Seedgo's `mock_infrastructure` (`AIPASS_TEST_LOG_DIR` into `tmp_path`) is the worked example.
+A branch whose product writes outside `tmp_path` adds its own redirect fixture, autouse, pointing that write into `tmp_path` — a **real** redirect, not a mock. Sentry's `mock_infrastructure` (`AIPASS_TEST_LOG_DIR` into `tmp_path`) is the worked example.
 
 ## What the checkers will be
 
@@ -94,4 +94,4 @@ Every numbered item is a candidate checker, built one at a time, tests-only, in 
 
 ## The model file
 
-`readme_update_model.py.txt` beside this page is the shipped article, not a sketch: it is byte-identical to `src/aipass/seedgo/tests/test_readme_update.py`, 31 tests, green on Ubuntu and macOS across Python 3.10 to 3.13 (PR#774). Read it next to this page — every item above has a line in it. The `.txt` suffix is there so pytest can never collect it and so the path-based `applicability` split never reads a test model as production code; the live, linted copy is the `tests/` one.
+`readme_update_model.py.txt` beside this page is the shipped article, not a sketch: it is byte-identical to `src/aipass/sentry/tests/test_readme_update.py`, 31 tests, green on Ubuntu and macOS across Python 3.10 to 3.13 (PR#774). Read it next to this page — every item above has a line in it. The `.txt` suffix is there so pytest can never collect it and so the path-based `applicability` split never reads a test model as production code; the live, linted copy is the `tests/` one.

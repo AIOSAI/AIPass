@@ -3,7 +3,7 @@
 # Description: The config verbs' --json machine surface - one document on stdout, payloads, in-band refusals
 # Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/rollover_json.py — the `--json` surface of the config and rollover verbs."""
@@ -11,7 +11,7 @@
 # @api reads this stdout instead of the screen: one document, refusals in band as ok:false.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — the human-path refusal sentences, tests/test_config_verbs_refusals.py
+# sentry: no-test-needed(covered_elsewhere) — the human-path refusal sentences, tests/test_config_verbs_refusals.py
 
 import json
 from types import SimpleNamespace
@@ -295,7 +295,7 @@ class TestJsonRefusals:
         ("set-default",),
         ("reset",),
     ]
-    # seedgo SHORT-TABLE (2026-08-31): a non-empty parametrize is not a count
+    # sentry SHORT-TABLE (2026-08-31): a non-empty parametrize is not a count
     # guard - a row silently dropped from _CASES still leaves every surviving
     # case green. Pin the count so a shrink is loud.
     assert len(_CASES) == 15

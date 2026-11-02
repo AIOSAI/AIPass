@@ -4,7 +4,7 @@
 
 **Branch** trigger · **Code** `apps/modules/ci.py`, `apps/handlers/ci/`, `apps/handlers/events/ci_red.py`
 
-A red CI run on dev wakes the branch that owns the failure. Its cure goes through one @seedgo
+A red CI run on dev wakes the branch that owns the failure. Its cure goes through one @sentry
 review and is pushed through drone's `ci-cure` door. @devpulse and the phone hear about each
 step. A green run sends nothing. The verbs are in `drone @trigger ci --help`, and
 `drone @trigger ci status` prints the ledger.
@@ -48,9 +48,9 @@ step. A green run sends nothing. The verbs are in `drone @trigger ci --help`, an
    git and asks for the owner reply shape below. When the owner exits, @trigger is woken back.
 5. **Review.** On that wake-back the @trigger agent runs
    `drone @trigger ci reply <run_id> @<owner> "<reply body>"`. The verb parses the reply and
-   reads `drone @git diff <files>`. Then it dispatches @seedgo once with the run id, the
+   reads `drone @git diff <files>`. Then it dispatches @sentry once with the run id, the
    failing lines, the owner's note and the diff.
-6. **Verdict.** On seedgo's wake-back the agent runs
+6. **Verdict.** On sentry's wake-back the agent runs
    `drone @trigger ci verdict <run_id> @<owner> "<reply body>"`.
    - On `VERDICT: OK` the owner's bullet goes first under `## [Unreleased]` → `### Fixed` in the
      repo's `CHANGELOG.md`, and then the door runs:
@@ -59,7 +59,7 @@ step. A green run sends nothing. The verbs are in `drone @trigger ci --help`, an
      and `CHANGELOG.md` goes back to what it was.
 7. **Proof.** A later poll finds the first run of the same workflow created after the push.
    That run is the proving run. @devpulse gets one `[CI PUSHED]` note naming it, with the owner's
-   note and seedgo's lesson. When the proving run passes, the cure becomes `cured` and @devpulse
+   note and sentry's lesson. When the proving run passes, the cure becomes `cured` and @devpulse
    gets one `[CI GREEN]` note. When it fails, the cure becomes `unproven` and the new red goes
    through the lane like any other red.
 
@@ -69,8 +69,8 @@ At most two citizens are awake. The count comes from ai_mail's public
 `outstanding_dispatches()`: the distinct targets of open dispatches, leaving out rows whose
 monitor is known dead (`monitor_alive: false`) and overdue rows. When the register cannot be
 read, the cap counts as full. A wake that would be the third is queued in the ledger, as
-`queued` for an owner or `review_queued` for seedgo, and the next poll sends it. The @trigger
-agent on a wake-back counts as awake. The owner wake and the seedgo wake come one after the
+`queued` for an owner or `review_queued` for sentry, and the next poll sends it. The @trigger
+agent on a wake-back counts as awake. The owner wake and the sentry wake come one after the
 other, so the lane never holds two wakes at once.
 
 ## Ledger
@@ -119,7 +119,7 @@ What was wrong and why the cure is right.
 The run is held when the reply has no `FILES:` block, when the block is empty, or when a path
 is outside `src/aipass/<owner>/` and is not `CHANGELOG.md`.
 
-**Seedgo**, to the `[CI REVIEW] run <id> @<owner>` mail. The first line must be `VERDICT: OK` or
+**Sentry**, to the `[CI REVIEW] run <id> @<owner>` mail. The first line must be `VERDICT: OK` or
 `VERDICT: HELD`. On HELD the next lines give the reason. The rest is the checker lesson, which
 goes to @devpulse in the pushed note. A reply in any other shape is refused and changes nothing.
 
@@ -134,7 +134,7 @@ Feed events use `kind` `system`, `source` `ci`, and
 | Red with an owner | `red`, then `dispatched` | owner's dispatch |
 | Infra red | `red` | — |
 | Unowned red | `unowned` | @devpulse, the excerpt |
-| Seedgo asked | `dispatched` | @seedgo's dispatch |
+| Sentry asked | `dispatched` | @sentry's dispatch |
 | Held | `held` | @devpulse, diff and reason |
 | Pushed | `pushed` | @devpulse once the proving run exists |
 | Green after a cure | `green` | @devpulse, once |
@@ -142,7 +142,7 @@ Feed events use `kind` `system`, `source` `ci`, and
 
 ## Limits
 
-- `drone @git diff` does not show untracked files, so the diff seedgo reviews leaves out a new
+- `drone @git diff` does not show untracked files, so the diff sentry reviews leaves out a new
   file the cure adds.
 - `projects/*` paths name no owner. Such a red is unowned.
 - A `gated` cure waits for its gate. A 24h build mute holds it for up to 24h; `medic unmute @<owner>` sends it on the next poll.

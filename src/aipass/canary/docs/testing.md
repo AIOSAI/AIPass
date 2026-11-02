@@ -57,7 +57,7 @@ once, parametrised across every branch in the fleet, by the standards branch's
 own contract test, where the shim is one file.
 
 New test files need permission by policy, and a hook gate refuses them across
-the fleet. `agent_test_writing` is off and `allow` holds `seedgo` alone; this
+the fleet. `agent_test_writing` is off and `allow` holds `sentry` alone; this
 branch is not on it, so the gate refuses a new test file here as it does
 anywhere else. Read it live with `drone @hooks testwrite`; never route around
 it. The route to a new test is a mail to the orchestration branch naming the

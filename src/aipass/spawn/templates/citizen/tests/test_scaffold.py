@@ -3,13 +3,13 @@
 # Description: The handler guard's structural pin a citizen is born with
 # Version: 1.3.0
 # Created: 2026-07-04
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/__init__.py, the guard pin a citizen is born with: no ``inspect.stack()``."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/handlers/__init__.py parses and imports
+# sentry: no-test-needed(ruff) — that apps/handlers/__init__.py parses and imports
 
 import ast
 from pathlib import Path

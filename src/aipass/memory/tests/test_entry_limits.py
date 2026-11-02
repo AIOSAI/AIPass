@@ -3,7 +3,7 @@
 # Description: entry_limits config reader and the apps/modules/limits.py gateway over it
 # Version: 1.2.0
 # Created: 2026-06-13
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # Category: memory/tests
 # =============================================
 
@@ -12,9 +12,9 @@
 # entry_limits reads through config_loader, so tests patch config_loader._CONFIG_PATH.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — classify_entries(), is_near_cap(): tests/test_changed_entries.py
-# seedgo: no-test-needed(covered_elsewhere) — check_fields() per field, pinned in tests/test_unified_schema.py
-# seedgo: no-test-needed(covered_elsewhere) — resolve_entry_types() merge, pinned in tests/test_trinity_standard.py
+# sentry: no-test-needed(covered_elsewhere) — classify_entries(), is_near_cap(): tests/test_changed_entries.py
+# sentry: no-test-needed(covered_elsewhere) — check_fields() per field, pinned in tests/test_unified_schema.py
+# sentry: no-test-needed(covered_elsewhere) — resolve_entry_types() merge, pinned in tests/test_trinity_standard.py
 
 import json
 from pathlib import Path

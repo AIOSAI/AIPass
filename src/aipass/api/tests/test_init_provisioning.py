@@ -1,16 +1,16 @@
 # =================== AIPass ====================
 # Name: test_init_provisioning.py
-# Description: Init/Provisioning Tests (from seedgo template)
+# Description: Init/Provisioning Tests (from sentry template)
 # Version: 1.0.0
 # Created: 2026-03-27
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/json/json_handler.py, its ensure_json_exists provisioning."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the json_handler shim parses and imports
-# seedgo: no-test-needed(duplicate_test) — log_operation() and the prax service behind the shim, @prax's own suite
+# sentry: no-test-needed(ruff) — that the json_handler shim parses and imports
+# sentry: no-test-needed(duplicate_test) — log_operation() and the prax service behind the shim, @prax's own suite
 
 import importlib
 import json

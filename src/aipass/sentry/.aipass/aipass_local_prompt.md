@@ -1,0 +1,100 @@
+# SENTRY — Branch Context
+<!-- Before editing or adding to this file: read .aipass/PROMPT_STYLE.md (repo root) — the prompt format rules. -->
+<!-- File: src/aipass/sentry/.aipass/aipass_local_prompt.md — Injected every prompt when in sentry directory. -->
+
+Standards compliance platform. Audits branches, queries standard content, manages bypass rules.
+
+## Commands
+
+```
+sentry audit aipass                              # Audit every citizen against the aipass pack
+sentry audit aipass @flow                        # Single branch
+sentry audit pytest_quality [@branch]            # v5 pack — 15 AST rules over tests/ (scores, gates nothing)
+sentry audit-tests @branch                       # Execution lane — a suite under the write gate, advisory
+sentry standard cli                              # Show standard content (short form)
+sentry standards_query aipass_standards cli      # Show standard content (explicit pack)
+sentry checklist <file|dir>                      # Per-file standards check (hook consumer)
+sentry diagnostics                               # Pyright type errors (runs via audit pipeline)
+sentry proof aipass                              # Proof certification
+sentry test_map @branch                          # Custom function test coverage
+sentry test-inventory <path>                     # Every test function in a tree, ranked
+sentry tests retired / restore <name>            # The retire lane — a logged move, never a delete
+sentry tests pinning <path>...                   # Test files naming a non-.py path, one per line
+sentry bypass prune @branch [--dry-run]          # Remove bypass rules that match nothing; live/blank never
+sentry tests template-status / template bump     # Test template v1: receipts vs gold (--confirm writes)
+sentry shadow-cycle run                          # The three weekly v5 passes
+sentry ratchet pick / run / record @branch      # Execution ratchet: one branch a week, --pseudo-tested, series
+sentry permissions / inbox_audit                 # Settings sweep / mailbox hygiene
+sentry home-paths scan [<root>]                  # developer_home over the tracked tree — the CI gate, red exits 1
+sentry readme update @branch                     # README auto-update
+```
+
+All modules also accept the filename form: `standards_audit`, `standards_query`, `diagnostics_audit`, `readme_update`.
+
+An unknown command, pack, flag or branch REFUSES by name and exits non-zero (the owner's ruling, 2026-09-07 fleet sweep) — code 7 for an argument nobody recognised, 3 for a target with nothing to check, 2 for a lane that could not run.
+
+## Hook Architecture
+
+The **hooks branch** (`src/aipass/hooks/`) owns all hook infrastructure — engine, bridge, and the native handlers. Sentry audits hooks via standards but does not own the hook system, and does not carry its counts.
+
+Provider settings route all events through the bridge: `src/aipass/hooks/apps/handlers/bridges/claude.py <Event>:<handler>`. The bridge dispatches to native Python handlers in `hooks/apps/handlers/` (prompt, security, lifecycle, notification categories).
+
+## Apps Layout (extra layer vs standard branch)
+
+```
+apps/
+├── sentry.py                    # Entry point — thin router; turns a CommandRefused into its exit code
+├── modules/                     # One module per CLI verb; __init__.py holds CommandRefused
+└── handlers/                    # One directory per concern
+    ├── aipass_standards/        # v4 checker pack (*_check.py + *_content.py + *.md triplets)
+    ├── pytest_quality_standards/ # v5 SCORING pack, generic, 15 branch-level AST rules
+    ├── context_standards/       # ADVISORY startup-budget pack — `audit context` = the fleet table
+    ├── tests_pytest_standards/  # EXECUTION pack — nominators, not checkers; never scored
+    ├── aipass_proof/            # Proof certification
+    ├── audit/                   # branch_audit, discovery, audit_display, artifact, incremental_cache
+    ├── audit_tests/             # The execution lane: refusal vocabulary, runner, render
+    ├── bypass/                  # bypass_handler, ignore_handler, inert, dead_rules
+    ├── cli/                     # help_flags
+    ├── config/                  # Package marker only — no handlers today
+    ├── diagnostics/             # discovery (standalone disabled, runs via audit pipeline)
+    ├── json/                    # json_handler — the canonical shim, byte-identical fleet-wide
+    ├── ratchet/                 # Execution ratchet: pick, series (.sentry/ratchet_series.jsonl)
+    ├── readme/                  # readme_update handlers
+    ├── shadow_cycle/            # Weekly v5 cadence: score, cycle
+    ├── test_inventory/          # collection, exclusions
+    ├── test_map/                # function_scanner
+    └── tests_lane/              # retire_ops (the .backup move), template_ops (gold + receipts)
+```
+
+Two lanes: the **audit** walks `apps/`, `shared/` and collectable `tests/` files (`branch_audit.py` `_collect_py_files`), each checker scoring only the files its `APPLIES_TO` names; the PostToolUse **checklist** hook checks one file as it is written. Advisory arms (`check_branch_info`) print lines and never score. A pack declares its own corpus in `pack.json`; the banner over its scores is that declaration, not the engine's file count.
+
+## How I Work — Standards Reasoning
+
+When branch raises standards issue (email, dispatch, user relaying):
+
+1. **Reproduce first.** Run audit their branch. See violation myself. Don't take their word — audit is ground truth.
+2. **Checker wrong?** Violation false positive (flagging doc strings, catching wrong pattern) → checker needs fixing. Not branch's code.
+3. **Standard unclear?** Branch had ASK what do → standard content incomplete. Answer them, then update standard so next branch doesn't ask.
+4. **Branch legitimately non-compliant?** Explain what needs change + why. Point `drone @sentry standards_query aipass_standards <standard>` pattern.
+5. **Valid exception?** Some files genuinely can't comply (circular imports, pure-Python contracts). That's bypass rules. Help write bypass entry.
+
+Before changing checker/standard: prove catches real case AND doesn't catch false positives. Rule: break first, see violation, then fix.
+
+Before reporting a leg, run the touched tests as a clean checkout too: `PYTHONPATH=tools python -m pytest <files> -p clean_checkout_probe` hides the git-ignored AIPASS_REGISTRY.json from this process only. A seat green with the marker present is not CI green.
+
+When fixing own compliance: eat own dogfood. Sentry can't pass own audit → nothing else matters.
+
+## Access
+
+Sentry + devpulse have **system-wide file access**. "No cross-branch edits" rule does not apply — sentry needs edit system files (`.aipass/`, global prompts) + inspect any branch's code standards enforcement.
+
+## Quick Reference
+
+- Pack discovery: `handlers/*_standards/` dirs `*_check.py` files
+- `audit` strips `_standards` suffix: `aipass_standards/` → `audit aipass`
+- `standards_query` uses full dir name: `standards_query aipass_standards`
+- Rich markup only — never bare `print()`, never captured ANSI drone output
+- `standard ruff` is the query name; a ruff bypass rule still uses the key `"ruff_check"`
+- The tree above is the ONLY copy — README is the face, not the map, and is off the startup read
+- Depth is `docs/` (indexed from README): standards pack, v5 pack, startup budget, audit engine, checklist+hooks, proof+coverage, tech debt
+- `templates/` is the fleet's GOLD test template: `templates.json` versions it, `test_template_v1.md` is the page, `readme_update_model.py` is the model. Never collected by pytest. A branch's receipt is its `tests/.template_version.json`; a test's BODY is never distributed

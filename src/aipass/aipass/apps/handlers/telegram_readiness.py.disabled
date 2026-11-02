@@ -76,7 +76,7 @@ from aipass.aipass.apps.handlers.json import json_handler
 _MODULE_NAME = "telegram_readiness"
 
 # Re-declared rather than imported from ui.progress — handlers do not import
-# each other (seedgo handlers rule). Mirrors provider_reconcile.py:23-24.
+# each other (sentry handlers rule). Mirrors provider_reconcile.py:23-24.
 GLYPH_PASS = "[green]✓[/green]"
 GLYPH_WARN = "[yellow]![/yellow]"
 

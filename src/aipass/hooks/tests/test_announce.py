@@ -4,15 +4,15 @@
 # Description: Tests for announce notification handler
 # Branch: hooks
 # Created: 2026-05-20
-# Modified: 2026-09-27
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/notification/announce.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — SOUND_FILE and SOUNDS_DIR, paths built once from AIPASS_HOME
-# seedgo: no-test-needed(documentation) — handle()'s docstring naming a Piper voice it never plays
-# seedgo: no-test-needed(stdlib) — os.environ.get and pathlib joining behind AIPASS_HOME
+# sentry: no-test-needed(constant) — SOUND_FILE and SOUNDS_DIR, paths built once from AIPASS_HOME
+# sentry: no-test-needed(documentation) — handle()'s docstring naming a Piper voice it never plays
+# sentry: no-test-needed(stdlib) — os.environ.get and pathlib joining behind AIPASS_HOME
 
 from aipass.hooks.apps.handlers.notification.announce import handle
 

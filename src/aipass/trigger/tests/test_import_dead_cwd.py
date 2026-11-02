@@ -3,7 +3,7 @@
 # Name: test_import_dead_cwd.py
 # Description: trigger imports without a readable cwd
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # Version: 1.4.0
 # Category: trigger/tests
 # =============================================
@@ -15,7 +15,7 @@
 # importer of prax's logger. Each world is a subprocess: in-process the imports already ran.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(behaviour) — what each module under apps/modules/ does once imported; each has its own tests
+# sentry: no-test-needed(behaviour) — what each module under apps/modules/ does once imported; each has its own tests
 
 import subprocess
 import sys

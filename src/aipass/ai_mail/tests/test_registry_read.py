@@ -3,7 +3,7 @@
 # Description: Tests for registry read handler
 # Version: 1.0.2
 # Created: 2026-03-24
-# Modified: 2026-10-04
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/registry/read.py."""
@@ -11,7 +11,7 @@
 # Branch listing and email derivation.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — get_all_branches()'s broad except Exception fallback on a malformed registry file
+# sentry: no-test-needed(stdlib) — get_all_branches()'s broad except Exception fallback on a malformed registry file
 
 import json
 import pytest

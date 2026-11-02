@@ -3,7 +3,7 @@
 # Description: Tests for admin-grant verification + dispatch wiring (FPLAN-0401 Phase 4)
 # Version: 1.1.3
 # Created: 2026-08-12
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/users/verified_caller.py and the dispatch admin-wiring it feeds."""
@@ -18,7 +18,7 @@
 # path in explicitly.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(shared) — is_verified_admin_caller(), never called here: tests/test_cross_project_bridge.py
+# sentry: no-test-needed(shared) — is_verified_admin_caller(), never called here: tests/test_cross_project_bridge.py
 
 import json
 from contextlib import ExitStack
@@ -113,11 +113,11 @@ class TestVerifyAdminCaller:
         assert ok is True, reason
 
     def test_unauthorized_caller_refused_at_leg_one(self, ceremony, monkeypatch):
-        """A perfect ceremony grants @seedgo nothing."""
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        """A perfect ceremony grants @sentry nothing."""
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "sentry")
         ok, reason = verify_admin_caller(key_path=ceremony["key_path"], registry_path=ceremony["registry_path"])
         assert ok is False
-        assert "leg1" in reason and "seedgo" in reason
+        assert "leg1" in reason and "sentry" in reason
 
     def test_unverifiable_caller_refused(self, ceremony):
         """No caller rail at all — refused, not assumed."""
@@ -280,7 +280,7 @@ class TestDispatchSendAdminWiring:
 
     def test_unverified_caller_threads_admin_false(self, monkeypatch):
         """Every other citizen's dispatch is byte-identical to before."""
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "sentry")
         calls: list = []
         with _send_patches({f"{_H_WAKE}.wake_branch": MagicMock(side_effect=_wake_spy(calls))}):
             _dispatch_send(["@target", "Subject", "Body"])
@@ -298,7 +298,7 @@ class TestDispatchSendAdminWiring:
 
     def test_non_holder_caller_never_runs_the_verifier(self, monkeypatch):
         """No file I/O, no key read, for callers who cannot hold the grant."""
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "sentry")
         verifier = MagicMock(return_value=(False, "leg1 caller"))
         calls: list = []
         with _send_patches(

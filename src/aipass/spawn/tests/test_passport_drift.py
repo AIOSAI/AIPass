@@ -3,14 +3,14 @@
 # Description: DPLAN-0262 — live passport drift vs template contract (permanent canary)
 # Version: 2.0.2
 # Created: 2026-07-27
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/class_registry.py and apps/handlers/registry.py — the passport drift canary (DPLAN-0262)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that class_registry.py and registry.py parse and import cleanly
-# seedgo: no-test-needed(documentation) — that the public functions in those modules carry docstrings
+# sentry: no-test-needed(ruff) — that class_registry.py and registry.py parse and import cleanly
+# sentry: no-test-needed(documentation) — that the public functions in those modules carry docstrings
 
 import json
 from pathlib import Path

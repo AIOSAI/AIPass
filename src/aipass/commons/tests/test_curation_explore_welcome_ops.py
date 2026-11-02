@@ -5,7 +5,7 @@
 # Date: 2026-04-03
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-09-28
+# Modified: 2026-11-02
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -20,7 +20,7 @@
 """Tests for apps/handlers/curation/curation_ops.py, rooms/explore_ops.py and welcome/welcome_ops.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(duplicate) — query/routing covered by test_curation.py, test_explore_leaderboard.py
+# sentry: no-test-needed(duplicate) — query/routing covered by test_curation.py, test_explore_leaderboard.py
 
 import sqlite3
 from typing import Callable, List

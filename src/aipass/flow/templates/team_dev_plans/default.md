@@ -128,7 +128,7 @@ Captured ideas, brainstorms, future possibilities. Add freely. Any branch can co
 - **Related TDPLANs:** None yet
 - **Coordinating branch:** Who created this plan + coordinates
 - **Participating branches:** List * branches with sections
-- **Seedgo standards:** `drone @seedgo audit aipass @branch` | `drone @seedgo standards_query aipass_standards`
+- **Sentry standards:** `drone @sentry audit aipass @branch` | `drone @sentry standards_query aipass_standards`
 
 ## Status
 - [x] Planning

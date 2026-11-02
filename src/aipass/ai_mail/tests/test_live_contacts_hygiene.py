@@ -3,7 +3,7 @@
 # Description: Guard that test/probe fixtures never leak into the live contacts.json
 # Version: 1.0.2
 # Created: 2026-08-18
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/paths.py's find_repo_root(), guarding the live contacts.json it locates."""
@@ -12,7 +12,7 @@
 # auto-registers every recipient, and a tmp row would be served as a "verified" identity.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — json.JSONDecodeError's contract on a malformed file, not re-verified
+# sentry: no-test-needed(stdlib) — json.JSONDecodeError's contract on a malformed file, not re-verified
 
 import json
 import tempfile

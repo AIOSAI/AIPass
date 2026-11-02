@@ -3,7 +3,7 @@
 # Description: Branch Activity Report Generator Module
 # Version: 0.5.0
 # Created: 2026-01-30
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -126,14 +126,14 @@ def _print_branch_health_help() -> None:
     console.print("USAGE:")
     console.print("  drone @daemon branch-health DRONE")
     console.print("  daemon branch-health FLOW")
-    console.print("  daemon branch-health SEEDGO --hours 48")
+    console.print("  daemon branch-health SENTRY --hours 48")
     console.print()
     console.print("DESCRIPTION:")
     console.print("  Deep dive report for a single branch.")
     console.print("  Shows all file changes, memory health, and specific recommendations.")
     console.print()
     console.print("OPTIONS:")
-    console.print("  <branch_name>      Required - branch name (e.g., DRONE, FLOW, SEEDGO)")
+    console.print("  <branch_name>      Required - branch name (e.g., DRONE, FLOW, SENTRY)")
     console.print("  --hours N, -t N    Time window in hours (default: 24)")
     console.print("  --help, -h         Show this help message")
     console.print()

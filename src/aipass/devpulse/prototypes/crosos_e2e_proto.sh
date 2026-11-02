@@ -26,7 +26,7 @@ cat > "$SRC/AIPASS_REGISTRY.json" <<JSON
 { "metadata": { "name": "AIPASS", "version": "1.0.0", "total_branches": 2 },
   "branches": [
     { "name": "drone",  "path": "$SRC/src/aipass/drone" },
-    { "name": "seedgo", "path": "$SRC/src/aipass/seedgo" }
+    { "name": "sentry", "path": "$SRC/src/aipass/sentry" }
   ] }
 JSON
 python3 -m venv "$BUILDENV"
@@ -96,7 +96,7 @@ chk "rm_gate allows echo (exit 0)"        "[ '$HX2' = 0 ]"
 
 hdr "TIER 3 — drone routing (against real repo registry)"
 chk "drone systems runs (reads registry)" "cd '$SRC' && '$DRONE' systems"
-chk "drone systems lists a known branch"  "cd '$SRC' && '$DRONE' systems 2>/dev/null | grep -qi seedgo"
+chk "drone systems lists a known branch"  "cd '$SRC' && '$DRONE' systems 2>/dev/null | grep -qi sentry"
 chk "drone @drone --help routes"          "cd '$SRC' && '$DRONE' @drone --help"
 
 hdr "RESULT"

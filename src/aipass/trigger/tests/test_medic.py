@@ -3,13 +3,13 @@
 # Description: Unit tests for medic module handle_command
 # Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for the medic toggle module (apps/modules/medic.py)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(behaviour) — the state file format in apps/handlers/medic_state.py; its own tests cover it
+# sentry: no-test-needed(behaviour) — the state file format in apps/handlers/medic_state.py; its own tests cover it
 
 import re
 import subprocess
@@ -79,7 +79,7 @@ def _mock_infrastructure(monkeypatch):
             "last_rate_limited": "never",
         }
     )
-    # The real parser: a stub answering None let no test pin --for (seedgo flag_never_passed).
+    # The real parser: a stub answering None let no test pin --for (sentry flag_never_passed).
     medic_state_mod.parse_duration = parse_duration
     medic_state_mod.DEFAULT_MUTE_SECONDS = 86400
     medic_state_mod.DEFAULT_OFF_SECONDS = 86400
@@ -313,7 +313,7 @@ def test_handle_command_mute_branch():
 
 
 def test_handle_command_mute_for_sets_the_asked_duration_not_the_default():
-    """--for 2h reaches mute_branch as 7200s; the parse was unpinned (seedgo flag_never_passed)."""
+    """--for 2h reaches mute_branch as 7200s; the parse was unpinned (sentry flag_never_passed)."""
     medic = _import_medic()
     medic.handle_command("mute", ["@speakeasy", "--for", "2h"])
 

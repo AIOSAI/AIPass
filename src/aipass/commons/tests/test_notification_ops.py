@@ -5,7 +5,7 @@
 # Date: 2026-04-03
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-10-04
+# Modified: 2026-11-02
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -20,8 +20,8 @@
 """Tests for apps/handlers/notifications/notification_ops.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every file in handlers/notifications/ parses and imports
-# seedgo: no-test-needed(duplicate) — the notification preference primitives; tests/test_notifications.py pins them
+# sentry: no-test-needed(ruff) — that every file in handlers/notifications/ parses and imports
+# sentry: no-test-needed(duplicate) — the notification preference primitives; tests/test_notifications.py pins them
 
 import sqlite3
 from unittest.mock import patch, MagicMock

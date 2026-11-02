@@ -3,13 +3,13 @@
 # Description: Shared helpers for test_wake.py and its split siblings - the wake fixtures and spawn recorder
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-25
+# Modified: 2026-11-02
 # =============================================
 
 """Helpers for the tests of apps/handlers/dispatch/wake.py (no test_ prefix: never collected)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(ruff) — that the module parses and imports
 
 import json
 

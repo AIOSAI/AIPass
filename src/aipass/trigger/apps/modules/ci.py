@@ -1,13 +1,13 @@
 # =================== AIPass ====================
 # Name: ci.py
-# Description: CI red lane - poll dev's runs, wake the owner, gate the cure through @seedgo, push it through drone
+# Description: CI red lane - poll dev's runs, wake the owner, gate the cure through @sentry, push it through drone
 # Version: 1.2.0
 # Created: 2026-10-22
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """
-CI red lane - poll dev's runs, wake the owner of a red, gate its cure through @seedgo, push it
+CI red lane - poll dev's runs, wake the owner of a red, gate its cure through @sentry, push it
 """
 
 import os
@@ -46,7 +46,7 @@ def print_introspection():
     console.print("    [cyan]•[/cyan] git_door.py [dim](run list, run view, diff, remote, the ci-cure door)[/dim]")
     console.print("    [cyan]•[/cyan] triage.py [dim](newest run per workflow, infra steps, owner mapping)[/dim]")
     console.print("    [cyan]•[/cyan] ledger.py [dim](trigger_json/ci_ledger.json — runs and cures)[/dim]")
-    console.print("    [cyan]•[/cyan] replies.py [dim](owner and seedgo reply parsers, briefs, CHANGELOG insert)[/dim]")
+    console.print("    [cyan]•[/cyan] replies.py [dim](owner and sentry reply parsers, briefs, CHANGELOG insert)[/dim]")
     console.print("    [cyan]•[/cyan] outbound.py [dim](mail, dispatch, feed, the two-awake cap)[/dim]")
     console.print("  [cyan]handlers/events/[/cyan]")
     console.print("    [cyan]•[/cyan] ci_red.py [dim](handle_ci_red — medic's gates, then the owner's wake)[/dim]")
@@ -63,8 +63,8 @@ def print_help() -> None:
     console.print("[yellow]Commands:[/yellow]")
     console.print("  [cyan]poll[/cyan]                            Read dev's runs, dispatch new reds, drain the queue")
     console.print("  [cyan]status[/cyan]                          The ledger: recent runs and every open cure")
-    console.print("  [cyan]reply <run_id> @owner <text>[/cyan]    Take the owner's reply, dispatch @seedgo's review")
-    console.print("  [cyan]verdict <run_id> @owner <text>[/cyan]  Seedgo's VERDICT: OK pushes, HELD mails @devpulse")
+    console.print("  [cyan]reply <run_id> @owner <text>[/cyan]    Take the owner's reply, dispatch @sentry's review")
+    console.print("  [cyan]verdict <run_id> @owner <text>[/cyan]  Sentry's VERDICT: OK pushes, HELD mails @devpulse")
     console.print()
     console.print("[yellow]On a wake-back:[/yellow]")
     console.print('  A reply to [CI RED] run N @x     ->  drone @trigger ci reply N @x "<the reply body>"')
@@ -134,7 +134,7 @@ def _send_note(note: Dict[str, Any]) -> None:
             f"Cure for run {run_id} pushed by ci-cure as {cure.get('sha', '')}; run {proof} is proving it.\n\n"
             f"Owner: @{owner}\nFiles:\n" + "\n".join(f"  {p}" for p in cure.get("files", [])) + "\n\n"
             f"CHANGELOG: {cure.get('changelog', '') or '(none)'}\n\nOwner's note:\n{cure.get('note', '')}\n\n"
-            f"Seedgo's lesson:\n{cure.get('lesson', '') or '(none)'}\n"
+            f"Sentry's lesson:\n{cure.get('lesson', '') or '(none)'}\n"
         )
         outbound.mail(outbound.MANAGER, f"[CI PUSHED] run {run_id} @{owner} - run {proof} proving it", body)
         return
@@ -175,7 +175,7 @@ def _triage_reds(reds: List[Dict[str, str]]) -> List[Dict[str, Any]]:
 
 
 def _drain(data: Dict[str, Any]) -> tuple:
-    """Cures waiting on a gate or the cap: owner wakes to re-fire, seedgo reviews to re-request."""
+    """Cures waiting on a gate or the cap: owner wakes to re-fire, sentry reviews to re-request."""
     owners = [c for c in data["cures"].values() if is_retried(c)]
     reviews = [key for key, c in data["cures"].items() if c["state"] == "review_queued"]
     return owners, reviews
@@ -235,17 +235,17 @@ def hold(key: str, reason: str) -> Dict[str, Any]:
 
 
 def request_review(key: str) -> str:
-    """Dispatch @seedgo once with the cure's diff, or queue it while two citizens are awake."""
+    """Dispatch @sentry once with the cure's diff, or queue it while two citizens are awake."""
     cure = _cure(key)
     if not outbound.cap_allows():
         _set(key, "review_queued", reason="two citizens awake")
         return "review_queued"
     subject = f"[CI REVIEW] run {cure['run_id']} @{cure['owner']} - {cure.get('workflow', '')}"
-    if not outbound.dispatch(outbound.REVIEWER, subject, replies.seedgo_brief(cure)):
+    if not outbound.dispatch(outbound.REVIEWER, subject, replies.sentry_brief(cure)):
         _set(key, "review_queued", reason="mail not delivered")
         return "review_queued"
     _set(key, "reviewing", reason="")
-    outbound.feed("dispatched", f"CI cure to @seedgo for review: run {cure['run_id']}", subject, **cure)
+    outbound.feed("dispatched", f"CI cure to @sentry for review: run {cure['run_id']}", subject, **cure)
     return "reviewing"
 
 
@@ -273,7 +273,7 @@ def take_reply(run_id: str, owner: str, text: str) -> str:
 
 
 def push(key: str) -> str:
-    """Seedgo said OK: append the bullet, call the ci-cure door; any refusal restores CHANGELOG and holds."""
+    """Sentry said OK: append the bullet, call the ci-cure door; any refusal restores CHANGELOG and holds."""
     cure = _cure(key)
     paths = list(cure.get("files") or [])
     original = None
@@ -302,17 +302,17 @@ def push(key: str) -> str:
 
 
 def take_verdict(run_id: str, owner: str, text: str) -> str:
-    """Seedgo's wake-back: OK pushes, HELD mails @devpulse; a reply in neither shape changes nothing."""
+    """Sentry's wake-back: OK pushes, HELD mails @devpulse; a reply in neither shape changes nothing."""
     key = ledger.cure_key(run_id, owner)
     cure = _cure(key)
     if cure["state"] != "reviewing":
         raise ValueError(f"cure {key} is {cure['state']}, not under review")
     verdict = replies.parse_verdict(text)
     if verdict is None:
-        raise ValueError("seedgo's reply must start with VERDICT: OK or VERDICT: HELD")
+        raise ValueError("sentry's reply must start with VERDICT: OK or VERDICT: HELD")
     _set(key, "reviewing", verdict=verdict["verdict"], lesson=verdict["body"])
     if verdict["verdict"] == "HELD":
-        return hold(key, f"@seedgo: VERDICT: HELD\n{verdict['body']}")["state"]
+        return hold(key, f"@sentry: VERDICT: HELD\n{verdict['body']}")["state"]
     return push(key)
 
 

@@ -3,14 +3,14 @@
 # Description: Tests for POST /v1/verbs/new-project, the phone's new-project door (FPLAN-0649)
 # Version: 1.0.2
 # Created: 2026-10-16
-# Modified: 2026-10-25
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/host/new_project_route.py and verbs.new_project behind it."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that new_project_route.py parses and imports
-# seedgo: no-test-needed(external) — project_door's real create_project, @aipass's; every call to it is patched
+# sentry: no-test-needed(ruff) — that new_project_route.py parses and imports
+# sentry: no-test-needed(external) — project_door's real create_project, @aipass's; every call to it is patched
 
 import os
 from pathlib import Path

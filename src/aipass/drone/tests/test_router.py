@@ -3,13 +3,13 @@
 # Description: Command routing - router module and router_handler
 # Version: 1.1.0
 # Created: 2026-03-14
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/router.py and apps/handlers/router_handler.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — subprocess spawning itself; tests/test_executor.py drives the executor
+# sentry: no-test-needed(stdlib) — subprocess spawning itself; tests/test_executor.py drives the executor
 
 import json
 import sys

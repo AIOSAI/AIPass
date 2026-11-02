@@ -3,13 +3,13 @@
 # Description: Tests for devpulse_ops plugin — git module routing for pr/system-pr
 # Version: 2.0.1
 # Created: 2026-03-30
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/git_module.py routing of the pr verb and the retired system-pr."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — the wording of get_introspective()'s handler roster beyond the plugin name
+# sentry: no-test-needed(constant) — the wording of get_introspective()'s handler roster beyond the plugin name
 
 from __future__ import annotations
 

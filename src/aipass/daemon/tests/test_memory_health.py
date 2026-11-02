@@ -3,14 +3,14 @@
 # Description: Memory health handler tests — .trinity files present, well-shaped and fresh
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/memory_health.py — a branch's .trinity files present, valid and fresh."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — os.stat's mtime and json.load's parse; only what the handler does with them
-# seedgo: no-test-needed(constant) — FRESHNESS_WARNING_DAYS / FRESHNESS_RED_DAYS; each threshold test passes its own
+# sentry: no-test-needed(stdlib) — os.stat's mtime and json.load's parse; only what the handler does with them
+# sentry: no-test-needed(constant) — FRESHNESS_WARNING_DAYS / FRESHNESS_RED_DAYS; each threshold test passes its own
 
 import json
 import os

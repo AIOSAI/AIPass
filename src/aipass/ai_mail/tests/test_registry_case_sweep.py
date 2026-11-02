@@ -3,7 +3,7 @@
 # Description: Registry globs must not widen on a case-insensitive filesystem
 # Version: 1.0.3
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/paths.py's registry glob readers on a case-insensitive filesystem."""
@@ -13,7 +13,7 @@
 # the Windows matcher and the macOS volume on Linux, with positive and negative controls.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(windows_compat) — the real Windows/macOS case-folding behavior; emulated here, not run there
+# sentry: no-test-needed(windows_compat) — the real Windows/macOS case-folding behavior; emulated here, not run there
 
 import ast
 import fnmatch
@@ -513,7 +513,7 @@ class TestNoInlineRegistryGlobSurvivesInTheTree:
     def _sources(root):
         """Every .py under root, never inside a dropbox, .archive or __pycache__.
 
-        Written here, not imported: seedgo's handlers guard refuses a caller from another branch.
+        Written here, not imported: sentry's handlers guard refuses a caller from another branch.
         """
         skip = frozenset({"dropbox", ".archive", "__pycache__"})
         for source in root.rglob("*.py"):

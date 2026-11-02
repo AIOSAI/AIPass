@@ -38,7 +38,7 @@ drone @trigger fire error_detected branch=api error_type=ImportError
   is not, and both stay auditable.
 
 - **Routes a red CI run on dev to its owner.** The `ci` lane polls dev's runs, wakes the
-  branch whose code failed, has @seedgo review the cure, and pushes it through drone's
+  branch whose code failed, has @sentry review the cure, and pushes it through drone's
   `ci-cure` door; @devpulse and the phone hear about every step.
 
 It never fixes another branch's code: it detects, it tells the owner, and the owner fixes.

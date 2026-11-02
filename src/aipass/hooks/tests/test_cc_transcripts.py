@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-08-18
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/cc_transcripts.py."""
@@ -13,9 +13,9 @@
 # The picker lists transcripts, not processes: Ctrl+C removes a dead chat's session file, so a PID list hides it.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that modules/cc_transcripts.py parses and imports
-# seedgo: no-test-needed(documentation) — print_introspection(), the module's help screen
-# seedgo: no-test-needed(constant) — PROJECTS_ROOT's default location; every test repoints it at a temporary directory
+# sentry: no-test-needed(ruff) — that modules/cc_transcripts.py parses and imports
+# sentry: no-test-needed(documentation) — print_introspection(), the module's help screen
+# sentry: no-test-needed(constant) — PROJECTS_ROOT's default location; every test repoints it at a temporary directory
 
 import json
 import os

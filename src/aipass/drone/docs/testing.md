@@ -69,14 +69,14 @@ it would pin. The gate is never routed around.
 
 ## The standards lanes
 
-- `drone @seedgo audit aipass @drone` — the scored pack, the one CI gates.
-- `drone @seedgo audit pytest_quality @drone` — the advisory test-quality lane.
-- `drone @seedgo audit context @drone` — the startup budget: README, prompt, `.trinity/` and the
+- `drone @sentry audit aipass @drone` — the scored pack, the one CI gates.
+- `drone @sentry audit pytest_quality @drone` — the advisory test-quality lane.
+- `drone @sentry audit context @drone` — the startup budget: README, prompt, `.trinity/` and the
   dashboard, in chars, each against the cap its owner publishes.
-- `drone @seedgo checklist <file>` — one file, every eligible standard, which is also what the
+- `drone @sentry checklist <file>` — one file, every eligible standard, which is also what the
   post-edit hook runs.
 
-Documented exceptions live in `.seedgo/bypass.json`, each with a written reason. Several of them
+Documented exceptions live in `.sentry/bypass.json`, each with a written reason. Several of them
 are line-scoped and drift whenever code above them moves; that drift is a feature in one respect,
 since it proves the rule is still load-bearing.
 

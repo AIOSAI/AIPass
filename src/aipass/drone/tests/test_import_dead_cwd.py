@@ -3,14 +3,14 @@
 # Description: Every drone module imports without a readable working directory
 # Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/ and apps/handlers/json/json_handler.py: every drone module imports and logs with no cwd."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — run-time location-inference sites, pinned in tests/test_no_cwd_sweep.py
-# seedgo: no-test-needed(external) — other branches' import-time code (prax.logger, cli, api), preloaded and held here
+# sentry: no-test-needed(covered_elsewhere) — run-time location-inference sites, pinned in tests/test_no_cwd_sweep.py
+# sentry: no-test-needed(external) — other branches' import-time code (prax.logger, cli, api), preloaded and held here
 
 import ast
 import subprocess
@@ -21,7 +21,7 @@ import pytest
 
 import aipass.drone.apps as drone_apps
 
-# Sandbox names (dropbox, .archive, __pycache__) come from conftest, never from seedgo's handlers.
+# Sandbox names (dropbox, .archive, __pycache__) come from conftest, never from sentry's handlers.
 from .conftest import SANDBOX_DIRS
 
 # ntpath.realpath reads os.getcwd() unconditionally (posixpath only for a relative path) and

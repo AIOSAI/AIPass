@@ -3,14 +3,14 @@
 # Description: Tests for aipass read — branch README rendering
 # Version: 1.3.1
 # Created: 2026-08-07
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/read.py — aipass read command."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — get_readme_path, list_branches and read_readme_at's
-# seedgo: no-test-needed(covered_elsewhere) — own behavior; see tests/test_readme_map.py
+# sentry: no-test-needed(covered_elsewhere) — get_readme_path, list_branches and read_readme_at's
+# sentry: no-test-needed(covered_elsewhere) — own behavior; see tests/test_readme_map.py
 
 from __future__ import annotations
 

@@ -1,0 +1,644 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "created": "2026-03-07T23:23:54.979418",
+    "description": "Standards bypass configuration for this branch",
+    "last_updated": "2026-10-23"
+  },
+  "bypass": [
+    {
+      "file": "apps/handlers/storage/chroma_subprocess.py",
+      "standard": "cli",
+      "reason": "Subprocess IPC script — print(json.dumps()) outputs JSON to stdout for parent process. Not display output."
+    },
+    {
+      "file": "apps/handlers/storage/chroma_subprocess.py",
+      "standard": "json_structure",
+      "reason": "Self-contained subprocess — no branch imports by design"
+    },
+    {
+      "file": "apps/handlers/vector/embed_subprocess.py",
+      "standard": "json_structure",
+      "reason": "Self-contained subprocess — no branch imports by design"
+    },
+    {
+      "file": "apps/handlers/vector/embed_subprocess.py",
+      "standard": "cli",
+      "reason": "Subprocess IPC script — print(json.dumps()) outputs JSON to stdout for parent process. Not display output."
+    },
+    {
+      "file": "apps/handlers/vector/embed_subprocess.py",
+      "standard": "debug_print",
+      "reason": "Subprocess IPC — print() is the output mechanism (JSON to stdout). Not debug output."
+    },
+    {
+      "file": "apps/handlers/vector/embed_subprocess.py",
+      "standard": "silent_catch",
+      "reason": "Self-contained subprocess — cannot import prax logger. Uses stdlib logging."
+    },
+    {
+      "file": "apps/handlers/storage/chroma_subprocess.py",
+      "standard": "error_handling",
+      "reason": "Self-contained subprocess — runs in memory venv without aipass package. Cannot import prax. Uses stdlib logging."
+    },
+    {
+      "file": "apps/handlers/storage/chroma_subprocess.py",
+      "standard": "log_visibility",
+      "reason": "Self-contained subprocess — runs in memory venv without aipass package. Cannot import prax. Uses stdlib logging.getLogger()."
+    },
+    {
+      "file": "apps/handlers/storage/chroma_subprocess.py",
+      "standard": "debug_print",
+      "reason": "Subprocess IPC — print(json.dumps()) is the output mechanism (JSON to stdout). Not debug output."
+    },
+    {
+      "file": "apps/handlers/storage/chroma_subprocess.py",
+      "standard": "naming",
+      "reason": "_clients is a module-level mutable cache (dict), not a constant. Lowercase is appropriate."
+    },
+    {
+      "file": "apps/modules/templates.py",
+      "standard": "modules",
+      "reason": "Templates module orchestrates 6 subcommands across 3 handlers — splitting further would fragment related orchestration."
+    },
+    {
+      "file": "apps/modules/symbolic.py",
+      "standard": "modules",
+      "reason": "Symbolic module is 1669 lines — legacy port from old memory system. Functions flagged as implementation are CLI-display orchestration, not raw logic."
+    },
+    {
+      "file": "apps/modules/rollover.py",
+      "standard": "modules",
+      "reason": "process_plans_command is a thin CLI wrapper that delegates to plans_processor handler. Orchestration, not implementation."
+    },
+    {
+      "file": "apps/handlers/rollover/extractor.py",
+      "standard": "handlers",
+      "reason": "Architectural: imports json.memory_files for memory file read/write during rollover extraction."
+    },
+    {
+      "file": "apps/handlers/rollover/orchestrator.py",
+      "standard": "handlers",
+      "reason": "Architectural: rollover orchestrator coordinates monitor, tracking, storage, dashboard, intake, and trigger handlers. Central pipeline hub."
+    },
+    {
+      "file": "apps/handlers/intake/auto_process.py",
+      "standard": "handlers",
+      "reason": "Architectural: auto-process entry point coordinates pool (intake), rollover (orchestrator), and detection (monitor) for session-start hook. TDPLAN-0005."
+    },
+    {
+      "file": "apps/handlers/monitor/memory_watcher.py",
+      "standard": "handlers",
+      "reason": "Architectural: watcher coordinates tracking, rollover, intake, and archive handlers for auto-rollover pipeline."
+    },
+    {
+      "file": "apps/handlers/intake/plans_processor.py",
+      "standard": "handlers",
+      "reason": "Architectural: imports json.config_loader and json_handler for centralized config access and operation logging."
+    },
+    {
+      "file": "apps/handlers/intake/pool_processor.py",
+      "standard": "handlers",
+      "reason": "Architectural: imports json.config_loader and json_handler for centralized config access and operation logging."
+    },
+    {
+      "file": "apps/handlers/monitor/detector.py",
+      "standard": "handlers",
+      "reason": "Architectural: imports json.config_loader and json_handler for centralized config access and operation logging."
+    },
+    {
+      "file": "apps/handlers/tracking/tab_renderer.py",
+      "standard": "handlers",
+      "reason": "Architectural: imports json.memory_files, json.config_loader, and monitor.detector for config-driven tab rendering across all branches."
+    },
+    {
+      "file": "apps/handlers/monitor/memory_watcher.py",
+      "standard": "error_handling",
+      "reason": "stdlib logging.getLogger() used at import-time before prax is available. Immediately replaced by get_system_logger() 3 lines below."
+    },
+    {
+      "file": "apps/handlers/schema/normalize.py",
+      "standard": "dead_code",
+      "reason": "Utility handler for v1-to-v2 schema migration. Called on-demand, not wired to main pipeline."
+    },
+    {
+      "file": "apps/modules/symbolic.py",
+      "standard": "naming",
+      "reason": "Local variables (source_branch, error_type, message) inside functions, not constants."
+    },
+    {
+      "file": "apps/modules/search.py",
+      "standard": "naming",
+      "reason": "Local variables (border_style, query, branch) inside functions, not constants."
+    },
+    {
+      "file": "apps/handlers/json/memory_files.py",
+      "standard": "naming",
+      "reason": "Local variables (data, status) inside functions, not constants."
+    },
+    {
+      "file": "apps/modules/templates.py",
+      "standard": "naming",
+      "reason": "_REPO_ROOT is a private module-level path derived at import time, not a public constant."
+    },
+    {
+      "file": "apps/modules/rollover.py",
+      "standard": "naming",
+      "reason": "_SUBCOMMANDS is a private module-level dict, not a public constant."
+    },
+    {
+      "file": "apps/modules/verify.py",
+      "standard": "naming",
+      "reason": "Module-level variables are private path derivations (_HANDLERS_DIR, _MEMORY_ROOT), not public constants."
+    },
+    {
+      "file": "apps/handlers/monitor/memory_watcher.py",
+      "standard": "naming",
+      "reason": "_startup_check_done and _observer are module-level mutable state flags, not constants."
+    },
+    {
+      "file": "apps/handlers/rollover/orchestrator.py",
+      "standard": "naming",
+      "reason": "Module-level variables are path derivations and env lookups, not true constants."
+    },
+    {
+      "file": "apps/handlers/intake/plans_processor.py",
+      "standard": "naming",
+      "reason": "Module-level variables (MEMORY_PYTHON, MAX_CHUNK_CHARS) are config values derived at import time."
+    },
+    {
+      "file": "apps/handlers/intake/pool_processor.py",
+      "standard": "naming",
+      "reason": "Module-level variables are path configurations derived at import time."
+    },
+    {
+      "file": "apps/handlers/search/query_executor.py",
+      "standard": "naming",
+      "reason": "Module-level variables (MEMORY_PYTHON, MIN_SIMILARITY_THRESHOLD) are config values."
+    },
+    {
+      "file": "apps/modules/symbolic.py",
+      "standard": "documentation",
+      "reason": "Large legacy module (1672 lines) ported from old memory system. Multiline signatures cause false-positive missing docstring detection."
+    },
+    {
+      "file": "apps/modules/search.py",
+      "standard": "documentation",
+      "reason": "show_search_results has multiline signature causing false-positive missing docstring detection."
+    },
+    {
+      "file": "apps/handlers/search/query_executor.py",
+      "standard": "documentation",
+      "reason": "Multiline function signatures cause false-positive missing docstring detection."
+    },
+    {
+      "file": "apps/handlers/intake/pool_processor.py",
+      "standard": "documentation",
+      "reason": "Utility handler with clear function names. Multiline signatures cause false-positive detection."
+    },
+    {
+      "file": "apps/handlers/intake/plans_processor.py",
+      "standard": "documentation",
+      "reason": "Multiline function signatures cause false-positive missing docstring detection."
+    },
+    {
+      "file": "apps/handlers/rollover/orchestrator.py",
+      "standard": "documentation",
+      "reason": "Multiline function signatures cause false-positive missing docstring detection."
+    },
+    {
+      "file": "apps/handlers/rollover/extractor.py",
+      "standard": "documentation",
+      "reason": "Multiline function signatures cause false-positive missing docstring detection."
+    },
+    {
+      "file": "apps/modules/symbolic.py",
+      "standard": "architecture",
+      "reason": "1672 lines — legacy port from old memory system. Full refactor into handler split deferred."
+    },
+    {
+      "file": "apps/handlers/rollover/orchestrator.py",
+      "standard": "architecture",
+      "reason": "Central rollover pipeline. Orchestrates entire rollover flow."
+    },
+    {
+      "file": "apps/handlers/rollover/extractor.py",
+      "standard": "naming",
+      "reason": "Local variables (target_lines, enriched, enriched_item) inside functions, not constants."
+    },
+    {
+      "file": "apps/handlers/central_writer.py",
+      "standard": "naming",
+      "reason": "Local variables inside functions, not constants."
+    },
+    {
+      "file": "apps/handlers/monitor/detector.py",
+      "standard": "naming",
+      "reason": "Local variables inside functions, not constants."
+    },
+    {
+      "file": "apps/handlers/templates/spawn_pusher.py",
+      "standard": "architecture",
+      "reason": "Memory doesn't use all builder templates — branch has custom structure."
+    },
+    {
+      "file": "apps/handlers/monitor/memory_watcher.py",
+      "standard": "architecture",
+      "reason": "704 lines — watcher coordinates file monitoring, rollover triggers, and health checks. Near 700 threshold but cohesive."
+    },
+    {
+      "file": "apps/handlers/schema/normalize.py",
+      "standard": "architecture",
+      "reason": "Utility for v1-to-v2 schema migration — invoked on-demand."
+    },
+    {
+      "file": "apps/handlers/intake/pool_processor.py",
+      "standard": "unused_function",
+      "reason": "find_source_file is part of public pool processing API, called by external consumers."
+    },
+    {
+      "file": "apps/handlers/monitor/memory_watcher.py",
+      "standard": "unused_function",
+      "reason": "on_modified is a watchdog FileSystemEventHandler callback, invoked by framework."
+    },
+    {
+      "file": "apps/modules/symbolic.py",
+      "standard": "unused_function",
+      "reason": "search_fragments_by_dimensions, search_fragments_by_triggers, search_fragments_by_vector, load_hook_config are public API functions for symbolic search variants."
+    },
+    {
+      "file": "apps/modules/verify.py",
+      "standard": "unused_function",
+      "reason": "is_plan_vectorized is a public API function for external callers."
+    },
+    {
+      "file": "apps/handlers/tracking/tab_renderer.py",
+      "standard": "unused_function",
+      "functions": [
+        "render_all_meta_tabs"
+      ],
+      "reason": "Cross-branch public API — called by @spawn's _load_meta_tabs() (spawn/apps/modules/core.py:82), whose result feeds build_replacements_dict(meta_tabs=...) at core.py:272 to resolve {{*_META}} placeholders at branch creation. Also called inline by spawn's setup.sh bootstrap_branch(). Verified 2026-08-09."
+    },
+    {
+      "file": "apps/modules/governance.py",
+      "standard": "unused_function",
+      "reason": "Cross-branch public API — should_surface, record_message, new_state re-exported for @hooks compass_recall and @devpulse recall query."
+    },
+    {
+      "file": "apps/handlers/governance/engine.py",
+      "standard": "unused_function",
+      "reason": "Implementation functions re-exported via modules/governance.py for cross-branch consumers."
+    },
+    {
+      "file": "apps/modules/templates.py",
+      "standard": "deep_nesting",
+      "reason": "handle_command() routes 6 subcommands with validation — nesting is inherent to command dispatch."
+    },
+    {
+      "file": "apps/modules/symbolic.py",
+      "standard": "deep_nesting",
+      "reason": "Legacy port (1672 lines). extract_and_store_llm, search_fragments_cli, _parse_jsonl_to_chat_history have deep nesting from complex data processing. Full refactor deferred."
+    },
+    {
+      "file": "apps/modules/search.py",
+      "standard": "deep_nesting",
+      "reason": "handle_command() has deep nesting from search options parsing and result formatting."
+    },
+    {
+      "file": "apps/handlers/rollover/orchestrator.py",
+      "standard": "deep_nesting",
+      "reason": "Rollover pipeline has nested error handling and branch iteration."
+    },
+    {
+      "file": "apps/handlers/rollover/extractor.py",
+      "standard": "deep_nesting",
+      "reason": "Memory extraction parses nested JSON structures with validation."
+    },
+    {
+      "file": "apps/handlers/monitor/memory_watcher.py",
+      "standard": "deep_nesting",
+      "reason": "File watcher callbacks coordinate multiple handlers with error isolation."
+    },
+    {
+      "file": "apps/handlers/storage/chroma_subprocess.py",
+      "standard": "deep_nesting",
+      "reason": "Self-contained subprocess — main() handles multiple operation types with nested JSON processing."
+    },
+    {
+      "file": "apps/handlers/intake/plans_processor.py",
+      "standard": "deep_nesting",
+      "reason": "process_plans() iterates files with nested chunking, embedding, and error handling."
+    },
+    {
+      "file": "apps/handlers/cli/help_flags.py",
+      "standard": "json_structure",
+      "reason": "Pure argument-inspection predicate — no I/O, no state, no branch imports by design. Runs on every command invocation, so log_operation() here would write a line per CLI call and drown the operation log."
+    },
+    {
+      "file": "apps/handlers/intake/auto_process.py",
+      "standard": "unused_function",
+      "reason": "spawn_background() has no in-branch caller BY CONTRACT: the caller is @hooks' lifecycle/auto_process.py, which reaches it cross-branch via importlib.import_module('aipass.memory.apps.handlers.intake.auto_process').spawn_background() - the invocation string is in this file's HOOK ENGINE CONTRACT docstring. Measured 2026-08-13 (DPLAN-0295 item 1): grepped the whole repo for the symbol; the only call site is that hook shell, which @memory may not edit. Same class as the pre-existing 'handlers' rule on this file. Re-verify by grepping spawn_background across src/ - if @hooks' half ships and the symbol has an in-branch caller (e.g. a CLI kick), DELETE this rule."
+    },
+    {
+      "file": "apps/modules/health.py",
+      "standard": "unused_function",
+      "reason": "Cross-branch public API — get_branch_health() wraps detector.check_single_file (entry-count) + lint_handler.run_lint (entry-size) into one function @daemon imports from its modules/ layer, because sentry blocks handler-to-other-branch-handler imports. THE CALLER HAS LANDED (verified 2026-08-16, DPLAN-0302): daemon/apps/modules/activity_report.py:208 imports it inside _render_entry_health, with daemon/tests/test_activity_report.py:256 patching the same symbol. The earlier version of this rule promised deletion once that happened; that promise was written on a wrong assumption and is retracted. unused_function_check.py declares AUDIT_SCOPE = 'branch_level' and collects .py files with rglob over the BRANCH root only, so it structurally cannot see a caller in another branch — deleting the rule costs 1% forever and teaches nothing. Same permanent class as the 'governance.py' and 'tab_renderer.py' rules above, whose cross-branch callers also exist and are equally invisible. Re-verify by grepping get_branch_health across src/: if the only hits are this branch, the function is genuinely dead and the rule (and the function) should go."
+    },
+    {
+      "file": "apps/handlers/cli/json_flag.py",
+      "standard": "json_structure",
+      "reason": "Pure argument-inspection predicate -- no I/O, no state, no branch imports by design, the --json sibling of help_flags.py above. Runs on every command invocation, so log_operation() here would write a line per CLI call and drown the operation log."
+    },
+    {
+      "file": "apps/handlers/json/entry_limits.py",
+      "standard": "unused_function",
+      "functions": [
+        "changed_entries"
+      ],
+      "reason": "Cross-branch entry point the branch-local scan cannot see: @hooks calls it by name via importlib in apps/handlers/security/edit_gate.py (the entry-cap half of the write gate for the whole fleet). Deleting it to satisfy the checker disables that gate. Narrowed to this one function, and the claim is pinned by tests/test_changed_entries.py::TestTheBypassClaimIsMeasuredNotAsserted so the bypass goes red the day @hooks stops calling it."
+    },
+    {
+      "file": "apps/modules/todo.py",
+      "standard": "introspection",
+      "reason": "Bare `todo` IS the verb, by ruling (DPLAN-0345 @memory review section 4, FPLAN-0590 row 5): `drone @memory todo` prints ONE line - pad N of COUNT and the backlog count - so handle_command() deliberately has no no-args gate calling print_introspection(); a gate there would replace that line with the module page. The module still defines print_introspection() (printed after a refused argument) and print_help() (--help/-h/help in any slot). The bare behaviour is pinned by tests/test_config_verbs_todo.py::TestTodoVerbs::test_bare_is_one_line_the_pad_of_the_configured_count_and_the_backlog. Same class as @ai_mail's apps/modules/email.py introspection rule (inbox works without args). Added 2026-09-15; DELETE this rule if bare `todo` ever becomes the introspection page."
+    },
+    {
+      "file": "tests/__init__.py",
+      "standard": "file_top",
+      "reason": "File-wide because the checker names no line. An empty package marker: it tests no module, so it has no subject line or declared pass to state, and a header on an empty file would be the only content. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "tests/dead_cwd.py",
+      "standard": "file_top",
+      "reason": "File-wide because the checker names no line. Not a test file: the shared definition of the dead-cwd world that the subprocess pins import (it collects no tests). Its long docstring is why the world exists, and items 6 and 7 of the test template describe a file that tests a module. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "tests/test_auto_process_background.py",
+      "standard": "import_site",
+      "lines": [194],
+      "reason": "The import route is the subject: the helper returns the trigger object through the same import the product makes, because on 3.10 a split worker held two objects and a patch on the other one let a real completion fire (CI run 34088947108). A top-of-file binding is the route that failed. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "tests/test_repo_root.py",
+      "standard": "stdlib_patch",
+      "reason": "File-wide because stdlib_patch passes no line (the checklist calls a lines rule inert); it covers one patch, rr.os.scandir at 659. The only way to make a real directory unlistable for one call without root or platform ACLs. A scandir parameter on exists_exactly would be a door for the test alone (no caller passes it), so the patch stays: monkeypatch scopes it to this test and restores it, and the test asserts the denied listing was the parent. Leg 8 of DPLAN-0354, @devpulse's landing ruling; made file-wide in leg 10."
+    },
+    {
+      "file": "tests/conftest.py",
+      "standard": "stdlib_patch",
+      "reason": "File-wide because stdlib_patch passes no line; it covers two opt-in fixtures, case_insensitive_filesystem (Path.glob, 414) and case_insensitive_exists (Path.exists, 443). They emulate what Windows and macOS answer so the case-fold pins go red on Linux before CI. Every walk must see the emulation the way it sees the platform, so a product seam per walk would be a door for the tests alone, and Linux cannot show the effect on disk. monkeypatch restores both after each test that asks for them. Leg 10 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "tests/test_symbolic_parked.py",
+      "standard": "import_site",
+      "lines": [85, 93],
+      "reason": "The import is what is under test: the parked symbolic package (the owner's ruling of 2026-08-14) must refuse every import, the package and each submodule, naming the ruling. A top-of-file import would raise at collection and pin nothing. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "tests/test_import_isolation.py",
+      "standard": "import_site",
+      "lines": [92],
+      "reason": "The test is about the import itself: it proves conftest's mock still shadows json_handler through `from X import y` at call time. A top-of-file import would bind before the autouse fixture runs and test nothing. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "tests/test_marker7_memory_lane.py",
+      "standard": "import_site",
+      "lines": [731],
+      "reason": "The trigger bus package is stood in through sys.modules because the test pins the event _announce_bump fires through its own `from aipass.trigger.apps.modules.core import trigger`; the next line asserts that import reaches the stand-in. It is the only edge between @memory and @trigger's bus that keeps a real event from firing. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "tests/test_trinity_standard.py",
+      "standard": "import_site",
+      "lines": [375],
+      "reason": "The subject is import time: memory_files is evicted and imported fresh to prove a removed attribute is not re-created by a fresh import. A top-of-file binding is the already-imported module and could not see that. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/intake/auto_process.py",
+      "standard": "logged_fallback",
+      "lines": [88],
+      "reason": "_reclaim_stale_lock answers 'is the lane free now'. False after a failed unlink means the lane is NOT free, which is true; the caller's decision (do not run) is the same as for a live lock, and the failure is logged at error. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/intake/plans_processor.py",
+      "standard": "logged_fallback",
+      "lines": [184],
+      "reason": "_is_stale answers 'process this plan again?'. True when the mtime cannot be compared is the decision, not a failure value: re-vectorizing is the safe answer when the manifest cannot vouch for the file. Logged at warning. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/monitor/memory_watcher.py",
+      "standard": "logged_fallback",
+      "lines": [74],
+      "reason": "_check_vector_deps answers 'are chromadb and numpy confirmed importable'. A check that could not run has not confirmed them, so False is the true answer; the self-report reads it as degraded either way. Logged at warning. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/monitor/registry_scope.py",
+      "standard": "logged_fallback",
+      "lines": [192],
+      "reason": "declared_roots: an unreadable AIPASS_ROOTS.json answers [] (no external roots), logged at error. Never None: ai_mail registry/read.py 474 and drone registry_handler.py 458 loop over the answer outside their try. Not a raise: detector.py 298 (read_scope, feeding health and lint) calls it bare. No caller writes [] out as truth. Rollover's write scope (_read_registry), the push, the todo lane and the normalizer all exclude the external tier. read_scope only reports, and an external name then answers 'Unknown branch', never another branch. Leg 12 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/monitor/registry_scope.py",
+      "standard": "logged_fallback",
+      "lines": [66, 189],
+      "reason": "Both lines are FileNotFoundError: an absent passport declares nothing (None), and an absent declared-roots file declares no roots ([]). That is the answer for an absent file, not a failure value; the unreadable roots branch (470) is not covered here. Leg 8 of DPLAN-0354, @memory's decision; lines moved in leg 10."
+    },
+    {
+      "file": "apps/handlers/monitor/registry_scope.py",
+      "standard": "logged_fallback",
+      "lines": [69],
+      "reason": "declared_residency: an unreadable passport declares nothing, logged at error. None cannot add or swap a citizen: a core citizen is kept (the sealed registry is the anchor) and a resident candidate is refused, the same policy as for an absent passport. The contract was asked for by @daemon (5031a591), whose scheduler calls it. Leg 10 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/templates/receipt.py",
+      "standard": "logged_fallback",
+      "lines": [90],
+      "reason": "_write answers 'written'. False on every path that did not write (fence refusal, failed write); the success path returns True only. The checker reads the fence refusal as success. Logged at error. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/templates/spawn_pusher.py",
+      "standard": "logged_fallback",
+      "lines": [85],
+      "reason": "_write_json answers 'written'. False on every path that did not write (fence refusal, failed write); the success path returns True only. The checker reads the fence refusal as success. Logged at warning. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "apps/handlers/templates/template_bump.py",
+      "standard": "logged_fallback",
+      "lines": [51],
+      "reason": "_read_ledger merges absent and unreadable on purpose: bump_pending counts both as PENDING ('a missing record of a push is not a record of a push') and its reason names both ('never pushed, or lost'). The unreadable case is logged at error. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "apps/modules/rollover_config.py",
+      "standard": "logged_fallback",
+      "lines": [111, 161],
+      "reason": "_resolve_branch and _validate_count return None only after _refuse(ctx, ...) has recorded the refusal and its reason; every None is a refusal and no success returns None. The checker reads the other refusals as success. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "apps/modules/search.py",
+      "standard": "logged_fallback",
+      "lines": [75],
+      "reason": "handle_command answers 'was this command routed here', not 'did it succeed'. An invalid --n is handled: the error is printed to the user and logged, so True is correct and False would send the router looking for another handler. Leg 8 of DPLAN-0354, @memory's decision."
+    },
+    {
+      "file": "tests/conftest.py",
+      "standard": "import_site",
+      "lines": [64, 65, 66, 67, 76, 77, 83, 84, 85, 86],
+      "reason": "The stub is the cure (compass 493; @devpulse's leg 11 ruling (a)). Each keeps a far side off the disk or the bus. 88-91 aipass.prax: the real logger writes every module's log file under logs/, and its json service writes operation logs. 115-116 handlers.json.json_handler: log_operation writes memory_json operation logs. 123-126 aipass.trigger: Trigger.fire posts real events to the bus. Leg 11 of DPLAN-0354; lines moved +1 by the four-rows split (2026-10-08), which added the support_config_verbs import; moved -6 when the three unrequested fixtures and their imports were cut (2026-10-10)."
+    },
+    {
+      "file": "tests/conftest.py",
+      "standard": "through_the_command",
+      "lines": [95],
+      "reason": "Ruling (b): a read, not a patch. The live-state guard reads trinity_push._REPO_ROOT to check that the push lane's own root holds a core registry with rows before a live-fleet test runs. No public name carries that root (registry_scope.REPO_ROOT is the other lane, read beside it), and no door is added for the guard. Leg 11 of DPLAN-0354; line moved +1 by the four-rows split (2026-10-08), -58 by the fixture cut (2026-10-10)."
+    },
+    {
+      "file": "tests/test_config_loader.py",
+      "standard": "import_site",
+      "lines": [47],
+      "reason": "The stub is the cure (ruling (a)). _get_module re-imports config_loader after the fixture evicted the json package, so it binds conftest's json_handler stand-in; with the real one bound, load/save write memory_json operation logs. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_vector.py",
+      "standard": "import_site",
+      "lines": [42, 47],
+      "reason": "Parked tier: vector/embedder.py was parked with the symbolic fragments tier on 2026-08-14 (the owner's ruling) and this file skips; the lines stay as they were. The stub also keeps fastembed from loading a model. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_symbolic_extras.py",
+      "standard": "import_site",
+      "lines": [48, 49],
+      "reason": "Parked tier: the symbolic fragments tier was parked on 2026-08-14 (the owner's ruling) and this file skips; the lines stay as they were. Where the import is meant to raise (the parked package's __init__ raises), the raise is the test. Leg 11 of DPLAN-0354; lines moved by the four-rows split (2026-10-08), the rest went to test_symbolic_extras_storage.py and support_symbolic_extras.py."
+    },
+    {
+      "file": "tests/test_symbolic_extras.py",
+      "standard": "state_leak",
+      "lines": [48],
+      "reason": "Parked tier: the owner's ruling of 2026-08-14 keeps this file as it was, and it skips, so these pops never run. Leg 11 of DPLAN-0354; lines moved by the four-rows split (2026-10-08)."
+    },
+    {
+      "file": "tests/test_symbolic_extras_storage.py",
+      "standard": "import_site",
+      "lines": [49, 50, 70, 71, 77, 78, 84, 85, 432, 452, 864],
+      "reason": "Parked tier: the symbolic fragments tier was parked on 2026-08-14 (the owner's ruling) and this file skips, as test_symbolic_extras.py did; the lines stay as they were. Where the import is meant to raise (the parked package's __init__ raises), the raise is the test. Leg 11 of DPLAN-0354; moved here from test_symbolic_extras.py (184-220, 1209, 1229, 1676) by the four-rows split (2026-10-08)."
+    },
+    {
+      "file": "tests/test_symbolic_extras_storage.py",
+      "standard": "state_leak",
+      "lines": [49, 70, 77, 84],
+      "reason": "Parked tier: the owner's ruling of 2026-08-14 keeps this code as it was, and the file skips, so these pops never run. Leg 11 of DPLAN-0354; moved here from test_symbolic_extras.py (184, 205, 212, 219) by the four-rows split (2026-10-08)."
+    },
+    {
+      "file": "tests/support_symbolic_extras.py",
+      "standard": "import_site",
+      "lines": [31, 41, 42, 49, 50, 51, 52, 53],
+      "reason": "Parked tier: these are the autouse stand-ins the two symbolic-extras files share, moved verbatim from test_symbolic_extras.py (90, 101, 102, 111-115) by the four-rows split (2026-10-08). Both files skip at module level before importing them, so they never run while the tier is parked (the owner's ruling of 2026-08-14). Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_rollover_pipeline.py",
+      "standard": "import_site",
+      "reason": "File-wide by devpulse's leg 12 ruling: each harness (_import_orchestrator, _import_extractor, _import_rollover_module, _import_normalize, _import_line_counter) stands fake handler modules in through monkeypatch.setitem and evicts through monkeypatch, so teardown removes every one. The fakes keep the run off live state: execute_rollover writes .trinity, the backups and the stores; the json package's json_handler writes operation logs; the detector walks the live fleet. The in-function imports bind under conftest's per-test prax/json/trigger stand-ins; at the top of the file they would bind the real logger at collection. The importlib fetches (161/162, 269, 1892, 1919, 2363, 2408, 3237) take the REAL module from the cache for the same reason and patch it at the edge. A lines rule closes a line here (measured on 86, leg 12); file-wide is the ruling. Leg 12 of DPLAN-0354."
+    },
+    {
+      "file": "tests/support_rollover_pipeline.py",
+      "standard": "import_site",
+      "reason": "File-wide by devpulse's leg 12 ruling, carried with the code: _import_extractor moved verbatim from tests/test_rollover_pipeline.py by the four-rows split (2026-10-08). It stands the json package and its handlers in through monkeypatch.setitem and evicts the extractor through monkeypatch, so teardown removes every one; the fakes keep extract_items off the live .trinity files and the operation logs. The import is in-function so it binds under the stand-ins, not the real logger at collection. Leg 12 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_rollover_pipeline_extraction.py",
+      "standard": "import_site",
+      "reason": "File-wide by devpulse's leg 12 ruling, carried with the code: _import_orchestrator moved verbatim from tests/test_rollover_pipeline.py by the four-rows split (2026-10-08). It stands the json, monitor and tracking handlers in through monkeypatch.setitem and evicts through monkeypatch, so teardown removes every one; the detector would otherwise walk the live fleet and the json shim write operation logs. The import is in-function so it binds under the stand-ins. Leg 12 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_rollover_pipeline_todo.py",
+      "standard": "import_site",
+      "reason": "File-wide by devpulse's leg 12 ruling, carried with the code: the todo lane moved verbatim from tests/test_rollover_pipeline.py by the four-rows split (2026-10-08). The importlib fetches (_todo_roll, _point_todos_count, the tab renderer) take the REAL module from the cache inside the test, after conftest's per-test stand-ins are in, and patch it at the edge; at the top of the file they would bind the real logger at collection. Leg 12 of DPLAN-0354."
+    },
+    {
+      "file": "tests/support_config_verbs.py",
+      "standard": "import_site",
+      "reason": "File-wide by devpulse's leg 12 ruling: the fixture (_real_verbs) evicts conftest's json package stand-in through monkeypatch (_evict records each one) and re-imports the REAL config_loader, detector, rollover and rollover_config (134, 149, 162, 171) so the code under test is real; teardown puts the stand-ins back. A top-of-file import would bind the real json shim and logger at collection, and those write operation logs. Leg 12 of DPLAN-0354; moved here from tests/test_config_verbs.py with the fixture by the four-rows split (2026-10-08)."
+    },
+    {
+      "file": "tests/test_config_verbs_todo.py",
+      "standard": "import_site",
+      "reason": "File-wide by devpulse's leg 12 ruling: the fetches take real modules (todo_roll, todo_report, the json holders memory_files and entry_limits, the todo module, memory) from the cache under conftest's per-test prax/json stand-ins and patch them at the edge; a top-of-file import would bind the real json shim and logger at collection, and those write operation logs. Leg 12 of DPLAN-0354; copied here from tests/test_config_verbs.py with the todo classes by the four-rows split (2026-10-08)."
+    },
+    {
+      "file": "tests/test_config_verbs.py",
+      "standard": "import_site",
+      "reason": "File-wide by devpulse's leg 12 ruling, kept on the original for what stayed in it: the display tests fetch the real config_content and rollover_config modules from the cache under conftest's per-test prax/json stand-ins; a top-of-file import would bind the real json shim and logger at collection, and those write operation logs. The fixture's re-imports moved to tests/support_config_verbs.py and the todo fetches to tests/test_config_verbs_todo.py, each with its own copy of this row, by the four-rows split (2026-10-08). Leg 12 of DPLAN-0354."
+    },
+    {
+      "file": "tests/support_config_verbs.py",
+      "standard": "through_the_command",
+      "lines": [76],
+      "reason": "Ruling (c): reads config_loader._CONFIG_PATH once, BEFORE the fixture repoints it at tmp, so TestOperatorConfigIsolation can prove the operator file is untouched. The contract: every config verb writes the file at _CONFIG_PATH. The far side is memory_json/custom_config/memory.config.json, the live operator config. No public name carries the path, and no door was added for the test. Leg 12 of DPLAN-0354; moved here from tests/test_config_verbs.py 171 with the fixture by the four-rows split (2026-10-08)."
+    },
+    {
+      "file": "tests/test_rollover.py",
+      "standard": "import_site",
+      "lines": [32, 33, 60, 61, 62, 130, 170, 187, 207],
+      "reason": "Not stubs: each importlib.import_module fetches the REAL module. 54/55 first-import rollover_config and rollover_json before any stand-in lands, because what they bind at import they keep. 107-109 take the real cli flag helpers so the routing guards are real. 203/291 fetch the parent package to evict its cached attribute (monkeypatch restores it). 267/316 fetch the real handlers.cli package to compare with. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_rollover.py",
+      "standard": "import_site",
+      "lines": [81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 104, 105, 127, 134],
+      "reason": "The stub is the cure (ruling (a)). rollover.py imports these at import time, and each far side writes. orchestrator.execute_rollover writes .trinity, the backups and the vector stores. memory_watcher.check_and_rollover runs that same rollover. detector's walk recreates a missing .trinity file. todo_report.roll_pad writes the .backup todo backlogs. plans_processor.process_plans embeds and writes the flow_plans store. 134-137 register the REAL cli flag helpers under the stand-in package, which has no __path__. 139/140 are the parent packages. 199 is the eviction of the cached rollover (del under the module constant _ROLLOVER_MODULE, after setitem so teardown restores it) that the re-import at 207 needs; the checker read the constant key from sentry leg 17 on, and devpulse added the line on 2026-10-05 as part of this same ruling. 207 is the deliberate re-import of rollover against them. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_marker7_memory_lane.py",
+      "standard": "through_the_command",
+      "lines": [94, 135, 156, 167, 275, 737],
+      "reason": "Contracts pinned, each with no public caller that leaves the disk alone. 149/284: detector._read_registry is the rollover WRITE scope (it stops at the repo edge); its public readers walk files and return counts, never rows, and read_scope adds the externals. 228/262: rollover._normalize_rolled never reaches another repository and names a branch whose frame could not be written; its public caller runs a real rollover first. 409: spawn_pusher._write_json refuses a path outside the root; its public caller pushes the spawn templates. 1015: templates._announce_bump fires on the bus; its public caller stamps the receipts. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_residency_scope.py",
+      "standard": "through_the_command",
+      "lines": [301],
+      "reason": "Contract pinned: the WRITE scope (detector._read_registry) stops at the repo edge while read_scope reaches a declared external. The write scope's public readers (check_all_branches, get_rollover_stats) walk files and return counts, not rows, so the difference is visible only here. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_roots_lifecycle.py",
+      "standard": "through_the_command",
+      "lines": [381, 389],
+      "reason": "Contract pinned: a declared root is written with forward slashes on Windows. The tests hand _spell a Windows path flavour, which no public caller accepts; the public caller (roots add) writes AIPASS_ROOTS.json under the real home with the host's flavour. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_trinity_push.py",
+      "standard": "through_the_command",
+      "lines": [1446],
+      "reason": "Ruling (b): tp._RULES_CACHE.clear() empties the module's cache of the global rules file so the test reads its own tmp copy and can count re-reads; there is no public reset, and no door is added for the test. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_trinity_standard.py",
+      "standard": "through_the_command",
+      "lines": [301, 310, 319, 628, 644],
+      "reason": "Contracts pinned on a tmp file: the meta line is tab then template semantics, a refresh restores _usage from the template and never leaves a bare tab, and the receipt is bumped after a refresh (or the refresh succeeds with no receipt). The public caller refreshes every live branch's .trinity files, which is live state. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "tests/test_declared_roots.py",
+      "standard": "no_product_call",
+      "reason": "File-wide because no_product_call passes no line (the checklist calls a lines rule inert); it covers TestWhatTheHostCanActuallyHold, lines 660 and 675. Host probes @devpulse asked for. They measure what the running file system holds (case-only names fold or not; a differing stem is always a second file), the premise every case-glob pin in this file is written on. No product code answers that question. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "apps/handlers/templates/push_store.py",
+      "standard": "json_structure",
+      "reason": "Its two operations are logged by storage/lane.run_json, the one subprocess runner, as subprocess_lane rows labelled vectorize_and_store and get_by_ids."
+    }
+  ],
+  "notes": {
+    "usage": "Add entries to 'bypass' list to exclude specific violations",
+    "example": {
+      "file": "apps/example.py",
+      "standard": "imports",
+      "reason": "Legacy import required for compatibility"
+    },
+    "fields": {
+      "file": "Relative path from branch root (required)",
+      "standard": "Standard name: cli, imports, naming, etc. (required)",
+      "lines": "Optional - specific line numbers to bypass",
+      "pattern": "Optional - pattern to match (e.g. 'if __name__')",
+      "reason": "Required - why this bypass exists"
+    }
+  }
+}

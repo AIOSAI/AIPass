@@ -3,13 +3,13 @@
 # Description: Tests for the host API attach lane — the pump's shape and the socket's records
 # Version: 1.1.1
 # Created: 2026-08-14
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for the attach socket's records in apps/handlers/host/server.py and the pump's shape in pump.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered) — issue_token() and the token store's own locking, tests/test_host_token_store.py
+# sentry: no-test-needed(covered) — issue_token() and the token store's own locking, tests/test_host_token_store.py
 
 import json
 import re

@@ -5,15 +5,15 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-10-25
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/security/settings_gate.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that handlers/security/settings_gate.py parses and imports
-# seedgo: no-test-needed(constant) — the ASK / DENY_* wording beyond the file, the kind and the @devpulse door
-# seedgo: no-test-needed(documentation) — the module docstring's account of why Codex and OpenCode are deny-only
+# sentry: no-test-needed(ruff) — that handlers/security/settings_gate.py parses and imports
+# sentry: no-test-needed(constant) — the ASK / DENY_* wording beyond the file, the kind and the @devpulse door
+# sentry: no-test-needed(documentation) — the module docstring's account of why Codex and OpenCode are deny-only
 
 import json
 import os

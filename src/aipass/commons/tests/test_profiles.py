@@ -5,7 +5,7 @@
 # Date: 2026-03-24
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-09-28
+# Modified: 2026-11-02
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -20,7 +20,7 @@
 """Tests for apps/handlers/profiles/profile_queries.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every file in handlers/profiles/ parses and imports
+# sentry: no-test-needed(ruff) — that every file in handlers/profiles/ parses and imports
 
 import sqlite3
 from datetime import datetime, timezone, timedelta

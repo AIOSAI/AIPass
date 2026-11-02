@@ -1,0 +1,236 @@
+# =================== AIPass ====================
+# Name: proof_query.py
+# Description: Proof Query Module
+# Version: 1.0.1
+# Created: 2026-03-22
+# Modified: 2026-11-02
+# =============================================
+
+"""
+Proof Query Module
+"""
+
+import importlib.util
+from pathlib import Path
+from typing import List
+
+from aipass.prax import logger
+
+from aipass.cli import console, header
+from aipass.cli.apps.modules import error, warning
+
+from aipass.sentry.apps.handlers.json import json_handler
+
+from aipass.sentry.apps.handlers.audit_tests import refusal
+from aipass.sentry.apps.handlers.cli.help_flags import wants_help
+from aipass.sentry.apps.modules import CommandRefused
+
+
+def _discover_proof_packs() -> dict:
+    """Discover available proof packs from handlers/ directory.
+
+    Convention: directories named *_proof/ holding *_content.py files; the pack id is the directory name.
+    """
+    handlers_dir = Path(__file__).parent.parent / "handlers"
+    packs = {}
+    if not handlers_dir.exists():
+        return packs
+    for d in sorted(handlers_dir.iterdir()):
+        if not d.is_dir():
+            continue
+        if not d.name.endswith("_proof"):
+            continue
+        content_files = list(d.glob("*_content.py"))
+        if content_files:
+            packs[d.name] = d
+    return packs
+
+
+def _discover_proof_content(pack_dir: Path) -> dict:
+    """Discover available proof content files within a pack."""
+    proofs = {}
+    for f in sorted(pack_dir.glob("*_content.py")):
+        proof_name = f.stem.removesuffix("_content")
+        proofs[proof_name] = f
+    return proofs
+
+
+def _load_proof_content(content_file: Path, proof_name: str) -> str | None:
+    """Load and return formatted proof content from a content handler."""
+    try:
+        spec = importlib.util.spec_from_file_location(content_file.stem, content_file)
+        if spec is None or spec.loader is None:
+            logger.error(f"[proof_query] Failed to create spec for {content_file}")
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        fn_name = f"get_{proof_name}_proof"
+        fn = getattr(mod, fn_name, None)
+        if fn is None:
+            logger.error(f"[proof_query] No {fn_name}() in {content_file.name}")
+            error(f"Content handler missing: {fn_name}() not found in {content_file.name}")
+            return None
+
+        return fn()
+    except Exception as e:
+        logger.error(f"[proof_query] Failed to load {content_file.name}: {e}")
+        error(f"Failed to load content: {e}")
+        return None
+
+
+def _show_query_introspection() -> None:
+    """No-args display: list available proof packs with content counts."""
+    console.print()
+    console.print("[bold cyan]proof_query Module[/bold cyan]")
+    console.print("Pack-aware content query — browse proof content by pack and name")
+    console.print()
+
+    packs = _discover_proof_packs()
+    console.print("[yellow]Discovered Proof Packs:[/yellow]")
+    for name, pack_path in packs.items():
+        proofs = _discover_proof_content(pack_path)
+        console.print(f"  [cyan]{name}[/cyan]  ({len(proofs)} proof{'s' if len(proofs) != 1 else ''})")
+    if not packs:
+        console.print("  [dim]No proof packs found[/dim]")
+    console.print()
+
+    console.print("[yellow]Connected Handlers:[/yellow]")
+    for name, pack_path in packs.items():
+        console.print(f"  [cyan]handlers/{name}/[/cyan]")
+        proofs = _discover_proof_content(pack_path)
+        for proof_name, proof_path in proofs.items():
+            console.print(f"    [dim]- {proof_path.name} (get_{proof_name}_proof)[/dim]")
+    console.print()
+
+    if packs:
+        console.print("[yellow]Next:[/yellow]  Pick a pack to see its proofs")
+        for name in packs:
+            console.print(f"  [green]drone @sentry proof_query {name}[/green]")
+        console.print()
+
+
+def _list_pack_proofs(pack_name: str, pack_dir: Path) -> None:
+    """List all proofs available in a pack.
+
+    Never empty: _discover_proof_packs admits only a directory holding a *_content.py.
+    """
+    proofs = _discover_proof_content(pack_dir)
+
+    console.print()
+    header(f"PROOFS IN {pack_name.upper()}")
+    console.print()
+
+    console.print(f"[yellow]Available Proofs:[/yellow] ({len(proofs)})")
+    console.print()
+    for name in proofs:
+        console.print(f"  [cyan]{name}[/cyan]")
+    console.print()
+
+    console.print("[yellow]Next:[/yellow]  Pick a proof to see its content")
+    first_proof = next(iter(proofs))
+    console.print(f"  [green]drone @sentry proof_query {pack_name} {first_proof}[/green]")
+    console.print()
+
+
+def _show_proof_content(pack_name: str, pack_dir: Path, proof_name: str) -> None:
+    """Display specific proof content."""
+    proofs = _discover_proof_content(pack_dir)
+    if proof_name not in proofs:
+        error(f"Unknown proof: '{proof_name}'")
+        console.print()
+        warning(f"Available proofs in {pack_name}:")
+        for name in proofs:
+            console.print(f"  [cyan]{name}[/cyan]")
+        console.print()
+        raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, proof_name)
+
+    content = _load_proof_content(proofs[proof_name], proof_name)
+    json_handler.log_operation("proof_queried", {"pack": pack_name, "proof": proof_name})
+    if not content:
+        # `_load_proof_content` already said why; a silent return would exit 0 on a proof never printed.
+        raise CommandRefused(refusal.EXIT_UNPROVEN, f"{pack_name}/{proof_name}")
+
+    console.print()
+    if isinstance(content, list):
+        for line in content:
+            console.print(line)
+    else:
+        console.print(content)
+    console.print()
+
+
+def handle_command(command: str, args: List[str]) -> bool:
+    """
+    Handle 'proof_query' command with pack-aware drill-down.
+    """
+    if command != "proof_query":
+        return False
+
+    if not args:
+        print_introspection()
+        return True
+
+    # A help flag anywhere means explain, never a proof named '--help'.
+    if wants_help(None, args):
+        print_help()
+        return True
+
+    packs = _discover_proof_packs()
+    pack_name = args[0]
+    if pack_name not in packs:
+        error(f"Unknown pack: '{pack_name}'")
+        console.print()
+        console.print("[yellow]Available packs:[/yellow]")
+        for name in packs:
+            console.print(f"  [cyan]{name}[/cyan]")
+        console.print()
+        raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, pack_name)
+
+    if len(args) < 2:
+        _list_pack_proofs(pack_name, packs[pack_name])
+        return True
+
+    _show_proof_content(pack_name, packs[pack_name], args[1])
+    return True
+
+
+def print_introspection() -> None:
+    """Display module info for sentry introspection system."""
+    _show_query_introspection()
+
+
+def print_help() -> None:
+    """Print help information."""
+    console.print()
+    console.print("[bold cyan]Proof Query Module[/bold cyan]")
+    console.print("Pack-aware content query — browse and display proof content")
+    console.print()
+
+    console.print("[yellow]COMMANDS:[/yellow]")
+    console.print(
+        "  [green]drone @sentry proof_query[/green]                        [dim]List available proof packs[/dim]"
+    )
+    console.print("  [green]drone @sentry proof_query <pack>[/green]                 [dim]List proofs in pack[/dim]")
+    console.print("  [green]drone @sentry proof_query <pack> <proof>[/green]         [dim]Show proof content[/dim]")
+    console.print("  [green]drone @sentry proof_query --help[/green]                 [dim]This help message[/dim]")
+    console.print()
+
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [dim]# List all proof packs[/dim]")
+    console.print("  [green]drone @sentry proof_query[/green]")
+    console.print()
+    console.print("  [dim]# List proofs in aipass proof pack[/dim]")
+    console.print("  [green]drone @sentry proof_query aipass_proof[/green]")
+    console.print()
+    console.print("  [dim]# Show triplet proof content[/dim]")
+    console.print("  [green]drone @sentry proof_query aipass_proof triplet[/green]")
+    console.print()
+
+    console.print("[yellow]REFERENCE:[/yellow]")
+    console.print("  Auto-discovers *_content.py handlers from proof pack directories.")
+    console.print("  Each content handler provides get_<name>_proof() returning Rich-formatted text.")
+    console.print()
+
+    console.print("[dim]Commands: proof_query, --help[/dim]")
+    console.print()

@@ -3,14 +3,14 @@
 # Description: The passport 2.0 contract AT BIRTH — block order, key order, new fields
 # Version: 1.0.2
 # Created: 2026-08-28
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/core.py — the passport 2.0 contract at birth."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that core.py, placeholders.py, and class_registry.py parse and import cleanly
-# seedgo: no-test-needed(documentation) — that the public functions in those modules carry docstrings
+# sentry: no-test-needed(ruff) — that core.py, placeholders.py, and class_registry.py parse and import cleanly
+# sentry: no-test-needed(documentation) — that the public functions in those modules carry docstrings
 
 import json
 from pathlib import Path

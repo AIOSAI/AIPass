@@ -3,7 +3,7 @@
 # Description: Manual Branch Wake Handler
 # Version: 3.11.1
 # Created: 2026-03-02
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -840,10 +840,10 @@ def wake_branch(
         prompt = f"{DEFAULT_PROMPT} "
     # Never tell the agent to delete its lock: the monitor owns cleanup, and two monitors would race.
     prompt += (
-        "Before you build: read the seedgo standards rows for what you touch "
-        "(src/aipass/seedgo/docs/aipass_standards.md; drone @seedgo checklist names the "
+        "Before you build: read the sentry standards rows for what you touch "
+        "(src/aipass/sentry/docs/aipass_standards.md; drone @sentry checklist names the "
         "rows for a file) and the test template for tests "
-        "(src/aipass/seedgo/templates/test_template_v1.md); build to them; run the "
+        "(src/aipass/sentry/templates/test_template_v1.md); build to them; run the "
         "checklist last, to find what you missed. "
         "IMPORTANT: run any sub-agents synchronously (foreground) and wait for them to "
         "finish before ending your turn — headless dispatch kills orphaned background "

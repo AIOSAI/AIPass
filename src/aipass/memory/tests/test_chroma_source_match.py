@@ -3,7 +3,7 @@
 # Description: Tests for source_file matching in the ChromaDB subprocess handler
 # Version: 1.1.2
 # Created: 2026-08-23
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/storage/chroma_subprocess.py."""
@@ -12,8 +12,8 @@
 # --branch aipass must not reach aipass_site_local. A fake collection, no live ChromaDB.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — _vectorize_and_store(): tests/test_chroma_vectorize.py
-# seedgo: no-test-needed(external) — chromadb.PersistentClient behind _get_client(); a fake client stands in here
+# sentry: no-test-needed(covered_elsewhere) — _vectorize_and_store(): tests/test_chroma_vectorize.py
+# sentry: no-test-needed(external) — chromadb.PersistentClient behind _get_client(); a fake client stands in here
 
 import io
 import json

@@ -3,14 +3,14 @@
 # Description: Fleet inbox sweep tests — stale unread mail detection, wake policy and waking
 # Version: 1.1.1
 # Created:2026-08-11
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/inbox_sweep.py and the handlers/monitoring/inbox_scanner.py it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — wake_branch's own spawn and blocklist file; @ai_mail's dispatch tests
-# seedgo: no-test-needed(constant) — MAX_WAKES, WAKE_MODEL and the help and introspection text
+# sentry: no-test-needed(external) — wake_branch's own spawn and blocklist file; @ai_mail's dispatch tests
+# sentry: no-test-needed(constant) — MAX_WAKES, WAKE_MODEL and the help and introspection text
 
 import json
 import shutil

@@ -3,7 +3,7 @@
 # Description: Tests for the dispatch register append-only log
 # Version: 1.1.0
 # Created: 2026-08-22
-# Modified: 2026-10-25
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/dispatch/register.py: the append-only dispatch register."""
@@ -11,7 +11,7 @@
 # An entry past expected_by with no completion is a fact about a file; these pin append-only and honest parsing.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(windows_compat) — monitor_alive()'s Windows OpenProcess leg (_monitor_alive_windows)
+# sentry: no-test-needed(windows_compat) — monitor_alive()'s Windows OpenProcess leg (_monitor_alive_windows)
 
 import json
 import os

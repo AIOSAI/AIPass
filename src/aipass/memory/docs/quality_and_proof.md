@@ -18,8 +18,8 @@ Two invocation shapes, and both are expected to agree: from the repo root in the
 
 **The xfail is conditional.**
 `test_trinity_push.py::TestThePushedFileIsCanonical::test_a_pushed_branch_satisfies_the_trinity_checker`
-scores a push with @seedgo's checker. While that checker still renders the retired todos tab, the
-only miss it allows is the `todos_meta` byte-match, and it xfails; once seedgo's todos-tab mirror
+scores a push with @sentry's checker. While that checker still renders the retired todos tab, the
+only miss it allows is the `todos_meta` byte-match, and it xfails; once sentry's todos-tab mirror
 renders the pad tab, it asserts strictly on its own
 ([todos_v2_shape_contract.md](todos_v2_shape_contract.md)).
 
@@ -34,18 +34,18 @@ checkout"). A skip that names its reason is honest; a pass that needed this mach
 live in modules that call `pytest.skip(allow_module_level=True)` at import, so pytest never collects
 them individually; they surface as one skip each. The rest expand through
 `@pytest.mark.parametrize` into more **collected** cases than there are functions. Both numbers are
-true: seedgo's `readme` rule counts the functions on disk, a green board counts the cases that
+true: sentry's `readme` rule counts the functions on disk, a green board counts the cases that
 execute. Quoting one where the other is meant is how a README ends up arguing with its own audit.
 
 The `.trinity/` json_handler shim pins do not live here: they run once for every branch inside
-seedgo's `tests/test_json_handler_contract.py`, because a per-branch contract is the right home for
+sentry's `tests/test_json_handler_contract.py`, because a per-branch contract is the right home for
 a shim every branch carries.
 
 ---
 
-## Seedgo
+## Sentry
 
-The audit is `drone @seedgo audit aipass @memory`, `apps/` only. Findings are fixed, not bypassed,
+The audit is `drone @sentry audit aipass @memory`, `apps/` only. Findings are fixed, not bypassed,
 where the code can carry the fix:
 
 - The entry seam says for itself that a bare `rollover` introspects; the no-args gate is not
@@ -57,7 +57,7 @@ where the code can carry the fix:
   JSON, so no Rich `cli` bypass is needed to serve a machine. The `json_flag.py` rule
   (`json_structure`) mirrors `help_flags.py` for its sibling predicate.
 
-**Bypass registry.** `.seedgo/bypass.json` holds the per-file rules that remain. Every rule names a
+**Bypass registry.** `.sentry/bypass.json` holds the per-file rules that remain. Every rule names a
 file that is in the tree; a bypass for an absent file suppresses nothing and would be dead weight.
 
 ---

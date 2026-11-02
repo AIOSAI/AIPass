@@ -3,13 +3,13 @@
 # Description: Canary tests that literal [placeholders] survive Rich rendering
 # Version: 1.0.0
 # Created: 2026-08-11
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for the rendered [placeholders] of apps/devpulse.py, apps/modules/watchdog.py and its presenter."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — the Rich colour tags around HELP_TEXT's placeholders
+# sentry: no-test-needed(constant) — the Rich colour tags around HELP_TEXT's placeholders
 
 import io
 

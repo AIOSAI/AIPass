@@ -3,14 +3,14 @@
 # Description: Tests for aipass profile Phase 3
 # Version: 1.2.6
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/profile.py and the handlers it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/modules/profile.py parses and imports
-# seedgo: no-test-needed(constant) — USER_FIELDS' literal contents and the store's filename
+# sentry: no-test-needed(ruff) — that apps/modules/profile.py parses and imports
+# sentry: no-test-needed(constant) — USER_FIELDS' literal contents and the store's filename
 
 import io
 import json
@@ -213,7 +213,7 @@ class TestWriteDurability:
         mock_trigger.fire.assert_not_called()
 
     def test_module_does_no_direct_file_operations(self) -> None:
-        """The seedgo modules rule, pinned here so it cannot regress silently."""
+        """The sentry modules rule, pinned here so it cannot regress silently."""
         source = Path(profile_mod.__file__).read_text(encoding="utf-8")
         body = [line for line in source.splitlines() if line.strip() and not line.strip().startswith("#")]
         for forbidden in (".mkdir(", ".write_text(", ".read_text(", "json.dump(", "json.load("):

@@ -1,0 +1,334 @@
+# =================== AIPass ====================
+# Name: test_hooks_track_e.py
+# Description: DPLAN-0139 Track E — single-path enforcement tests
+# Version: 1.3.2
+# Created: 2026-04-21
+# Modified: 2026-11-02
+# =============================================
+"""Tests for apps/modules/permissions.py and apps/modules/inbox_audit.py, DPLAN-0139 Track E single-path enforcement."""
+
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# sentry: no-test-needed(ruff) — that modules/permissions.py and modules/inbox_audit.py parse and import
+# sentry: no-test-needed(stdlib) — Path.rglob's walk; the tests choose only the root it starts from
+
+import importlib.util
+import json
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from aipass.drone.apps.plugins.devpulse_ops import auth
+from aipass.sentry.apps.modules import CommandRefused, inbox_audit, permissions
+from aipass.sentry.apps.modules.inbox_audit import handle_command
+from aipass.sentry.apps.modules.permissions import TRUSTED_CROSS_WRITERS, identify_caller, is_trusted_caller
+
+
+def _find_repo_root() -> Path:
+    """Walk up from this file to find the git repo root."""
+    current = Path(__file__).resolve().parent
+    for parent in (current, *current.parents):
+        if (parent / ".git").exists():
+            return parent
+    return Path(__file__).resolve().parents[4]
+
+
+REPO_ROOT = _find_repo_root()
+
+
+def test_trusted_cross_writers_contains_expected_members():
+    """TRUSTED_CROSS_WRITERS must include devpulse, sentry, and spawn."""
+    assert "devpulse" in TRUSTED_CROSS_WRITERS
+    assert "sentry" in TRUSTED_CROSS_WRITERS
+    assert "spawn" in TRUSTED_CROSS_WRITERS
+
+
+def test_is_trusted_caller_returns_true_for_devpulse():
+    """devpulse is a trusted cross-writer."""
+    assert is_trusted_caller("devpulse") is True
+
+
+def test_is_trusted_caller_returns_true_for_sentry():
+    """sentry is a trusted cross-writer."""
+    assert is_trusted_caller("sentry") is True
+
+
+def test_is_trusted_caller_returns_true_for_spawn():
+    """spawn is a trusted cross-writer."""
+    assert is_trusted_caller("spawn") is True
+
+
+def test_is_trusted_caller_returns_false_for_unknown():
+    """Regular branches are not trusted cross-writers."""
+    assert is_trusted_caller("flow") is False
+    assert is_trusted_caller("memory") is False
+    assert is_trusted_caller("random_branch") is False
+
+
+def test_identify_caller_returns_empty_when_no_passport(tmp_path):
+    """identify_caller returns empty string when no passport.json is found."""
+    result = identify_caller(str(tmp_path))
+    assert result == ""
+
+
+def test_identify_caller_reads_branch_name_from_passport(tmp_path):
+    """identify_caller reads branch_name from branch_info section."""
+    trinity = tmp_path / ".trinity"
+    trinity.mkdir()
+    passport = trinity / "passport.json"
+    passport.write_text(json.dumps({"branch_info": {"branch_name": "testbranch"}}), encoding="utf-8")
+    result = identify_caller(str(tmp_path))
+    assert result == "testbranch"
+
+
+def test_identify_caller_falls_back_to_identity_name(tmp_path):
+    """identify_caller falls back to identity.name when branch_info absent."""
+    trinity = tmp_path / ".trinity"
+    trinity.mkdir()
+    passport = trinity / "passport.json"
+    passport.write_text(json.dumps({"identity": {"name": "fallback_branch"}}), encoding="utf-8")
+    result = identify_caller(str(tmp_path))
+    assert result == "fallback_branch"
+
+
+def test_identify_caller_raises_on_a_passport_it_cannot_parse(tmp_path):
+    """A found passport that does not parse names itself, never the "" of no passport."""
+    trinity = tmp_path / ".trinity"
+    trinity.mkdir()
+    passport = trinity / "passport.json"
+    passport.write_text("{not json", encoding="utf-8")
+    with pytest.raises(ValueError) as caught:
+        identify_caller(str(tmp_path))
+    assert str(caught.value).startswith(f"passport at {passport} cannot be parsed: ")
+
+
+def test_handle_command_prints_nothing_for_another_modules_command(capsys):
+    """A module that does not own the command must not write: route_command tries every module in turn."""
+    assert permissions.handle_command("standard", []) is False
+    assert permissions.handle_command("audit", ["--help"]) is False
+    assert capsys.readouterr().out == ""
+
+
+def test_handle_command_claims_its_own_command_and_renders_the_trust_list(capsys):
+    """`permissions` is a real command: it renders and it is claimed."""
+    assert permissions.handle_command("permissions", []) is True
+    out = capsys.readouterr().out
+    assert "TRUSTED_CROSS_WRITERS" in out
+    for member in permissions.TRUSTED_CROSS_WRITERS:
+        assert member in out
+
+    assert permissions.handle_command("permissions", ["--help"]) is True
+    assert "TRUSTED_CROSS_WRITERS" in capsys.readouterr().out
+
+
+def test_drone_auth_has_no_hardcoded_caller_list():
+    """Owner-tier git is earned per-repo, never granted by name: no ALLOWED_CALLERS list exists."""
+    assert not hasattr(auth, "ALLOWED_CALLERS")
+    for tier in auth.GIT_ACCESS_TIERS.values():
+        assert "allowed_callers" not in tier
+
+
+def test_inbox_audit_ignores_non_audit_command():
+    """handle_command returns False for non-audit command names."""
+    assert handle_command("standards_query", ["inbox-ids"]) is False
+    assert handle_command("checklist", ["inbox-ids"]) is False
+
+
+def test_inbox_audit_handles_inbox_ids_subcommand():
+    """handle_command returns True and runs scan for `audit inbox-ids`."""
+    with patch("aipass.sentry.apps.modules.inbox_audit._run_inbox_id_scan", return_value=0) as scan:
+        result = handle_command("audit", ["inbox-ids"])
+    assert result is True
+    # The docstring promised the scan RAN; the True alone held whether it did
+    # or the subcommand was claimed and dropped.
+    assert scan.call_count == 1
+
+
+def test_inbox_audit_ignores_other_audit_subcommands():
+    """handle_command returns False for audit subcommands other than inbox-ids."""
+    assert handle_command("audit", ["aipass"]) is False
+    assert handle_command("audit", ["flow"]) is False
+
+
+def _run_inbox_ids(root, monkeypatch, capsys):
+    """Run `audit inbox-ids` over `root` as the repo root; return (out, err)."""
+    monkeypatch.setattr(inbox_audit, "_find_repo_root", lambda: root)
+    assert handle_command("audit", ["inbox-ids"]) is True
+    return capsys.readouterr()
+
+
+def _run_inbox_ids_red(root, monkeypatch, capsys):
+    """Run `audit inbox-ids` expecting violations: it refuses with exit 1; return (out, err)."""
+    monkeypatch.setattr(inbox_audit, "_find_repo_root", lambda: root)
+    with pytest.raises(CommandRefused) as refused:
+        handle_command("audit", ["inbox-ids"])
+    assert refused.value.code == 1
+    return capsys.readouterr()
+
+
+def _inbox(path, ids):
+    """Write an inbox holding one message per id."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    messages = [{"id": i, "subject": f"s{n}", "from": "@test", "status": "new"} for n, i in enumerate(ids)]
+    path.write_text(json.dumps({"messages": messages}), encoding="utf-8")
+
+
+def test_inbox_audit_skips_archived_and_backed_up_inboxes(tmp_path, monkeypatch, capsys):
+    """_is_live_inbox skips .backup/ and .archive/: a deleted branch's archived inbox is nobody's to fix."""
+    _inbox(tmp_path / "flow" / ".ai_mail.local" / "inbox.json", ["a1b2c3d4"])
+    for dead_root in (".backup", ".archive"):
+        _inbox(tmp_path / dead_root / "deleted_branches" / "old" / ".ai_mail.local" / "inbox.json", ["not-hex!"])
+
+    out, err = _run_inbox_ids(tmp_path, monkeypatch, capsys)
+    assert "Scanning 1 live inbox file(s)" in out
+    assert "Skipped 2 archived/backed-up" in out
+    assert "not-hex!" not in out
+    assert err == ""
+
+
+def test_inbox_audit_skips_a_directory_named_inbox_json(tmp_path, monkeypatch, capsys):
+    """_is_live_inbox is False for a directory: @backup versions a file into a same-named directory."""
+    as_dir = tmp_path / "branch" / ".ai_mail.local" / "inbox.json"
+    as_dir.mkdir(parents=True)
+    (as_dir / "inbox.json").write_text("{}", encoding="utf-8")
+
+    out, _err = _run_inbox_ids(tmp_path, monkeypatch, capsys)
+    assert "Scanning 0 live inbox file(s)" in out
+    assert "Skipped 1 archived/backed-up" in out
+
+
+def test_inbox_audit_scan_detects_bad_id(tmp_path, monkeypatch, capsys):
+    """_scan_inbox flags message ids that are not 8-char lowercase hex."""
+    _inbox(tmp_path / "flow" / ".ai_mail.local" / "inbox.json", ["not-hex!", "a1b2c3d4"])
+
+    out, err = _run_inbox_ids_red(tmp_path, monkeypatch, capsys)
+    assert "Found 1 id violation(s)" in err
+    assert "id='not-hex!'" in out
+    assert "id='a1b2c3d4'" not in out
+
+
+def test_inbox_audit_scan_passes_valid_ids(tmp_path, monkeypatch, capsys):
+    """_scan_inbox returns empty list when all message ids are valid 8-hex."""
+    _inbox(tmp_path / "flow" / ".ai_mail.local" / "inbox.json", ["a1b2c3d4", "deadbeef"])
+
+    out, err = _run_inbox_ids(tmp_path, monkeypatch, capsys)
+    assert "All message ids are valid 8-char hex strings." in out
+    assert err == ""
+
+
+def test_inbox_audit_reads_a_list_inbox_as_unreadable_not_a_crash(tmp_path, monkeypatch, capsys):
+    """An inbox.json holding a JSON list crashed _scan_inbox on .get; it is named unreadable and skipped."""
+    target = tmp_path / "flow" / ".ai_mail.local" / "inbox.json"
+    target.parent.mkdir(parents=True)
+    target.write_text("[]", encoding="utf-8")
+
+    _out, err = _run_inbox_ids(tmp_path, monkeypatch, capsys)
+    assert "Unreadable inbox (not a JSON object)" in err
+
+
+def test_inbox_audit_never_walks_a_virtualenv(tmp_path, monkeypatch, capsys):
+    """.venv and node_modules hold no mailbox: an inbox planted inside one is never scanned."""
+    _inbox(tmp_path / "flow" / ".ai_mail.local" / "inbox.json", ["a1b2c3d4"])
+    for env in (".venv", "node_modules"):
+        _inbox(tmp_path / env / "pkg" / ".ai_mail.local" / "inbox.json", ["not-hex!"])
+
+    out, _err = _run_inbox_ids(tmp_path, monkeypatch, capsys)
+    assert "Scanning 1 live inbox file(s)" in out
+    assert "Skipped" not in out
+
+
+# Load by file path to avoid cross-branch package import restriction.
+
+
+def _load_delivery():
+    """Load ai_mail delivery.py by file path (bypasses cross-branch import check)."""
+    delivery_path = REPO_ROOT / "src" / "aipass" / "ai_mail" / "apps" / "handlers" / "email" / "delivery.py"
+    if not delivery_path.exists():
+        pytest.skip(f"delivery.py not found: {delivery_path}")
+    spec = importlib.util.spec_from_file_location("delivery", delivery_path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+def test_deliver_to_inbox_file_returns_false_for_missing_inbox(tmp_path):
+    """deliver_to_inbox_file returns (False, error, '') when inbox does not exist."""
+    delivery = _load_delivery()
+    missing = tmp_path / "inbox.json"
+    success, error_msg, reply_id = delivery.deliver_to_inbox_file(
+        missing,
+        {"from": "@x", "to": "@y", "subject": "s", "message": "m", "timestamp": "t"},
+    )
+    assert success is False
+    assert reply_id == ""
+
+
+def test_deliver_to_inbox_file_writes_message_and_returns_id(tmp_path):
+    """deliver_to_inbox_file writes to inbox and returns the assigned 8-char id."""
+    delivery = _load_delivery()
+    inbox = tmp_path / "inbox.json"
+    inbox.write_text(
+        json.dumps({"mailbox": "inbox", "total_messages": 0, "unread_count": 0, "messages": []}),
+        encoding="utf-8",
+    )
+    email_data = {
+        "from": "@sender",
+        "to": "@recv",
+        "subject": "Hello",
+        "message": "body",
+        "timestamp": "2026-04-21 00:00:00",
+    }
+    with patch.object(delivery, "_emit_notification_event"):
+        success, error_msg, reply_id = delivery.deliver_to_inbox_file(inbox, email_data)
+
+    assert success is True
+    assert len(reply_id) == 8
+    data = json.loads(inbox.read_text(encoding="utf-8"))
+    assert len(data["messages"]) == 1
+    assert data["messages"][0]["id"] == reply_id
+
+
+def test_inbox_ids_help_does_not_run_the_repo_wide_scan():
+    """`drone @sentry audit inbox-ids --help` explains and never runs the scan, asserted on a mock."""
+    with (
+        patch.object(inbox_audit, "_run_inbox_id_scan") as scan,
+        patch.object(inbox_audit, "print_introspection") as shown,
+    ):
+        assert inbox_audit.handle_command("audit", ["inbox-ids", "--help"]) is True
+
+    assert scan.call_count == 0
+    assert shown.call_count == 1
+
+
+def test_inbox_ids_still_scans_without_a_help_flag():
+    """The gate must not swallow the real subcommand."""
+    with patch.object(inbox_audit, "_run_inbox_id_scan", return_value=0) as scan:
+        assert inbox_audit.handle_command("audit", ["inbox-ids"]) is True
+
+    assert scan.call_count == 1
+
+
+def test_inbox_audit_help_flag_does_not_claim_another_audit_subcommand():
+    """Ownership first: `audit aipass --help` belongs to standards_audit, not here."""
+    with patch.object(inbox_audit, "_run_inbox_id_scan") as scan:
+        assert inbox_audit.handle_command("audit", ["aipass", "--help"]) is False
+
+    assert scan.call_count == 0
+
+
+def test_permissions_help_after_an_argument_explains():
+    """`drone @sentry permissions list --help` fell through to "Unknown command"."""
+    with patch.object(permissions, "print_introspection") as shown:
+        assert permissions.handle_command("permissions", ["list", "--help"]) is True
+
+    assert shown.call_count == 1
+
+
+def test_permissions_does_not_answer_for_another_command():
+    """Ownership first: a help flag never makes a module claim a command it does not own."""
+    with patch.object(permissions, "print_introspection") as shown:
+        assert permissions.handle_command("checklist", ["--help"]) is False
+
+    assert shown.call_count == 0

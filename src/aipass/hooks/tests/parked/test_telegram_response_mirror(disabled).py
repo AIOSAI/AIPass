@@ -3,7 +3,7 @@
 # Description: telegram_response's mirror lane: never-expired mirror files, turn extraction, handle() and cursor
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/notification/telegram_response.py: its mirror lane."""
@@ -13,7 +13,7 @@
 # delivery helpers are test_telegram_response_delivery.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that telegram_response.py parses and imports, ruff and collection cover it
+# sentry: no-test-needed(ruff) — that telegram_response.py parses and imports, ruff and collection cover it
 
 import json
 import time

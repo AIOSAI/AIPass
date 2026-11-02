@@ -3,7 +3,7 @@
 # Description: PRAX Public API
 # Version: 1.5.0
 # Created: 2025-11-15
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -43,7 +43,7 @@ from aipass.prax.apps.handlers.logging.direct import get_direct_logger, direct_l
 from aipass.prax.apps.handlers.logging.jsonl_writer import append_jsonl
 from aipass.prax.apps.handlers.json import json_handler
 
-# seedgo requires a module-level 'logger'; SystemLogger methods shadow it on purpose.
+# sentry requires a module-level 'logger'; SystemLogger methods shadow it on purpose.
 logger = logging.getLogger(__name__)
 
 MODULE_NAME = "prax_logger"

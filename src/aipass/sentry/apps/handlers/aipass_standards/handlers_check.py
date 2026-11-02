@@ -1,0 +1,361 @@
+# =================== AIPass ====================
+# Name: handlers_check.py
+# Description: Handlers Standards Checker Handler
+# Version: 1.2.1
+# Created: 2026-03-05
+# Modified: 2026-11-02
+# =============================================
+
+"""Handlers Standards Checker Handler"""
+
+import ast
+import re
+from pathlib import Path
+from typing import Dict, Iterator, List, Optional, Tuple
+
+from aipass.prax import logger
+from aipass.sentry.apps.handlers.json import json_handler
+from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
+from aipass.sentry.apps.handlers.aipass_standards.string_imports import STRING_IMPORT_NOTE, iter_string_imports
+
+AUDIT_SCOPE = "all_files"
+# Applies to production source only: the handler contract describes apps/handlers/ code.
+APPLIES_TO = "production"
+
+# Cross-handler/orchestration imports are purely import-statement checks, so a
+# violation hiding in a package marker file must not be invisible to the audit
+# the way it would be for content checkers (dead code, naming, etc.).
+INCLUDE_INIT_FILES = True
+
+
+def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
+    """Check if handler follows handler standards"""
+    checks = []
+    path = Path(module_path)
+
+    # Normalize to forward slashes so string matching works on Windows too
+    module_path = Path(module_path).as_posix()
+
+    if is_bypassed(module_path, "handlers", bypass_rules=bypass_rules):
+        return {
+            "passed": True,
+            "checks": [{"name": "Bypassed", "passed": True, "message": "Standard bypassed via .sentry/bypass.json"}],
+            "score": 100,
+            "standard": "HANDLERS",
+        }
+
+    if not path.exists():
+        return {
+            "passed": False,
+            "checks": [{"name": "File exists", "passed": False, "message": f"File not found: {module_path}"}],
+            "score": 0,
+            "standard": "HANDLERS",
+        }
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+            lines = content.split("\n")
+    except Exception as e:
+        logger.info("Cannot read %s: %s", path, e)
+        return {
+            "passed": False,
+            "checks": [{"name": "File readable", "passed": False, "message": f"Error reading file: {e}"}],
+            "score": 0,
+            "standard": "HANDLERS",
+        }
+
+    is_handler = "apps/handlers/" in module_path
+    if not is_handler:
+        return {
+            "passed": True,
+            "checks": [
+                {"name": "Handler check", "passed": True, "message": "Not a handler file (skipped)", "declined": True}
+            ],
+            "score": 100,
+            "standard": "HANDLERS",
+        }
+
+    independence_check = check_handler_independence(content, lines, module_path)
+    checks.append(independence_check)
+
+    auto_detect_check = check_auto_detection(content)
+    if auto_detect_check:
+        checks.append(auto_detect_check)
+
+    orchestration_check = check_no_orchestration(content, lines, module_path)
+    if orchestration_check:
+        checks.append(orchestration_check)
+
+    passed_checks = sum(1 for check in checks if check["passed"])
+    total_checks = len(checks)
+    score = int((passed_checks / total_checks * 100)) if total_checks > 0 else 0
+
+    overall_passed = score >= 75
+
+    json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "handlers"})
+    return {"passed": overall_passed, "checks": checks, "score": score, "standard": "HANDLERS"}
+
+
+def _iter_import_modules(content: str) -> Iterator[Tuple[int, str, List[str]]]:
+    """
+    Parse content and yield (line_number, dotted_module, imported_names) for every
+    real import statement — string literals, comments and docstrings can never
+    produce a hit because the AST only contains actual import nodes.
+    """
+    try:
+        tree = ast.parse(content)
+    except (SyntaxError, ValueError) as e:
+        logger.info("Skipping import scan: SyntaxError during parse: %s", e)
+        return
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.level:
+                continue
+            yield node.lineno, node.module or "", [alias.name for alias in node.names]
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                yield node.lineno, alias.name, []
+
+
+def _line_text(lines: List[str], lineno: int, fallback: str) -> str:
+    """Return the source line at 1-indexed lineno, or a fallback if out of range."""
+    if 0 < lineno <= len(lines):
+        return lines[lineno - 1].strip()
+    return fallback
+
+
+def _branch_of_path(module_path: str) -> Optional[str]:
+    """Return the branch a file lives in, from the path segment before 'apps'."""
+    path_parts = Path(module_path).parts
+    for i, part in enumerate(path_parts):
+        if part == "apps" and i > 0:
+            return path_parts[i - 1]
+    return None
+
+
+def _branch_before(module: str, marker: str) -> Optional[str]:
+    """Return the branch segment sitting immediately before marker, or None.
+
+    The None on a missing marker matters: splitting a string without the separator returns
+    the WHOLE string, a confident wrong branch name rather than "I cannot tell".
+    """
+    if marker not in module:
+        return None
+    prefix = module.split(marker, 1)[0]
+    parts = prefix.split(".")
+    return parts[-1] if parts and parts[-1] else None
+
+
+def _branch_of_import(module: str) -> Optional[str]:
+    """Return the branch an 'apps.handlers' import targets."""
+    return _branch_before(module, ".apps.handlers")
+
+
+def _branch_of_modules_import(module: str) -> Optional[str]:
+    """Return the branch an 'apps.modules' import targets."""
+    return _branch_before(module, ".apps.modules")
+
+
+def check_handler_independence(content: str, lines: List[str], module_path: str) -> Dict:
+    """Check handler independence - handlers are private to their own branch."""
+    forbidden_imports = []
+
+    own_branch = _branch_of_path(module_path)
+    if own_branch is None:
+        # Not a recognisable branch layout -- the same-branch rule is not
+        # evaluable here. Say so rather than flag every import as cross-branch.
+        return {
+            "name": "Handler independence",
+            "passed": True,
+            "message": "Branch could not be determined from path (independence rule not evaluated)",
+        }
+
+    for lineno, module, _names in _iter_import_modules(content):
+        if "apps.handlers" not in module:
+            continue
+
+        if _branch_of_import(module) == own_branch:
+            continue
+
+        forbidden_imports.append(f"line {lineno}: {_line_text(lines, lineno, module)}")
+
+    # The same rule over targets named as a call's string
+    for lineno, target in iter_string_imports(content):
+        if _branch_of_import(target) != own_branch:
+            forbidden_imports.append(f"line {lineno}: {_line_text(lines, lineno, target)} {STRING_IMPORT_NOTE}")
+
+    if forbidden_imports:
+        return {
+            "name": "Handler independence",
+            "passed": False,
+            "message": "Cross-branch handler imports detected (use that branch's modules/ instead): "
+            + "; ".join(forbidden_imports),
+        }
+
+    return {"name": "Handler independence", "passed": True, "message": "No forbidden cross-branch handler imports"}
+
+
+def _public_function_takes_module_name(content: str) -> bool:
+    """True when a PUBLIC function accepts a ``module_name`` parameter."""
+    try:
+        tree = ast.parse(content)
+    except (SyntaxError, ValueError) as exc:
+        logger.info("handlers: unparseable, falling back to the text scan for module_name: %s", exc)
+        return bool(re.search(r"def\s+\w+\([^)]*module_name", content))
+
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name.startswith("_"):
+            continue
+        args = node.args
+        names = [a.arg for a in (*args.posonlyargs, *args.args, *args.kwonlyargs)]
+        if args.vararg:
+            names.append(args.vararg.arg)
+        if args.kwarg:
+            names.append(args.kwarg.arg)
+        if "module_name" in names:
+            return True
+    return False
+
+
+#: Every way a handler can ask "who called me": the question is whether the caller is
+#: detected, never which library spells it.
+_FRAME_WALK_CALLS = frozenset(
+    {
+        "sys._getframe",
+        "inspect.currentframe",
+        "inspect.stack",
+        "inspect.getouterframes",
+        "traceback.extract_stack",
+        "traceback.walk_stack",
+    }
+)
+
+#: Helper names that ARE the auto-detection, whatever they use inside.
+_CALLER_HELPER_MARKERS = ("_get_caller_module_name", "get_caller")
+
+
+def _module_name_is_optional(content: str) -> Optional[bool]:
+    """True when some public function lets ``module_name`` be omitted."""
+    try:
+        tree = ast.parse(content)
+    except (SyntaxError, ValueError) as exc:
+        logger.info("handlers: unparseable, cannot read module_name defaults: %s", exc)
+        return None
+
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or node.name.startswith("_"):
+            continue
+        args = node.args
+        positional = [*args.posonlyargs, *args.args]
+        first_defaulted = len(positional) - len(args.defaults)
+        for index, arg in enumerate(positional):
+            if arg.arg == "module_name" and index >= first_defaulted:
+                return True
+        for arg, default in zip(args.kwonlyargs, args.kw_defaults):
+            if arg.arg == "module_name" and default is not None:
+                return True
+        if (args.vararg and args.vararg.arg == "module_name") or (args.kwarg and args.kwarg.arg == "module_name"):
+            return True
+    return False
+
+
+def _walks_the_caller_frame(content: str) -> Optional[bool]:
+    """True when the file asks who called it, BY ANY MECHANISM."""
+    try:
+        tree = ast.parse(content)
+    except (SyntaxError, ValueError) as exc:
+        logger.info("handlers: unparseable, cannot see a frame walk: %s", exc)
+        return None
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(
+            marker in node.name for marker in _CALLER_HELPER_MARKERS
+        ):
+            return True
+        if not isinstance(node, ast.Call):
+            continue
+        dotted = _dotted_call_name(node.func)
+        if dotted in _FRAME_WALK_CALLS or any(marker in dotted for marker in _CALLER_HELPER_MARKERS):
+            return True
+    return False
+
+
+def _dotted_call_name(func: ast.expr) -> str:
+    """Dotted spelling of a call target, or "" when it is not a plain name."""
+    parts = []
+    while isinstance(func, ast.Attribute):
+        parts.append(func.attr)
+        func = func.value
+    if isinstance(func, ast.Name):
+        parts.append(func.id)
+        return ".".join(reversed(parts))
+    return ""
+
+
+def check_auto_detection(content: str) -> Optional[Dict]:
+    """Check that a handler detects its caller when ``module_name`` is omissible."""
+    if not _public_function_takes_module_name(content):
+        return None  # No module_name parameter, auto-detection not needed
+
+    if _module_name_is_optional(content) is False:
+        return None  # Callers always supply it — there is nothing to detect
+
+    walks = _walks_the_caller_frame(content)
+    if walks is None:
+        # Unparseable: neither helper could read it, and that is no acquittal.
+        return {
+            "name": "Auto-detection pattern",
+            "passed": False,
+            "message": "Does not parse, so no caller-frame read can be seen (it names module_name)",
+        }
+    if walks:
+        return {
+            "name": "Auto-detection pattern",
+            "passed": True,
+            "message": "Auto-detection pattern implemented (caller frame is read)",
+        }
+
+    return {
+        "name": "Auto-detection pattern",
+        "passed": False,
+        "message": (
+            "Has an optional module_name but never reads the caller frame "
+            "(use sys._getframe — NOT inspect.stack(), which needs a readable cwd on Windows). "
+            "If this module_name is an event payload rather than a caller identity, say so — "
+            "the checker reads the name and cannot tell them apart."
+        ),
+    }
+
+
+def check_no_orchestration(content: str, lines: List[str], module_path: str = "") -> Optional[Dict]:
+    """Check that a handler does not reach up into its OWN branch's modules layer."""
+    module_imports = []
+
+    own_branch = _branch_of_path(module_path) if module_path else None
+
+    for lineno, module, _names in _iter_import_modules(content):
+        if "apps.modules" not in module:
+            continue
+
+        if "prax.apps.modules.logger" in module or "cli.apps.modules" in module:
+            continue
+
+        # Allowed: another branch's modules gateway -- its public door
+        imported_branch = _branch_of_modules_import(module)
+        if own_branch and imported_branch and imported_branch != own_branch:
+            continue
+
+        module_imports.append(f"line {lineno}: {_line_text(lines, lineno, module)}")
+
+    if module_imports:
+        return {
+            "name": "No orchestration",
+            "passed": False,
+            "message": "Handler imports modules (orchestration): " + "; ".join(module_imports),
+        }
+
+    return {"name": "No orchestration", "passed": True, "message": "No module imports detected (pure implementation)"}

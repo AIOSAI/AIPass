@@ -3,17 +3,17 @@
 # Description: Tests for the share module and the drive/share handler it drives
 # Version: 2.0.4
 # Created: 2026-07-01
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/share.py and apps/handlers/drive/share.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every file under apps/handlers/drive/ parses and imports
-# seedgo: no-test-needed(documentation) — that the public share functions carry docstrings
-# seedgo: no-test-needed(constant) — the Rich colour tags print_introspection and print_help emit
-# seedgo: no-test-needed(stdlib) — pathlib's resolve()/is_file() and mimetypes' type guessing
-# seedgo: no-test-needed(generated) — the Drive file, folder and permission IDs; the API mints them
+# sentry: no-test-needed(ruff) — that every file under apps/handlers/drive/ parses and imports
+# sentry: no-test-needed(documentation) — that the public share functions carry docstrings
+# sentry: no-test-needed(constant) — the Rich colour tags print_introspection and print_help emit
+# sentry: no-test-needed(stdlib) — pathlib's resolve()/is_file() and mimetypes' type guessing
+# sentry: no-test-needed(generated) — the Drive file, folder and permission IDs; the API mints them
 
 from unittest.mock import MagicMock, call
 

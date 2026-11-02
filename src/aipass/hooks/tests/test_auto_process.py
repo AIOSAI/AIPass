@@ -4,7 +4,7 @@
 # Description: Tests for auto_process lifecycle handler (TDPLAN-0005, DPLAN-0294 phase 1b)
 # Branch: hooks
 # Created: 2026-06-06
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/lifecycle/auto_process.py."""
@@ -12,9 +12,9 @@
 # The handler only kicks @memory's spawn_background(); the detached child owns the counters.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — _GUARD_DIR's value; it is tempfile.gettempdir() and the tests patch it
-# seedgo: no-test-needed(ruff) — that the module parses and its logger import resolves
-# seedgo: no-test-needed(documentation) — that the handler's functions carry docstrings
+# sentry: no-test-needed(constant) — _GUARD_DIR's value; it is tempfile.gettempdir() and the tests patch it
+# sentry: no-test-needed(ruff) — that the module parses and its logger import resolves
+# sentry: no-test-needed(documentation) — that the handler's functions carry docstrings
 
 import contextlib
 import importlib

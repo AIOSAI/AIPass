@@ -3,13 +3,13 @@
 # Description: Tests for the custom command registry
 # Version: 1.0.5
 # Created: 2026-03-17
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/commands.py and the command registry handlers it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module under test parses and imports
+# sentry: no-test-needed(ruff) — that the module under test parses and imports
 
 import json
 from pathlib import Path
@@ -70,7 +70,7 @@ class TestUnreadableRegistry:
         self, isolated_registry: Path, unreadable_reads: None
     ) -> None:
         """Mutant killed: the raise replaced by the old recreate (an empty registry saved over the commands)."""
-        _seed_registry(isolated_registry, {"audit": {"name": "audit", "target": "@seedgo"}})
+        _seed_registry(isolated_registry, {"audit": {"name": "audit", "target": "@sentry"}})
         before = isolated_registry.read_text(encoding="utf-8")
 
         with pytest.raises(RegistryError) as raised:
@@ -144,11 +144,11 @@ class TestCRUDOperations:
         """add_command creates a new entry in the registry."""
         result = ops.add_command(
             name="audit",
-            target="@seedgo",
+            target="@sentry",
             command="audit",
             args=["aipass"],
             description="Run audit",
-            source_branch="seedgo",
+            source_branch="sentry",
         )
 
         assert result is True
@@ -157,15 +157,15 @@ class TestCRUDOperations:
         assert "audit" in registry["commands"]
         cmd = registry["commands"]["audit"]
         assert cmd["name"] == "audit"
-        assert cmd["target"] == "@seedgo"
+        assert cmd["target"] == "@sentry"
         assert cmd["command"] == "audit"
         assert cmd["args"] == ["aipass"]
         assert cmd["description"] == "Run audit"
-        assert cmd["source_branch"] == "seedgo"
+        assert cmd["source_branch"] == "sentry"
 
     def test_add_duplicate_returns_false(self, isolated_registry: Path) -> None:
         """Adding a command with an existing name returns False."""
-        ops.add_command("audit", "@seedgo", "audit")
+        ops.add_command("audit", "@sentry", "audit")
 
         result = ops.add_command("audit", "@prax", "something_else")
 
@@ -180,7 +180,7 @@ class TestCRUDOperations:
 
     def test_remove_command(self, isolated_registry: Path) -> None:
         """remove_command deletes an existing entry."""
-        ops.add_command("audit", "@seedgo", "audit")
+        ops.add_command("audit", "@sentry", "audit")
 
         result = ops.remove_command("audit")
 
@@ -198,7 +198,7 @@ class TestCRUDOperations:
         self, isolated_registry: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The save is staged and replaced: when the replace fails the old registry is byte-equal."""
-        _seed_registry(isolated_registry, {"audit": {"name": "audit", "target": "@seedgo"}})
+        _seed_registry(isolated_registry, {"audit": {"name": "audit", "target": "@sentry"}})
         before = isolated_registry.read_bytes()
 
         def refuse(source: str, destination: str) -> None:
@@ -218,7 +218,7 @@ class TestCRUDOperations:
         lock_file = isolated_registry.with_name(isolated_registry.name + ".lock")
         with open(lock_file, "a", encoding="utf-8") as held:
             fcntl.flock(held, fcntl.LOCK_EX)
-            writer = threading.Thread(target=ops.add_command, args=("audit", "@seedgo", "audit"))
+            writer = threading.Thread(target=ops.add_command, args=("audit", "@sentry", "audit"))
             writer.start()
             writer.join(timeout=0.3)
             assert writer.is_alive()
@@ -244,13 +244,13 @@ class TestCRUDOperations:
 class TestLookup:
     def test_lookup_found(self, isolated_registry: Path) -> None:
         """lookup_command returns the command dict for an exact match."""
-        ops.add_command("audit", "@seedgo", "audit", ["aipass"], "Run audit", "seedgo")
+        ops.add_command("audit", "@sentry", "audit", ["aipass"], "Run audit", "sentry")
 
         result = lookup.lookup_command("audit")
 
         assert result is not None
         assert result["name"] == "audit"
-        assert result["target"] == "@seedgo"
+        assert result["target"] == "@sentry"
 
     def test_lookup_not_found(self, isolated_registry: Path) -> None:
         """lookup_command returns None when no match exists."""
@@ -262,7 +262,7 @@ class TestLookup:
 class TestMultiWordMatching:
     def test_single_word_match(self, isolated_registry: Path) -> None:
         """match_command matches a single-word command."""
-        ops.add_command("audit", "@seedgo", "audit")
+        ops.add_command("audit", "@sentry", "audit")
 
         result = lookup.match_command(["audit", "--verbose"])
 
@@ -307,7 +307,7 @@ class TestMultiWordMatching:
 
     def test_no_match_returns_none(self, isolated_registry: Path) -> None:
         """match_command returns None when no candidate matches."""
-        ops.add_command("audit", "@seedgo", "audit")
+        ops.add_command("audit", "@sentry", "audit")
 
         result = lookup.match_command(["deploy", "staging"])
 
@@ -334,7 +334,7 @@ class TestMultiWordMatching:
 
     def test_exact_match_no_remaining(self, isolated_registry: Path) -> None:
         """match_command with no extra args returns empty remaining list."""
-        ops.add_command("audit", "@seedgo", "audit")
+        ops.add_command("audit", "@sentry", "audit")
 
         result = lookup.match_command(["audit"])
 
@@ -365,20 +365,20 @@ class TestListAndFilter:
 
     def test_list_by_branch(self, isolated_registry: Path) -> None:
         """list_commands_by_branch filters by source_branch."""
-        ops.add_command("audit", "@seedgo", "audit", source_branch="seedgo")
+        ops.add_command("audit", "@sentry", "audit", source_branch="sentry")
         ops.add_command("monitor", "@prax", "monitor", source_branch="prax")
-        ops.add_command("check", "@seedgo", "check", source_branch="seedgo")
+        ops.add_command("check", "@sentry", "check", source_branch="sentry")
 
-        seedgo_cmds = lookup.list_commands_by_branch("seedgo")
+        sentry_cmds = lookup.list_commands_by_branch("sentry")
 
-        assert len(seedgo_cmds) == 2
-        names = [c["name"] for c in seedgo_cmds]
+        assert len(sentry_cmds) == 2
+        names = [c["name"] for c in sentry_cmds]
         assert "audit" in names
         assert "check" in names
 
     def test_list_by_branch_no_match(self, isolated_registry: Path) -> None:
         """list_commands_by_branch returns empty for nonexistent branch."""
-        ops.add_command("audit", "@seedgo", "audit", source_branch="seedgo")
+        ops.add_command("audit", "@sentry", "audit", source_branch="sentry")
 
         result = lookup.list_commands_by_branch("nonexistent")
 
@@ -466,12 +466,12 @@ class TestListAll:
 
     def test_list_all_returns_all_fields(self, isolated_registry: Path) -> None:
         """list_all returns full command dicts with expected keys."""
-        ops.add_command("audit", "@seedgo", "audit", ["aipass"], "Run audit", "seedgo")
+        ops.add_command("audit", "@sentry", "audit", ["aipass"], "Run audit", "sentry")
 
         result = list_all()
         assert len(result) == 1
         cmd = result[0]
         assert cmd["name"] == "audit"
-        assert cmd["target"] == "@seedgo"
+        assert cmd["target"] == "@sentry"
         assert cmd["command"] == "audit"
         assert cmd["args"] == ["aipass"]
