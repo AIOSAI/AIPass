@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: email.py
-# Version: 1.2.1
+# Version: 1.2.2
 # Description: Checks inbox for unread emails on UserPromptSubmit
 # Branch: hooks
 # Layer: apps/handlers/notification
@@ -55,8 +55,8 @@ def _find_repo_root() -> Path | None:
     return None
 
 
-def _count_new_emails(branch_root: Path) -> int:
-    """Count unread emails in the branch's inbox."""
+def _count_new_emails(branch_root: Path) -> int | None:
+    """Count unread emails in the branch's inbox: 0 with no inbox, None when the inbox cannot be read."""
     inbox_path = branch_root / ".ai_mail.local" / "inbox.json"
     if not inbox_path.exists():
         inbox_path = branch_root / "ai_mail.local" / "inbox.json"
@@ -76,7 +76,7 @@ def _count_new_emails(branch_root: Path) -> int:
         return count
     except (json.JSONDecodeError, OSError) as exc:
         logger.info("[HOOKS] email: inbox read error: %s", exc)
-        return 0
+        return None
 
 
 def _cadence_allows(new_count: int, hook_data: dict) -> bool:
@@ -102,7 +102,7 @@ def handle(hook_data: dict) -> dict:
         return {"stdout": "", "exit_code": 0}
 
     new_count = _count_new_emails(branch_root)
-    if not _cadence_allows(new_count, hook_data):
+    if new_count is None or not _cadence_allows(new_count, hook_data):
         return {"stdout": "", "exit_code": 0}
 
     plural = "s" if new_count != 1 else ""

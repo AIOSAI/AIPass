@@ -24,6 +24,7 @@ PyPI version — not the changelog header.
 - **seedgo, hooks, aipass, prax, flow, api**: an empty `.git` directory is not a repository. Codex's sandbox leaves one in `/tmp` and in every working directory it starts in, and 22 repo-root probes read it as a repo, turning @api and @prax suites red on any host where Codex had run.
 - **flow**: the merge playbook wakes @vera at the release tag with the version and its CHANGELOG section.
 - **devpulse**: `watchdog timer`, `schedule` and `agent --timeout` return False on a refused value, so a caller can tell a refusal from a served command; the module declares the Stop door `.aipass/hooks.json` wires, pinned by a test.
+- **hooks**: the presence gate's session age and start, and the email banner's unread count, return None when their source cannot be read, a value no readable source returns; the banner stays silent on None as it did on 0.
 
 ## [2026-11-01] — v2.8.32: compass recall for managers only, a hook mute that survives reboots, seedgo finds the tests that pin a file, spawn owner moves, api run with a scoped key
 
