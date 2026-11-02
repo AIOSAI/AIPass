@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: stop.py
 # Description: End a running dispatch from outside: the stop verb's handler, and the live-monitor test close uses
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-11-01
 # Modified: 2026-11-02
 # =============================================
@@ -143,6 +143,7 @@ def stop_dispatch(branch_path: Path, email: str, by: str) -> Tuple[bool, str, st
 
     _end_process_group(pid, GRACE_SECONDS)
     if check_pid_alive(pid):
+        logger.warning("[stop] %s's monitor PID %s still alive after SIGKILL", email, pid)
         return False, f"{email}'s monitor (PID {pid}) is still running after SIGKILL", ""
     check_lock(branch_path)
     when = datetime.now().astimezone().isoformat(timespec="seconds")

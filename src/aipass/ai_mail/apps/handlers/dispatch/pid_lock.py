@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: pid_lock.py
 # Description: Process liveness, branch occupancy and the dispatch lock
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-10-04
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -309,9 +309,19 @@ def check_pid_alive(pid: int) -> bool:
     except OSError as exc:
         logger.warning("[wake] PID %s os.kill error (assuming dead): %s", pid, exc)
         return False
-    if sys.platform == "linux" and _is_zombie_linux(pid):
+    if sys.platform == "linux":
+        return not _is_zombie_linux(pid)
+    return not _is_zombie_ps(pid)
+
+
+def _is_zombie_ps(pid: int) -> bool:
+    """Return True if ps reports PID as a zombie: macOS has no /proc, and a signal reaches a zombie there."""
+    try:
+        result = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("[wake] PID %s state unreadable by ps (assuming alive): %s", pid, exc)
         return False
-    return True
+    return result.stdout.strip().startswith("Z")
 
 
 def _is_zombie_linux(pid: int) -> bool:

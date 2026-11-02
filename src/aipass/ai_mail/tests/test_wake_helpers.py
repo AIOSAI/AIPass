@@ -17,6 +17,7 @@
 import json
 import os
 import subprocess
+import sys
 import pytest
 from datetime import datetime, timedelta
 from pathlib import Path as _Path
@@ -220,6 +221,19 @@ def test_check_pid_alive_zombie(monkeypatch, tmp_path):
         _fake_open_factory(str(status_file), {"/proc/42/status": str(status_file)}),
     )
     assert check_pid_alive(42) is False
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="zombies and ps are POSIX")
+def test_an_unreaped_child_reads_dead_where_there_is_no_proc(monkeypatch):
+    """macOS has no /proc: a stopped monitor its parent had not reaped yet read alive, and stop said it outlived SIGKILL."""
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    try:
+        os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOWAIT)  # exited, left unreaped: a zombie
+        monkeypatch.setattr("sys.platform", "darwin")
+        assert check_pid_alive(child.pid) is False
+        assert check_pid_alive(os.getpid()) is True
+    finally:
+        child.wait()
 
 
 # --- pid_lock's process readers, through branch_occupant -----------

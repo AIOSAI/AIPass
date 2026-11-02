@@ -506,6 +506,8 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
         error(f"Email sent but wake failed — retry: drone @ai_mail dispatch wake {target}")
     elif dispatch_status.busy_detail():
         _refuse_busy(dispatch_status.busy_detail(), target)
+    elif (gate := dispatch_status.find_step("manager")) and gate[0] == "info":
+        console.print(f"[dim]{target} is a manager — mailed, not woken; no wake-back[/dim]")
     else:
         _announce_wake_back(target, verified_caller.resolve_wake_sender(user_info.get("email_address", "@ai_mail")))
 

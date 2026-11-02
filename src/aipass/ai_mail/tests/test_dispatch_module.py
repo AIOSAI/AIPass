@@ -907,6 +907,35 @@ class TestWakeBackMessaging:
         combined = " ".join(printed)
         assert "Wake-back enabled" not in combined
 
+    def test_a_manager_target_is_mailed_and_promises_no_wake_back(self, monkeypatch):
+        """The manager gate skips the wake and returns True; nothing runs, so nothing wakes back."""
+        skipped = DispatchStatus()
+        skipped.info("manager", "@devpulse is a manager — wake skipped, caller must mail")
+        printed: list[str] = []
+        monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
+
+        with _send_patches({f"{_H_WAKE}.wake_branch": MagicMock(return_value=(skipped, True))}):
+            result = _send(["@devpulse", "Subject", "Body"])
+
+        assert result is True
+        combined = " ".join(printed)
+        assert "Wake-back enabled" not in combined
+        assert "@devpulse is a manager — mailed, not woken; no wake-back" in combined
+
+    def test_a_bypassed_manager_gate_still_announces_wake_back(self, monkeypatch):
+        """An admin or scheduled lane wakes the manager: its gate step is ok, and the wake-back stands."""
+        woken = DispatchStatus()
+        woken.ok("manager", "@devpulse manager gate bypassed — verified admin dispatch")
+        printed: list[str] = []
+        monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
+
+        with _send_patches({f"{_H_WAKE}.wake_branch": MagicMock(return_value=(woken, True))}):
+            _send(["@devpulse", "Subject", "Body"])
+
+        combined = " ".join(printed)
+        assert "Wake-back enabled" in combined
+        assert "no wake-back" not in combined
+
     def test_no_watchdog_flag_still_accepted(self, monkeypatch):
         """--no-watchdog flag is consumed without error (backward compat)."""
         printed: list[str] = []
@@ -1226,7 +1255,7 @@ def running_dispatch(tmp_path, monkeypatch):
                 encoding="utf-8",
             )
             assert proc.stdout is not None
-            proc.agent_pid = int(proc.stdout.readline())
+            proc.agent_pid = int(proc.stdout.readline())  # pyright: ignore[reportAttributeAccessIssue]
             threading.Thread(target=proc.wait, daemon=True).start()
             procs.append(proc)
             # Returned only once the product's own checks see the stand-in; a slow runner otherwise raced them.
