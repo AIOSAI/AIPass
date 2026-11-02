@@ -3,14 +3,14 @@
 # Description: Tests for handoff_platform handler
 # Version: 1.3.0
 # Created: 2026-05-12
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/handoff_platform/__init__.py and the handoff module it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/handlers/handoff_platform/__init__.py parses and imports
-# seedgo: no-test-needed(constant) — IS_WINDOWS, IS_MACOS, IS_LINUX read sys.platform once at import
+# sentry: no-test-needed(ruff) — that apps/handlers/handoff_platform/__init__.py parses and imports
+# sentry: no-test-needed(constant) — IS_WINDOWS, IS_MACOS, IS_LINUX read sys.platform once at import
 
 from __future__ import annotations
 

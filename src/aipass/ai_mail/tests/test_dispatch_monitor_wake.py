@@ -3,7 +3,7 @@
 # Description: Tests for the dispatch monitor's wake-back - the sender wake, its log, the manager mail and the decline
 # Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's wake-back: wake_sender, log_wake_result, main()'s wake."""
@@ -12,7 +12,7 @@
 # 1,200-line target: who is woken or mailed when a dispatch completes.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(shared) — main()'s attempts and the bounce: tests/test_dispatch_monitor.py
+# sentry: no-test-needed(shared) — main()'s attempts and the bounce: tests/test_dispatch_monitor.py
 
 import os
 import time

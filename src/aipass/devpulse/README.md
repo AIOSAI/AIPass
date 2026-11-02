@@ -104,11 +104,11 @@ src/aipass/devpulse/
 └── docs/                  # Depth — one page per module
 ```
 
-Live numbers come from their doors, not this file: `drone @seedgo audit aipass @devpulse` for standards, the pytest suite for tests, `CHANGELOG.md` at the repo root for history.
+Live numbers come from their doors, not this file: `drone @sentry audit aipass @devpulse` for standards, the pytest suite for tests, `CHANGELOG.md` at the repo root for history.
 
 ## Documentation
 
-Depth lives in [docs/](docs/), in the shape `drone @seedgo standards_query aipass_standards docs_page` shows:
+Depth lives in [docs/](docs/), in the shape `drone @sentry standards_query aipass_standards docs_page` shows:
 
 | Doc | What it covers |
 |---|---|
@@ -118,7 +118,7 @@ Depth lives in [docs/](docs/), in the shape `drone @seedgo standards_query aipas
 
 ### Depends On
 
-drone (routing), ai_mail (dispatch, mail), flow (plans), seedgo (standards), prax (logging, json service, dashboard), memory (vectors, search), cli (rendering).
+drone (routing), ai_mail (dispatch, mail), flow (plans), sentry (standards), prax (logging, json service, dashboard), memory (vectors, search), cli (rendering).
 
 ### Provides To
 

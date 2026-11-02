@@ -105,4 +105,4 @@ docs/                         # The depth — indexed from README.md
 - **trigger** — imports `deliver_email_to_branch()` directly for event-driven delivery.
 - **drone** — routes commands in via `handle_command()`; the broker socket is the only
   `aipass.drone` import here.
-- **seedgo** — audited like every branch; documented exceptions live in `.seedgo/bypass.json`.
+- **sentry** — audited like every branch; documented exceptions live in `.sentry/bypass.json`.

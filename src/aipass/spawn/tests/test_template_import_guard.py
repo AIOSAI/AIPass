@@ -3,14 +3,14 @@
 # Description: What the newborn's handler guard must survive on its very first import
 # Version: 1.1.1
 # Created: 2026-08-30
-# Modified: 2026-10-31
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for templates/citizen/apps/handlers/__init__.py, the newborn's import-time access guard."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/modules/core.py parses and imports
-# seedgo: no-test-needed(documentation) — docstrings on the guard's helper functions in the template
+# sentry: no-test-needed(ruff) — that apps/modules/core.py parses and imports
+# sentry: no-test-needed(documentation) — docstrings on the guard's helper functions in the template
 
 import ast
 import importlib
@@ -379,7 +379,7 @@ class TestTheGetcwdRouteNeedsNoAccessorPatch:
 
     @pytest.mark.parametrize("route", sorted(_PLATFORM_EMULATIONS))
     def test_an_emulation_stacked_on_its_own_platform_is_one_layer(self, route):
-        """@seedgo's round-8 find, relayed by @devpulse, checked here.
+        """@sentry's round-8 find, relayed by @devpulse, checked here.
 
         On Windows the nt emulation lands on a host already nt; applying it twice shows that from Linux."""
         emulation = self._emulation_or_skip(route)

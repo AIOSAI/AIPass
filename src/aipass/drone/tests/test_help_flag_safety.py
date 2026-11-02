@@ -3,13 +3,13 @@
 # Description: Rule E canaries — a help flag anywhere explains, never executes
 # Version: 1.0.1
 # Created: 2026-08-13
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/help_flags.py and the help gate of every drone module."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — the wording each print_help() prints; only that help runs instead of the verb
+# sentry: no-test-needed(constant) — the wording each print_help() prints; only that help runs instead of the verb
 
 from __future__ import annotations
 
@@ -76,8 +76,8 @@ class TestWantsHelp:
 
     def test_bare_help_opt_out_for_modules_that_own_the_verb(self) -> None:
         """discovery has a real `help <target>` subcommand — it must survive."""
-        assert wants_help("help", ["@seedgo"], bare_help=False) is False
-        assert wants_help("help", ["@seedgo", "--help"], bare_help=False) is True
+        assert wants_help("help", ["@sentry"], bare_help=False) is False
+        assert wants_help("help", ["@sentry", "--help"], bare_help=False) is True
 
     def test_empty_is_not_help(self) -> None:
         assert wants_help(None, None) is False
@@ -179,7 +179,7 @@ class TestRouterNeverRoutesOnHelp:
             patch(f"{_M}.router.route_command") as route,
             patch(f"{_M}.router.print_help") as help_,
         ):
-            result = router.handle_command("route", ["@seedgo", "audit", "--help"])
+            result = router.handle_command("route", ["@sentry", "audit", "--help"])
 
         route.assert_not_called()
         help_.assert_called_once()
@@ -213,7 +213,7 @@ class TestReadOnlyModulesStillHonourRuleE:
             patch(f"{_M}.scan.scan") as target,
             patch(f"{_M}.scan.print_help") as help_,
         ):
-            result = scan.handle_command(None, ["@seedgo", "--help"])
+            result = scan.handle_command(None, ["@sentry", "--help"])
 
         target.assert_not_called()
         help_.assert_called_once()
@@ -224,7 +224,7 @@ class TestReadOnlyModulesStillHonourRuleE:
             patch(f"{_M}.resolver.resolve_branch") as target,
             patch(f"{_M}.resolver.print_help") as help_,
         ):
-            result = resolver.handle_command("resolve", ["@seedgo", "--help"])
+            result = resolver.handle_command("resolve", ["@sentry", "--help"])
 
         target.assert_not_called()
         help_.assert_called_once()
@@ -235,7 +235,7 @@ class TestReadOnlyModulesStillHonourRuleE:
             patch(f"{_M}.registry.get_branch_by_name") as target,
             patch(f"{_M}.registry.print_help") as help_,
         ):
-            result = registry.handle_command("lookup", ["seedgo", "--help"])
+            result = registry.handle_command("lookup", ["sentry", "--help"])
 
         target.assert_not_called()
         help_.assert_called_once()
@@ -257,7 +257,7 @@ class TestReadOnlyModulesStillHonourRuleE:
             patch(f"{_M}.discovery.discover_modules") as target,
             patch(f"{_M}.discovery.print_help") as help_,
         ):
-            result = discovery.handle_command("modules", ["@seedgo", "--help"])
+            result = discovery.handle_command("modules", ["@sentry", "--help"])
 
         target.assert_not_called()
         help_.assert_called_once()
@@ -272,18 +272,18 @@ class TestDiscoveryHelpSubcommandSurvives:
     """
 
     def test_help_target_still_dispatches(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """`help @seedgo` prints the target's help (mutant: the text print removed)."""
+        """`help @sentry` prints the target's help (mutant: the text print removed)."""
         with (
             patch(f"{_M}.discovery.get_help") as target,
             patch(f"{_M}.discovery.print_help") as help_,
         ):
-            target.return_value.text = "seedgo help text"
-            result = discovery.handle_command("help", ["@seedgo"])
+            target.return_value.text = "sentry help text"
+            result = discovery.handle_command("help", ["@sentry"])
 
-        target.assert_called_once_with("@seedgo", None)
+        target.assert_called_once_with("@sentry", None)
         help_.assert_not_called()
         assert result is True
-        assert "seedgo help text" in capsys.readouterr().out
+        assert "sentry help text" in capsys.readouterr().out
 
     def test_help_target_with_flag_explains_instead(self) -> None:
         """...but a dashed flag alongside it still wins."""
@@ -291,7 +291,7 @@ class TestDiscoveryHelpSubcommandSurvives:
             patch(f"{_M}.discovery.get_help") as target,
             patch(f"{_M}.discovery.print_help") as help_,
         ):
-            result = discovery.handle_command("help", ["@seedgo", "--help"])
+            result = discovery.handle_command("help", ["@sentry", "--help"])
 
         target.assert_not_called()
         help_.assert_called_once()
@@ -322,13 +322,13 @@ class TestHelpTopic:
 
     def test_a_module_that_owns_help_reads_it_as_a_topic(self) -> None:
         """bare_help=False: `help` is that module's verb, so it names itself."""
-        assert help_topic("help", ["@seedgo"], bare_help=False) == "help"
+        assert help_topic("help", ["@sentry"], bare_help=False) == "help"
 
 
 class TestGitHelpNamesTheVerb:
     """`drone @git <verb> --help` must explain THAT verb, not the whole page.
 
-    seedgo's subcommand_help calls top-level help for a verb a violation.
+    sentry's subcommand_help calls top-level help for a verb a violation.
     """
 
     @pytest.mark.parametrize(

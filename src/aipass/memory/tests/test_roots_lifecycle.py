@@ -3,7 +3,7 @@
 # Description: Pins the template, verbs and healing for AIPASS_ROOTS.json
 # Version: 1.0.2
 # Created: 2026-08-30
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/roots.py and apps/handlers/monitor/roots_file.py."""
@@ -12,9 +12,9 @@
 # and healing is a deliberate verb, never a side effect of reading (zero roots is a legal state).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(shared) — handle_command's writing verbs hit the live find_repo_root() file; add_root() pinned
-# seedgo: no-test-needed(shared) — show_roots() table text; list_roots() rows it prints are pinned here
-# seedgo: no-test-needed(shared) — json_handler.log_operation() audit line on each roots command
+# sentry: no-test-needed(shared) — handle_command's writing verbs hit the live find_repo_root() file; add_root() pinned
+# sentry: no-test-needed(shared) — show_roots() table text; list_roots() rows it prints are pinned here
+# sentry: no-test-needed(shared) — json_handler.log_operation() audit line on each roots command
 
 import json
 import pathlib

@@ -3,7 +3,7 @@
 Another branch reaches these handlers only through aipass.drone.apps.modules; this refuses a foreign importer.
 Frames are kin (this branch), transport (importlib, stdlib such as unittest.mock, site-packages) or foreign.
 The first foreign frame is refused unless kin code imported on its behalf and its line does not name the handlers.
-Fires only on a process's first import; the wall is drone @seedgo audit (handlers, encapsulation).
+Fires only on a process's first import; the wall is drone @sentry audit (handlers, encapsulation).
 """
 
 import linecache
@@ -114,7 +114,7 @@ def _guard_branch_access() -> None:
         f"    from aipass.{MY_BRANCH}.apps.modules.<module> import <function>\n"
         f"\n"
         f"  For full standards guide:\n"
-        f"    drone @seedgo handlers\n"
+        f"    drone @sentry handlers\n"
         f"{'=' * 60}"
     )
 

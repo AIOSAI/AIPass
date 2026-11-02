@@ -41,7 +41,7 @@ anything, and exiting 0 told the caller's `&&` that it had.
 
 The gate is a **handler**, so it decides and does not print: it raises `UnknownArgument`, and the
 router in `apps/daemon.py` renders it once — one message shape for twelve verbs. The router may
-not import a handler (seedgo *encapsulation*), so the exception is re-exported through
+not import a handler (sentry *encapsulation*), so the exception is re-exported through
 `apps/modules/__init__.py`; the router talks to the modules layer, the modules layer talks to the
 handler. `gate()` is called **outside** each module's `try`, because a module that catches its own
 refusal turns exit 1 back into exit 0.

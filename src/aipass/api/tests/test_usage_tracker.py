@@ -3,15 +3,15 @@
 # Description: Tests for usage tracker module
 # Version: 1.0.1
 # Created: 2026-03-24
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/usage_tracker.py, API usage monitoring orchestration."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — the aggregation handler's sums; tests/test_aggregation.py
-# seedgo: no-test-needed(covered_elsewhere) — the cleanup handler's file pruning; tests/test_cleanup.py
-# seedgo: no-test-needed(covered_elsewhere) — the tracking handler's storage; tests/test_tracking.py
+# sentry: no-test-needed(covered_elsewhere) — the aggregation handler's sums; tests/test_aggregation.py
+# sentry: no-test-needed(covered_elsewhere) — the cleanup handler's file pruning; tests/test_cleanup.py
+# sentry: no-test-needed(covered_elsewhere) — the tracking handler's storage; tests/test_tracking.py
 
 import json
 from pathlib import Path
@@ -22,7 +22,7 @@ import pytest
 from aipass.api.apps.handlers.usage import cleanup as cleanup_handler
 from aipass.api.apps.modules import usage_tracker
 from aipass.api.apps.modules.usage_tracker import handle_command
-from aipass.api.apps.modules.usage_tracker import handle_command as _hc  # noqa: F401 — seedgo test_coverage detection
+from aipass.api.apps.modules.usage_tracker import handle_command as _hc  # noqa: F401 — sentry test_coverage detection
 
 PATCH_ROOT = "aipass.api.apps.modules.usage_tracker"
 # cleanup_data imports the bus inside the function, so the name it reads is the bus's home.

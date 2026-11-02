@@ -3,7 +3,7 @@
 # Description: Tests for Google API client module
 # Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-10-22
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/google_client.py and the apps/handlers/google/auth.py it drives."""
@@ -22,8 +22,8 @@
 # - is_ssl_error() delegation
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered) — build_service() and its thread-safe twin, tests/test_service_factory_handler.py
-# seedgo: no-test-needed(covered) — the backoff behind api_call_with_retry(), tests/test_retry_handler.py
+# sentry: no-test-needed(covered) — build_service() and its thread-safe twin, tests/test_service_factory_handler.py
+# sentry: no-test-needed(covered) — the backoff behind api_call_with_retry(), tests/test_retry_handler.py
 
 import json
 from unittest.mock import patch, MagicMock
@@ -33,7 +33,7 @@ from keyring.errors import KeyringLocked
 
 from aipass.api.apps.handlers.google.auth import DEFAULT_SCOPES, load_credentials, refresh_credentials, run_oauth_flow
 from aipass.api.apps.modules import google_client
-from aipass.api.apps.modules.google_client import handle_command as _hc  # noqa: F401 — seedgo test_coverage detection
+from aipass.api.apps.modules.google_client import handle_command as _hc  # noqa: F401 — sentry test_coverage detection
 
 
 # Base patch path for all mocks in this module
@@ -445,7 +445,7 @@ def test_api_call_with_retry_delegates(_warn, _err, _succ, _hdr, _json, mock_ret
     It passed for years because the module patch was an unspecced MagicMock
     that accepts any signature: the wrapper is *args/**kwargs, so nothing
     between the test and the real function ever checked the name. Under
-    autospec it raises TypeError, which is the drift seedgo's mock_drift rule
+    autospec it raises TypeError, which is the drift sentry's mock_drift rule
     exists to surface — the test was documenting a parameter production does
     not have, and anyone who copied it would have written a TypeError.
     """

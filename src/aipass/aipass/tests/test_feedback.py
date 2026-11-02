@@ -3,13 +3,13 @@
 # Description: Tests for aipass feedback — toggle alias for @hooks feedback pulse
 # Version: 1.1.4
 # Created: 2026-07-18
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/feedback.py and the feedback toggle command it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
+# sentry: no-test-needed(ruff) — that every module this file imports parses and imports
 
 import subprocess
 from unittest.mock import MagicMock, patch

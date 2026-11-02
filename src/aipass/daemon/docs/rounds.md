@@ -19,7 +19,7 @@ The night watch doing its rounds: one citizen a night, woken fresh on opus for a
 
 **Scope.** The rounds are AIPass maintaining its own agents. External citizens keep their own schedules, and project residents are not trusted with an unattended maintenance turn. `ROSTER_SCOPE` in `apps/handlers/schedule/rotation.py` is a named rule applied inside `build_roster` before any passport is read. It is decided on the branch PATH, never on the tier label, which stays presentation-only. `drone @daemon rotation` prints it on its `Scope:` line. Pinned by `TestRoundsScope`: a temp install holding a framework branch, a projects resident and an external-root citizen, all declaring the same class, serves only the first.
 
-**What a citizen does on its night:** inbox to zero; reconcile `.trinity` todos against reality; refresh and read its dashboard; review its logs; run its seedgo self-audit; do mailed-in work only if it sits in its own domain and fits one session; small fixes in its own branch, red-first.
+**What a citizen does on its night:** inbox to zero; reconcile `.trinity` todos against reality; refresh and read its dashboard; review its logs; run its sentry self-audit; do mailed-in work only if it sits in its own domain and fits one session; small fixes in its own branch, red-first.
 
 **Budget, stated in the prompt:** never dispatch or wake another citizen; at most 2 sub-agents, sonnet or lower; never edit another branch; no fleet-wide investigations; anything out of lane is written down for @devpulse, not chased.
 

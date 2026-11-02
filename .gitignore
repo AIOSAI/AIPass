@@ -79,7 +79,7 @@ src/aipass/trigger/trigger_data.json
 src/aipass/trigger/trigger_data.lock
 src/aipass/drone/drone_command_registry.json
 src/aipass/flow/CLOSED_PLANS.local.json
-src/aipass/seedgo/apps/standards/aipass/pack.json
+src/aipass/sentry/apps/standards/aipass/pack.json
 
 # Registry lock (spawn's writer lock; one machine's state, recreated on use)
 .AIPASS_REGISTRY.lock
@@ -201,13 +201,13 @@ sandbox_test/
 # mutmut working copy (advisory mutation runs, DPLAN-0323, 2026-09-07)
 mutants/
 
-# seedgo ratchet artifacts (DPLAN-0405): one probe's full record, 100-480 KB each,
-# written weekly by seedgo's Sunday job and read from disk by the owner it names.
-# The append-only series beside them (.seedgo/ratchet_series.jsonl) is the tracked
+# sentry ratchet artifacts (DPLAN-0405): one probe's full record, 100-480 KB each,
+# written weekly by sentry's Sunday job and read from disk by the owner it names.
+# The append-only series beside them (.sentry/ratchet_series.jsonl) is the tracked
 # record. The four from the first run (3ccc004f, 2026-10-12) stay tracked until
-# seedgo releases them; CI's own home-paths check caught absolute paths in them
+# sentry releases them; CI's own home-paths check caught absolute paths in them
 # the night of 2026-10-13, which is also why they never belonged in the repo.
-src/aipass/*/.seedgo/ratchet/
+src/aipass/*/.sentry/ratchet/
 
 # The last wake prompt a citizen received, filed into ITS .daemon/ by the daemon
 # (DPLAN-0332 catch-up lane) and by ai_mail's interactive lane. A runtime record

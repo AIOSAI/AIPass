@@ -7,7 +7,7 @@ Why `apps/handlers/json/json_handler.py` is a shim and not an implementation.
 `apps/handlers/json/json_handler.py` is **not an implementation**. It is the
 fleet's canonical shim: 1724 bytes,
 byte-identical in all eighteen branches, sha256
-`3456b7660698fa9d2a1f9352523f3a0aa75c3d862bcf6222ce4be280513cf0b7`. seedgo
+`237bc66d92337a188bcd85e515863fe2141a607df0b7534c820b9ead55ae50db`. sentry
 checks it by hash, so nothing branch-specific may be added to it.
 
 It **binds** the one json service — `aipass.prax.json_handler`, owned by @prax —

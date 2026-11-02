@@ -3,13 +3,13 @@
 # Description: Tests for the merge, dev-pr and branches lanes — protected-branch merge, return to dev, external repos
 # Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/merge_plugin.py and the merge, dev-pr and branches handlers it pairs with."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — subprocess.run, which every git and gh call here reaches as a recorded stub
+# sentry: no-test-needed(stdlib) — subprocess.run, which every git and gh call here reaches as a recorded stub
 
 from __future__ import annotations
 
@@ -307,7 +307,7 @@ class TestPruneTempBranches:
             r.returncode = 0
             r.stderr = ""
             if cmd[1:3] == ["branch", "--merged"]:
-                r.stdout = "  main\n  dev\n  citizen/drone-fix\n  citizen/seedgo-pr\n"
+                r.stdout = "  main\n  dev\n  citizen/drone-fix\n  citizen/sentry-pr\n"
             elif cmd[1:3] == ["branch", "-d"]:
                 r.stdout = f"Deleted branch {cmd[3]}\n"
             return r
@@ -317,7 +317,7 @@ class TestPruneTempBranches:
 
         assert result["count"] == 2
         assert "citizen/drone-fix" in result["pruned"]
-        assert "citizen/seedgo-pr" in result["pruned"]
+        assert "citizen/sentry-pr" in result["pruned"]
 
     def test_skips_non_citizen_branches(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Non-citizen branches (main, dev, feature/*) are not pruned."""

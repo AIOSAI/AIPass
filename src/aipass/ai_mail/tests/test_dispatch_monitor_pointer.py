@@ -3,13 +3,13 @@
 # Description: Tests for the dispatch monitor's session-pointer aware retry loop
 # Version: 1.3.0
 # Created: 2026-10-08
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's session-pointer aware retry loop and reconciliation, Claude, Codex and OpenCode."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(shared) — main()'s attempts and the bounce: tests/test_dispatch_monitor.py
+# sentry: no-test-needed(shared) — main()'s attempts and the bounce: tests/test_dispatch_monitor.py
 
 import json
 import sqlite3
@@ -512,7 +512,7 @@ CODEX_STREAM = [
     '{"type":"item.completed","item":{"id":"item_6","type":"agent_message","text":"Canary has one new email, no active plans, and no open todos. I’ll read and process the mail, then save the outcome in memory. All findings here are canary test data.\\n"}}',
     '{"type":"item.completed","item":{"id":"item_11","type":"agent_message","text":"The probe asked for my provider/model, branch and working directory, and confirmation that memories loaded. I replied to @devpulse and the mail is closed. I identified as OpenAI Codex/GPT-6 from runtime instructions, with the exact backend variant unverified. I’ll now record this as session #59 using the memo skill.\\n"}}',
     '{"type":"item.completed","item":{"id":"item_22","type":"agent_message","text":"Session #59 is saved and verified. The inbox is empty, and memory health reports zero entry-size violations. The requested standards audit is still running; no code or tests were changed.\\n"}}',
-    '{"type":"item.completed","item":{"id":"item_24","type":"agent_message","text":"Processed the probe, replied to @devpulse, and confirmed the inbox is empty.\\n\\nSaved session #59 in `.trinity/local.json`. Memory health passed; final checklist passed. Seedgo audit reported 100% (86/87 files cached).\\n\\nAll findings are canary test data."}}',
+    '{"type":"item.completed","item":{"id":"item_24","type":"agent_message","text":"Processed the probe, replied to @devpulse, and confirmed the inbox is empty.\\n\\nSaved session #59 in `.trinity/local.json`. Memory health passed; final checklist passed. Sentry audit reported 100% (86/87 files cached).\\n\\nAll findings are canary test data."}}',
     '{"type":"turn.completed","usage":{"input_tokens":825068,"cached_input_tokens":783360,"cache_write_input_tokens":0,"output_tokens":1871,"reasoning_output_tokens":247}}',
 ]
 CODEX_THREAD = "01a1746b-c9c8-7891-ae8e-666b368caf13"

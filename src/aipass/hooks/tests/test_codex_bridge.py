@@ -5,16 +5,16 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-10
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/bridges/codex.py, apps/handlers/bridges/opencode.py and its plugin, opencode_plugin.ts."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that handlers/bridges/codex.py parses and imports its engine and loader
-# seedgo: no-test-needed(documentation) — the Codex protocol notes in the bridge's module docstring
-# seedgo: no-test-needed(generated) — opencode_plugin.ts inside a real OpenCode server: a live run (Node runs it here)
-# seedgo: no-test-needed(stdlib) — json.loads and json.dumps round-tripping a payload
+# sentry: no-test-needed(ruff) — that handlers/bridges/codex.py parses and imports its engine and loader
+# sentry: no-test-needed(documentation) — the Codex protocol notes in the bridge's module docstring
+# sentry: no-test-needed(generated) — opencode_plugin.ts inside a real OpenCode server: a live run (Node runs it here)
+# sentry: no-test-needed(stdlib) — json.loads and json.dumps round-tripping a payload
 
 import importlib.util
 import io

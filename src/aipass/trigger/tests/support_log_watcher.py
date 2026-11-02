@@ -3,13 +3,13 @@
 # Description: Shared synthetic log paths for test_log_watcher.py and test_log_watcher_state.py
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Constants for the tests of apps/handlers/log_watcher.py (no test_ prefix: never collected)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(ruff) — that the module parses and imports
 
 from pathlib import Path, PurePosixPath
 

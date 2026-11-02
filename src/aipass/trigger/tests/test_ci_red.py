@@ -3,15 +3,15 @@
 # Description: Tests for the ci_red event handler and medic's dispatch gates it runs
 # Version: 1.1.2
 # Created: 2026-10-23
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/events/ci_red.py and the dispatch gates it runs."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — the poll, the replies and the push, in test_ci.py
-# seedgo: no-test-needed(covered_elsewhere) — what should_dispatch and the breaker decide, in test_error_registry.py
-# seedgo: no-test-needed(external) — ai_mail delivery and wake_branch; AIPass tests only its own files
+# sentry: no-test-needed(covered_elsewhere) — the poll, the replies and the push, in test_ci.py
+# sentry: no-test-needed(covered_elsewhere) — what should_dispatch and the breaker decide, in test_error_registry.py
+# sentry: no-test-needed(external) — ai_mail delivery and wake_branch; AIPass tests only its own files
 
 import json
 
@@ -21,8 +21,8 @@ from aipass.trigger.apps.handlers.events.ci_red import handle_ci_red
 from aipass.trigger.apps.modules.core import Trigger
 
 LOG = (
-    "seedgo-audit\tRun seedgo standards audit\t2026-10-23T05:33:48.3Z   hooks: 99%\n"
-    "seedgo-audit\tRun seedgo standards audit\t2026-10-23T05:33:53.4Z ##[error]Process completed with exit code 1.\n"
+    "sentry-audit\tRun sentry standards audit\t2026-10-23T05:33:48.3Z   hooks: 99%\n"
+    "sentry-audit\tRun sentry standards audit\t2026-10-23T05:33:53.4Z ##[error]Process completed with exit code 1.\n"
 )
 
 
@@ -133,7 +133,7 @@ class TestHandFire:
         [mail] = ci_lane.mails
         assert mail["to_branch"] == "@hooks" and "hooks: 99%" in mail["message"]
         cure = _state(ci_lane)
-        assert cure["workflow"] == "CI" and cure["step"] == "Run seedgo standards audit"
+        assert cure["workflow"] == "CI" and cure["step"] == "Run sentry standards audit"
 
     def test_a_fire_without_a_run_id_does_nothing(self, ci_lane):
         handle_ci_red(owner="hooks", lines=["x"])

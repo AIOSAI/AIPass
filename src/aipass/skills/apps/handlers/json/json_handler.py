@@ -3,7 +3,7 @@
 # Description: This branch's bound names for the fleet json service (prax-owned)
 # Version: 2.0.0
 # Created: 2026-09-03
-# Modified: 2026-09-03
+# Modified: 2026-11-02
 # =============================================
 
 """Branch JSON handler - the fleet's one json service, bound to this branch.
@@ -15,7 +15,7 @@ service resolves the calling module and this branch's ``<branch>_json``
 directory itself, per call (``AIPASS_TEST_LOG_DIR`` is honoured there, never
 here).
 
-Byte-identical in every branch by design; seedgo checks it by hash. Do not add
+Byte-identical in every branch by design; sentry checks it by hash. Do not add
 functions, constants or branch names here - a branch that needs more owns it
 in a module of its own.
 

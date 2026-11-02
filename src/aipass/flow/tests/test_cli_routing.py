@@ -3,13 +3,13 @@
 # Description: Tests for flow's entry point routing, help and introspection
 # Version: 1.0.0
 # Created: 2026-09-04
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/flow.py, the CLI entry point."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/flow.py parses and imports
+# sentry: no-test-needed(ruff) — that apps/flow.py parses and imports
 
 import pytest
 

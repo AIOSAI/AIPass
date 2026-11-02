@@ -11,7 +11,7 @@ The real-time terminal console: threads, multi-CLI session reading, the commons 
 ```bash
 drone @prax monitor                      # Show monitor architecture
 drone @prax monitor run                  # Launch Mission Control (all branches)
-drone @prax monitor run seedgo,cli       # Monitor specific branches
+drone @prax monitor run sentry,cli       # Monitor specific branches
 drone @prax monitor run commons          # Live social feed of The Commons
 drone @prax monitor run commons --logs   # Tail commons' technical logs instead
 drone @prax monitor --help               # Monitor usage
@@ -29,7 +29,7 @@ there is a feedback loop.
 
 Real-time unified console showing:
 - File changes, log events, drone commands, agent activity
-- **Branch scoping** — `monitor run seedgo,cli` shows only those branches (see below)
+- **Branch scoping** — `monitor run sentry,cli` shows only those branches (see below)
 - **Caller attribution** — `CALLER → TARGET` for drone commands
 - **Model tags** — `[BRANCH/model]` (e.g., `[DEVPULSE/opus]`, `[DEVPULSE/gpt-5.4]`)
 - **Multi-CLI** — Claude Code (JSONL), Codex (JSONL) session monitoring
@@ -53,11 +53,11 @@ shape is never used: matching path segments against known names labels every
 file under the `AIPass` directory as AIPASS, and misattribution is worse than
 UNKNOWN — events land on the wrong screen and are filtered off the right one.
 
-**Branch scoping.** A comma-separated list (`monitor run seedgo,cli`) restricts the
+**Branch scoping.** A comma-separated list (`monitor run sentry,cli`) restricts the
 display to those branches; bare `run` and `run all` show everything. A
 scope covers each named branch's log lines, file changes and CLI sessions —
 including session labels that carry a project prefix or model tag
-(`AIPASS/SEEDGO/opus`) — plus commands the branch issued or was targeted by
+(`AIPASS/SENTRY/opus`) — plus commands the branch issued or was targeted by
 (`devpulse → prax` appears in both scopes). Filtering happens at the queue, so
 out-of-scope traffic never occupies a display slot and cannot push wanted events
 out under load. The banner and `status` name the active scope, `status` also

@@ -3,7 +3,7 @@
 # Description: The terminal moment's ordering, FPLAN-0452 P0's second fix
 # Version: 1.0.2
 # Created: 2026-08-22
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py -- the terminal moment's ordering."""
@@ -12,7 +12,7 @@
 # single call shows. Anchors use .index(), which raises when an anchor is gone, so a rename fails loudly.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — STARTUP_TIMEOUT and HARD_TIMEOUT's numeric values
+# sentry: no-test-needed(constant) — STARTUP_TIMEOUT and HARD_TIMEOUT's numeric values
 
 from pathlib import Path
 

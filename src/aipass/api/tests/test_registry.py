@@ -3,14 +3,14 @@
 # Description: Tests for registry driver auto-discovery
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/registry.py, driver auto-discovery for integrations."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered) — bridge's list_contracts() and call routing, tests/test_integrations.py
-# seedgo: no-test-needed(stdlib) — importlib.util.spec_from_file_location's own loading of a file as a module
+# sentry: no-test-needed(covered) — bridge's list_contracts() and call routing, tests/test_integrations.py
+# sentry: no-test-needed(stdlib) — importlib.util.spec_from_file_location's own loading of a file as a module
 
 import sys
 

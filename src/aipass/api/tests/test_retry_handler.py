@@ -3,15 +3,15 @@
 # Description: Tests for Google API retry handler with SSL error detection
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/google/retry.py, the SSL retry logic."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that retry.py parses and imports
-# seedgo: no-test-needed(stdlib) — time.sleep's real delay; the sleep seam gets a recorder, no backoff is waited out
-# seedgo: no-test-needed(network) — a real Google call; api_call_with_retry is handed a stand-in request
+# sentry: no-test-needed(ruff) — that retry.py parses and imports
+# sentry: no-test-needed(stdlib) — time.sleep's real delay; the sleep seam gets a recorder, no backoff is waited out
+# sentry: no-test-needed(network) — a real Google call; api_call_with_retry is handed a stand-in request
 
 from __future__ import annotations
 

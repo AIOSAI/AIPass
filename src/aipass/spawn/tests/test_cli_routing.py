@@ -3,14 +3,14 @@
 # Description: Tests for CLI routing and help output
 # Version: 1.1.0
 # Created: 2026-03-27
-# Modified: 2026-10-31
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/spawn.py's CLI routing, help output, and introspection."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/spawn.py parses and imports
-# seedgo: no-test-needed(documentation) — docstrings on print_help, print_introspection, and handle_create
+# sentry: no-test-needed(ruff) — that apps/spawn.py parses and imports
+# sentry: no-test-needed(documentation) — docstrings on print_help, print_introspection, and handle_create
 
 import logging
 from unittest.mock import patch
@@ -189,11 +189,11 @@ class TestCreateDryRun:
     def test_dry_run_names_the_nearest_registry_not_the_framework_one(
         self, tmp_path, capsys: pytest.CaptureFixture[str]
     ):
-        (tmp_path / "BEO_REGISTRY.json").write_text('{"metadata": {}, "branches": []}', encoding="utf-8")
+        (tmp_path / "SEED_REGISTRY.json").write_text('{"metadata": {}, "branches": []}', encoding="utf-8")
 
         assert handle_create([str(tmp_path / "src" / "dean"), "--dry-run"]) == 0
         out = " ".join(capsys.readouterr().out.split())
-        assert f"Registry: add to {tmp_path / 'BEO_REGISTRY.json'}" in out
+        assert f"Registry: add to {tmp_path / 'SEED_REGISTRY.json'}" in out
         assert "AIPASS_REGISTRY" not in out
 
     def test_dry_run_with_no_registry_above_says_create_would_refuse(

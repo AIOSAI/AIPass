@@ -3,7 +3,7 @@
 # Description: Unit tests for filesystem_handler's JSONL reading and agent activity
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/filesystem_handler.py, its JSONL reading and agent activity."""
@@ -14,7 +14,7 @@
 # _parse_agent_activity (Claude Code), _check_command_indicator.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — _shorten_model, covered by tests/test_filesystem_handler_tool_action.py
+# sentry: no-test-needed(through_the_command) — _shorten_model, covered by tests/test_filesystem_handler_tool_action.py
 
 import json
 from unittest.mock import MagicMock

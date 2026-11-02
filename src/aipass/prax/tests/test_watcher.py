@@ -3,13 +3,13 @@
 # Description: Tests for file system watcher handlers
 # Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/discovery/watcher.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(json_structure) — _report_watcher_death's log_operation record, covered by that row
+# sentry: no-test-needed(json_structure) — _report_watcher_death's log_operation record, covered by that row
 
 import subprocess
 import sys

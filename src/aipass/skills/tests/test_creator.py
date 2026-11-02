@@ -3,14 +3,14 @@
 # Description: Tests for creator module orchestration layer
 # Version: 1.0.1
 # Created: 2026-04-03
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/creator.py — routing, the create_skill wrapper and introspection."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/modules/creator.py parses and carries no unused import
-# seedgo: no-test-needed(constant) — print_introspection's prose beyond the module and handler names pinned below
+# sentry: no-test-needed(ruff) — that apps/modules/creator.py parses and carries no unused import
+# sentry: no-test-needed(constant) — print_introspection's prose beyond the module and handler names pinned below
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch

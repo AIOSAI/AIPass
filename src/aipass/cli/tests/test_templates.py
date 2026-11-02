@@ -3,13 +3,13 @@
 # Description: The templates module — operation_start, operation_complete, routing, demo
 # Version: 1.1.3
 # Created: 2026-03-24
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/templates.py — the operation output templates."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(documentation) — that templates.operation_start and operation_complete carry docstrings
+# sentry: no-test-needed(documentation) — that templates.operation_start and operation_complete carry docstrings
 
 import pytest
 from unittest.mock import patch

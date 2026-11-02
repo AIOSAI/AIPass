@@ -4,7 +4,7 @@
 # Description: CLI contract tests for the claude flags session_boot invokes
 # Branch: hooks
 # Created: 2026-07-13
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_boot.py's claude CLI contract."""
@@ -12,9 +12,9 @@
 # Probes the real `claude --help` so a phantom flag cannot ship mocked-green; skips without the binary.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that session_boot.py parses and imports
-# seedgo: no-test-needed(stdlib) — subprocess.run and shutil.which themselves
-# seedgo: no-test-needed(generated) — the full claude help text, upstream's output; only session_boot's flags pinned
+# sentry: no-test-needed(ruff) — that session_boot.py parses and imports
+# sentry: no-test-needed(stdlib) — subprocess.run and shutil.which themselves
+# sentry: no-test-needed(generated) — the full claude help text, upstream's output; only session_boot's flags pinned
 
 import shutil
 import subprocess

@@ -3,13 +3,13 @@
 # Description: Tests for launch-time branch scoping of Mission Control
 # Version: 1.1.0
 # Created: 2026-08-11
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_scope.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(json_structure) — parse_scope's log_operation record of the parsed names, covered by that row
+# sentry: no-test-needed(json_structure) — parse_scope's log_operation record of the parsed names, covered by that row
 
 from dataclasses import dataclass
 from typing import Optional
@@ -47,23 +47,23 @@ class TestParseScope:
         assert parse_scope(["ALL"]).is_scoped is False
 
     def test_comma_list_yields_each_name(self):
-        """The documented `seedgo,cli,flow` form."""
-        scope = parse_scope(["seedgo,cli,flow"])
+        """The documented `sentry,cli,flow` form."""
+        scope = parse_scope(["sentry,cli,flow"])
         assert scope.is_scoped is True
-        assert scope.names == ("SEEDGO", "CLI", "FLOW")
+        assert scope.names == ("SENTRY", "CLI", "FLOW")
 
     def test_separate_words_are_accepted(self):
-        """A shell-split list (`run seedgo cli`) works like the comma form."""
-        assert parse_scope(["seedgo", "cli"]).names == ("SEEDGO", "CLI")
+        """A shell-split list (`run sentry cli`) works like the comma form."""
+        assert parse_scope(["sentry", "cli"]).names == ("SENTRY", "CLI")
 
     def test_trailing_comma_and_spaces_ignored(self):
-        """`run seedgo, cli` arrives as ['seedgo,', 'cli'] — no empty names."""
-        assert parse_scope(["seedgo,", "cli"]).names == ("SEEDGO", "CLI")
+        """`run sentry, cli` arrives as ['sentry,', 'cli'] — no empty names."""
+        assert parse_scope(["sentry,", "cli"]).names == ("SENTRY", "CLI")
 
     def test_flags_are_not_branch_names(self):
         """--relay/--logs must never become a scope entry."""
-        scope = parse_scope(["--relay", "seedgo", "--logs"])
-        assert scope.names == ("SEEDGO",)
+        scope = parse_scope(["--relay", "sentry", "--logs"])
+        assert scope.names == ("SENTRY",)
 
     def test_flags_only_is_unscoped(self):
         """`run --relay` is still an all-branches run."""
@@ -71,11 +71,11 @@ class TestParseScope:
 
     def test_all_anywhere_wins(self):
         """A list containing 'all' widens back to everything, not a branch named all."""
-        assert parse_scope(["seedgo,all"]).is_scoped is False
+        assert parse_scope(["sentry,all"]).is_scoped is False
 
     def test_duplicates_deduped_order_preserved(self):
         """Requested order drives the banner text; repeats collapse."""
-        assert parse_scope(["flow,seedgo,flow"]).names == ("FLOW", "SEEDGO")
+        assert parse_scope(["flow,sentry,flow"]).names == ("FLOW", "SENTRY")
 
 
 class TestLabelTokens:
@@ -109,7 +109,7 @@ class TestMatchesLabel:
         assert BranchScope(["prax"]).matches_label("prax") is True
 
     def test_other_branch_excluded(self):
-        assert BranchScope(["PRAX"]).matches_label("SEEDGO") is False
+        assert BranchScope(["PRAX"]).matches_label("SENTRY") is False
 
     def test_session_label_with_model_tag(self):
         """`run devpulse` catches DEVPULSE's Claude session events."""
@@ -143,17 +143,17 @@ class TestMatchesEvent:
         assert BranchScope(["DEVPULSE"]).matches_event(event) is True
 
     def test_target_attribution(self):
-        """seedgo auditing prax shows in a prax scope."""
-        event = _Event(branch="SEEDGO", caller="DEVPULSE", event_type="command", action="executed:prax")
+        """sentry auditing prax shows in a prax scope."""
+        event = _Event(branch="SENTRY", caller="DEVPULSE", event_type="command", action="executed:prax")
         assert BranchScope(["PRAX"]).matches_event(event) is True
 
     def test_unrelated_command_excluded(self):
-        event = _Event(branch="SEEDGO", caller="DEVPULSE", event_type="command", action="executed:CLI")
+        event = _Event(branch="SENTRY", caller="DEVPULSE", event_type="command", action="executed:CLI")
         assert BranchScope(["PRAX"]).matches_event(event) is False
 
     def test_plain_action_is_not_a_target(self):
         """A non-command action ('logged') must not be read as attribution."""
-        assert BranchScope(["LOGGED"]).matches_event(_Event(branch="SEEDGO", action="logged")) is False
+        assert BranchScope(["LOGGED"]).matches_event(_Event(branch="SENTRY", action="logged")) is False
 
     def test_event_without_caller_attribute(self):
         """Events built without the optional fields must not raise."""
@@ -162,7 +162,7 @@ class TestMatchesEvent:
             branch = "PRAX"
 
         assert BranchScope(["PRAX"]).matches_event(_Bare()) is True
-        assert BranchScope(["SEEDGO"]).matches_event(_Bare()) is False
+        assert BranchScope(["SENTRY"]).matches_event(_Bare()) is False
 
     def test_unscoped_matches_every_event(self):
         assert BranchScope([]).matches_event(_Event(branch="WHATEVER")) is True
@@ -175,19 +175,19 @@ class TestDescribeAndUnknown:
         assert BranchScope([]).describe() == "all branches"
 
     def test_describe_scoped_keeps_order(self):
-        assert BranchScope(["DEVPULSE", "SEEDGO"]).describe() == "DEVPULSE, SEEDGO"
+        assert BranchScope(["DEVPULSE", "SENTRY"]).describe() == "DEVPULSE, SENTRY"
 
     def test_unknown_names_flags_typos(self):
         """A misspelled branch would otherwise show an empty screen with no reason."""
-        scope = BranchScope(["DEVPULES", "SEEDGO"])
-        assert scope.unknown_names({"DEVPULSE", "SEEDGO", "PRAX"}) == ["DEVPULES"]
+        scope = BranchScope(["DEVPULES", "SENTRY"])
+        assert scope.unknown_names({"DEVPULSE", "SENTRY", "PRAX"}) == ["DEVPULES"]
 
     def test_unknown_names_empty_when_all_known(self):
-        assert BranchScope(["SEEDGO"]).unknown_names({"SEEDGO"}) == []
+        assert BranchScope(["SENTRY"]).unknown_names({"SENTRY"}) == []
 
     def test_unknown_names_without_registry_claims_nothing(self):
         """An empty known-branch set means we could not check — never cry wolf."""
-        assert BranchScope(["SEEDGO"]).unknown_names(set()) == []
+        assert BranchScope(["SENTRY"]).unknown_names(set()) == []
 
     @pytest.mark.parametrize("empty", ["", "   ", ","])
     def test_blank_entries_never_become_names(self, empty):

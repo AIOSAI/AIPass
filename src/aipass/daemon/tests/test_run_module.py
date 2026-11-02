@@ -3,14 +3,14 @@
 # Description: Tests for the drone @daemon run module
 # Version: 1.3.1
 # Created:2026-06-15
-# Modified: 2026-10-25
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/run.py — the decentralized scheduler tick behind drone @daemon run."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — fcntl's exclusive lock under tick_lock; its use is pinned in the blocked contract
-# seedgo: no-test-needed(ruff) — that run.py parses and imports; every test here imports it first
+# sentry: no-test-needed(stdlib) — fcntl's exclusive lock under tick_lock; its use is pinned in the blocked contract
+# sentry: no-test-needed(ruff) — that run.py parses and imports; every test here imports it first
 
 import errno
 import json
@@ -311,12 +311,12 @@ def flat(text: str) -> str:
 
 
 def interval_job_with_slot(slot: Optional[str] = "2026-09-06T03:00:00", minutes=10080):
-    """@seedgo's weekly cycle, in the shape that caused the lesson."""
+    """@sentry's weekly cycle, in the shape that caused the lesson."""
     schedule = {"type": "interval", "interval_minutes": minutes}
     if slot is not None:
         schedule["slot"] = slot
     return {
-        "owner": "@seedgo",
+        "owner": "@sentry",
         "id": "shadow-cycle-weekly",
         "enabled": True,
         "schedule": schedule,
@@ -467,8 +467,8 @@ class TestSlotSeeding:
         out = capsys.readouterr().out
         assert results["seeded"] == 1
         assert results["fired"] == 0
-        assert "SEED: @seedgo/shadow-cycle-weekly" in flat(out)
-        assert runstate["jobs"]["@seedgo/shadow-cycle-weekly"]["last_run"] == seeded
+        assert "SEED: @sentry/shadow-cycle-weekly" in flat(out)
+        assert runstate["jobs"]["@sentry/shadow-cycle-weekly"]["last_run"] == seeded
 
     def test_a_slotless_job_warns_and_still_fires(self, caplog):
         # Asserted on the LOGGER, not the console: this is the line that lands
@@ -479,7 +479,7 @@ class TestSlotSeeding:
         assert results["seeded"] == 0
         assert results["fired"] == 1
         assert "declares no 'slot'" in caplog.text
-        assert "@seedgo/shadow-cycle-weekly" in caplog.text
+        assert "@sentry/shadow-cycle-weekly" in caplog.text
         assert "IMMEDIATE" in caplog.text
 
     @pytest.mark.parametrize("bad_interval", ["sixty", None], ids=["text", "null"])
@@ -507,7 +507,7 @@ class TestSlotSeeding:
         assert (results["seeded"], results["fired"]) == (0, 1)
         fired = [call.args[0]["id"] for call in mock_fire.call_args_list]
         assert fired == ["hourly-good"], f"only the good job may fire, fired {fired}"
-        assert "last_run" not in runstate["jobs"].get("@seedgo/shadow-cycle-weekly", {})
+        assert "last_run" not in runstate["jobs"].get("@sentry/shadow-cycle-weekly", {})
         assert f"interval {bad_interval!r}" in caplog.text
 
     def test_a_blocked_job_is_still_seedable(self, capsys):
@@ -515,15 +515,15 @@ class TestSlotSeeding:
         # the ROW would strand exactly the job the lesson came from.
         runstate = {
             "jobs": {
-                "@seedgo/shadow-cycle-weekly": {"last_status": "blocked", "last_blocked_at": "2026-09-07T01:34:52"}
+                "@sentry/shadow-cycle-weekly": {"last_status": "blocked", "last_blocked_at": "2026-09-07T01:34:52"}
             }
         }
         results, _save = self._tick(interval_job_with_slot(), runstate)
         assert results["seeded"] == 1
-        assert "SEED: @seedgo/shadow-cycle-weekly" in flat(capsys.readouterr().out)
+        assert "SEED: @sentry/shadow-cycle-weekly" in flat(capsys.readouterr().out)
 
     def test_an_already_running_job_is_left_alone(self):
-        runstate = {"jobs": {"@seedgo/shadow-cycle-weekly": {"last_run": "2026-09-06T03:00:00"}}}
+        runstate = {"jobs": {"@sentry/shadow-cycle-weekly": {"last_run": "2026-09-06T03:00:00"}}}
         results, _save = self._tick(interval_job_with_slot(), runstate)
         assert results["seeded"] == 0
 

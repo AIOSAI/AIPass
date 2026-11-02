@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: door_class_registry.py
-# Description: Door: spawn's citizen classes and their template dirs, published for aipass and seedgo (DPLAN-0404)
+# Description: Door: spawn's citizen classes and their template dirs, published for aipass and sentry (DPLAN-0404)
 # Version: 1.0.0
 # Created: 2026-10-07
-# Modified: 2026-10-07
+# Modified: 2026-11-02
 # =============================================
 
 """Door for apps/handlers/class_registry.py: the citizen classes, their refusals and their template dirs."""

@@ -3,7 +3,7 @@
 # Description: Cadence's regroup and counter machinery: reset, the regroup token and part queue, config, fail-loud
 # Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-22
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/cadence.py: the regroup and counter machinery."""
@@ -19,9 +19,9 @@
 # debounce window (= a real prior turn, not a sibling in the same turn).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that cadence.py parses and imports, ruff and collection cover it
-# seedgo: no-test-needed(documentation) — reset_counter() and should_fire() carry docstrings
-# seedgo: no-test-needed(constant) — HELP_COMMANDS' description text, pinned only as reaching print_introspection
+# sentry: no-test-needed(ruff) — that cadence.py parses and imports, ruff and collection cover it
+# sentry: no-test-needed(documentation) — reset_counter() and should_fire() carry docstrings
+# sentry: no-test-needed(constant) — HELP_COMMANDS' description text, pinned only as reaching print_introspection
 
 import json
 import os

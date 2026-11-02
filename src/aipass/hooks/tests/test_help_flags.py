@@ -4,7 +4,7 @@
 # Description: Help-flag safety — a help flag anywhere means explain, never execute
 # Branch: hooks
 # Created: 2026-08-13
-# Modified: 2026-11-01
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py and the modules that route through it."""
@@ -12,9 +12,9 @@
 # A help flag after args[0] must not run the subcommand: each test mocks the damaging target, asserts never called.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that help_flags.py parses and imports, ruff and collection cover it
-# seedgo: no-test-needed(documentation) — each module's help text wording, the documentation checker covers it
-# seedgo: no-test-needed(constant) — HELP_FLAGS' spelling list beyond the members asserted here
+# sentry: no-test-needed(ruff) — that help_flags.py parses and imports, ruff and collection cover it
+# sentry: no-test-needed(documentation) — each module's help text wording, the documentation checker covers it
+# sentry: no-test-needed(constant) — HELP_FLAGS' spelling list beyond the members asserted here
 
 import json
 from unittest.mock import patch

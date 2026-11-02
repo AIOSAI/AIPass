@@ -4,14 +4,14 @@
 # Description: Tests for temporal prompt handler
 # Branch: hooks
 # Created: 2026-07-21
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/prompt/temporal.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — datetime.strftime and datetime.astimezone, the source of every field on the line
-# seedgo: no-test-needed(generated) — logger.info on the except path; its text is the exception's own
+# sentry: no-test-needed(stdlib) — datetime.strftime and datetime.astimezone, the source of every field on the line
+# sentry: no-test-needed(generated) — logger.info on the except path; its text is the exception's own
 
 from datetime import datetime, timedelta, timezone
 

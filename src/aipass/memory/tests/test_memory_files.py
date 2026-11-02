@@ -3,7 +3,7 @@
 # Description: Tests for memory_files.py, the memory file safe I/O handler
 # Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/json/memory_files.py."""
@@ -11,9 +11,9 @@
 # update_metadata is gone on purpose: the trinity standard forbids a stored status block.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — read_memory_file() and write_memory_file(), tests/test_changed_entries.py
-# seedgo: no-test-needed(covered_elsewhere) — violation_line(), read_memory_file_data(): tests/test_changed_entries.py
-# seedgo: no-test-needed(covered_elsewhere) — write_memory_file_simple(), pinned in tests/test_handlers.py
+# sentry: no-test-needed(covered_elsewhere) — read_memory_file() and write_memory_file(), tests/test_changed_entries.py
+# sentry: no-test-needed(covered_elsewhere) — violation_line(), read_memory_file_data(): tests/test_changed_entries.py
+# sentry: no-test-needed(covered_elsewhere) — write_memory_file_simple(), pinned in tests/test_handlers.py
 
 import pytest
 

@@ -3,7 +3,7 @@
 # Description: Entry point CLI for drone @spawn
 # Version: 1.2.1
 # Created: 2026-03-05
-# Modified: 2026-10-31
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -75,6 +75,7 @@ def print_help():
         "  [green]repair[/green] --relocate @branch <path> Move branch + update registry (preview; add --apply)"
     )
     console.print("  [dim]         add --relocate-artifacts to carry the branch's vector store with it[/dim]")
+    console.print("  [green]repair[/green] --rename @old @new      Re-point entry + passport at a renamed dir")
     console.print("  [green]grant-admin[/green]                    Ceremony: write admin:true onto the devpulse entry")
     console.print("  [green]grant-ci-cure[/green]                  Ceremony: write ci_cure:true onto the trigger entry")
     console.print("  [green]owner[/green] @citizen                 Move a project's owner seat (preview; add --apply)")

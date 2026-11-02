@@ -4,15 +4,15 @@
 # Description: Tests for compass recall prompt handler
 # Branch: hooks
 # Created: 2026-07-16
-# Modified: 2026-10-31
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/prompt/compass_recall.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that compass_recall.py parses and imports, ruff and collection cover it
-# seedgo: no-test-needed(documentation) — handle()'s docstring, the documentation checker covers it
-# seedgo: no-test-needed(stdlib) — tempfile.gettempdir's choice of directory, the stdlib's own
+# sentry: no-test-needed(ruff) — that compass_recall.py parses and imports, ruff and collection cover it
+# sentry: no-test-needed(documentation) — handle()'s docstring, the documentation checker covers it
+# sentry: no-test-needed(stdlib) — tempfile.gettempdir's choice of directory, the stdlib's own
 
 import json
 import os

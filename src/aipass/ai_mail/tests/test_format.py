@@ -3,13 +3,13 @@
 # Description: Tests for email formatting handler
 # Version: 1.0.0
 # Created: 2026-04-25
-# Modified: 2026-09-27
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/email/format.py -- lookup, preview, header, list item."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(shared) — format_update_count(), unrelated to display formatting: tests/test_upsert.py
+# sentry: no-test-needed(shared) — format_update_count(), unrelated to display formatting: tests/test_upsert.py
 
 import io
 import json

@@ -3,13 +3,13 @@
 # Description: Tests for the read lane's git-changes lane — the card contract, the stampede, grains, rows, refusals
 # Version: 1.1.2
 # Created: 2026-10-08
-# Modified: 2026-11-01
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for read_git_changes() in apps/handlers/host/git_reads.py and its cache and refusal memory."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — drone's own `git status --json`; subprocess.run is faked, drone tests it
+# sentry: no-test-needed(external) — drone's own `git status --json`; subprocess.run is faked, drone tests it
 
 import concurrent.futures as cf
 import json

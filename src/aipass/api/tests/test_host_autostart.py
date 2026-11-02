@@ -3,7 +3,7 @@
 # Description: Tests for the supervisor seam — a server that comes back on its own
 # Version: 1.2.0
 # Created: 2026-08-27
-# Modified: 2026-10-22
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/host/autostart.py and the host-api autostart verb that drives it."""
@@ -12,9 +12,9 @@
 # record), and stop must go through systemd (a signal is undone by Restart=).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that autostart.py parses and imports
-# seedgo: no-test-needed(constant) — RESTART_SECONDS, START_LIMIT_INTERVAL_SECONDS and START_LIMIT_BURST's values
-# seedgo: no-test-needed(external) — a real systemd; subprocess.run is scripted and is_supported pinned
+# sentry: no-test-needed(ruff) — that autostart.py parses and imports
+# sentry: no-test-needed(constant) — RESTART_SECONDS, START_LIMIT_INTERVAL_SECONDS and START_LIMIT_BURST's values
+# sentry: no-test-needed(external) — a real systemd; subprocess.run is scripted and is_supported pinned
 
 from pathlib import Path
 from typing import Any, Iterator

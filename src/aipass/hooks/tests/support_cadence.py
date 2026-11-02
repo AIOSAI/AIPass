@@ -3,7 +3,7 @@
 # Description: Helpers shared by test_cadence.py and test_cadence_regroup.py: module path, cache reset, state writer
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Helpers for the cadence tests (no test_ prefix: never collected).
@@ -12,7 +12,7 @@ conftest's _restore_cadence_globals puts back the caches _reset_module_globals w
 """
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(ruff) — that the module parses and imports
 
 import json
 import os

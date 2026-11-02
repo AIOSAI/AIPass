@@ -3,16 +3,16 @@
 # Description: Tests for the drive_* command modules, the settings verb and the suite-wide Drive seal
 # Version: 2.0.4
 # Created: 2026-06-12
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/drive_*.py and settings.py, and the Drive seal on apps/handlers/drive/client.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the six modules imported below parse; ruff parses, it does not import
-# seedgo: no-test-needed(documentation) — that each module's public functions carry docstrings
-# seedgo: no-test-needed(constant) — the [bold cyan]/[yellow] styling in print_introspection(); tests read plain text
-# seedgo: no-test-needed(stdlib) — the win32 preamble's os.environ.setdefault and stream reconfigure
+# sentry: no-test-needed(ruff) — that the six modules imported below parse; ruff parses, it does not import
+# sentry: no-test-needed(documentation) — that each module's public functions carry docstrings
+# sentry: no-test-needed(constant) — the [bold cyan]/[yellow] styling in print_introspection(); tests read plain text
+# sentry: no-test-needed(stdlib) — the win32 preamble's os.environ.setdefault and stream reconfigure
 
 import json
 from pathlib import Path

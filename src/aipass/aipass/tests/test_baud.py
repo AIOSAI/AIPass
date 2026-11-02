@@ -3,7 +3,7 @@
 # Description: Tests for aipass baud's command line: each value flag reaches the function it feeds
 # Version: 1.6.0
 # Created: 2026-10-08
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/baud.py: the install and status flags as a user types them, and the phone print."""
@@ -20,7 +20,7 @@
 # the terminal is a StringIO that says it is a tty; the re-probe's sleep is a list.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
+# sentry: no-test-needed(ruff) — that every module this file imports parses and imports
 
 import hashlib
 import http.server

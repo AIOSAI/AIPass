@@ -37,7 +37,7 @@ Digests are **email, never dispatch** (`auto_execute=False`). The default recipi
 | Collapsed | To | Why |
 |---|---|---|
 | Any standalone number, plus a short unit suffix (`20`, `1237ms`, `pid 4471`) | `<id>` | A climbing count or a duration is the same condition recurring. The suffix is load-bearing: there is no word boundary between digits and letters, so a bare `\b\d+\b` leaves `1237ms` alone |
-| Registered citizen names, from `AIPASS_REGISTRY.json` (TTL-cached) | `<branch>` | "latest: log from SEEDGO" and "from PRAX" are one queue-full condition, not two |
+| Registered citizen names, from `AIPASS_REGISTRY.json` (TTL-cached) | `<branch>` | "latest: log from SENTRY" and "from PRAX" are one queue-full condition, not two |
 | Any `@handle`, registered or not | `<branch>` | An unregistered name must not fragment what the registered ones unify |
 
 The placeholder is `<id>` on purpose — the same token the registry normalizer emits for 3+ digits. A different token would make the two passes disagree at the 100 boundary, and `99 events` / `101 events` would keep minting separate signatures.

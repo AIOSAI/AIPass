@@ -3,14 +3,14 @@
 # Description: TDPLAN-0017 — passport seeds: export, validation, mint-from-seed
 # Version: 1.1.0
 # Created: 2026-08-28
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/seed_ops.py and apps/modules/core.py's mint-from-seed path."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every file in apps/handlers/ and apps/modules/ parses and imports
-# seedgo: no-test-needed(documentation) — that seed_ops' public functions carry docstrings
+# sentry: no-test-needed(ruff) — that every file in apps/handlers/ and apps/modules/ parses and imports
+# sentry: no-test-needed(documentation) — that seed_ops' public functions carry docstrings
 
 import hashlib
 import json

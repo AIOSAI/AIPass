@@ -3,7 +3,7 @@
 # Description: Tests for the wake's small parts - dispatch status, the grant read, pid lock and branch resolution
 # Version: 1.3.0
 # Created: 2026-10-08
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's helpers and pid_lock.py: status, locks, pids, resolve_branch."""
@@ -12,11 +12,12 @@
 # target: the parts a wake is built from, each pinned on its own.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(shared) — wake_branch()'s own lanes and gates: tests/test_wake.py
+# sentry: no-test-needed(shared) — wake_branch()'s own lanes and gates: tests/test_wake.py
 
 import json
 import os
 import subprocess
+import sys
 import pytest
 from datetime import datetime, timedelta
 from pathlib import Path as _Path
@@ -220,6 +221,19 @@ def test_check_pid_alive_zombie(monkeypatch, tmp_path):
         _fake_open_factory(str(status_file), {"/proc/42/status": str(status_file)}),
     )
     assert check_pid_alive(42) is False
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="zombies and ps are POSIX")
+def test_an_unreaped_child_reads_dead_where_there_is_no_proc(monkeypatch):
+    """macOS has no /proc: a stopped monitor its parent had not reaped yet read alive, and stop said it outlived SIGKILL."""
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    try:
+        os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOWAIT)  # exited, left unreaped: a zombie
+        monkeypatch.setattr("sys.platform", "darwin")
+        assert check_pid_alive(child.pid) is False
+        assert check_pid_alive(os.getpid()) is True
+    finally:
+        child.wait()
 
 
 # --- pid_lock's process readers, through branch_occupant -----------

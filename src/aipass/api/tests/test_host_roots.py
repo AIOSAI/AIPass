@@ -3,7 +3,7 @@
 # Description: Tests for the roots roster and the widened name fence
 # Version: 1.1.1
 # Created: 2026-08-18
-# Modified: 2026-10-25
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/host/reads.py's four-kind name fence, /v1/dir paging and the /v1/roots route."""
@@ -12,8 +12,8 @@
 # A read-scope token reads ~/.ssh by the owner's FULLY OPEN ruling; the suite reads it on purpose.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(duplicate_test) — the branch read lane with no root, tests/test_host_read_lane.py
-# seedgo: no-test-needed(duplicate_test) — issue_token() and verify_token() themselves, tests/test_host_api_config.py
+# sentry: no-test-needed(duplicate_test) — the branch read lane with no root, tests/test_host_read_lane.py
+# sentry: no-test-needed(duplicate_test) — issue_token() and verify_token() themselves, tests/test_host_api_config.py
 
 import json
 import re

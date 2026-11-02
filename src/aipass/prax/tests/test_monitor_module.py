@@ -3,17 +3,17 @@
 # Description: Tests for the unified monitoring module
 # Version: 1.1.1
 # Created: 2026-04-03
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/monitor.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — _report_render_failures, covered by tests/test_display_resilience.py
-# seedgo: no-test-needed(through_the_command) — _standalone_run_args, covered by tests/test_display_resilience.py
-# seedgo: no-test-needed(through_the_command) — _rate_tracker_worker's scan_rates, covered by tests/test_rate_tracker.py
-# seedgo: no-test-needed(through_the_command) — the run -h screen, covered by tests/test_help_flag_safety.py
-# seedgo: no-test-needed(json_structure) — _run_monitor's log_operation("monitor_started") record, covered by that row
+# sentry: no-test-needed(through_the_command) — _report_render_failures, covered by tests/test_display_resilience.py
+# sentry: no-test-needed(through_the_command) — _standalone_run_args, covered by tests/test_display_resilience.py
+# sentry: no-test-needed(through_the_command) — _rate_tracker_worker's scan_rates, covered by tests/test_rate_tracker.py
+# sentry: no-test-needed(through_the_command) — the run -h screen, covered by tests/test_help_flag_safety.py
+# sentry: no-test-needed(json_structure) — _run_monitor's log_operation("monitor_started") record, covered by that row
 
 import json
 import sys
@@ -134,8 +134,8 @@ class TestHandleCommand:
         """Extra args after 'run' are forwarded to _run_monitor."""
         mod = _import_monitor()
         with patch.object(mod, "_run_monitor", return_value=True) as mock_run:
-            mod.handle_command("monitor", ["run", "seedgo,cli"])
-            mock_run.assert_called_once_with(["seedgo,cli"])
+            mod.handle_command("monitor", ["run", "sentry,cli"])
+            mock_run.assert_called_once_with(["sentry,cli"])
 
     def test_unknown_subcommand_prints_error_and_help(self):
         """Unknown subcommand is refused by name: returning True would read as success to the router."""
@@ -179,18 +179,18 @@ class TestDispatchRun:
             mock_feed.assert_not_called()
 
     def test_mixed_branch_list_with_commons_stays_branch_tail(self):
-        """A mixed list (e.g. 'seedgo,commons') treats commons as a branch — feed is standalone-only."""
+        """A mixed list (e.g. 'sentry,commons') treats commons as a branch — feed is standalone-only."""
         mod = _import_monitor()
         with (
             patch(_COMMONS_FEED_TARGET) as mock_feed,
             patch.object(mod, "_run_monitor", return_value=True) as mock_branch,
         ):
-            result = mod.handle_command("monitor", ["run", "seedgo,commons"])
+            result = mod.handle_command("monitor", ["run", "sentry,commons"])
             assert result is True
-            mock_branch.assert_called_once_with(["seedgo,commons"])
+            mock_branch.assert_called_once_with(["sentry,commons"])
             mock_feed.assert_not_called()
 
-    @pytest.mark.parametrize("run_args", [["--relay"], ["commons", "--relay"], ["seedgo", "-x"]])
+    @pytest.mark.parametrize("run_args", [["--relay"], ["commons", "--relay"], ["sentry", "-x"]])
     def test_unknown_flag_is_refused_before_anything_starts(self, run_args):
         """A flag `run` does not define (the retired --relay included) exits 1, never starts a monitor."""
         mod = _import_monitor()
@@ -330,14 +330,14 @@ class TestRenderEvent:
         event = MagicMock()
         event.event_type = "command"
         event.branch = "FLOW"
-        event.message = "seedgo audit"
+        event.message = "sentry audit"
         event.caller = "prax"
         event.action = action
 
         with patch.object(mod, "_get_pid_for_branch", return_value=None):
             mod._print_event_to_console(event)
 
-        _doubled("print_command_separator").assert_called_once_with("FLOW", "seedgo audit", "prax", expected_target)
+        _doubled("print_command_separator").assert_called_once_with("FLOW", "sentry audit", "prax", expected_target)
 
     def test_render_non_command_event(self):
         """Non-command events call print_event."""
@@ -1149,12 +1149,12 @@ class TestBranchScopeWiring:
     """The branch list reaches the queue instead of being logged and dropped."""
 
     def test_scope_installed_on_queue(self):
-        """`run seedgo,cli` sets a scope naming exactly those branches."""
+        """`run sentry,cli` sets a scope naming exactly those branches."""
         mod = _import_monitor()
-        queue = _run_scoped(mod, ["seedgo,cli"])
+        queue = _run_scoped(mod, ["sentry,cli"])
         queue.set_scope.assert_called_once()
         scope = queue.set_scope.call_args.args[0]
-        assert scope.names == ("SEEDGO", "CLI")
+        assert scope.names == ("SENTRY", "CLI")
 
     def test_bare_run_installs_no_scope(self):
         """All-branches monitoring must not gain a filter."""
@@ -1178,8 +1178,8 @@ class TestBannerTruth:
 
     def test_scoped_banner_names_the_scope(self, capsys):
         mod = _import_monitor()
-        _run_scoped(mod, ["devpulse,seedgo"])
-        assert any("DEVPULSE, SEEDGO" in line for line in _printed(capsys))
+        _run_scoped(mod, ["devpulse,sentry"])
+        assert any("DEVPULSE, SENTRY" in line for line in _printed(capsys))
 
     def test_scoped_banner_drops_the_all_branches_claim(self, capsys):
         mod = _import_monitor()
@@ -1206,11 +1206,11 @@ class TestBannerTruth:
         queue.size.return_value = 2
         queue.suppressed_count.return_value = 41
         monkeypatch.setattr(mod, "_event_queue", queue)
-        monkeypatch.setattr(mod, "_active_scope", BranchScope(["SEEDGO"]))
+        monkeypatch.setattr(mod, "_active_scope", BranchScope(["SENTRY"]))
 
         mod._print_status()
         lines = _printed(capsys)
-        assert any("SEEDGO" in line for line in lines)
+        assert any("SENTRY" in line for line in lines)
         assert not any("no filters" in line for line in lines)
         assert any("41" in line for line in lines), "hidden-event count explains a quiet screen"
 
@@ -1220,14 +1220,14 @@ class TestUnknownScopeWarning:
 
     def test_unknown_branch_warns(self, capsys):
         mod = _import_monitor()
-        with patch.object(mod, "_known_branch_names", return_value={"SEEDGO", "PRAX"}):
-            _run_scoped(mod, ["seedgoo"])
-        assert any("seedgoo" in line.lower() for line in _printed(capsys))
+        with patch.object(mod, "_known_branch_names", return_value={"SENTRY", "PRAX"}):
+            _run_scoped(mod, ["sentryy"])
+        assert any("sentryy" in line.lower() for line in _printed(capsys))
 
     def test_known_branch_does_not_warn(self, capsys):
         mod = _import_monitor()
-        with patch.object(mod, "_known_branch_names", return_value={"SEEDGO", "PRAX"}):
-            _run_scoped(mod, ["seedgo"])
+        with patch.object(mod, "_known_branch_names", return_value={"SENTRY", "PRAX"}):
+            _run_scoped(mod, ["sentry"])
         assert not any("not a known branch" in line.lower() for line in _printed(capsys))
 
     def test_no_registry_means_no_warning(self, capsys):

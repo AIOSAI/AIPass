@@ -3,13 +3,13 @@
 # Description: Unit tests for the whole-sequence help-flag predicate
 # Version: 1.0.0
 # Created: 2026-08-13
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(behaviour) — the routing in apps/trigger.py that calls the predicate; the entry point tests cover it
+# sentry: no-test-needed(behaviour) — the routing in apps/trigger.py that calls the predicate; the entry point tests cover it
 
 import pytest
 

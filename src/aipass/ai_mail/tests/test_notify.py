@@ -3,7 +3,7 @@
 # Description: Tests for the notification feed writer
 # Version: 2.0.3
 # Created: 2026-04-03
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/notify.py -- JSONL notification feed writer."""
@@ -11,7 +11,7 @@
 # Assertions read the real tmp_path feed; only json_handler and logger are mocked, never the write path.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — the feed's JSON key names and path template in the module docstring
+# sentry: no-test-needed(constant) — the feed's JSON key names and path template in the module docstring
 
 import json
 import threading

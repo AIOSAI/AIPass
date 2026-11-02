@@ -3,14 +3,14 @@
 # Description: next_run must name an instant is_job_due actually agrees with
 # Version: 1.0.1
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for handlers/schedule/runstate.py — next_run and is_job_due must not disagree."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that runstate.py parses and imports
-# seedgo: no-test-needed(stdlib) — datetime's own arithmetic; the pins drive is_job_due at the instants next_run names
+# sentry: no-test-needed(ruff) — that runstate.py parses and imports
+# sentry: no-test-needed(stdlib) — datetime's own arithmetic; the pins drive is_job_due at the instants next_run names
 
 from datetime import datetime, timedelta
 

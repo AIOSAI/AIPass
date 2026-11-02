@@ -4,15 +4,15 @@
 # Description: Tests for stop_sound notification handler
 # Branch: hooks
 # Created: 2026-05-20
-# Modified: 2026-09-27
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/notification/stop_sound.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — AIPASS_HOME, SOUNDS_DIR and SOUND_FILE's path text
-# seedgo: no-test-needed(documentation) — that handle() carries a docstring
-# seedgo: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(constant) — AIPASS_HOME, SOUNDS_DIR and SOUND_FILE's path text
+# sentry: no-test-needed(documentation) — that handle() carries a docstring
+# sentry: no-test-needed(ruff) — that the module parses and imports
 
 from aipass.hooks.apps.handlers.notification.stop_sound import handle
 

@@ -3,14 +3,14 @@
 # Description: Tests for flow.py CLI entry point
 # Version: 1.1.1
 # Created: 2026-05-12
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/flow.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that flow.py parses and imports
-# seedgo: no-test-needed(stdlib) — the `if __name__ == "__main__":` guard's sys.exit() and os._exit() calls
+# sentry: no-test-needed(ruff) — that flow.py parses and imports
+# sentry: no-test-needed(stdlib) — the `if __name__ == "__main__":` guard's sys.exit() and os._exit() calls
 
 import importlib
 import signal

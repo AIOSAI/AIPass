@@ -3,7 +3,7 @@
 # Description: Tests for hooks's entry point routing, help and introspection
 # Version: 1.2.3
 # Created: 2026-09-03
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/hooks.py, the branch's CLI entry point."""
@@ -11,9 +11,9 @@
 # A refusal that exits 0 reads as success to the shell, so exit codes are pinned.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that hooks.py parses and imports, ruff and collection cover it
-# seedgo: no-test-needed(documentation) — the help text's prose beyond its section headers, the documentation checker
-# seedgo: no-test-needed(stdlib) — importlib.import_module's submodule resolution, the stdlib's own
+# sentry: no-test-needed(ruff) — that hooks.py parses and imports, ruff and collection cover it
+# sentry: no-test-needed(documentation) — the help text's prose beyond its section headers, the documentation checker
+# sentry: no-test-needed(stdlib) — importlib.import_module's submodule resolution, the stdlib's own
 
 import importlib
 import os

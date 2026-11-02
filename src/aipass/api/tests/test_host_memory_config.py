@@ -3,7 +3,7 @@
 # Description: Tests for the host API memory-config lane — @memory's rollover limits
 # Version: 2.0.3
 # Created: 2026-08-16
-# Modified: 2026-10-25
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/host/memory_config.py and its routes in apps/handlers/host/server.py."""
@@ -11,8 +11,8 @@
 # The verdict is @memory's `ok`, never the exit code: their refusals exit 0.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — the real drone.route_command dispatch, stubbed here; @memory's suite
-# seedgo: no-test-needed(duplicate_test) — issue_token() and verify_token() themselves, tests/test_host_api_config.py
+# sentry: no-test-needed(through_the_command) — the real drone.route_command dispatch, stubbed here; @memory's suite
+# sentry: no-test-needed(duplicate_test) — issue_token() and verify_token() themselves, tests/test_host_api_config.py
 
 import importlib.util
 import re

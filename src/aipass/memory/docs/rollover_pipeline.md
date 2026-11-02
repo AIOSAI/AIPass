@@ -15,7 +15,7 @@ Everything below is the machinery *behind* `drone @memory rollover run|check|sta
 `apps/handlers/json/json_handler.py` is not an implementation. It is the fleet shim, binding the public names of `aipass.prax.json_handler` to a
 handle for this branch and adding nothing. It BINDS rather than wraps — every name is the service's
 own callable, so the service resolves the calling module and this branch's `memory_json/` directory
-itself, per call. The file is byte-identical in every branch by design and @seedgo checks it by
+itself, per call. The file is byte-identical in every branch by design and @sentry checks it by
 hash, not by reading it. Anything this
 branch needs beyond the service belongs in a module of its own, never in this file.
 

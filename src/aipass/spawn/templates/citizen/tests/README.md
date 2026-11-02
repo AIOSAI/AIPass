@@ -17,6 +17,6 @@ template's `.spawn/.registry_ignore.json` so a mature branch that has moved past
 is not marked structurally incomplete for dropping it.
 
 A JSON-handler starter suite shipped here until 2026-09-07. It was retired
-(FPLAN-0492) because its six shim-pin checks now live once in @seedgo's json
+(FPLAN-0492) because its six shim-pin checks now live once in @sentry's json
 handler contract suite, which discovers every branch's shim by walking the
 installed package — this branch is covered by that run without carrying a copy.

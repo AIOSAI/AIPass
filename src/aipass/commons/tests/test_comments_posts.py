@@ -5,7 +5,7 @@
 # Date: 2026-04-03
 # Version: 1.0.1
 # Created: 2026-04-03
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -20,7 +20,7 @@
 """Tests for apps/handlers/comments/comment_ops.py and apps/handlers/posts/post_ops.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every file in handlers/comments/, handlers/posts/ parses and imports
+# sentry: no-test-needed(ruff) — that every file in handlers/comments/, handlers/posts/ parses and imports
 
 import sqlite3
 from pathlib import Path

@@ -13,7 +13,7 @@
 
 ```bash
 drone systems                     # Every registered branch and module
-drone @seedgo audit aipass        # Route a command to a branch
+drone @sentry audit aipass        # Route a command to a branch
 drone @flow --help                # The full reference for any target
 drone @git status                 # Read-only git, available to every branch
 ```
@@ -122,7 +122,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 
 ### Provides To
 - Every branch — command routing, module and branch discovery, and the only interface to git
-- `aipass.seedgo`, `aipass.cli`, `aipass.spawn` — in-process module routing declared in
+- `aipass.sentry`, `aipass.cli`, `aipass.spawn` — in-process module routing declared in
   `apps/handlers/routing_config.json`
 - `@devpulse` — the write verbs, the PR lock and the external-repo door
 - The whole fleet — the sanctioned delete path and its audit trail

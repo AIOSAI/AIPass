@@ -3,7 +3,7 @@
 # Description: Canary tests that literal [placeholders] survive Rich rendering
 # Version: 1.1.0
 # Created: 2026-08-10
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/monitor.py, apps/prax.py and apps/modules/log_health.py's bracket rendering."""
@@ -12,9 +12,9 @@
 # the product's real console: a mocked console records the call but never renders.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — prax.py's main() on each flag, covered by tests/test_help_flag_safety.py
-# seedgo: no-test-needed(through_the_command) — monitor.py's run dispatch, covered by tests/test_monitor_module.py
-# seedgo: no-test-needed(through_the_command) — log_health.py's handle_command, covered by tests/test_log_health.py
+# sentry: no-test-needed(through_the_command) — prax.py's main() on each flag, covered by tests/test_help_flag_safety.py
+# sentry: no-test-needed(through_the_command) — monitor.py's run dispatch, covered by tests/test_monitor_module.py
+# sentry: no-test-needed(through_the_command) — log_health.py's handle_command, covered by tests/test_log_health.py
 
 import io
 from pathlib import Path
@@ -84,8 +84,8 @@ class TestScopedBannerRenders:
         )
 
     def test_scoped_banner_shows_branch_names(self):
-        output = self._banner(["seedgo,cli"])
-        assert "scoped to SEEDGO, CLI" in output
+        output = self._banner(["sentry,cli"])
+        assert "scoped to SENTRY, CLI" in output
 
     def test_unscoped_banner_unchanged(self):
         assert "all branches, all levels, no filters" in self._banner([])
@@ -107,10 +107,10 @@ class TestLogHealthBranchTag:
             "severity": "critical",
         },
         {
-            "file": "seedgo_audit.log",
+            "file": "sentry_audit.log",
             "rate_lines_per_min": 12,
             "size_kb": 8,
-            "branch": "seedgo",
+            "branch": "sentry",
             "severity": None,
         },
         {
@@ -122,7 +122,7 @@ class TestLogHealthBranchTag:
         },
     ]
 
-    @pytest.mark.parametrize("branch", ["prax", "seedgo", "cli"])
+    @pytest.mark.parametrize("branch", ["prax", "sentry", "cli"])
     def test_branch_tag_survives_rendering(self, branch):
         """Flagged, active and idle rows all keep their bracketed branch name."""
         output = self._render(

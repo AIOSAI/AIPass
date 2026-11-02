@@ -42,7 +42,7 @@ jobs:
           source .venv/bin/activate
           drone --version
           drone systems
-          drone @seedgo --help
+          drone @sentry --help
 
       - name: Run full test suite
         run: |

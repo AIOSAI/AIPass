@@ -4,14 +4,14 @@
 # Description: Tests for hookstatus module (drone @hooks status)
 # Branch: hooks
 # Created: 2026-05-28
-# Modified: 2026-10-05
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/hookstatus.py — read-only hook config viewer."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — HELP_COMMANDS and the help screen's fixed lines
-# seedgo: no-test-needed(constant) — EVENT_TYPES, the fixed order the status table walks
+# sentry: no-test-needed(constant) — HELP_COMMANDS and the help screen's fixed lines
+# sentry: no-test-needed(constant) — EVENT_TYPES, the fixed order the status table walks
 
 from unittest.mock import patch
 

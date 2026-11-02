@@ -3,13 +3,13 @@
 # Description: Data loader tests — inbox and local.json loading, message triage, the real mailbox path
 # Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/update/data_loader.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — json.load's own parse of a well-formed file
+# sentry: no-test-needed(stdlib) — json.load's own parse of a well-formed file
 
 import json
 from pathlib import Path
@@ -166,7 +166,7 @@ class TestGetEscalations:
     def test_urgent_message_detected(self):
         """Messages with URGENT in subject are escalated."""
         messages = [
-            {"id": "1", "subject": "URGENT: seedgo audit failed"},
+            {"id": "1", "subject": "URGENT: sentry audit failed"},
             {"id": "2", "subject": "Normal update"},
         ]
         result = get_escalations(messages)

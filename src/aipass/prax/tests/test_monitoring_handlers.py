@@ -3,13 +3,13 @@
 # Description: Unit tests for monitoring handler modules
 # Version: 1.4.1
 # Created: 2026-04-25
-# Modified: 2026-10-25
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_detector.py, the detector and its branch registry."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — _detect_from_claude_project, in the external_project sibling
+# sentry: no-test-needed(through_the_command) — _detect_from_claude_project, in the external_project sibling
 
 import json
 from pathlib import Path
@@ -106,8 +106,8 @@ class TestDetectFromPath:
         """Should detect branch by walking up parent directories."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
-        child = str(_ECO / "seedgo" / "core" / "validator.py")
-        parent_str = str(_ECO / "seedgo")
+        child = str(_ECO / "sentry" / "core" / "validator.py")
+        parent_str = str(_ECO / "sentry")
 
         with patch(f"{mod.__name__}.Path") as mock_path_cls:
             mock_path = MagicMock(spec=Path)
@@ -128,7 +128,7 @@ class TestDetectFromPath:
 
             result = detector.detect_from_path(child)
 
-        assert result == "SEEDGO"
+        assert result == "SENTRY"
 
     def test_unknown_path(self):
         """Should return UNKNOWN for unrecognized paths."""
@@ -206,8 +206,8 @@ class TestDetectFromLog:
         """Should detect branch from log filename with known prefix."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
-        result = detector.detect_from_log("seedgo_audit.log")
-        assert result == "SEEDGO"
+        result = detector.detect_from_log("sentry_audit.log")
+        assert result == "SENTRY"
 
     def test_exact_branch_name_log(self):
         """Should detect branch when log name matches exactly."""
@@ -428,7 +428,7 @@ class TestLoadRegistry:
         detector._load_registry()
 
         assert "PRAX" in detector.known_branches
-        assert "SEEDGO" in detector.known_branches
+        assert "SENTRY" in detector.known_branches
         assert "no branch registry at" in _detector_log().warning.call_args.args[0]
 
     def test_loads_fallback_when_no_branches_key(self, tmp_path):
@@ -476,7 +476,7 @@ class TestLoadFallbackBranches:
         detector._load_fallback_branches()
 
         expected = {
-            "SEEDGO",
+            "SENTRY",
             "CLI",
             "FLOW",
             "PRAX",

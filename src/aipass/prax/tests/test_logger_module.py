@@ -3,7 +3,7 @@
 # Description: Unit tests for PRAX logger module (public API)
 # Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/logger.py."""
@@ -11,9 +11,9 @@
 # logger.py is bound once at the top; _inject_and_import doubles each handler name on it per test.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that each __all__ re-export, e.g. get_direct_logger(), names a real import (F822)
-# seedgo: no-test-needed(through_the_command) — append_jsonl()'s writing, covered by tests/test_jsonl_writer.py
-# seedgo: no-test-needed(through_the_command) — check_file_watcher_liveness() itself, covered by tests/test_watcher.py
+# sentry: no-test-needed(ruff) — that each __all__ re-export, e.g. get_direct_logger(), names a real import (F822)
+# sentry: no-test-needed(through_the_command) — append_jsonl()'s writing, covered by tests/test_jsonl_writer.py
+# sentry: no-test-needed(through_the_command) — check_file_watcher_liveness() itself, covered by tests/test_watcher.py
 
 import json
 import os

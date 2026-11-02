@@ -390,11 +390,11 @@ else
     FAIL=1
 fi
 
-# seedgo is accessed via drone @seedgo, not as a standalone CLI
-if drone @seedgo --help &>/dev/null; then
-    echo "  seedgo ... ok (via drone @seedgo)"
+# sentry is accessed via drone @sentry, not as a standalone CLI
+if drone @sentry --help &>/dev/null; then
+    echo "  sentry ... ok (via drone @sentry)"
 else
-    echo "  seedgo ... FAILED"
+    echo "  sentry ... FAILED"
     FAIL=1
 fi
 
@@ -640,10 +640,10 @@ PYEOF
         fi
     fi
 
-    # .seedgo/bypass.json
-    mkdir -p "$path/.seedgo"
-    if [ ! -f "$path/.seedgo/bypass.json" ]; then
-        echo '{}' > "$path/.seedgo/bypass.json"
+    # .sentry/bypass.json
+    mkdir -p "$path/.sentry"
+    if [ ! -f "$path/.sentry/bypass.json" ]; then
+        echo '{}' > "$path/.sentry/bypass.json"
         created=1
     fi
 
@@ -663,7 +663,7 @@ PYEOF
 
 # Branches inside src/aipass/
 bootstrap_branch "drone"    "$SCRIPT_DIR/src/aipass/drone" "specialist" "Command routing and module discovery"
-bootstrap_branch "seedgo"   "$SCRIPT_DIR/src/aipass/seedgo" "specialist" "Standards enforcement and code auditing"
+bootstrap_branch "sentry"   "$SCRIPT_DIR/src/aipass/sentry" "specialist" "Standards enforcement and code auditing"
 bootstrap_branch "prax"     "$SCRIPT_DIR/src/aipass/prax" "specialist" "Logging and monitoring system"
 bootstrap_branch "cli"      "$SCRIPT_DIR/src/aipass/cli" "specialist" "Display formatting service"
 bootstrap_branch "flow"     "$SCRIPT_DIR/src/aipass/flow" "specialist" "Workflow and plan management"
@@ -1073,7 +1073,7 @@ if [ "$FAIL" -eq 0 ]; then
     else
         echo "drone is available via ~/.local/bin symlink (on PATH)."
     fi
-    echo "seedgo is accessed via: drone @seedgo"
+    echo "sentry is accessed via: drone @sentry"
     echo "No venv activation needed for CLI commands."
     echo ""
     echo "CLI integrations:"

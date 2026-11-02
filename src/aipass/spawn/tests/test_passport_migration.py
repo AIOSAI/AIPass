@@ -3,14 +3,14 @@
 # Description: DPLAN-0319 — passport 2.0 fleet migration: order, drops, lanes, idempotency
 # Version: 1.0.2
 # Created: 2026-08-28
-# Modified: 2026-10-31
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/passport_migration.py's fleet-wide passport 2.0 migration (DPLAN-0319 deliverable 3)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that passport_migration.py and migrate_passports.py parse and import
-# seedgo: no-test-needed(documentation) — docstrings on migrate_document, migrate_fleet, and discover_passports
+# sentry: no-test-needed(ruff) — that passport_migration.py and migrate_passports.py parse and import
+# sentry: no-test-needed(documentation) — docstrings on migrate_document, migrate_fleet, and discover_passports
 
 import json
 import os

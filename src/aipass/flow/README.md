@@ -122,7 +122,7 @@ Read the one that broke.
 Current state is never written down here; it is produced on demand.
 `drone @flow templates` lists the registered types, `drone @flow registry
 status` reports registry health, `drone @flow list all` counts the plans, and
-`drone @seedgo audit aipass @flow` scores the code.
+`drone @sentry audit aipass @flow` scores the code.
 
 ---
 

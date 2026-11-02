@@ -3,15 +3,15 @@
 # Description: Tests for ignore/patterns.py: matching, seed template, *.tmp floor, cleanup
 # Version: 1.3.7
 # Created: 2026-06-12
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for src/aipass/backup/apps/handlers/ignore/patterns.py: matching, seed template, *.tmp floor, cleanup."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that all ignore and scan files parse and import
-# seedgo: no-test-needed(documentation) — handler docstrings and function docs
-# seedgo: no-test-needed(constant) — project/config.py's DEFAULTS: create_backup_dir writes them, no assert reads it
+# sentry: no-test-needed(ruff) — that all ignore and scan files parse and import
+# sentry: no-test-needed(documentation) — handler docstrings and function docs
+# sentry: no-test-needed(constant) — project/config.py's DEFAULTS: create_backup_dir writes them, no assert reads it
 
 import os
 from pathlib import Path

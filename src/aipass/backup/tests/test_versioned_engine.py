@@ -3,16 +3,16 @@
 # Description: Tests for versioned engine — baseline, diff, skip, never-delete, restore
 # Version: 2.1.1
 # Created: 2026-06-12
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/copy/versioned.py and the restore route in apps/modules/restore.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every file under apps/handlers/copy, diff and path parses and imports
-# seedgo: no-test-needed(documentation) — that the public handler and module functions carry docstrings
-# seedgo: no-test-needed(constant) — BACKUP_DIR's ".backup" text and the store's "versioned" directory name
-# seedgo: no-test-needed(generated) — the dates _make_baseline_name and _copy_changed_file stamp into file names
+# sentry: no-test-needed(ruff) — that every file under apps/handlers/copy, diff and path parses and imports
+# sentry: no-test-needed(documentation) — that the public handler and module functions carry docstrings
+# sentry: no-test-needed(constant) — BACKUP_DIR's ".backup" text and the store's "versioned" directory name
+# sentry: no-test-needed(generated) — the dates _make_baseline_name and _copy_changed_file stamp into file names
 
 import os
 import tempfile

@@ -3,13 +3,13 @@
 # Description: Tests for FPLAN-0190 Task B — manual wake blocklist
 # Version: 1.0.3
 # Created: 2026-04-20
-# Modified: 2026-10-25
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py -- manual wake blocklist (FPLAN-0190 Task B)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — DAEMON_SESSION_PREFIX, unrelated to the blocklist
+# sentry: no-test-needed(constant) — DAEMON_SESSION_PREFIX, unrelated to the blocklist
 
 from contextlib import ExitStack
 from unittest.mock import MagicMock, patch

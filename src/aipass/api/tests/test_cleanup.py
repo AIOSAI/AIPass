@@ -3,14 +3,14 @@
 # Description: Tests for usage data cleanup handler
 # Version: 1.0.1
 # Created: 2026-05-12
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/usage/cleanup.py, the usage data retention handler."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — DEFAULT_RETENTION_DAYS's value; the retention tests pass retention_days
-# seedgo: no-test-needed(json_handler) — the json_handler.log_operation() audit line cleanup writes
+# sentry: no-test-needed(constant) — DEFAULT_RETENTION_DAYS's value; the retention tests pass retention_days
+# sentry: no-test-needed(json_handler) — the json_handler.log_operation() audit line cleanup writes
 
 import json
 from datetime import datetime, timedelta
@@ -19,7 +19,7 @@ import pytest
 
 # _write_json by name: its mkdir and failure paths are unreachable through
 # cleanup_old_data, which only writes a store it has just parsed (line bypass).
-from aipass.api.apps.handlers.usage.cleanup import (  # seedgo test_coverage detection
+from aipass.api.apps.handlers.usage.cleanup import (  # sentry test_coverage detection
     _write_json,
     cleanup_old_data,
 )

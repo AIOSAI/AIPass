@@ -40,7 +40,7 @@ Audit Plans (APLANs) are **living documents** -- track ongoing health, issues, i
 | **Last verified** | {today} |
 | **Open items** | 0 |
 | **Tests** | 0 pass, 0 fail |
-| **Seedgo** | 0% with bypasses / 0% without (publish BOTH -- one number is how a branch lies about itself) |
+| **Sentry** | 0% with bypasses / 0% without (publish BOTH -- one number is how a branch lies about itself) |
 | **Bypass entries** | 0 total: 0 live / 0 dead (last measured: date) |
 | **CLI score** | Nav 0/5, Output 0/5 |
 
@@ -94,7 +94,7 @@ Items captured in other DPLANs or FPLANs.
 - **Related DPLANs:** None yet
 - **Related FPLANs:** None yet
 - **Owner branch:** @{tag}
-- **Seedgo:** `drone @seedgo audit aipass @{tag}`
+- **Sentry:** `drone @sentry audit aipass @{tag}`
 
 ## Notes
 Session notes, discoveries, changes. Stamp each entry: session number + date.

@@ -37,7 +37,7 @@ Provider settings are protected files (`modules/protected_paths.py`, enforced by
 | UserPromptSubmit | presence_gate, persistent_alert, identity, email, branch_loader, tier0_kernel, navmap, compass_recall, feedback_pulse, context_gauge, temporal, auto_process, user_message_relay | Presence gate + alerts + prompt injection + inbox + governance recall + feedback + context gauge + temporal + auto-process + TG mirror |
 | PreToolUse | tool_sound, edit_gate, git_gate, rm_gate, testwrite_gate, registry_gate | Security gates + guardrails + sound. `edit_gate` reads Bash too (the scripted cross-project lane — see [bash_writes.md](bash_writes.md)) |
 | PostToolUse | auto_fix, post_compact_regrounding | Diagnostics + post-compaction re-ground backstop |
-| SubagentStop | subagent_gate | Seedgo validation |
+| SubagentStop | subagent_gate | Sentry validation |
 | Stop | stop_sound, telegram_response, presence_release | Bell + Telegram delivery + presence release |
 | Notification | announce | Announcement tone |
 | SessionStart | cadence_reset | Cadence reset on new chat / clear |

@@ -3,7 +3,7 @@
 # Description: Surfacing governance module — public API
 # Version: 1.1.0
 # Created: 2026-07-16
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -35,7 +35,7 @@ __all__ = ["should_surface", "record_message", "new_state", "DEFAULT_CONFIG"]
 
 
 def print_introspection() -> None:
-    """Display module introspection (seedgo standard)."""
+    """Display module introspection (sentry standard)."""
     from aipass.cli.apps.modules import console
 
     console.print()

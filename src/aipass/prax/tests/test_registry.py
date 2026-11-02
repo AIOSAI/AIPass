@@ -3,13 +3,13 @@
 # Description: Tests for registry load and save handlers
 # Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/registry/load.py and apps/handlers/registry/save.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(error_handling) — _atomic_write's warning when the temp file cleanup fails, covered by that row
+# sentry: no-test-needed(error_handling) — _atomic_write's warning when the temp file cleanup fails, covered by that row
 
 import json
 from datetime import timedelta

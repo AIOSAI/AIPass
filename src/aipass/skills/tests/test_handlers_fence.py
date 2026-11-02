@@ -3,7 +3,7 @@
 # Description: The handlers fence: a foreign importer is refused, kin and the modules door pass (DPLAN-0404)
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/__init__.py, the fence, in a fresh interpreter per case."""
@@ -11,7 +11,7 @@
 # The refusal banner's prose beyond the caller line is not asserted.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/handlers/__init__.py parses and imports
+# sentry: no-test-needed(ruff) — that apps/handlers/__init__.py parses and imports
 
 import shutil
 import subprocess

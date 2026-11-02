@@ -3,13 +3,13 @@
 # Description: The git read doors and their --json, remote, gh tiers, merge-main, the read twins and lock
 # Version: 1.0.8
 # Created: 2026-08-18
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/git_module.py's --json on status/log/show and apps/handlers/git/remote_handler.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — json.dumps' own encoding of the documents
+# sentry: no-test-needed(stdlib) — json.dumps' own encoding of the documents
 
 from __future__ import annotations
 

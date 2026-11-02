@@ -3,14 +3,14 @@
 # Description: The job-authoring reference printed by drone @daemon run --help
 # Version: 1.1.0
 # Created: 2026-09-11
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """The job-authoring reference that ``drone @daemon run --help`` prints: schema, schedule
 types, command jobs, optional fields, and the recovery lane.
 
 Data, not behaviour. It lives here rather than inline in ``apps/modules/run.py`` because
-it is 79 lines of static text, and run.py is held under seedgo's 600-line module cap
+it is 79 lines of static text, and run.py is held under sentry's 600-line module cap
 (DPLAN-0338 wave 1a pushed it to 647). The module still does the printing; a handler
 may not. Each entry is one ``console.print`` argument: Rich markup, and "" for a blank line.
 """

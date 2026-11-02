@@ -3,14 +3,14 @@
 # Description: Integration test for full skill lifecycle
 # Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # Category: skills/tests
 # =============================================
 
 """Tests for apps/modules/creator.py, discovery.py and runner.py: create -> discover -> load -> run."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every file under apps/modules and apps/handlers parses and imports
+# sentry: no-test-needed(ruff) — that every file under apps/modules and apps/handlers parses and imports
 
 import shutil
 import tempfile

@@ -4,15 +4,15 @@
 # Description: Tests for tool_sound notification handler
 # Branch: hooks
 # Created: 2026-05-19
-# Modified: 2026-09-27
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/notification/tool_sound.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that tool_sound.py parses and imports, ruff and collection cover it
-# seedgo: no-test-needed(documentation) — handle()'s docstring, the documentation standard covers it
-# seedgo: no-test-needed(generated) — the spoken audio; handle() only returns the text, the TTS layer renders it
+# sentry: no-test-needed(ruff) — that tool_sound.py parses and imports, ruff and collection cover it
+# sentry: no-test-needed(documentation) — handle()'s docstring, the documentation standard covers it
+# sentry: no-test-needed(generated) — the spoken audio; handle() only returns the text, the TTS layer renders it
 
 from aipass.hooks.apps.handlers.notification.tool_sound import handle
 

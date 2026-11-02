@@ -3,13 +3,13 @@
 # Description: Unit tests for medic_state handler — real file I/O via tmp_path
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for the medic_state handler (apps/handlers/medic_state.py)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(behaviour) — the command surface in apps/modules/medic.py; the medic tests cover it
+# sentry: no-test-needed(behaviour) — the command surface in apps/modules/medic.py; the medic tests cover it
 
 import json
 from datetime import datetime, timedelta
@@ -972,10 +972,10 @@ class TestLegacyPathMigration:
         legacy.parent.mkdir(parents=True, exist_ok=True)
         legacy.write_text(json.dumps({"config": {"muted_branches": []}}), encoding="utf-8")
 
-        assert state_mod.mute_branch("@seedgo") is True
+        assert state_mod.mute_branch("@sentry") is True
 
         data = json.loads(state_mod.MEDIC_STATE_FILE.read_text(encoding="utf-8"))
-        assert [e["name"] for e in data["config"]["muted_branches"]] == ["seedgo"]
+        assert [e["name"] for e in data["config"]["muted_branches"]] == ["sentry"]
         assert not legacy.exists()
 
 
@@ -1002,7 +1002,7 @@ class TestARefusedReadDoesNotBlankTheState:
 
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr(state_mod, "MEDIC_STATE_FILE", _RefusedOnce(state_file))
-            state_mod.mute_branch("seedgo")
+            state_mod.mute_branch("sentry")
 
         assert seen, "fixture refused nothing — test is vacuous"
-        assert sorted(state_mod.get_muted_branches()) == ["flow", "seedgo"]
+        assert sorted(state_mod.get_muted_branches()) == ["flow", "sentry"]

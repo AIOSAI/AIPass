@@ -3,13 +3,13 @@
 # Description: Tests for email error dispatch handler
 # Version: 1.0.2
 # Created: 2026-04-25
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/email/error_dispatch.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(json_handler) — json_handler.log_operation's exact call args here
+# sentry: no-test-needed(json_handler) — json_handler.log_operation's exact call args here
 
 import pytest
 from unittest.mock import patch, MagicMock

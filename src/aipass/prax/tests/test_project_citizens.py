@@ -3,7 +3,7 @@
 # Description: projects/* citizens resolve by registry and passport, not path shape
 # Version: 1.1.0
 # Created: 2026-08-14
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_detector.py."""
@@ -12,11 +12,11 @@
 # by the path-segment fallback. Each test builds its own temp repo, never the live tree.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — detect_from_log, covered by tests/test_monitoring_handlers.py
-# seedgo: no-test-needed(through_the_command) — get_detector, covered by tests/test_monitoring_handlers.py
-# seedgo: no-test-needed(through_the_command) — detect_branch_from_path, covered by tests/test_monitoring_handlers.py
-# seedgo: no-test-needed(through_the_command) — detect_branch_from_log, covered by tests/test_monitoring_handlers.py
-# seedgo: no-test-needed(json_structure) — __init__'s log_operation("branch_detected") record, covered by that row
+# sentry: no-test-needed(through_the_command) — detect_from_log, covered by tests/test_monitoring_handlers.py
+# sentry: no-test-needed(through_the_command) — get_detector, covered by tests/test_monitoring_handlers.py
+# sentry: no-test-needed(through_the_command) — detect_branch_from_path, covered by tests/test_monitoring_handlers.py
+# sentry: no-test-needed(through_the_command) — detect_branch_from_log, covered by tests/test_monitoring_handlers.py
+# sentry: no-test-needed(json_structure) — __init__'s log_operation("branch_detected") record, covered by that row
 
 import json
 from pathlib import Path

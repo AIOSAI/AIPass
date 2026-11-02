@@ -3,16 +3,16 @@
 # Description: Tests for rollover trigger detection handler
 # Version: 1.3.1
 # Created: 2026-03-24
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/monitor/detector.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — resident tier, read_scope() externals: tests/test_residency_scope.py
-# seedgo: no-test-needed(covered_elsewhere) — _find_repo_root() -> find_repo_root, pinned in tests/test_repo_root.py
-# seedgo: no-test-needed(covered_elsewhere) — detector/extractor boundary sweep: tests/test_trinity_standard.py
-# seedgo: no-test-needed(external) — get_system_logger from @prax; the autouse fixture replaces logger
+# sentry: no-test-needed(covered_elsewhere) — resident tier, read_scope() externals: tests/test_residency_scope.py
+# sentry: no-test-needed(covered_elsewhere) — _find_repo_root() -> find_repo_root, pinned in tests/test_repo_root.py
+# sentry: no-test-needed(covered_elsewhere) — detector/extractor boundary sweep: tests/test_trinity_standard.py
+# sentry: no-test-needed(external) — get_system_logger from @prax; the autouse fixture replaces logger
 
 import json
 import logging
@@ -146,7 +146,7 @@ class TestCheckSingleFile:
 
     def test_file_under_threshold_no_rollover(self, tmp_path: Path, monkeypatch):
         """A small file with entries under v2 limits should not trigger rollover."""
-        mem_file = tmp_path / "SEEDGO.observations.json"
+        mem_file = tmp_path / "SENTRY.observations.json"
         data = {
             "document_metadata": {"schema_version": "3.0.0"},
             "observations": [],
@@ -157,7 +157,7 @@ class TestCheckSingleFile:
         monkeypatch.setattr(
             detector.config_loader,
             "section",
-            lambda name: {"per_branch": {"seedgo": {"observations": {"observations": {"count": 10}}}}, "defaults": {}},
+            lambda name: {"per_branch": {"sentry": {"observations": {"observations": {"count": 10}}}}, "defaults": {}},
         )
 
         result = detector.check_single_file(mem_file)
@@ -167,7 +167,7 @@ class TestCheckSingleFile:
 
     def test_file_over_threshold_triggers_rollover(self, tmp_path: Path, monkeypatch):
         """A file exceeding v2 entry-count limits should trigger rollover."""
-        mem_file = tmp_path / "SEEDGO.local.json"
+        mem_file = tmp_path / "SENTRY.local.json"
         data = {
             "document_metadata": {"schema_version": "3.0.0"},
             "sessions": [{"id": f"s{i}", "notes": "padding"} for i in range(50)],
@@ -178,7 +178,7 @@ class TestCheckSingleFile:
         monkeypatch.setattr(
             detector.config_loader,
             "section",
-            lambda name: {"per_branch": {"seedgo": {"local": {"sessions": {"count": 10}}}}, "defaults": {}},
+            lambda name: {"per_branch": {"sentry": {"local": {"sessions": {"count": 10}}}}, "defaults": {}},
         )
 
         result = detector.check_single_file(mem_file)

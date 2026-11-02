@@ -3,13 +3,13 @@
 # Description: Tests for module and command discovery
 # Version: 1.1.1
 # Created: 2026-03-14
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/discovery.py and the discovery and module registry handlers it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module under test parses and imports
+# sentry: no-test-needed(ruff) — that the module under test parses and imports
 
 import subprocess
 import sys

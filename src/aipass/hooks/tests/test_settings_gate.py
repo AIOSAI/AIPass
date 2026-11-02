@@ -1,19 +1,19 @@
 # =================== AIPass ====================
 # Name: test_settings_gate.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Description: Tests for the provider-settings gate: the decision table, the paths, the Bash shapes, the installers
 # Branch: hooks
 # Layer: tests
 # Created: 2026-10-25
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/security/settings_gate.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that handlers/security/settings_gate.py parses and imports
-# seedgo: no-test-needed(constant) — the ASK / DENY_* wording beyond the file, the kind and the @devpulse door
-# seedgo: no-test-needed(documentation) — the module docstring's account of why Codex and OpenCode are deny-only
+# sentry: no-test-needed(ruff) — that handlers/security/settings_gate.py parses and imports
+# sentry: no-test-needed(constant) — the ASK / DENY_* wording beyond the file, the kind and the @devpulse door
+# sentry: no-test-needed(documentation) — the module docstring's account of why Codex and OpenCode are deny-only
 
 import json
 import os
@@ -267,6 +267,19 @@ class TestDirectories:
 
     def test_listing_a_settings_directory_is_untouched(self, seat):
         assert _decision(_bash(seat, "ls ~/.codex ~/.claude", provider="codex")) == "allow"
+
+    def test_a_settings_directory_named_in_an_interpreters_own_text_is_not_a_settings_write(self, seat):
+        # 2026-11-01: a python heredoc editing a plan whose prose said "~/.claude or ~/.codex" asked the owner.
+        command = (
+            "python3 - plan.md <<'EOF'\nimport sys\nt = open(sys.argv[1]).read()\n"
+            "t += 'under ~/.claude or ~/.codex'\nopen(sys.argv[1], 'w').write(t)\nEOF"
+        )
+        assert _decision(_bash(seat, command)) == "allow"
+        assert _decision(_bash(seat, command, provider="codex")) == "allow"
+
+    def test_a_settings_file_named_in_an_interpreters_own_text_still_asks(self, seat):
+        command = "python3 - <<'EOF'\nopen('~/.codex/config.toml', 'a').write('x')\nEOF"
+        assert _decision(_bash(seat, command)) == "ask"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")

@@ -3,13 +3,13 @@
 # Description: Unit tests for monitoring_filters.py
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/monitoring_filters.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — the HIGHLIGHT_PATTERNS entries beyond those the get_priority() tests sample
+# sentry: no-test-needed(constant) — the HIGHLIGHT_PATTERNS entries beyond those the get_priority() tests sample
 
 from aipass.prax.apps.handlers.monitoring.monitoring_filters import (
     get_priority,

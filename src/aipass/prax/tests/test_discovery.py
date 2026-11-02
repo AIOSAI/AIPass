@@ -3,13 +3,13 @@
 # Description: Unit tests for discovery handlers
 # Version: 1.2.0
 # Created: 2026-03-29
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/discovery/filtering.py, scanner.py, scan.py and apps/modules/discover.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — start_file_watcher, stop_file_watcher, covered by tests/test_watcher.py
+# sentry: no-test-needed(through_the_command) — start_file_watcher, stop_file_watcher, covered by tests/test_watcher.py
 
 from pathlib import Path
 from unittest.mock import MagicMock

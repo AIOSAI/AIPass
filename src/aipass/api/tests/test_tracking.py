@@ -3,14 +3,14 @@
 # Description: Tests for usage tracking handler
 # Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/usage/tracking.py, the usage tracking handler."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — the live OpenRouter generation endpoint; urlopen is mocked, no network
-# seedgo: no-test-needed(constant) — DEFAULT_REQUEST_TIMEOUT's value
+# sentry: no-test-needed(external) — the live OpenRouter generation endpoint; urlopen is mocked, no network
+# sentry: no-test-needed(constant) — DEFAULT_REQUEST_TIMEOUT's value
 
 import json
 from datetime import datetime

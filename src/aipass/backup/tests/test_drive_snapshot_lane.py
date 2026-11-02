@@ -3,7 +3,7 @@
 # Description: Tests for the Drive lane's source store, tracker lane stamp, never-leaves floor, Drive headroom and network loss
 # Version: 1.3.0
 # Created: 2026-10-16
-# Modified: 2026-10-31
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/drive_sync.py: the snapshot store it uploads, the tracker lane, the floor and the headroom."""
@@ -14,7 +14,7 @@
 # answers for it, and what is refused on the way out -- read as one unit here.
 #
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — the literal string of SET_ASIDE_FILENAME, read by name below
+# sentry: no-test-needed(constant) — the literal string of SET_ASIDE_FILENAME, read by name below
 
 from __future__ import annotations
 

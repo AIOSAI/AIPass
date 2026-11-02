@@ -3,14 +3,14 @@
 # Description: Unit tests for apps/modules/list_plans.py
 # Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/list_plans.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that list_plans.py parses and imports
-# seedgo: no-test-needed(constant) — print_introspection's and print_help's literal banner text
+# sentry: no-test-needed(ruff) — that list_plans.py parses and imports
+# sentry: no-test-needed(constant) — print_introspection's and print_help's literal banner text
 
 import pytest
 from unittest.mock import patch

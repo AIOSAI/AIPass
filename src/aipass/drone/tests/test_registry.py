@@ -3,13 +3,13 @@
 # Description: Tests for the registry module orchestrator
 # Version: 1.0.3
 # Created: 2026-04-26
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/registry.py: introspection, help, and the load, branches and lookup commands."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module under test parses and imports
+# sentry: no-test-needed(ruff) — that the module under test parses and imports
 
 from unittest.mock import patch
 
@@ -101,7 +101,7 @@ class TestHandleCommandLoad:
     def test_load_success(self) -> None:
         """load logs the branch count it read; mutant killed: the count logged as 0."""
 
-        mock_registry = {"branches": {"drone": {}, "seedgo": {}}}
+        mock_registry = {"branches": {"drone": {}, "sentry": {}}}
         with patch(f"{_REG}.load_registry", return_value=mock_registry), patch(f"{_REG}.logger") as log:
             result = handle_command("load", [])
         assert result is True
@@ -122,7 +122,7 @@ class TestHandleCommandBranches:
     def test_branches_no_filter(self) -> None:
         """branches with no args lists all branches."""
 
-        mock_branches = [{"name": "drone"}, {"name": "seedgo"}]
+        mock_branches = [{"name": "drone"}, {"name": "sentry"}]
         with patch(f"{_REG}.get_all_branches", return_value=mock_branches) as mock_gab:
             result = handle_command("branches", [])
         assert result is True
@@ -156,14 +156,14 @@ class TestHandleCommandLookup:
         log.info.assert_called_once_with("Branch: %s", mock_branch)
 
     def test_lookup_takes_an_at_name(self) -> None:
-        """``registry lookup @seedgo`` looks up seedgo, as every other @name in drone does."""
+        """``registry lookup @sentry`` looks up sentry, as every other @name in drone does."""
 
         def by_name(name: str) -> dict | None:
-            return {"name": "seedgo"} if name == "seedgo" else None
+            return {"name": "sentry"} if name == "sentry" else None
 
         with patch(f"{_REG}.get_branch_by_name", side_effect=by_name) as lookup:
-            assert handle_command("lookup", ["@seedgo"]) is True
-        lookup.assert_called_once_with("seedgo")
+            assert handle_command("lookup", ["@sentry"]) is True
+        lookup.assert_called_once_with("sentry")
 
     def test_lookup_not_found(self) -> None:
         """lookup with missing branch returns False."""

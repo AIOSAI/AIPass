@@ -3,14 +3,14 @@
 # Description: Tests for the drone-broker daemon, identity, and allowlist
 # Version: 2.0.9
 # Created: 2026-06-09
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/broker/daemon.py, its path resolver, protocol, client and rm routing."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — rm's direct (non-broker) delete lane, pinned in tests/test_rm.py
-# seedgo: no-test-needed(external) — the kernel's openat2 RESOLVE_BENEATH itself; the resolver's use of it is pinned
+# sentry: no-test-needed(covered_elsewhere) — rm's direct (non-broker) delete lane, pinned in tests/test_rm.py
+# sentry: no-test-needed(external) — the kernel's openat2 RESOLVE_BENEATH itself; the resolver's use of it is pinned
 
 from __future__ import annotations
 

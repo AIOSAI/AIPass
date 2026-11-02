@@ -3,7 +3,7 @@
 # Description: Shared template content generators for project scaffolding
 # Version: 1.6.2
 # Created: 2026-04-22
-# Modified: 2026-11-01
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -44,7 +44,7 @@ def readme_md(name: str) -> str:
         "claude  # or your preferred AI CLI\n"
         "\n"
         "# 3. Check project health\n"
-        "drone @seedgo audit .\n"
+        "drone @sentry audit .\n"
         "```\n"
         "\n"
         "## Project Structure\n"
@@ -75,7 +75,7 @@ def readme_md(name: str) -> str:
         "|---------|-------------|\n"
         "| `aipass init agent <name>` | Create a new agent |\n"
         "| `drone @spawn create <name>` | Create agent (alternative) |\n"
-        "| `drone @seedgo audit <project>` | Run standards audit |\n"
+        "| `drone @sentry audit <project>` | Run standards audit |\n"
         "| `drone @ai_mail inbox` | Check agent mailbox |\n"
         "| `drone systems` | List infrastructure |\n"
         "\n"
@@ -121,7 +121,7 @@ def agents_md(name: str) -> str:
         "or `$memo` (Codex).\n"
         "\n"
         "Todos[] are a sticky-note pad, not a log: 10 live, each `{number, date, task, priority?}`, "
-        'the task one line under 100 chars ("Check on seedgo\'s errors in logs"), no `status` '
+        'the task one line under 100 chars ("Check on sentry\'s errors in logs"), no `status` '
         "field — the story lives in plans and sessions. **Delete each todo the moment it's done.** "
         "The oldest roll off by number to your backlog at rollover (PreCompact) and at @memory's "
         "push; `drone @memory todo backlog` reads them, `todo restore <n>` brings one back. Rolling "
@@ -169,8 +169,8 @@ def global_prompt_md(name: str) -> str:
         "\n"
         "### Standards\n"
         "```\n"
-        "drone @seedgo audit <project>      # Run full standards audit\n"
-        "drone @seedgo checklist <file>     # Check a single file\n"
+        "drone @sentry audit <project>      # Run full standards audit\n"
+        "drone @sentry checklist <file>     # Check a single file\n"
         "```\n"
         "\n"
         "### Dispatch — Send Task + Wake an Agent (DEFAULT)\n"
@@ -235,7 +235,7 @@ def global_prompt_md(name: str) -> str:
         "## Patterns\n"
         "\n"
         "- **Communication** — agents communicate via `.ai_mail.local/`.\n"
-        "- **Standards** — run `drone @seedgo audit` to check compliance.\n"
+        "- **Standards** — run `drone @sentry audit` to check compliance.\n"
         "- **Identity** — agents have `.trinity/passport.json`. "
         "Projects use the registry.\n"
         "- **Memory** — update `.trinity/local.json` at session end. "
@@ -274,7 +274,7 @@ def gitignore() -> str:
         "*_ROOTS.json\n"
         ".*_REGISTRY.lock\n"
         "**/.daemon/last_wake_prompt.txt\n"
-        "**/.seedgo/ratchet/\n"
+        "**/.sentry/ratchet/\n"
         "system_logs/\n"
         "logs/\n"
         "\n"
@@ -389,7 +389,7 @@ def navmap_md(name: str, citizens: list[tuple[str, str]]) -> str:
         'drone @ai_mail dispatch @target "Subject" "Body"   # send + wake\n'
         "drone @ai_mail inbox                               # check mail\n"
         'drone @flow create . "Subject"                     # new plan\n'
-        "drone @seedgo checklist <file|dir>                 # standards check\n"
+        "drone @sentry checklist <file|dir>                 # standards check\n"
         "```\n"
     )
 

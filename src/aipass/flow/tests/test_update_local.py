@@ -3,13 +3,13 @@
 # Description: Tests for update_local handler — Flow dashboard updates
 # Version: 2.0.0
 # Created: 2026-04-26
-# Modified: 2026-09-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/dashboard/update_local.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that update_local.py parses and imports
+# sentry: no-test-needed(ruff) — that update_local.py parses and imports
 
 import json
 from pathlib import Path

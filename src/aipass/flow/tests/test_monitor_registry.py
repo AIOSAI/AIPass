@@ -3,13 +3,13 @@
 # Description: Tests for monitor_ops handler and registry_monitor module
 # Version: 2.1.0
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/registry/monitor_ops.py and apps/modules/registry_monitor.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that monitor_ops.py and registry_monitor.py parse and import
+# sentry: no-test-needed(ruff) — that monitor_ops.py and registry_monitor.py parse and import
 
 import os
 from pathlib import Path

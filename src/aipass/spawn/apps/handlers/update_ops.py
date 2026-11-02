@@ -3,7 +3,7 @@
 # Description: Update handler — path-based template sync engine (P1 rewrite, TDPLAN-0006)
 # Version: 2.6.0
 # Created: 2026-03-07
-# Modified: 2026-10-27
+# Modified: 2026-11-02
 # =============================================
 
 """Update handler — path-based template sync engine.
@@ -39,7 +39,7 @@ _NEVER_UPDATE_FILES = frozenset(
     {
         "DASHBOARD.local.json",
         "artifacts/birth_certificate.json",
-        ".seedgo/bypass.json",
+        ".sentry/bypass.json",
         # The .py skip only covers existing files; a deleted scaffold test must not come back.
         "tests/test_scaffold.py",
     }

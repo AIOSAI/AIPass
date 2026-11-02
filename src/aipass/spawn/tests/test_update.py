@@ -3,14 +3,14 @@
 # Description: Tests for spawn update orchestrator
 # Version: 1.3.0
 # Created: 2026-03-07
-# Modified: 2026-10-27
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/update_ops.py — the spawn update orchestrator."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that update_ops.py, update_ignore.py, and modules/update.py parse and import cleanly
-# seedgo: no-test-needed(documentation) — that the public functions in those modules carry docstrings
+# sentry: no-test-needed(ruff) — that update_ops.py, update_ignore.py, and modules/update.py parse and import cleanly
+# sentry: no-test-needed(documentation) — that the public functions in those modules carry docstrings
 
 import json
 from unittest.mock import patch

@@ -3,14 +3,14 @@
 # Description: Tests for regenerate_registry_ops handler
 # Version: 1.0.4
 # Created: 2026-04-03
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/regenerate_registry_ops.py and apps/modules/regenerate_registry.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that regenerate_registry_ops.py and regenerate_registry.py parse and import
-# seedgo: no-test-needed(documentation) — docstrings on the scan/regenerate helper functions
+# sentry: no-test-needed(ruff) — that regenerate_registry_ops.py and regenerate_registry.py parse and import
+# sentry: no-test-needed(documentation) — docstrings on the scan/regenerate helper functions
 
 import json
 from datetime import date

@@ -3,13 +3,13 @@
 # Description: Tests for central_writer -- branch inbox aggregation and central file writing
 # Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/central_writer.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — OSError handling around a disk write failure in json_handler
+# sentry: no-test-needed(stdlib) — OSError handling around a disk write failure in json_handler
 
 import json
 import pytest
@@ -34,8 +34,8 @@ def _suppress_logger(monkeypatch):
 
 def test_extract_branch_name_standard_path(tmp_path):
     """Standard .ai_mail.local path extracts uppercase branch name."""
-    inbox = tmp_path / "repo" / "src" / "aipass" / "seedgo" / ".ai_mail.local" / "inbox.json"
-    assert mod.extract_branch_name(inbox) == "SEEDGO"
+    inbox = tmp_path / "repo" / "src" / "aipass" / "sentry" / ".ai_mail.local" / "inbox.json"
+    assert mod.extract_branch_name(inbox) == "SENTRY"
 
 
 def test_extract_branch_name_nested_path(tmp_path):
@@ -77,7 +77,7 @@ def test_read_inbox_stats_partial_fields(tmp_path):
 def test_calculate_system_totals_multiple_branches():
     """Correct sums across multiple branches."""
     branch_stats = {
-        "SEEDGO": {"unread": 5, "total": 8},
+        "SENTRY": {"unread": 5, "total": 8},
         "DRONE": {"unread": 2, "total": 3},
         "PRAX": {"unread": 0, "total": 4},
     }
@@ -93,7 +93,7 @@ def test_calculate_system_totals_empty_dict():
 
 def test_build_central_data_has_required_keys():
     """Output contains service, last_updated, branch_stats, system_totals."""
-    branch_stats = {"SEEDGO": {"unread": 1, "total": 2}}
+    branch_stats = {"SENTRY": {"unread": 1, "total": 2}}
     result = mod.build_central_data(branch_stats)
     assert set(result.keys()) == {"service", "last_updated", "branch_stats", "system_totals"}
 
@@ -133,15 +133,15 @@ def _inbox(branch_dir: Path) -> Path:
 def test_find_all_inbox_files_follows_registry_order(tmp_path):
     """One inbox per registry row, in the order the registry lists them."""
     drone = _inbox(tmp_path / "elsewhere" / "drone")
-    seedgo = _inbox(mod.BRANCH_REGISTRY.parent / "src" / "aipass" / "seedgo")
+    sentry = _inbox(mod.BRANCH_REGISTRY.parent / "src" / "aipass" / "sentry")
     _registry(
         [
-            {"name": "SEEDGO", "path": "src/aipass/seedgo"},
+            {"name": "SENTRY", "path": "src/aipass/sentry"},
             {"name": "DRONE", "path": str(drone.parent.parent)},
         ]
     )
 
-    assert mod.find_all_inbox_files() == [seedgo, drone]
+    assert mod.find_all_inbox_files() == [sentry, drone]
 
 
 def test_find_all_inbox_files_roots_a_relative_path_at_the_repo_root(tmp_path, monkeypatch):
@@ -172,7 +172,7 @@ def test_find_all_inbox_files_skips_a_branch_without_an_inbox():
 
 def test_find_all_inbox_files_refuses_an_unreadable_registry():
     """An unreadable registry raises; it never reads as a fleet with no inboxes."""
-    _inbox(mod.BRANCH_REGISTRY.parent / "seedgo")
+    _inbox(mod.BRANCH_REGISTRY.parent / "sentry")
     mod.BRANCH_REGISTRY.write_text("{not json", encoding="utf-8")
 
     with pytest.raises(RegistryUnreadable):
@@ -186,18 +186,18 @@ def test_get_valid_branch_names_reads_the_registry_rows_uppercased(tmp_path):
     registry = tmp_path / "central_sandbox" / "AIPASS_REGISTRY.json"
     registry.parent.mkdir(parents=True)
     registry.write_text(
-        json.dumps({"branches": [{"name": "seedgo"}, {"name": "Drone"}, {"name": "AI_MAIL"}]}),
+        json.dumps({"branches": [{"name": "sentry"}, {"name": "Drone"}, {"name": "AI_MAIL"}]}),
         encoding="utf-8",
     )
 
-    assert mod.get_valid_branch_names() == {"SEEDGO", "DRONE", "AI_MAIL"}
+    assert mod.get_valid_branch_names() == {"SENTRY", "DRONE", "AI_MAIL"}
 
 
 def test_aggregate_branch_stats_multiple_branches(tmp_path, monkeypatch):
     """Aggregates stats from multiple branches, filtering by registry."""
-    seedgo_mail = tmp_path / "seedgo" / ".ai_mail.local"
-    seedgo_mail.mkdir(parents=True)
-    (seedgo_mail / "inbox.json").write_text(
+    sentry_mail = tmp_path / "sentry" / ".ai_mail.local"
+    sentry_mail.mkdir(parents=True)
+    (sentry_mail / "inbox.json").write_text(
         json.dumps({"unread_count": 2, "total_messages": 5}),
         encoding="utf-8",
     )
@@ -212,17 +212,17 @@ def test_aggregate_branch_stats_multiple_branches(tmp_path, monkeypatch):
     monkeypatch.setattr(
         mod,
         "find_all_inbox_files",
-        lambda: [seedgo_mail / "inbox.json", drone_mail / "inbox.json"],
+        lambda: [sentry_mail / "inbox.json", drone_mail / "inbox.json"],
     )
     monkeypatch.setattr(
         mod,
         "get_valid_branch_names",
-        lambda: {"SEEDGO", "DRONE"},
+        lambda: {"SENTRY", "DRONE"},
     )
 
     result = mod.aggregate_branch_stats()
     assert result == {
-        "SEEDGO": {"unread": 2, "total": 5},
+        "SENTRY": {"unread": 2, "total": 5},
         "DRONE": {"unread": 1, "total": 3},
     }
 
@@ -236,7 +236,7 @@ def test_aggregate_branch_stats_skips_unregistered(tmp_path, monkeypatch):
         encoding="utf-8",
     )
 
-    valid_mail = tmp_path / "seedgo" / ".ai_mail.local"
+    valid_mail = tmp_path / "sentry" / ".ai_mail.local"
     valid_mail.mkdir(parents=True)
     (valid_mail / "inbox.json").write_text(
         json.dumps({"unread_count": 1, "total_messages": 2}),
@@ -251,13 +251,13 @@ def test_aggregate_branch_stats_skips_unregistered(tmp_path, monkeypatch):
     monkeypatch.setattr(
         mod,
         "get_valid_branch_names",
-        lambda: {"SEEDGO"},  # ROGUE not registered
+        lambda: {"SENTRY"},  # ROGUE not registered
     )
 
     result = mod.aggregate_branch_stats()
     assert "ROGUE" not in result
-    assert "SEEDGO" in result
-    assert result["SEEDGO"] == {"unread": 1, "total": 2}
+    assert "SENTRY" in result
+    assert result["SENTRY"] == {"unread": 1, "total": 2}
 
 
 def test_aggregate_branch_stats_skips_malformed_inbox(tmp_path, monkeypatch):
@@ -300,7 +300,7 @@ def test_write_central_file_creates_file(tmp_path, monkeypatch):
     data = {
         "service": "ai_mail",
         "last_updated": "2026-04-03",
-        "branch_stats": {"SEEDGO": {"unread": 1, "total": 2}},
+        "branch_stats": {"SENTRY": {"unread": 1, "total": 2}},
         "system_totals": {"total_unread": 1, "total_messages": 2},
     }
     mod.write_central_file(data)

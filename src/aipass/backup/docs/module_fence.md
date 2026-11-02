@@ -24,7 +24,7 @@ against the process cwd, and a cwd inside this branch would make every bootstrap
 frame look like kin.
 
 The fence fires on the first import in a process only; after that the package is
-served from `sys.modules`. The write-time wall is seedgo's `encapsulation` row.
+served from `sys.modules`. The write-time wall is sentry's `encapsulation` row.
 
 ### The door
 

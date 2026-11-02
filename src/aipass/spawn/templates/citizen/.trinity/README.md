@@ -42,5 +42,5 @@ The canonical shape of every section â€” required fields, ordering, numbering â€
 the trinity standard, and it is what scores these files:
 
 ```
-drone @seedgo standards_query aipass_standards trinity
+drone @sentry standards_query aipass_standards trinity
 ```

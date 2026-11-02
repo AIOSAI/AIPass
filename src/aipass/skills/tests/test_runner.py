@@ -3,14 +3,14 @@
 # Description: Unit tests for skills runner
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # Category: skills/tests
 # =============================================
 
 """Tests for apps/modules/runner.py and the built-in skills it runs (system_status, drone_commands, branch_health, inbox_check)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that runner.py and runner_handler.py parse and import
+# sentry: no-test-needed(ruff) — that runner.py and runner_handler.py parse and import
 
 import os
 import subprocess

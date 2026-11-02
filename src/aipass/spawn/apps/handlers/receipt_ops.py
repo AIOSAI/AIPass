@@ -3,7 +3,7 @@
 # Description: Birth receipt — stamp .trinity/.template_version.json onto a newborn
 # Version: 1.1.1
 # Created: 2026-08-27
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Stamp the trinity template receipt at birth.
@@ -25,7 +25,7 @@ __all__ = [
     "STAMPED_BY_SCAFFOLD",
     "RECEIPT_NAME",
     "gold_template_versions",
-    "seedgo_test_template",
+    "sentry_test_template",
     "write_birth_receipt",
     "write_test_template_receipt",
 ]
@@ -36,12 +36,12 @@ RECEIPT_NAME = ".template_version.json"
 # @memory's sanctioned lane name; their writer refuses anything else.
 STAMPED_BY_BIRTH = "spawn birth"
 
-# Distinct from @seedgo's own "seedgo tests template bump" so a birth stamp reads apart from a fleet bump.
+# Distinct from @sentry's own "sentry tests template bump" so a birth stamp reads apart from a fleet bump.
 STAMPED_BY_SCAFFOLD = "spawn scaffold"
 
 _GOLD_TEMPLATES = {"local": "LOCAL.template.json", "observations": "OBSERVATIONS.template.json"}
 
-# Read @seedgo's own manifest, never a copy of it held here.
+# Read @sentry's own manifest, never a copy of it held here.
 _TEST_TEMPLATE_MANIFEST = "templates.json"
 
 
@@ -50,11 +50,11 @@ def _gold_dir() -> Path:
     return Path(__file__).resolve().parents[3] / "memory" / "templates"
 
 
-def _seedgo_templates_dir() -> Path:
-    """Directory holding @seedgo's gold test template and its manifest.
+def _sentry_templates_dir() -> Path:
+    """Directory holding @sentry's gold test template and its manifest.
 
     Resolved at the call, never at import: importing this module must not touch the filesystem."""
-    return Path(__file__).resolve().parents[3] / "seedgo" / "templates"
+    return Path(__file__).resolve().parents[3] / "sentry" / "templates"
 
 
 def gold_template_versions() -> dict:
@@ -78,11 +78,11 @@ def gold_template_versions() -> dict:
     return versions
 
 
-def seedgo_test_template() -> tuple:
-    """Read @seedgo's gold test template manifest as (versions, [(source_path, distributed_name)]).
+def sentry_test_template() -> tuple:
+    """Read @sentry's gold test template manifest as (versions, [(source_path, distributed_name)]).
 
     All or nothing: raises ValueError on any unreadable part rather than return a half-read manifest."""
-    gold_dir = _seedgo_templates_dir()
+    gold_dir = _sentry_templates_dir()
     manifest_path = gold_dir / _TEST_TEMPLATE_MANIFEST
     try:
         data = json_handler.read_json(manifest_path)
@@ -110,12 +110,12 @@ def seedgo_test_template() -> tuple:
 
 
 def write_test_template_receipt(tests_dir) -> dict:
-    """Stamp @seedgo's test template receipt into a newborn's ``tests/``.
+    """Stamp @sentry's test template receipt into a newborn's ``tests/``.
 
-    Three keys, the same three @seedgo's bump writes. Never raises; an unreadable manifest leaves no receipt."""
+    Three keys, the same three @sentry's bump writes. Never raises; an unreadable manifest leaves no receipt."""
     tests_dir = Path(tests_dir)
     try:
-        versions, pages = seedgo_test_template()
+        versions, pages = sentry_test_template()
     except ValueError as exc:
         logger.error("[spawn] Test template receipt NOT stamped for %s: %s", tests_dir, exc)
         return {"success": False, "error": str(exc)}

@@ -3,7 +3,7 @@
 # Description: Rollover pipeline - the todo pad rolls to a backlog file, the backlog trim and restore
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # Category: memory/tests
 # =============================================
 
@@ -12,7 +12,7 @@
 # All tests use mocks or tmp_path -- no live filesystem or infrastructure access.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — compose_meta(), read here as the oracle; tests/test_tab_renderer.py
+# sentry: no-test-needed(covered_elsewhere) — compose_meta(), read here as the oracle; tests/test_tab_renderer.py
 
 import json
 from datetime import datetime

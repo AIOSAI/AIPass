@@ -3,14 +3,14 @@
 # Description: Tests for TDPLAN-0008 Phase 1 — scheduler bot daemon layer
 # Version: 1.2.1
 # Created: 2026-06-25
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/queue.py, apps/modules/run.py and handlers/schedule/ — TDPLAN-0008 Phase 1."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/modules/queue.py, and apps/modules/run.py parse
-# seedgo: no-test-needed(generated) — _print_rich_table's column layout; only the --json contract is frozen
+# sentry: no-test-needed(ruff) — that apps/modules/queue.py, and apps/modules/run.py parse
+# sentry: no-test-needed(generated) — _print_rich_table's column layout; only the --json contract is frozen
 
 import importlib.util
 import json

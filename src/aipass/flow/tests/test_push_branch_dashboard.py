@@ -3,13 +3,13 @@
 # Description: Tests for push_branch_dashboard handler — branch dashboard push
 # Version: 1.4.0
 # Created: 2026-04-26
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/dashboard/push_branch_dashboard.py and aipass.prax's dashboard module."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(ruff) — that the module parses and imports
 
 import json
 import sys

@@ -3,7 +3,7 @@
 # Description: Tests for serving @baud's phone face from the host API origin
 # Version: 1.0.2
 # Created: 2026-08-14
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/host/face.py and the face routes apps/handlers/host/server.py mounts."""
@@ -12,8 +12,8 @@
 # a subdirectory mount and each bundle-root file has its own route (TestTheMountCannotEatTheApi).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(duplicate_test) — set_face_dir(), test_host_api_config.py; its config command, test_host_api.py
-# seedgo: no-test-needed(duplicate_test) — issue_token() and verify_token() themselves, tests/test_host_api_config.py
+# sentry: no-test-needed(duplicate_test) — set_face_dir(), test_host_api_config.py; its config command, test_host_api.py
+# sentry: no-test-needed(duplicate_test) — issue_token() and verify_token() themselves, tests/test_host_api_config.py
 
 import re
 from pathlib import Path

@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-06-29
-# Modified: 2026-10-05
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/security/presence_gate.py."""
@@ -15,8 +15,8 @@
 # is still built from the test's tmp_path so no record names a path off the sandbox.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that handlers/security/presence_gate.py parses and imports
-# seedgo: no-test-needed(constant) — _SUB_AGENT_TYPES and _NON_BLOCKING_SESSION_TYPES' member strings
+# sentry: no-test-needed(ruff) — that handlers/security/presence_gate.py parses and imports
+# sentry: no-test-needed(constant) — _SUB_AGENT_TYPES and _NON_BLOCKING_SESSION_TYPES' member strings
 
 import contextlib
 import json

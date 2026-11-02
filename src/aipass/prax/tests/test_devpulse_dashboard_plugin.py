@@ -3,7 +3,7 @@
 # Description: Tests for devpulse dashboard plugin
 # Version: 1.4.1
 # Created: 2026-05-16
-# Modified: 2026-11-01
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/plugins/devpulse_dashboard/git_section.py, dispatch_section.py and refresh.py."""
@@ -11,9 +11,9 @@
 # Tests for devpulse dashboard plugin (git, session, dispatch sections + refresh).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — the builders' write_section, covered by tests/test_operations.py
-# seedgo: no-test-needed(ruff) — that __init__.py's __all__ re-export of refresh names a real import (F822)
-# seedgo: no-test-needed(log_level) — the lines each builder logs on a failure, covered by that row
+# sentry: no-test-needed(through_the_command) — the builders' write_section, covered by tests/test_operations.py
+# sentry: no-test-needed(ruff) — that __init__.py's __all__ re-export of refresh names a real import (F822)
+# sentry: no-test-needed(log_level) — the lines each builder logs on a failure, covered by that row
 
 import json
 import os
@@ -269,7 +269,7 @@ class TestDispatchSection:
         """Registered branches under this test's own tmp_path, named the way the registry lists them."""
         # Never branch_path.parent: that is pytest's shared base, so one test's lock reached the next.
         parent = branch_path / "registered"
-        self.branches = {name: parent / name for name in ("ai_mail", "prax", "seedgo", "daemon")}
+        self.branches = {name: parent / name for name in ("ai_mail", "prax", "sentry", "daemon")}
         for path in self.branches.values():
             (path / ".ai_mail.local").mkdir(parents=True, exist_ok=True)
         monkeypatch.setattr(dispatch_section, "get_branch_paths", lambda: list(self.branches.values()))
@@ -311,12 +311,12 @@ class TestDispatchSection:
 
     def test_build_dispatch_section_corrupt_lock(self, branch_path):
         """An unparseable lock is held as mid-write, so it still counts as active."""
-        self._lock("seedgo", "broken json{{{")
+        self._lock("sentry", "broken json{{{")
 
         dispatch = self._section(branch_path)
 
-        assert "seedgo" in dispatch["agents_active"]
-        assert dispatch["details"]["seedgo"] == {"pid": None, "timestamp": ""}
+        assert "sentry" in dispatch["agents_active"]
+        assert dispatch["details"]["sentry"] == {"pid": None, "timestamp": ""}
 
 
 class TestRefresh:

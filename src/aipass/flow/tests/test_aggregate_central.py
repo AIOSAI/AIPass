@@ -3,14 +3,14 @@
 # Description: Tests for the aggregate command - routing, heal flags, card sweep
 # Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/aggregate_central.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and imports
-# seedgo: no-test-needed(help_text) — the wording of print_help and print_introspection
+# sentry: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(help_text) — the wording of print_help and print_introspection
 
 from unittest.mock import patch
 

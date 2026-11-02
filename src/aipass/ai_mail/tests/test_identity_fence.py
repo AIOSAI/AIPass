@@ -3,7 +3,7 @@
 # Description: Tests for the caller identity fence (no branch under caller = refuse)
 # Version: 1.0.2
 # Created: 2026-08-21
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/users/branch_detection.py and the fence it enforces fleetwide."""
@@ -12,7 +12,7 @@
 # every verb refuses, and a claim in AIPASS_CALLER_BRANCH cannot outvote it.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(windows_compat) — the sys.platform == "win32" stdout/stderr reconfigure block
+# sentry: no-test-needed(windows_compat) — the sys.platform == "win32" stdout/stderr reconfigure block
 
 from pathlib import Path
 

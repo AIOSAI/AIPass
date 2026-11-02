@@ -3,7 +3,7 @@
 # Description: Tests for the all cycle's Drive switch, its Drive step's headroom refusal and the --registered run
 # Version: 1.1.0
 # Created: 2026-10-16
-# Modified: 2026-10-21
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/all.py: the drive_sync setting it obeys and the --registered run."""
@@ -12,7 +12,7 @@
 # in test_cli_routing.py, where every verb's routing is pinned together.
 #
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — time.monotonic's clock; the seconds column is pinned by shape only
+# sentry: no-test-needed(stdlib) — time.monotonic's clock; the seconds column is pinned by shape only
 
 from __future__ import annotations
 

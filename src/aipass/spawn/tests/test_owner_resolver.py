@@ -3,14 +3,14 @@
 # Description: Tests for owner resolver and registry authority
 # Version: 1.0.2
 # Created: 2026-07-10
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/registry.py's owner-resolution functions."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(documentation) — docstrings on get_owner, is_owner, ensure_project_has_owner and is_protected
-# seedgo: no-test-needed(stdlib) — json.dumps/json.loads round-tripping the fixture registries and passports
+# sentry: no-test-needed(documentation) — docstrings on get_owner, is_owner, ensure_project_has_owner and is_protected
+# sentry: no-test-needed(stdlib) — json.dumps/json.loads round-tripping the fixture registries and passports
 
 import json
 from unittest.mock import patch

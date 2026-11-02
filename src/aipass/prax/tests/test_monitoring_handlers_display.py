@@ -3,7 +3,7 @@
 # Description: Unit tests for the monitor's command parsing and stream display
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/interactive_filter.py and unified_stream.py, the command and display."""
@@ -13,7 +13,7 @@
 # - unified_stream: print_event, print_command_separator
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — print_hook_event(), covered by tests/test_display_resilience.py
+# sentry: no-test-needed(through_the_command) — print_hook_event(), covered by tests/test_display_resilience.py
 
 import io
 from unittest.mock import MagicMock, patch
@@ -160,11 +160,11 @@ class TestPrintEvent:
 
     def test_includes_branch_name(self, capsys):
         """One line reaches the console and it carries the branch name."""
-        unified_stream.print_event("SEEDGO", "audit complete")
+        unified_stream.print_event("SENTRY", "audit complete")
         # The line carries a host clock, so the count and the label are the claim.
         lines = capsys.readouterr().out.splitlines()
         assert len(lines) == 1
-        assert "[SEEDGO" in lines[0]
+        assert "[SENTRY" in lines[0]
 
     def test_includes_message(self, capsys):
         """Output should include the event message."""
@@ -185,8 +185,8 @@ class TestPrintEvent:
     def test_branch_color_lookup(self, monkeypatch):
         """Should use branch-specific color from BRANCH_COLORS."""
         buffer = _colour_console(monkeypatch)
-        unified_stream.print_event("SEEDGO", "test")
-        assert "\x1b[32mSEEDGO " in buffer.getvalue()  # SEEDGO -> green
+        unified_stream.print_event("SENTRY", "test")
+        assert "\x1b[32mSENTRY " in buffer.getvalue()  # SENTRY -> green
 
     def test_unknown_branch_uses_white(self, monkeypatch):
         """Unknown branches should use white as default color."""
@@ -201,8 +201,8 @@ class TestPrintCommandSeparator:
 
     def test_prints_separator(self, capsys):
         """A blank line, a rule, the command, a rule: no context line without caller or target."""
-        unified_stream.print_command_separator("PRAX", "seedgo audit")
-        assert capsys.readouterr().out.splitlines() == ["", "─" * 60, "▶ seedgo audit", "─" * 60]
+        unified_stream.print_command_separator("PRAX", "sentry audit")
+        assert capsys.readouterr().out.splitlines() == ["", "─" * 60, "▶ sentry audit", "─" * 60]
 
     def test_includes_command(self, capsys):
         """Output should include the command text."""
@@ -211,12 +211,12 @@ class TestPrintCommandSeparator:
 
     def test_with_caller(self, capsys):
         """Output should include caller when provided."""
-        unified_stream.print_command_separator("SEEDGO", "audit PRAX", caller="DRONE")
+        unified_stream.print_command_separator("SENTRY", "audit PRAX", caller="DRONE")
         assert "  DRONE" in capsys.readouterr().out.splitlines()
 
     def test_with_target(self, capsys):
         """Output should include target when provided."""
-        unified_stream.print_command_separator("SEEDGO", "audit", target="FLOW")
+        unified_stream.print_command_separator("SENTRY", "audit", target="FLOW")
         assert "  → FLOW" in capsys.readouterr().out.splitlines()
 
     def test_without_caller_or_target(self, capsys):

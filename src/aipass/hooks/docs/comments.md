@@ -13,7 +13,7 @@ Every edit to a source file is measured: what share of its lines are full-line c
 - **Judged kinds:** `.py .pyi`, `.ts .tsx .js .jsx .mjs .cjs`, `.sh .bash`, `.css .scss`. Anything else is silent and writes no row.
 - **Body:** non-blank lines, minus the AIPass header in Python and shell (a run of `#` lines whose first starts `# ====`, at the top or under a shebang and coding line).
 - **Comment line:** Python, a comment token with only whitespace before it (read by `tokenize`); a bare string statement counts from its second line on, so a one-line docstring is free and a three-line one costs two. TS/JS/CSS, a `//` line or any line of a `/* */` block opened at a line's start (`{/*` too). Shell, a `#` line.
-- **Free:** shebang, `# -*- coding`, `# noqa`, `# type:`, `# pyright:`, `# pragma`, `# fmt:`, `# ruff:`, `# pylint:`, `# seedgo:` (a test's declared-pass markers), `// eslint-`, `// @ts-`, `// prettier-ignore`, `/* eslint`.
+- **Free:** shebang, `# -*- coding`, `# noqa`, `# type:`, `# pyright:`, `# pragma`, `# fmt:`, `# ruff:`, `# pylint:`, `# sentry:` (a test's declared-pass markers), `// eslint-`, `// @ts-`, `// prettier-ignore`, `/* eslint`.
 - **Budget:** `over = comments - floor(body * 10 / 100)`; a file at exactly 10% is not over. `BUDGET_PERCENT` in `comment_scan.py`.
 - **Floor:** a file under 20 non-blank lines (`MIN_BODY_LINES`) is never over: one why-line in a 4-line `__init__.py` is 25%. Its edit still writes a ledger row with the share as measured, and the statusline says `not judged`. Chosen over exempting a module's first docstring, which would make a 60-line docstring free.
 

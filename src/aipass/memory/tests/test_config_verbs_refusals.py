@@ -3,7 +3,7 @@
 # Description: The config verbs' refusal sentences, verbatim - the API contract a refused set prints
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/rollover_config.py — the refusals the config verbs print, through apps/modules/rollover.py."""
@@ -11,7 +11,7 @@
 # The refusal sentences ARE the API contract (@api exec's this CLI), so they are pinned verbatim.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — get_count_ceilings() arithmetic, pinned in tests/test_config_loader.py
+# sentry: no-test-needed(covered_elsewhere) — get_count_ceilings() arithmetic, pinned in tests/test_config_loader.py
 
 from types import SimpleNamespace
 

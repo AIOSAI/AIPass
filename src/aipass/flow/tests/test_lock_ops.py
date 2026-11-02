@@ -3,13 +3,13 @@
 # Description: Tests for lock_ops handler — atomic lock file management
 # Version: 1.2.0
 # Created: 2026-04-26
-# Modified: 2026-10-25
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/runner/lock_ops.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that lock_ops.py parses and imports
+# sentry: no-test-needed(ruff) — that lock_ops.py parses and imports
 
 import os
 import time

@@ -3,14 +3,14 @@
 # Description: Tests for return types, exceptions, data structures, and init
 # Version: 1.0.2
 # Created: 2026-03-27
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/core.py's mint contract and apps/handlers/json/json_handler.py's return/exception types."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/modules/regenerate_registry.py and apps/spawn.py parse and import
-# seedgo: no-test-needed(documentation) — docstrings on handle_command, spawn_agent, and read_json
+# sentry: no-test-needed(ruff) — that apps/modules/regenerate_registry.py and apps/spawn.py parse and import
+# sentry: no-test-needed(documentation) — docstrings on handle_command, spawn_agent, and read_json
 
 import json
 from pathlib import Path

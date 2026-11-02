@@ -3,13 +3,13 @@
 # Description: Tests for CLI routing and help display
 # Version: 1.1.0
 # Created: 2026-03-27
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/ai_mail.py's CLI routing: print_help, print_introspection, route_command, main."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — the "-V" version alias and the exact "AI_MAIL v1.0.0" banner text
+# sentry: no-test-needed(constant) — the "-V" version alias and the exact "AI_MAIL v1.0.0" banner text
 
 import json
 import os

@@ -3,14 +3,14 @@
 # Description: Birth receipt lane — a newborn arrives carrying .trinity/.template_version.json
 # Version: 1.2.2
 # Created: 2026-08-27
-# Modified: 2026-10-31
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/receipt_ops.py and the birth-receipt lane it drives through apps/modules/core.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/handlers/receipt_ops.py and apps/modules/core.py parse and import
-# seedgo: no-test-needed(documentation) — docstrings on receipt_ops' public functions
+# sentry: no-test-needed(ruff) — that apps/handlers/receipt_ops.py and apps/modules/core.py parse and import
+# sentry: no-test-needed(documentation) — docstrings on receipt_ops' public functions
 
 import ast
 import json
@@ -35,29 +35,29 @@ SPAWN_TEMPLATES = Path(__file__).resolve().parents[1] / "templates"
 GOLD_DIR = Path(__file__).resolve().parents[2] / "memory" / "templates"
 FLEET = Path(__file__).resolve().parents[2]
 
-#: @seedgo's published README cap.
-SEEDGO_CONTEXT_PACK = FLEET / "seedgo" / "apps" / "handlers" / "context_standards" / "pack.json"
+#: @sentry's published README cap.
+SENTRY_CONTEXT_PACK = FLEET / "sentry" / "apps" / "handlers" / "context_standards" / "pack.json"
 
 #: @memory's whole-file budgets for the three .trinity files, plus its per-string cap.
 MEMORY_CONFIG = FLEET / "memory" / "memory_json" / "custom_config" / "memory.config.json"
 
-#: @seedgo's gold test template: the manifest spawn stamps a newborn against.
-SEEDGO_TEMPLATES = FLEET / "seedgo" / "templates"
+#: @sentry's gold test template: the manifest spawn stamps a newborn against.
+SENTRY_TEMPLATES = FLEET / "sentry" / "templates"
 
 
-def _seedgo_manifest() -> dict:
-    return json.loads((SEEDGO_TEMPLATES / "templates.json").read_text(encoding="utf-8"))
+def _sentry_manifest() -> dict:
+    return json.loads((SENTRY_TEMPLATES / "templates.json").read_text(encoding="utf-8"))
 
 
-def _seedgo_template_versions() -> dict:
-    """seedgo's published versions, read at assert time - never copied into this file."""
-    return _seedgo_manifest()["template_versions"]
+def _sentry_template_versions() -> dict:
+    """sentry's published versions, read at assert time - never copied into this file."""
+    return _sentry_manifest()["template_versions"]
 
 
-def _seedgo_test_template_page() -> str:
-    """The gold page text a newborn is meant to receive, named by seedgo's own manifest."""
-    page = _seedgo_manifest()["files"]["test_template"]["page"]
-    return (SEEDGO_TEMPLATES / page).read_text(encoding="utf-8")
+def _sentry_test_template_page() -> str:
+    """The gold page text a newborn is meant to receive, named by sentry's own manifest."""
+    page = _sentry_manifest()["files"]["test_template"]["page"]
+    return (SENTRY_TEMPLATES / page).read_text(encoding="utf-8")
 
 
 def test_gold_versions_read_schema_version_from_both_templates():
@@ -197,9 +197,9 @@ def test_a_minted_citizen_arrives_carrying_a_valid_receipt(tmp_path):
 
 
 def test_a_minted_citizen_arrives_carrying_the_test_template_receipt(tmp_path, capsys):
-    """The same stamp, one step further: @seedgo's test template.
+    """The same stamp, one step further: @sentry's test template.
 
-    Versions are read from seedgo's manifest at assert time, so a bump there moves this pin.
+    Versions are read from sentry's manifest at assert time, so a bump there moves this pin.
     """
     import datetime
 
@@ -218,20 +218,20 @@ def test_a_minted_citizen_arrives_carrying_the_test_template_receipt(tmp_path, c
     written = json.loads(receipt_path.read_text(encoding="utf-8"))
     assert set(written) == {"template_versions", "stamped", "stamped_by"}
     assert written["stamped_by"] == getattr(receipt_ops, "STAMPED_BY_SCAFFOLD")
-    assert written["template_versions"] == _seedgo_template_versions()
+    assert written["template_versions"] == _sentry_template_versions()
     datetime.datetime.fromisoformat(written["stamped"])
 
     page = tests_dir / "TEST_TEMPLATE.md"
     assert page.exists(), "the test template page did not land beside the receipt"
-    assert page.read_text(encoding="utf-8") == _seedgo_test_template_page()
+    assert page.read_text(encoding="utf-8") == _sentry_test_template_page()
 
     assert capsys.readouterr().err == "", "the mint wrote to stderr while stamping"
 
 
-def test_a_newborn_gets_no_test_receipt_when_seedgos_manifest_is_unreadable(tmp_path, monkeypatch):
+def test_a_newborn_gets_no_test_receipt_when_sentrys_manifest_is_unreadable(tmp_path, monkeypatch):
     """An absent receipt reads as unstamped, which is true; an empty one would lie."""
 
-    monkeypatch.setattr(receipt_ops, "_seedgo_templates_dir", lambda: tmp_path / "no_such_gold")
+    monkeypatch.setattr(receipt_ops, "_sentry_templates_dir", lambda: tmp_path / "no_such_gold")
 
     result = spawn_agent(
         str(tmp_path / "unstamped"),
@@ -330,8 +330,8 @@ def test_adopting_a_directory_without_a_receipt_stamps_one(tmp_path, monkeypatch
 
 
 def _readme_cap() -> int:
-    """@seedgo's cap, read from its pack manifest at assert time."""
-    pack = json.loads(SEEDGO_CONTEXT_PACK.read_text(encoding="utf-8"))
+    """@sentry's cap, read from its pack manifest at assert time."""
+    pack = json.loads(SENTRY_CONTEXT_PACK.read_text(encoding="utf-8"))
     return int(pack["caps"]["README.md"]["max_chars"])
 
 
@@ -437,13 +437,13 @@ def test_a_newborn_carries_its_own_dashboard_without_flow_or_prax(tmp_path):
 
 
 def _docs_page_cap() -> int:
-    """@seedgo's docs/*.md cap, read from the same pack manifest at assert time."""
-    pack = json.loads(SEEDGO_CONTEXT_PACK.read_text(encoding="utf-8"))
+    """@sentry's docs/*.md cap, read from the same pack manifest at assert time."""
+    pack = json.loads(SENTRY_CONTEXT_PACK.read_text(encoding="utf-8"))
     return int(pack["caps"]["docs/*.md"]["max_chars"])
 
 
 def test_the_stamped_docs_index_copies_no_cap_and_points_at_the_standard():
-    """The docs index every newborn is born with names no number seedgo owns.
+    """The docs index every newborn is born with names no number sentry owns.
 
     A cap typed into a template keeps saying so after its owner moves it; the standard reads it live.
     """
@@ -451,8 +451,8 @@ def test_the_stamped_docs_index_copies_no_cap_and_points_at_the_standard():
     index = (SPAWN_TEMPLATES / "citizen" / "docs" / "README.md").read_text(encoding="utf-8")
 
     for spelling in (f"{cap:,}", str(cap)):
-        assert spelling not in index, f"the stamped docs index copies seedgo's cap as {spelling!r}"
-    assert "drone @seedgo standard docs_page" in index
+        assert spelling not in index, f"the stamped docs index copies sentry's cap as {spelling!r}"
+    assert "drone @sentry standard docs_page" in index
 
 
 def test_every_cap_is_read_from_its_owner_and_never_copied_into_this_file():

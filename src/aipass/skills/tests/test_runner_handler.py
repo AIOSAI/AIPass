@@ -3,15 +3,15 @@
 # Description: Unit tests for runner_handler (empty body, etc.)
 # Version: 1.0.0
 # Created: 2026-03-10
-# Modified: 2026-09-27
+# Modified: 2026-11-02
 # Category: skills/tests
 # =============================================
 
 """Tests for apps/handlers/runner_handler.py: run_markdown and run_handler."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that runner_handler.py parses and imports
-# seedgo: no-test-needed(constant) — the "handler_executed" log-operation name json_handler records
+# sentry: no-test-needed(ruff) — that runner_handler.py parses and imports
+# sentry: no-test-needed(constant) — the "handler_executed" log-operation name json_handler records
 
 from aipass.skills.apps.handlers.runner_handler import run_markdown, run_handler
 

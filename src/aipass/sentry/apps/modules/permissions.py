@@ -1,0 +1,78 @@
+# =================== AIPass ====================
+# Name: permissions.py
+# Description: Shared trust list for hook layer and drone authorization
+# Version: 1.0.2
+# Created: 2026-04-21
+# Modified: 2026-11-02
+# =============================================
+
+"""Shared permission definitions for cross-branch write authorization."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from aipass.prax import logger
+from aipass.sentry.apps.handlers.json import json_handler
+from aipass.sentry.apps.handlers.cli.help_flags import wants_help
+
+TRUSTED_CROSS_WRITERS: tuple[str, ...] = ("devpulse", "sentry", "spawn")
+
+
+def is_trusted_caller(name: str) -> bool:
+    """Return True if *name* is in TRUSTED_CROSS_WRITERS."""
+    json_handler.log_operation("is_trusted_caller", {"name": name})
+    return name.lower() in TRUSTED_CROSS_WRITERS
+
+
+def identify_caller(cwd: str | None = None) -> str:
+    """Walk up from *cwd* (default: CWD) to find passport.json, return branch_name.
+
+    An unparsable passport raises ValueError: an unreadable identity is not "no identity".
+    """
+    start = Path(cwd).resolve() if cwd else Path.cwd().resolve()
+    current = start
+    for _ in range(10):
+        passport = current / ".trinity" / "passport.json"
+        if passport.exists():
+            try:
+                data = json_handler.read_json(passport)
+                if not isinstance(data, dict):
+                    raise ValueError("not a JSON object")
+                name = data.get("branch_info", {}).get("branch_name")
+                if not name:
+                    name = data.get("identity", {}).get("name")
+                return name or ""
+            except Exception as exc:
+                logger.warning("[permissions] identify_caller: failed to parse passport at %s: %s", passport, exc)
+                raise ValueError(f"passport at {passport} cannot be parsed: {exc}") from exc
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return ""
+
+
+def print_introspection() -> None:
+    """Display permissions module info."""
+    from aipass.cli import console
+
+    console.print("[bold cyan]permissions[/bold cyan] — shared trust list for hook + drone layers")
+    console.print(f"  TRUSTED_CROSS_WRITERS: {TRUSTED_CROSS_WRITERS}")
+    console.print("  Functions: is_trusted_caller(name), identify_caller(cwd)")
+
+
+def handle_command(command: str, args: list) -> bool:
+    """Claim the ``permissions`` command and render the trust list; ignore the rest.
+
+    route_command() offers every command to every module, so this gates on the command name, never the arguments.
+    """
+    if command != "permissions":
+        return False
+    if not args:
+        print_introspection()
+        return True
+    if wants_help(None, args):
+        print_introspection()
+        return True
+    return False

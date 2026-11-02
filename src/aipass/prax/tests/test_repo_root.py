@@ -3,7 +3,7 @@
 # Description: Repo-Root Resolution Pins
 # Version: 1.2.2
 # Created: 2026-08-31
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # Category: prax/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -24,8 +24,8 @@
 # registry-less cwd crashed or misrouted almost every import. A ninth private copy is caught by an AST sweep.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(error_handling) — resolved_file answering the unresolved path on OSError, covered by that row
-# seedgo: no-test-needed(error_handling) — find_repo_root walking past an unreadable directory, covered by that row
+# sentry: no-test-needed(error_handling) — resolved_file answering the unresolved path on OSError, covered by that row
+# sentry: no-test-needed(error_handling) — find_repo_root walking past an unreadable directory, covered by that row
 
 import ast
 import os

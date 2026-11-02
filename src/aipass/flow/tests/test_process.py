@@ -3,13 +3,13 @@
 # Description: Tests for mbank/process.py — additional coverage
 # Version: 1.2.0
 # Created: 2026-05-12
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for mbank/process.py — archive_plan, is_template_content, and orchestration."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that mbank/process.py parses and imports
+# sentry: no-test-needed(ruff) — that mbank/process.py parses and imports
 
 import json
 import shutil
@@ -114,14 +114,14 @@ class TestIsTemplateContent:
         )
         assert is_template_content(content) is False
 
-    def test_user_checked_seedgo_overrides(self):
-        """Checked 'Seedgo checklist' item signals real work."""
+    def test_user_checked_sentry_overrides(self):
+        """Checked 'Sentry checklist' item signals real work."""
 
         content = (
             "[What do you want to achieve? Specific end state.]\n"
             "[How will agents tackle this? What instructions will they need?]\n"
             "[List any planning docs, specs, or examples to reference]\n"
-            "- [x] Seedgo checklist\n"
+            "- [x] Sentry checklist\n"
         )
         assert is_template_content(content) is False
 

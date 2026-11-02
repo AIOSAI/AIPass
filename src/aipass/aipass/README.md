@@ -145,7 +145,7 @@ Depth lives in [docs/](docs/), one page per command group:
   degrades
 - `pytest` — doctor shells out to collect the suite
 
-`@seedgo` and `@flow` are part of this branch's working practice — audits
+`@sentry` and `@flow` are part of this branch's working practice — audits
 before "done", plans for builds — but no code path here calls either.
 
 ### Provides To

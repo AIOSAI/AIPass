@@ -3,7 +3,7 @@
 # Description: Unified Display Handler
 # Version: 0.5.0
 # Created: 2025-11-23
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Unified Stream Display Handler"""
@@ -50,7 +50,7 @@ LEVEL_COLORS = {
 
 # Three-tier labels (AIPASS/DEVPULSE/OPUS) key on their first segment.
 BRANCH_COLORS = {
-    "SEEDGO": "green",
+    "SENTRY": "green",
     "DRONE": "cyan",
     "FLOW": "blue",
     "PRAX": "magenta",

@@ -3,7 +3,7 @@
 # Description: Module orchestrator for branch command scanning
 # Version: 1.0.2
 # Created: 2026-03-17
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Module orchestrator for branch command scanning.
@@ -50,7 +50,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
     json_handler.log_operation("handle_command", {"module": "scan", "command": command})
 
     if not args:
-        logger.warning("scan requires a target argument (e.g. scan @seedgo)")
+        logger.warning("scan requires a target argument (e.g. scan @sentry)")
         return False
 
     results = scan(args[0])
@@ -101,7 +101,7 @@ def print_help() -> None:
     console.print("  drone scan @target     Scan a branch for available commands")
     console.print()
     console.print("Examples:")
-    console.print("  drone scan @seedgo     Scan seedgo for commands")
+    console.print("  drone scan @sentry     Scan sentry for commands")
     console.print("  drone scan @flow       Scan flow for commands")
 
 

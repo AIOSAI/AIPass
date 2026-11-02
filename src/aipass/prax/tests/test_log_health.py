@@ -3,7 +3,7 @@
 # Description: Tests for the log-health command module
 # Version: 1.1.1
 # Created: 2026-08-13
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/log_health.py."""
@@ -12,11 +12,11 @@
 # through the product's own console: a recording mock never renders, so it could not fail.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(help_flag_safety) — -h routing to print_help, covered by tests/test_help_flag_safety.py
-# seedgo: no-test-needed(introspection) — print_introspection's no-args self-map, covered by that row
-# seedgo: no-test-needed(through_the_command) — scan_rates and get_snapshot, covered by tests/test_rate_tracker.py
-# seedgo: no-test-needed(trigger) — _get_event_callback's lookup of trigger.fire, covered by that row
-# seedgo: no-test-needed(json_structure) — the log_health_executed record written through json_handler.log_operation
+# sentry: no-test-needed(help_flag_safety) — -h routing to print_help, covered by tests/test_help_flag_safety.py
+# sentry: no-test-needed(introspection) — print_introspection's no-args self-map, covered by that row
+# sentry: no-test-needed(through_the_command) — scan_rates and get_snapshot, covered by tests/test_rate_tracker.py
+# sentry: no-test-needed(trigger) — _get_event_callback's lookup of trigger.fire, covered by that row
+# sentry: no-test-needed(json_structure) — the log_health_executed record written through json_handler.log_operation
 
 from unittest.mock import MagicMock
 

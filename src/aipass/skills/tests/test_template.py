@@ -3,14 +3,14 @@
 # Description: Tests for skill template management
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/template.py: resolution, placeholder replacement, copy."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that template.py and module_paths.py parse and import
-# seedgo: no-test-needed(documentation) — that get_template and copy_template carry docstrings
+# sentry: no-test-needed(ruff) — that template.py and module_paths.py parse and import
+# sentry: no-test-needed(documentation) — that get_template and copy_template carry docstrings
 
 import shutil
 import sys

@@ -3,7 +3,7 @@
 # Description: Tests for the pairing door — one-use QR codes a phone trades for its bearer
 # Version: 1.2.0
 # Created: 2026-10-13
-# Modified: 2026-10-22
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/host/pairings.py, POST /v1/pair and the host-api pair verb."""
@@ -14,8 +14,8 @@
 # Every test runs on the conftest `store` fixture: the lock directory is tmp_path, the rows sit in the dict store.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — segno's QR encoding itself; render_qr is pinned to its block characters only
-# seedgo: no-test-needed(constant) — ATTEMPT_LIMIT, ATTEMPT_WINDOW_SECONDS and the TTL bounds' values
+# sentry: no-test-needed(external) — segno's QR encoding itself; render_qr is pinned to its block characters only
+# sentry: no-test-needed(constant) — ATTEMPT_LIMIT, ATTEMPT_WINDOW_SECONDS and the TTL bounds' values
 
 import json
 from datetime import datetime, timedelta, timezone

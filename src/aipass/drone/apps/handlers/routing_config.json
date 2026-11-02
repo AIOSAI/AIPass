@@ -1,7 +1,7 @@
 {
   "modules": {
-    "seedgo": {
-      "entry_point": "aipass.seedgo.apps.seedgo",
+    "sentry": {
+      "entry_point": "aipass.sentry.apps.sentry",
       "description": "Standards compliance through pluggable checker packs",
       "version": "2.0.0"
     },

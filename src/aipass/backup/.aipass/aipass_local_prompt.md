@@ -56,7 +56,7 @@ apps/
     └── ui/                # settings window (archived under ui/.archive/)
 ```
 
-Branch top level: `apps/` `docs/` `docs.local/` `dropbox/` `artifacts/` `templates/` `tests/` `tools/` `logs/` `backup_json/` `.trinity/` `.aipass/` `.backup/` `.daemon/` `.seedgo/` `.archive/`. `apps/integrations/` and `apps/plugins/` exist as empty scaffolds — no code, deliberately.
+Branch top level: `apps/` `docs/` `docs.local/` `dropbox/` `artifacts/` `templates/` `tests/` `tools/` `logs/` `backup_json/` `.trinity/` `.aipass/` `.backup/` `.daemon/` `.sentry/` `.archive/`. `apps/integrations/` and `apps/plugins/` exist as empty scaffolds — no code, deliberately.
 
 # Breadcrumbs
 

@@ -3,13 +3,13 @@
 # Description: Tests for the trigger operator config loader
 # Version: 1.0.0
 # Created: 2026-08-08
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for handlers/json/config_loader.py — regenerate when missing, never clobber what the operator wrote."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(behaviour) — the lane in apps/handlers/escalation.py that reads the config; its own tests cover it
+# sentry: no-test-needed(behaviour) — the lane in apps/handlers/escalation.py that reads the config; its own tests cover it
 
 import json
 from pathlib import Path

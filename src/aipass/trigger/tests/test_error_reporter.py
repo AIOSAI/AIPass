@@ -3,14 +3,14 @@
 # Description: Unit tests for error_reporter handler
 # Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-09-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for the error_reporter handler (apps/handlers/error_reporter.py)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — how report() fingerprints and stores a row: tests/test_error_registry.py
-# seedgo: no-test-needed(covered_elsewhere) — what error_detected does once fired: tests/test_error_detected.py
+# sentry: no-test-needed(covered_elsewhere) — how report() fingerprints and stores a row: tests/test_error_registry.py
+# sentry: no-test-needed(covered_elsewhere) — what error_detected does once fired: tests/test_error_detected.py
 
 import pytest
 from unittest.mock import MagicMock

@@ -3,7 +3,7 @@
 # Description: Red-first pins for the trinity standard machinery (DPLAN-0318)
 # Version: 1.2.3
 # Created: 2026-08-25
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/json/entry_limits.py and the trinity-standard handlers around it."""
@@ -11,8 +11,8 @@
 # The property throughout: an unmeasurable field is a VIOLATION, never zero characters, and keep-N keeps N.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — render_tab() caps numbers and todo_context(): tests/test_tab_renderer.py
-# seedgo: no-test-needed(covered_elsewhere) — the lint command lane over lint_handler.run_lint(): tests/test_lint.py
+# sentry: no-test-needed(covered_elsewhere) — render_tab() caps numbers and todo_context(): tests/test_tab_renderer.py
+# sentry: no-test-needed(covered_elsewhere) — the lint command lane over lint_handler.run_lint(): tests/test_lint.py
 
 import json
 import sys
@@ -773,7 +773,7 @@ class TestMissingFieldIsAViolation:
 class TestTheTabHonoursPerBranchCharCaps:
     """One source, or the tab instructs an agent to break the rule it enforces.
 
-    @seedgo's ``expected_meta_line()`` resolves ``entry_limits.per_branch``; the tab must too.
+    @sentry's ``expected_meta_line()`` resolves ``entry_limits.per_branch``; the tab must too.
     """
 
     @staticmethod
@@ -835,7 +835,7 @@ class TestTheTabHonoursPerBranchCharCaps:
 
 
 class TestTheReceiptsGoldVersionIsSchemaVersion:
-    """@seedgo inferred it and asked to be pinned by the owner, not by itself."""
+    """@sentry inferred it and asked to be pinned by the owner, not by itself."""
 
     def test_the_receipt_reads_schema_version_not_document_version(self):
         """The receipt reports schema_version (the STRUCTURE stamped), never the templates' differing `version`."""

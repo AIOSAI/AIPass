@@ -3,22 +3,22 @@
 # Description: Tests for usage aggregation handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/usage/aggregation.py, the usage aggregation handler."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that aggregation.py parses and imports
-# seedgo: no-test-needed(constant) — MODULE_NAME and DATA_FILE's text; the tests read the file by that name
-# seedgo: no-test-needed(json_handler) — API_JSON_DIR's real location; every test redirects it into the sandbox
+# sentry: no-test-needed(ruff) — that aggregation.py parses and imports
+# sentry: no-test-needed(constant) — MODULE_NAME and DATA_FILE's text; the tests read the file by that name
+# sentry: no-test-needed(json_handler) — API_JSON_DIR's real location; every test redirects it into the sandbox
 
 import json
 from pathlib import Path
 
 import pytest
 
-from aipass.api.apps.handlers.usage.aggregation import (  # seedgo test_coverage detection
+from aipass.api.apps.handlers.usage.aggregation import (  # sentry test_coverage detection
     get_overall_stats,
     get_caller_usage,
     get_session_summary,

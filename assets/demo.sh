@@ -32,8 +32,8 @@ drone @memory search "tests pass serially but fail under xdist" --type local --n
 sleep 3
 
 fresh
-type_cmd 'drone @seedgo audit aipass @cli'
-drone @seedgo audit aipass @cli 2>&1 | sed -n '2,24p'
+type_cmd 'drone @sentry audit aipass @cli'
+drone @sentry audit aipass @cli 2>&1 | sed -n '2,24p'
 sleep 3
 printf '\n'
 prompt

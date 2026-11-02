@@ -82,7 +82,7 @@ cap, floored, from `entry_limits.draft_target()`. 300/200/100 read 240/160/80, a
 of 500 reads 400. It is derived, not a config key: a second stored number per entry type would go
 stale the first time an override moved only the cap. The write gate never reads it; the cap and
 `enforce` are unchanged. The line states a number so the text is drafted to it, below the cap.
-@seedgo's `expected_meta_line` mirrors this format byte for byte, so a format change here is mailed
+@sentry's `expected_meta_line` mirrors this format byte for byte, so a format change here is mailed
 there before files are re-rendered.
 
 **Nothing hand-edits that file.** `drone @memory config` is the verb surface over rollover limits — see [config_verbs.md](config_verbs.md).

@@ -3,15 +3,15 @@
 # Description: Tests for prax logging handler modules
 # Version: 1.5.0
 # Created: 2026-04-25
-# Modified: 2026-10-29
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/logging/direct.py and its sibling modules under apps/handlers/logging/."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — log_watchdog's sweep_stale_logs(), covered by tests/test_sweep.py
-# seedgo: no-test-needed(through_the_command) — setup_individual_logger(), covered by tests/test_logging.py
-# seedgo: no-test-needed(through_the_command) — append_jsonl() in jsonl_writer.py, covered by tests/test_jsonl_writer.py
+# sentry: no-test-needed(through_the_command) — log_watchdog's sweep_stale_logs(), covered by tests/test_sweep.py
+# sentry: no-test-needed(through_the_command) — setup_individual_logger(), covered by tests/test_logging.py
+# sentry: no-test-needed(through_the_command) — append_jsonl() in jsonl_writer.py, covered by tests/test_jsonl_writer.py
 
 import logging
 import os

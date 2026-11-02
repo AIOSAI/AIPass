@@ -3,7 +3,7 @@
 # Description: Tests for apps/modules/prune.py and the cleanup/prune handler it drives
 # Version: 1.0.0
 # Created: 2026-10-16
-# Modified: 2026-10-16
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/prune.py and the cleanup/prune handler it drives."""
@@ -13,7 +13,7 @@
 # tmp_path project, so the layout under test is the one the product writes.
 #
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(os_walk_onerror) — _raise_walk_error, the walk's hook for a store directory it cannot list
+# sentry: no-test-needed(os_walk_onerror) — _raise_walk_error, the walk's hook for a store directory it cannot list
 
 import json
 import os

@@ -3,14 +3,14 @@
 # Description: Tests for OpenRouter caller detection handler
 # Version: 1.0.1
 # Created: 2026-04-03
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/openrouter/caller.py's detect_caller_category()."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered) — get_caller_info(), tests/test_caller_detection.py
-# seedgo: no-test-needed(constant) — MODULE_NAME and MODULE_VERSION's display strings
+# sentry: no-test-needed(covered) — get_caller_info(), tests/test_caller_detection.py
+# sentry: no-test-needed(constant) — MODULE_NAME and MODULE_VERSION's display strings
 
 from aipass.api.apps.handlers.openrouter.caller import detect_caller_category
 

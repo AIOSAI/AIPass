@@ -3,14 +3,14 @@
 # Description: Torn-write durability tests for spawn's JSON/text write paths
 # Version: 1.1.4
 # Created: 2026-08-16
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/atomic_write.py and the write paths it makes durable."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(documentation) — docstrings on the handler functions this file drives
-# seedgo: no-test-needed(stdlib) — tempfile.mkstemp's filename-uniqueness guarantee
+# sentry: no-test-needed(documentation) — docstrings on the handler functions this file drives
+# sentry: no-test-needed(stdlib) — tempfile.mkstemp's filename-uniqueness guarantee
 
 import ast
 import errno

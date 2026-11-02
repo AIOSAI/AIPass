@@ -4,14 +4,14 @@
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's scripted lane and apps/modules/bash_writes.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that edit_gate.py and bash_writes.py parse and import
-# seedgo: no-test-needed(constant) — NO_WRITE_VERB's text, the marker testwrite_gate reads
+# sentry: no-test-needed(ruff) — that edit_gate.py and bash_writes.py parse and import
+# sentry: no-test-needed(constant) — NO_WRITE_VERB's text, the marker testwrite_gate reads
 
 import importlib
 import json
@@ -95,6 +95,12 @@ def grant_granted():
 def grant_withheld():
     with patch(f"{_RAIL}.is_verified_admin_caller", return_value=False) as m:
         yield m
+
+
+@pytest.fixture(autouse=True)
+def _no_inherited_caller_stamp(monkeypatch):
+    """drone exports AIPASS_CALLER_CWD; inherited (the commit gate's pytest), it would pose as the session cwd."""
+    monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
 
 
 class TestAdminExemptionToolLane:
@@ -419,10 +425,10 @@ class TestScriptedLaneDoesNotOverreach:
         # awk is not a read-only program (print > file, system()), so it may not name it.
         assert _run(registered_projects["hooks"], command=f"awk '/def /' {target}")["exit_code"] == 2
 
-    def test_seedgo_no_longer_writes_across_branches_from_a_shell(self, registered_projects: dict):
-        """A name (seedgo) decides nothing in the shell lane either."""
+    def test_sentry_no_longer_writes_across_branches_from_a_shell(self, registered_projects: dict):
+        """A name (sentry) decides nothing in the shell lane either."""
         memory = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
-        assert _run(registered_projects["seedgo"], command=f"sed -i s/a/b/ {memory}")["exit_code"] == 2
+        assert _run(registered_projects["sentry"], command=f"sed -i s/a/b/ {memory}")["exit_code"] == 2
 
     def test_a_projects_manager_writes_its_citizens_branches_and_a_citizen_does_not(
         self, registered_projects: dict, grant_withheld
@@ -431,7 +437,7 @@ class TestScriptedLaneDoesNotOverreach:
         writer = Path(registered_projects["writer"]) / ".updateignore"
         assert _run(registered_projects["vera_seat"], command=f"cp ./x {writer.as_posix()}")["exit_code"] == 0
         assert _run(registered_projects["vera_seat"], file_path=str(writer), tool="Write")["exit_code"] == 0
-        sibling = (Path(registered_projects["vera_seedgo"]) / "x.md").as_posix()
+        sibling = (Path(registered_projects["vera_sentry"]) / "x.md").as_posix()
         assert "Cross-branch" in _reason(_run(registered_projects["writer"], command=f"echo x > {sibling}"))
         hooks = (Path(registered_projects["hooks"]) / "x.py").as_posix()
         assert "Cross-branch" in _reason(_run(registered_projects["devpulse"], command=f"echo x > {hooks}"))
@@ -1024,7 +1030,7 @@ class TestTheBranchAndMemoryLanesAreDefaultDeny:
 
     def test_drone_and_own_branch_work_still_pass(self, registered_projects: dict):
         seat = registered_projects["hooks"]
-        for command in ("drone @seedgo checklist apps", "mkdir -p .archive && mv old.py .archive/", "pytest tests -q"):
+        for command in ("drone @sentry checklist apps", "mkdir -p .archive && mv old.py .archive/", "pytest tests -q"):
             assert _run(seat, command=command)["exit_code"] == 0, command
 
 

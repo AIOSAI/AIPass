@@ -3,14 +3,14 @@
 # Description: changed_entries diff helper and the write_memory_file entry-limits wiring (FPLAN-0270 phase 3)
 # Version: 1.0.1
 # Created: 2026-06-13
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/json/entry_limits.py changed_entries and its write_memory_file wiring in memory_files.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — write_memory_file_simple(), read_memory_file_data(): test_memory_files.py
-# seedgo: no-test-needed(covered_elsewhere) — load_entry_limits() config merge, fed in here: tests/test_entry_limits.py
+# sentry: no-test-needed(covered_elsewhere) — write_memory_file_simple(), read_memory_file_data(): test_memory_files.py
+# sentry: no-test-needed(covered_elsewhere) — load_entry_limits() config merge, fed in here: tests/test_entry_limits.py
 
 import json
 from pathlib import Path
@@ -487,7 +487,7 @@ class TestPassportUnaffected:
 # unchanged over-cap entry deadlocks rollover, whose write is always a shrink.
 # Carried debt is reported on every write; `drone @memory lint` reads disk.
 
-_FAT_SUMMARY = "X" * 343  # the @seedgo shape: over the 300-char sessions cap
+_FAT_SUMMARY = "X" * 343  # the @sentry shape: over the 300-char sessions cap
 
 
 class TestShrinkWriteIsNeverRefused:
@@ -497,7 +497,7 @@ class TestShrinkWriteIsNeverRefused:
         """The live deadlock, reproduced: 3 sessions in, tail archived, 2 out."""
         mem_mod = memory_files
 
-        trinity = tmp_path / "seedgo" / ".trinity"
+        trinity = tmp_path / "sentry" / ".trinity"
         trinity.mkdir(parents=True)
         local_path = trinity / "local.json"
 
@@ -525,7 +525,7 @@ class TestShrinkWriteIsNeverRefused:
         mock_logger = MagicMock()
         monkeypatch.setattr(mem_mod, "logger", mock_logger)
 
-        trinity = tmp_path / "seedgo" / ".trinity"
+        trinity = tmp_path / "sentry" / ".trinity"
         trinity.mkdir(parents=True)
         local_path = trinity / "local.json"
         before = {"sessions": [{"number": 2, "summary": _FAT_SUMMARY}, {"number": 1, "summary": "old"}]}
@@ -539,7 +539,7 @@ class TestShrinkWriteIsNeverRefused:
         warnings = " ".join(str(c) for c in mock_logger.warning.call_args_list)
         assert "CARRIED" in warnings, "carried debt passed without a word"
         assert "343/300" in warnings, "the report does not name the entry"
-        assert "seedgo" in warnings, "the report does not name the owner"
+        assert "sentry" in warnings, "the report does not name the owner"
 
 
 class TestAuthoringIsStillRefused:
@@ -628,7 +628,7 @@ class TestRenamedFieldEntryDoesNotBrickRollover:
 
 
 class TestTheBypassClaimIsMeasuredNotAsserted:
-    """`.seedgo/bypass.json` claims @hooks calls `changed_entries` — this checks it.
+    """`.sentry/bypass.json` claims @hooks calls `changed_entries` — this checks it.
 
     Red the day @hooks stops calling it: the bypass is stale and the function can go.
     Skips where @hooks is not installed (a lone checkout is not a failure).
@@ -652,7 +652,7 @@ class TestTheBypassClaimIsMeasuredNotAsserted:
         assert Path("handlers", "security", "edit_gate.py") in callers, (
             f"edit_gate.py is not among @hooks' callers of changed_entries() ({callers}) — "
             "no file in @hooks calls changed_entries() any more — the unused_function bypass in "
-            ".seedgo/bypass.json is now a false claim. Either the caller moved (update the reason) "
+            ".sentry/bypass.json is now a false claim. Either the caller moved (update the reason) "
             "or the function is genuinely dead (delete it and drop the bypass)."
         )
 
@@ -661,7 +661,7 @@ class TestTheBypassClaimIsMeasuredNotAsserted:
         import json as _json
 
         rules = _json.loads(
-            (repo_root.SOURCE_ROOT / "src" / "aipass" / "memory" / ".seedgo" / "bypass.json").read_text(
+            (repo_root.SOURCE_ROOT / "src" / "aipass" / "memory" / ".sentry" / "bypass.json").read_text(
                 encoding="utf-8"
             )
         )["bypass"]

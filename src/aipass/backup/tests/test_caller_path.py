@@ -3,15 +3,15 @@
 # Description: Tests for caller-CWD path resolution across user-facing commands
 # Version: 1.0.8
 # Created: 2026-08-08
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/path/caller.py and caller-CWD resolution."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that handlers/path/ and modules/share, register, status parse and import
-# seedgo: no-test-needed(documentation) — that functions like resolve_caller_path, run_share carry docstrings
-# seedgo: no-test-needed(stdlib) — Path.resolve() and pathlib behavior
+# sentry: no-test-needed(ruff) — that handlers/path/ and modules/share, register, status parse and import
+# sentry: no-test-needed(documentation) — that functions like resolve_caller_path, run_share carry docstrings
+# sentry: no-test-needed(stdlib) — Path.resolve() and pathlib behavior
 
 import inspect
 import json

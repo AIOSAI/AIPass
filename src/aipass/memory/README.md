@@ -28,7 +28,7 @@ drone @memory push --dry-run            # The trinity push — report what would
   observations, filterable by branch and by memory type.
 - **Owns the entry shape and the caps.** `memory.config.json` publishes the closed field shape — every
   field an entry may carry, its type and its cap — plus the keep counts and the whole-file budgets.
-  The write gate, the push, the state tabs and @seedgo's startup-budget pack all read those numbers
+  The write gate, the push, the state tabs and @sentry's startup-budget pack all read those numbers
   from here rather than copying them.
 - **Keeps the frame honest.** The trinity push rebuilds each branch's machine frame from the gold
   templates and moves every non-canonical entry out verbatim, verified before it is removed: records
@@ -130,7 +130,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 - Every branch — rollover archival when `.trinity/` files pass their keep counts, semantic search
   over what was archived, template distribution, and the todo pad and backlog
 - `@hooks` — the entry caps, the closed field shape and its refusal reasons, read at the write gate
-- `@seedgo` — the `.trinity` caps and whole-file budgets its startup-budget pack scores against
+- `@sentry` — the `.trinity` caps and whole-file budgets its startup-budget pack scores against
 - `@daemon` — branch health via `apps/modules/health.py`'s `get_branch_health(branch_name)`, because
   a handler may not import another branch's handler directly
 

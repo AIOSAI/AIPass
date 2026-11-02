@@ -3,14 +3,14 @@
 # Description: Tests for cross-OS gap registry parser + doctor/init integration
 # Version: 1.1.7
 # Created: 2026-07-02
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/cross_os/gap_registry.py and the handlers it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every file in handlers/cross_os/ parses and imports
-# seedgo: no-test-needed(documentation) — that the public parser and preflight functions carry docstrings
+# sentry: no-test-needed(ruff) — that every file in handlers/cross_os/ parses and imports
+# sentry: no-test-needed(documentation) — that the public parser and preflight functions carry docstrings
 
 import contextlib
 import platform

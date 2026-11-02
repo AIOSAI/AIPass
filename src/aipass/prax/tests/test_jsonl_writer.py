@@ -3,16 +3,16 @@
 # Description: Tests for PRAX JSONL writer with rotation
 # Version: 1.1.0
 # Created: 2026-07-10
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/logging/jsonl_writer.py, exported via apps/modules/logger.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(error_handling) — _rotate_with_backup unlinking when the rename fails, covered by that row
-# seedgo: no-test-needed(error_handling) — _unlink_safe's warning when the unlink fails, covered by that row
-# seedgo: no-test-needed(error_handling) — _maybe_rotate skipping rotation when the stat fails, covered by that row
-# seedgo: no-test-needed(constant) — rotation above the JSONL_MAX_BYTES default; only the size under it is tested
+# sentry: no-test-needed(error_handling) — _rotate_with_backup unlinking when the rename fails, covered by that row
+# sentry: no-test-needed(error_handling) — _unlink_safe's warning when the unlink fails, covered by that row
+# sentry: no-test-needed(error_handling) — _maybe_rotate skipping rotation when the stat fails, covered by that row
+# sentry: no-test-needed(constant) — rotation above the JSONL_MAX_BYTES default; only the size under it is tested
 
 import contextlib
 import json

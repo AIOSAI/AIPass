@@ -3,7 +3,7 @@
 # Description: Shared autouse fixtures for the test_symbolic_extras files - the handler-dependency stand-ins
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Fixtures for tests/test_symbolic_extras*.py (no test_ prefix: never collected).
@@ -12,7 +12,7 @@ Not in conftest.py: its autouse fixtures run suite-wide. Imported after each fil
 """
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(ruff) — that the module parses and imports
 
 import sys
 from unittest.mock import MagicMock

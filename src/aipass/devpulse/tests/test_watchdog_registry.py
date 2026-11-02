@@ -3,14 +3,14 @@
 # Description: Tests for the watchdog watch registry (Phase 4, FPLAN-0186)
 # Version: 1.4.1
 # Created: 2026-04-14
-# Modified: 2026-10-29
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/watchdog/registry.py and the handlers that register through it."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that handlers/watchdog/registry.py parses and imports
-# seedgo: no-test-needed(documentation) — that register, deregister, list_active and kill_watch carry docstrings
+# sentry: no-test-needed(ruff) — that handlers/watchdog/registry.py parses and imports
+# sentry: no-test-needed(documentation) — that register, deregister, list_active and kill_watch carry docstrings
 
 import json
 import os

@@ -3,14 +3,14 @@
 # Description: citizenship.citizen_id — the per-citizen UID stamped at birth
 # Version: 1.0.1
 # Created: 2026-08-24
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/registry.py and apps/handlers/placeholders.py — the citizen_id contract."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that registry.py, placeholders.py, and class_registry.py parse and import cleanly
-# seedgo: no-test-needed(documentation) — that the public functions in those modules carry docstrings
+# sentry: no-test-needed(ruff) — that registry.py, placeholders.py, and class_registry.py parse and import cleanly
+# sentry: no-test-needed(documentation) — that the public functions in those modules carry docstrings
 
 import json
 import uuid

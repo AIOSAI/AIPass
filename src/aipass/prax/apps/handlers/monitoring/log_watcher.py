@@ -3,7 +3,7 @@
 # Description: Log File Monitor
 # Version: 1.2.0
 # Created: 2025-11-23
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """PRAX Log Watcher - Event Queue Integration"""
@@ -217,16 +217,16 @@ class LogFileWatcher(FileSystemEventHandler):
             if result:
                 return result
 
-        if "[seedgo]" in log_line.lower() and "audit" in log_line.lower():
+        if "[sentry]" in log_line.lower() and "audit" in log_line.lower():
             match = re.search(r"Auditing\s+(\w+)", log_line)
             if match:
                 target = match.group(1).upper()
-                return {"command": f"seedgo audit @{target.lower()}", "caller": None, "target": target}
+                return {"command": f"sentry audit @{target.lower()}", "caller": None, "target": target}
 
         if "standards_checklist" in log_line.lower() and "Running" in log_line:
             match = re.search(r"Running\s+(\w+)\s+standard\s+check\s+on\s+(.+)", log_line)
             if match:
-                return {"command": f"seedgo checklist {match.group(2)}", "caller": None, "target": None}
+                return {"command": f"sentry checklist {match.group(2)}", "caller": None, "target": None}
 
         if "[ai_mail]" in log_line.lower():
             if "Sending" in log_line:
@@ -282,7 +282,7 @@ class LogFileWatcher(FileSystemEventHandler):
                 display_cmd = f"drone @{route_match.group(1)} {cmd_name} {cmd_args}".strip()
                 return {"command": display_cmd, "caller": caller, "target": target}
 
-        # Format: "Executing command [CALLER:PRAX]: seedgo.py audit @prax"
+        # Format: "Executing command [CALLER:PRAX]: sentry.py audit @prax"
         if "Executing" in log_line and "command" in log_line:
             return self._match_executing_command(log_line)
 

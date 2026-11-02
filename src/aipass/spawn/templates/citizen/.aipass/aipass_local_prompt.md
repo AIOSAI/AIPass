@@ -4,8 +4,8 @@
 THE CONTRACT FOR THIS FILE — read it, then delete this block with the rest of the guidance.
 
  - Injected every turn. @hooks renders it against BRANCH_CHAR_BUDGET in
-   aipass.hooks.apps.modules.grounding_content and truncates past it; seedgo reports it
-   in `drone @seedgo audit context`. hooks owns that number — never copy it in here.
+   aipass.hooks.apps.modules.grounding_content and truncates past it; sentry reports it
+   in `drone @sentry audit context`. hooks owns that number — never copy it in here.
  - Breadcrumbs only: how THIS branch works. The kernel and the navmap already carry
    dispatch syntax, git, logging, memory and the agent roster. Never repeat them.
  - The directory tree lives HERE and nowhere else. README is the face for strangers,

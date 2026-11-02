@@ -3,15 +3,15 @@
 # Description: Tests for devpulse.py CLI routing, introspection, and resilience
 # Version: 1.0.0
 # Created: 2026-05-15
-# Modified: 2026-10-22
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/devpulse.py and the routing of apps/modules/release_notify.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every file in apps/modules/ parses and imports
-# seedgo: no-test-needed(constant) — the Rich colour tags print_help and print_introspection emit
-# seedgo: no-test-needed(stdlib) — the win32 preamble's os.environ.setdefault and stream reconfigure
+# sentry: no-test-needed(ruff) — that every file in apps/modules/ parses and imports
+# sentry: no-test-needed(constant) — the Rich colour tags print_help and print_introspection emit
+# sentry: no-test-needed(stdlib) — the win32 preamble's os.environ.setdefault and stream reconfigure
 
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock

@@ -3,7 +3,7 @@
 # Description: EmbeddingService and the embedder public API — PARKED with the symbolic tier, kept for revival
 # Version: 2.0.1
 # Created: 2026-04-05
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/vector/embedder.py."""
@@ -11,7 +11,7 @@
 # Parked with the symbolic tier: embedder.py's only importers were parked; kept to document it for revival.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — vector/embed_subprocess.py, the live lane: fastembed runs out of process
+# sentry: no-test-needed(external) — vector/embed_subprocess.py, the live lane: fastembed runs out of process
 
 import pytest as _parked
 

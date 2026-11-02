@@ -3,15 +3,15 @@
 # Description: drone rm contained safe-delete: containment, carve-outs, stale sweep
 # Version: 1.0.5
 # Created: 2026-06-02
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/rm.py and the rm_handler containment it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — the deletion record's contents, pinned in tests/test_deletion_log.py
-# seedgo: no-test-needed(covered_elsewhere) — the broker lane of a sandboxed delete, pinned in tests/test_broker.py
-# seedgo: no-test-needed(covered_elsewhere) — rm from a deleted working directory, pinned in tests/test_no_cwd_sweep.py
+# sentry: no-test-needed(covered_elsewhere) — the deletion record's contents, pinned in tests/test_deletion_log.py
+# sentry: no-test-needed(covered_elsewhere) — the broker lane of a sandboxed delete, pinned in tests/test_broker.py
+# sentry: no-test-needed(covered_elsewhere) — rm from a deleted working directory, pinned in tests/test_no_cwd_sweep.py
 
 import errno
 import json

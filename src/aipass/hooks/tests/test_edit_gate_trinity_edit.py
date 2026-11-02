@@ -3,7 +3,7 @@
 # Description: edit_gate's .trinity caps on the Edit lane: Edit, replace_all, MultiEdit, carried vs authored entries
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py: the .trinity character caps on Edit and MultiEdit."""
@@ -12,8 +12,8 @@
 # test_edit_gate_trinity_tripwire.py; the advisories are test_edit_gate_trinity.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that edit_gate.py parses and its imports resolve
-# seedgo: no-test-needed(stdlib) — json.loads' parsing of the proposed content; the gate's reading of it is pinned
+# sentry: no-test-needed(ruff) — that edit_gate.py parses and its imports resolve
+# sentry: no-test-needed(stdlib) — json.loads' parsing of the proposed content; the gate's reading of it is pinned
 
 import json
 from pathlib import Path
@@ -437,7 +437,7 @@ class TestTrinityEditUnrelatedFieldOnFatFile:
     drift had been cured fleet-wide, and a clause justified by a temporary state
     has to be re-read when that state ends. @memory measured that it had ended —
     drift RECURS (@ai_mail carried three over-cap learnings the same evening,
-    @seedgo one) — and that refusing carried debt deadlocks the archiver:
+    @sentry one) — and that refusing carried debt deadlocks the archiver:
     a file cannot get smaller because it is too big.
 
     So the rule is @memory's entry_limits 1.6.0 rule, and this gate now keeps

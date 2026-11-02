@@ -62,7 +62,7 @@ The fallbacks are `UNKNOWN_BRANCH_DIR = "<branch>"` and `UNKNOWN_NEXT = "?"`. `t
 Here is an example rendered from the live config (count 10, max_chars 100). The branch directory is `memory`, the pad holds numbers 12 and 3, and the backlog holds #40:
 
 ```
-⟦ pad of 10 · oldest roll to .backup/todo/memory/backlog.json · task ≤100 chars · draft to 80 · next #41 ⟧ One line of what to do: 'Check on seedgo's errors in logs', 'fix drone help'. No status, no log — the story lives in plans and sessions. Delete it when done.
+⟦ pad of 10 · oldest roll to .backup/todo/memory/backlog.json · task ≤100 chars · draft to 80 · next #41 ⟧ One line of what to do: 'Check on sentry's errors in logs', 'fix drone help'. No status, no log — the story lives in plans and sessions. Delete it when done.
 ```
 
 The tab in the other cases:
@@ -111,11 +111,11 @@ def next_number(pad, backlog_entries, *, high_water=None, tab_floor=None) -> int
 - **The tab floor** is read only from memory's own tab shape — `⟦ … · next #N ⟧` at the start of the line, N a positive integer. `#?`, `#0`, a retired tab, free text or a non-string is no floor. It is how a number survives a hand deletion between renders: the tab that offered #13 still says #13 after #12 is deleted, so the next render says #13 again rather than walking back to #12. Callers: `tab_renderer.todo_context(..., todos_meta=)` from `_refresh_local`, `trinity_push.build_frame` and `_plan_file`; `todo_roll.restore_todo` reads the pad's own `todos_meta`. `render_all_meta_tabs` passes none (birth, no tab yet).
 - The tab shows `#?` in three cases. The pad is not a list. The backlog is unusable (`read_backlog` returned an error: the file cannot be read, has no `document_metadata` object, or has no `entries` list). There is no branch.
 - A missing backlog is not unusable. It just adds no numbers and no `high_water`.
-- **A restore lands on top.** Its fresh number is `next_number` with both floors, so it is the highest on the pad and goes to index 0: lists are newest-first (seedgo refuses "number N is not below the entry above it").
+- **A restore lands on top.** Its fresh number is `next_number` with both floors, so it is the highest on the pad and goes to index 0: lists are newest-first (sentry refuses "number N is not below the entry above it").
 - **N only changes when the tab is rendered.** The renderers are: push, `rollover run` (only for branches whose sessions, key_learnings or observations rolled), the normalizer, `templates bump --confirm`, `todo restore` (its pad write carries a fresh `todos_meta`), a `config` limit write that moves the branch's enforced count (`tab_renderer.refresh_moved_limits`), and spawn birth. Adding or deleting a todo does not re-render. So after an agent adds a todo, a checker that recomputes N from the live pad will disagree with a correctly rendered file until the next render.
 - **Residual (stated, not cured):** a todo added by hand and deleted by hand with no memory write or tab render in between leaves no trace, so its number can be issued again once.
 
-**A checker needs nothing for the floors.** @seedgo's `trinity_groups.py` never derives N: `_meta_item` sends the todos line to `_todos_meta_matches`, which byte-matches the whole line except the `next #N` slot. A higher N from either floor is still a match, and seedgo need not read `high_water`.
+**A checker needs nothing for the floors.** @sentry's `trinity_groups.py` never derives N: `_meta_item` sends the todos line to `_todos_meta_matches`, which byte-matches the whole line except the `next #N` slot. A higher N from either floor is still a match, and sentry need not read `high_water`.
 
 ## 4. Where count, max_chars and draft come from
 
@@ -146,7 +146,7 @@ How the count resolves:
               "entry": {<the todo, json-equal to the pad's copy>}}]}
 ```
 
-- **`document_metadata.high_water`** (optional int, memory-owned): the highest todo number memory has seen for the branch — on the pad, in the entries, or issued by a restore. Raised, never lowered, on every memory backlog write (roll, push move, restore) and verified on read-back. Absent means no floor, never an error. It is a floor for `next #N` (section 3) and nothing else; seedgo need not read it. Residual: a todo added by hand and deleted by hand with no memory write or tab render in between leaves no trace, so its number can be issued again once.
+- **`document_metadata.high_water`** (optional int, memory-owned): the highest todo number memory has seen for the branch — on the pad, in the entries, or issued by a restore. Raised, never lowered, on every memory backlog write (roll, push move, restore) and verified on read-back. Absent means no floor, never an error. It is a floor for `next #N` (section 3) and nothing else; sentry need not read it. Residual: a todo added by hand and deleted by hand with no memory write or tab render in between leaves no trace, so its number can be issued again once.
 
 - **Reasons:** `overflow`, `non-canonical` and `migration` (`todo_roll.REASONS`). The push writes `non-canonical` first, then `overflow`, with one verified append per reason.
 - **Appending** (`append_to_backlog`): read the file, add the records, replace it atomically, then read it back. Every record must match what was written, and every appended `entry` must be json-equal to the pad's copy. Equality is `json.dumps(sort_keys=True, ensure_ascii=False, separators=(",", ":"))`. The file is only ever appended to, never overwritten.
@@ -168,7 +168,7 @@ Your working draft — the context that keeps you YOU across sessions; updated f
 `todos_meta`:
 
 ```
-{{TODOS_META}} One line of what to do: 'Check on seedgo's errors in logs', 'fix drone help'. No status, no log — the story lives in plans and sessions. Delete it when done.
+{{TODOS_META}} One line of what to do: 'Check on sentry's errors in logs', 'fix drone help'. No status, no log — the story lives in plans and sessions. Delete it when done.
 ```
 
-`"todos": []`. @seedgo's `_usage` byte-match reads this template from `memory/templates`, so this text is what every branch's `_usage` is compared against.
+`"todos": []`. @sentry's `_usage` byte-match reads this template from `memory/templates`, so this text is what every branch's `_usage` is compared against.

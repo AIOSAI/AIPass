@@ -71,7 +71,7 @@ Install adds AIPass hooks and deny rules to your user-level Claude Code settings
    drone @ai_mail dispatch @agent "Subject" "Body"  # Send the task and wake the agent
    ```
 
-3. **Grow it and check it.** Add an agent with `drone @spawn create src/my_project/analyst --role "Analyst" --purpose "Reports"`. Run `drone @seedgo audit aipass` for the same standards checks AIPass's own agents pass in CI, and `aipass doctor` for the health of the install.
+3. **Grow it and check it.** Add an agent with `drone @spawn create src/my_project/analyst --role "Analyst" --purpose "Reports"`. Run `drone @sentry audit aipass` for the same standards checks AIPass's own agents pass in CI, and `aipass doctor` for the health of the install.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/AIOSAI/AIPass/main/assets/baud-agent.png" alt="An agent's card in BAUD: what it is doing, its mail, plans and todos" width="240">
@@ -141,7 +141,7 @@ The boring stuff works. One human and these agents built it, and use it every da
 - **Plans that carry context.** Work is written down as a plan, so whoever picks it up knows why it exists and where it stands.
 - **Gates.** Hooks decide which agent may [edit which files](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/hooks/docs/edit_gate.md). Git goes through [one door](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/hooks/docs/git_gate.md). Raw deletes are refused. [Provider settings](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/hooks/docs/settings_gate.md) (`~/.claude/settings.json`, `~/.codex/`) change only with the owner's yes.
 - **Works in your own repos.** A project that holds an agent calls the fleet right away. For the fleet to send work to it, declare it once with `drone @memory roots add <path>`.
-- **Standards audits.** AIPass's own 18 agents are audited in CI on every change against [one written standard](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/seedgo/docs/aipass_standards.md); `drone @seedgo audit` runs the same checks on yours.
+- **Standards audits.** AIPass's own 18 agents are audited in CI on every change against [one written standard](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/sentry/docs/aipass_standards.md); `drone @sentry audit` runs the same checks on yours.
 - **Logs and backups.** Every agent logs to its own place, and runaway logs are caught. Local snapshots you can restore from, with optional Google Drive sync.
 - **The daemon.** `drone @daemon install-timer` starts a scheduler for recurring jobs, and each agent owns its own schedule.
 - **Everything local.** Memory and mail are files on your machine. Nothing leaves it except what the CLI you run (Claude Code, or Codex or OpenCode when a seat runs on it) sends to its own provider, unless you turn on an outside API or Drive sync with your own keys. The phone face serves on your own tailnet, and the first memory search downloads its small embedding model once.
@@ -194,7 +194,7 @@ AIPass ships with 18 agents. Each has its own README and a `docs/` folder under 
 devpulse (orchestrator: the one you talk to)
    ├── aipass   : concierge: setup, updates, machine problems (init, doctor)
    ├── drone    : command routing and @agent resolution
-   ├── seedgo   : quality standards, checked across all agents
+   ├── sentry   : quality standards, checked across all agents
    ├── prax     : monitoring, logs, runaway-log detection
    ├── ai_mail  : agent-to-agent mail and task dispatch
    ├── flow     : plans, templates, archival
@@ -268,7 +268,7 @@ Each agent keeps its own docs under `src/aipass/<agent>/docs/`. Start with these
 - **Mail and dispatch:** [sending and delivery](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/ai_mail/docs/sending_and_delivery.md) · [wake pipeline](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/ai_mail/docs/wake_pipeline.md)
 - **Plans:** [plan lifecycle](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/flow/docs/plan_lifecycle.md) · [plan types](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/flow/docs/plan_types.md)
 - **Gates:** [edit gate](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/hooks/docs/edit_gate.md) · [git gate](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/hooks/docs/git_gate.md) · [sandbox](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/hooks/docs/sandbox.md)
-- **Standards:** [AIPass standards](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/seedgo/docs/aipass_standards.md)
+- **Standards:** [AIPass standards](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/sentry/docs/aipass_standards.md)
 - **Scheduler:** [daemon](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/daemon/docs/README.md)
 - **Backups:** [restore](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/backup/docs/restore.md)
 - **Project files:** [CONTRIBUTING](https://github.com/AIOSAI/AIPass/blob/main/CONTRIBUTING.md) · [SECURITY](https://github.com/AIOSAI/AIPass/blob/main/SECURITY.md) · [CHANGELOG](https://github.com/AIOSAI/AIPass/blob/main/CHANGELOG.md) · [LICENSE](https://github.com/AIOSAI/AIPass/blob/main/LICENSE)

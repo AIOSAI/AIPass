@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aipass"
-version = "2.8.33"
+version = "2.8.34"
 description = "A local multi-agent framework where your AI agents keep their memory, work together, and never ask you to re-explain context"
 readme = "README.md"
 license = "MIT"
@@ -94,7 +94,7 @@ dev = [
     # phase 6): a surviving mutant means the test lied about what it pins.
     # mutmut 3 refuses to run without a [tool.mutmut] block or a src/ layout in
     # cwd, so it is invoked from the repo root; the sampling instrument that
-    # drives it is seedgo's.
+    # drives it is sentry's.
     "mutmut>=3.7",
 ]
 
@@ -108,7 +108,7 @@ packages = ["src/aipass"]
 [tool.pytest.ini_options]
 testpaths = ["tests", "src"]
 # ".*" restores pytest's default dot-dir exclusion (dropped when this list was
-# customized) so scaffolding dirs (.aipass, .trinity, .seedgo, ...) are never
+# customized) so scaffolding dirs (.aipass, .trinity, .sentry, ...) are never
 # recursed for tests — prevents conftest module-name collisions like a bundled
 # skill's .aipass/.../tests/conftest.py clashing with a branch's tests/conftest.py.
 # docs.local and dropbox are untracked scratch and inbound relays; the test files
@@ -119,7 +119,7 @@ norecursedirs = ["templates", "*.egg-info", ".*", "__pycache__", "my-project", "
 # renamed (disabled). Every file or directory whose name carries "telegram" is
 # left out of collection: prax's relay test, the disabled daemon notifier and
 # hooks response. CodeQL carries the same exclusion in
-# .github/workflows/security.yml; seedgo's audit reads a .seedgoignore in
+# .github/workflows/security.yml; sentry's audit reads a .sentryignore in
 # daemon, prax and hooks.
 addopts = ["--ignore-glob=*telegram*"]
 
@@ -141,10 +141,10 @@ line-length = 120
 # READMEs are prose with illustrative snippets — keep them out of scope.
 # spawn's templates carry {{BRANCH}} placeholders in code positions — not valid
 # Python until rendered at create time; the newborn they mint IS linted.
-# seedgo's .seedgo/fixtures are canary trees frozen at pinned commits for the
+# sentry's .sentry/fixtures are canary trees frozen at pinned commits for the
 # audit-tests lane; a lint fix there would change the fixture, not the product
 # (RUF100 found 12 markers in 8 fixture files on 2026-09-24 and they were left).
-extend-exclude = ["*.md", "src/aipass/spawn/templates", "src/aipass/seedgo/.seedgo/fixtures"]
+extend-exclude = ["*.md", "src/aipass/spawn/templates", "src/aipass/sentry/.sentry/fixtures"]
 
 [tool.ruff.lint]
 # Pin the pre-ruff-0.16 default rule set: 0.16.0 expanded the defaults to many
@@ -154,11 +154,11 @@ extend-exclude = ["*.md", "src/aipass/spawn/templates", "src/aipass/seedgo/.seed
 # E402 ignored repo-wide, a `# noqa: E402` suppresses a rule that never fires, and
 # no other standard reads a suppression marker. Measured before: 258 dead markers
 # in 130 files, every one auto-fixable; 246 in 122 live files were removed, the 12
-# in seedgo's frozen fixtures were left (see extend-exclude above).
+# in sentry's frozen fixtures were left (see extend-exclude above).
 select = ["E4", "E7", "E9", "F", "RUF100"]
 ignore = ["E402"]
 
-# adopted 2026-09-08 under RPLAN-0004 decision D1 (seedgo), the cp1252 class:
+# adopted 2026-09-08 under RPLAN-0004 decision D1 (sentry), the cp1252 class:
 # before 39 sites, after 0.
 preview = true
 extend-select = ["PLW1514"]

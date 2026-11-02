@@ -3,7 +3,7 @@
 # Description: The --json surface behind the rollover verbs - the emitter, the refusal writer, the projections
 # Version: 1.0.0
 # Created: 2026-09-16
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -93,7 +93,7 @@ def _project_overrides(limits: dict) -> dict:
 
 
 def print_introspection() -> None:
-    """Display module introspection (seedgo standard)."""
+    """Display module introspection (sentry standard)."""
     console.print()
     console.print("[bold cyan]rollover_json Module[/bold cyan]")
     console.print("The --json surface the rollover and config verbs answer through")

@@ -3,7 +3,7 @@
 # Description: 10-stage guided first-run setup — aipass init command
 # Version: 1.5.0
 # Created: 2026-04-16
-# Modified: 2026-10-31
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -156,7 +156,7 @@ _TEST_WRITE_POLICY_DEFAULT = {
     "block_test_edits": False,
     "note": (
         "The owner ruled 2026-09-01 (devpulse DPLAN-0323): agents are stripped of "
-        "self-directed test creation while @seedgo's test_quality v5 pack lands, because "
+        "self-directed test creation while @sentry's test_quality v5 pack lands, because "
         "the corpus being culled (tests written to satisfy a checker rather than to pin a "
         "defect) regrows faster than a standards pack can cull it. OFF blocks CREATION of "
         "new test files under any tests/ directory; edits to existing tests stay allowed "

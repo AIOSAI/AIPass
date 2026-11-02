@@ -3,13 +3,13 @@
 # Description: A module target is routed as a module — never via a failed branch lookup
 # Version: 1.0.2
 # Created: 2026-08-21
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/drone.py: a module target never detours through branch routing."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — the subprocess a branch route would spawn; tests/test_router.py covers branch routing
+# sentry: no-test-needed(stdlib) — the subprocess a branch route would spawn; tests/test_router.py covers branch routing
 
 from unittest.mock import patch
 
@@ -90,10 +90,10 @@ class TestModuleTargetNeverDetours:
 
 
 class TestBranchBackedModuleKeepsInteractive:
-    """@seedgo is BOTH a module and a branch — its Rich lane must not regress."""
+    """@sentry is BOTH a module and a branch — its Rich lane must not regress."""
 
     def test_interactive_command_still_branch_routes_when_branch_exists(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """`drone @seedgo audit` keeps the live lane (mutants: `interactive = False`; lane `is_module` only)."""
+        """`drone @sentry audit` keeps the live lane (mutants: `interactive = False`; lane `is_module` only)."""
         with (
             patch(f"{_DRONE}.is_module", return_value=True),
             patch(f"{_DRONE}.branch_exists", return_value=True),
@@ -103,7 +103,7 @@ class TestBranchBackedModuleKeepsInteractive:
             mock_route.return_value.exit_code = 0
             mock_route.return_value.stdout = ""
             mock_route.return_value.stderr = ""
-            monkeypatch.setattr("sys.argv", ["drone", "@seedgo", "audit", "aipass"])
+            monkeypatch.setattr("sys.argv", ["drone", "@sentry", "audit", "aipass"])
             main()
 
         mock_module.assert_not_called()
@@ -122,7 +122,7 @@ class TestNoFallbackHidesAFailure:
             patch(f"{_DRONE}.route_command", side_effect=BranchNotFoundError("path escapes project root")),
             patch(f"{_DRONE}._handle_module") as mock_module,
         ):
-            monkeypatch.setattr("sys.argv", ["drone", "@seedgo", "audit"])
+            monkeypatch.setattr("sys.argv", ["drone", "@sentry", "audit"])
             rc = main()
 
         assert rc == 1, "a refused branch must fail loud"

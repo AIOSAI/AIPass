@@ -3,15 +3,15 @@
 # Description: Tests for the keyring-backed secrets handler, its module door, migrate and get_secret_cmd
 # Version: 2.0.1
 # Created: 2026-06-15
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/auth/secrets.py, apps/modules/secrets.py, and api_key.get_secret_cmd."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — SECRETS_BASE's real home location; every test patches it to a temp dir
-# seedgo: no-test-needed(covered) — api_key's get_key() and validate_key() commands, tests/test_api_key.py
-# seedgo: no-test-needed(hardcoded_key) — that no real token sits in this file; every value is a fixture string
+# sentry: no-test-needed(constant) — SECRETS_BASE's real home location; every test patches it to a temp dir
+# sentry: no-test-needed(covered) — api_key's get_key() and validate_key() commands, tests/test_api_key.py
+# sentry: no-test-needed(hardcoded_key) — that no real token sits in this file; every value is a fixture string
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from keyring.backend import KeyringBackend
 from keyring.backends import chainer, fail, null
 from keyring.errors import KeyringLocked, PasswordSetError
 
-from aipass.api.apps.modules.api_key import handle_command as _hc  # noqa: F401 — seedgo test_coverage detection
+from aipass.api.apps.modules.api_key import handle_command as _hc  # noqa: F401 — sentry test_coverage detection
 from aipass.api.apps.modules.secrets import handle_command
 from aipass.api.apps.handlers.auth.secrets import (
     SecretsUnavailable,

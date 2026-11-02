@@ -4,15 +4,15 @@
 # Description: Tests for rollover lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/lifecycle/rollover.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and its logger import resolves
-# seedgo: no-test-needed(stdlib) — subprocess.run's timeout mechanics; the tests stub it at the edge
-# seedgo: no-test-needed(documentation) — that the handler's functions carry docstrings
+# sentry: no-test-needed(ruff) — that the module parses and its logger import resolves
+# sentry: no-test-needed(stdlib) — subprocess.run's timeout mechanics; the tests stub it at the edge
+# sentry: no-test-needed(documentation) — that the handler's functions carry docstrings
 
 from unittest.mock import patch, MagicMock
 import os

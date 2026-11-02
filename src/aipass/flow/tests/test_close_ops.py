@@ -3,13 +3,13 @@
 # Description: Tests for close_ops handler — plan closure business logic
 # Version: 1.3.0
 # Created: 2026-03-29
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/plan/close_ops.py and its close_helpers, append_closed_plan and registry_routing modules."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(ruff) — that the module parses and imports
 
 import json
 from pathlib import Path
@@ -196,7 +196,7 @@ class TestClosePlanImplAlreadyClosedOrphan:
 class TestCloseNeverArchivesAFileThatIsNotAPlan:
     """Leg 9: rows registered before leg 7 name reports; close would archive them."""
 
-    REPORT = "FPLAN-0508 rows seedgo\nmeasured rows, not a plan\n"
+    REPORT = "FPLAN-0508 rows sentry\nmeasured rows, not a plan\n"
 
     @staticmethod
     def _close(row: dict, deps: dict) -> dict:

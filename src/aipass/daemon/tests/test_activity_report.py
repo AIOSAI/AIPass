@@ -3,14 +3,14 @@
 # Description: Tests for the activity_report CLI module
 # Version: 1.1.1
 # Created: 2026-04-03
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/activity_report.py — activity, activity-report, branch-health."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that activity_report.py parses and imports
-# seedgo: no-test-needed(generated) — the report bodies; handlers/monitoring/report_generator builds them
+# sentry: no-test-needed(ruff) — that activity_report.py parses and imports
+# sentry: no-test-needed(generated) — the report bodies; handlers/monitoring/report_generator builds them
 
 import re
 from datetime import datetime

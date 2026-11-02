@@ -35,7 +35,7 @@ and `--confcutdir` included (the rootdir takes pytest's cache).
 |---|---|---|
 | @devpulse (verified admin grant) | anywhere, system-wide | — |
 | a project's manager row (`owner: true`), outside AIPass | their own project: its files in no branch row and its citizens' branches | another project |
-| every other seat, @seedgo/@spawn included | their own branch directory | another branch, a project-level file, another project |
+| every other seat, @sentry/@spawn included | their own branch directory | another branch, a project-level file, another project |
 
 A directory name grants nothing. A manager row grants its whole project: the files that lie in no branch row and its citizens' branches (the owner's ruling, 2026-10-26). In AIPass the manager row is the admin seat's, and it writes only as the verified grant.
 

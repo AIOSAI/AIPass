@@ -3,13 +3,13 @@
 # Description: Tests for the runaway_log_detected event handler
 # Version: 1.0.2
 # Created: 2026-08-09
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/events/runaway_handler.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(behaviour) — the detection in apps/handlers/log_watcher.py; the log watcher tests cover it
+# sentry: no-test-needed(behaviour) — the detection in apps/handlers/log_watcher.py; the log watcher tests cover it
 import json
 import tempfile
 import time

@@ -3,7 +3,7 @@
 # Description: Verify registered branches respond via test-convention email
 # Version: 1.0.1
 # Created: 2026-04-16
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -33,7 +33,7 @@ _ACK_RE = re.compile(r"\back\b", re.IGNORECASE)
 
 BRANCHES = [
     "drone",
-    "seedgo",
+    "sentry",
     "prax",
     "cli",
     "flow",

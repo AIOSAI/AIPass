@@ -5,7 +5,7 @@
 # Date: 2026-03-28
 # Version: 1.0.0
 # Created: 2026-03-28
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -20,8 +20,8 @@
 """Tests for apps/handlers/activity/activity_ops.py, catchup_ops.py and digest_ops.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every file in handlers/activity/, catchup/, digest/ parses and imports
-# seedgo: no-test-needed(covered) — what query_catchup_data() gathers for catchup: test_space_catchup
+# sentry: no-test-needed(ruff) — that every file in handlers/activity/, catchup/, digest/ parses and imports
+# sentry: no-test-needed(covered) — what query_catchup_data() gathers for catchup: test_space_catchup
 
 import sqlite3
 from datetime import datetime, timezone, timedelta

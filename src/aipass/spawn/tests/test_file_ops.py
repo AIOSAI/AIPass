@@ -3,14 +3,14 @@
 # Description: Tests for file_ops handler
 # Version: 1.0.4
 # Created: 2026-04-03
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/file_ops.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/handlers/file_ops.py parses and imports
-# seedgo: no-test-needed(documentation) — docstrings on the file_ops public functions
+# sentry: no-test-needed(ruff) — that apps/handlers/file_ops.py parses and imports
+# sentry: no-test-needed(documentation) — docstrings on the file_ops public functions
 
 import hashlib
 import json

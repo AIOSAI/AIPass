@@ -3,7 +3,7 @@
 # Description: Tests for the admin-lane doctor row (DPLAN-0319 train)
 # Version: 1.1.4
 # Created: 2026-08-28
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/admin_lane.py."""
@@ -11,7 +11,7 @@
 # only, never a second implementation of @devpulse's contract.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that admin_lane.py and the modules it imports parse and import
+# sentry: no-test-needed(ruff) — that admin_lane.py and the modules it imports parse and import
 
 import json
 import os

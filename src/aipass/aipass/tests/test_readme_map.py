@@ -3,7 +3,7 @@
 # Description: Tests for readme_map handler
 # Version: 1.3.2
 # Created: 2026-05-12
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/readme_map.py and the handlers it drives."""
@@ -11,8 +11,8 @@
 # branch-name to README-path lookup.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/handlers/readme_map.py parses and imports
-# seedgo: no-test-needed(documentation) — that the public lookup functions carry docstrings
+# sentry: no-test-needed(ruff) — that apps/handlers/readme_map.py parses and imports
+# sentry: no-test-needed(documentation) — that the public lookup functions carry docstrings
 
 from __future__ import annotations
 

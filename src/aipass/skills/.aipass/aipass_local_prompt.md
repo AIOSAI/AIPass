@@ -32,7 +32,7 @@ docs/                      tracked pages, every one linked from README.md
 tools/                     verify_branch.py, suspend/
 skills_json/               switch_state.json and per-module operation logs
 .aipass/skills/            project-local skills for THIS project
-.seedgo/bypass.json        one carried waiver
+.sentry/bypass.json        one carried waiver
 ```
 
 One skill carries its own suite: `lib/screen_lock/tests/`.

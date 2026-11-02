@@ -4,7 +4,7 @@
 # Description: main()'s help/introspection/exit-code routing, route_command, and the json shim's contracts
 # Version: 1.3.0
 # Created: 2026-03-28
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -12,7 +12,7 @@
 #   - v1.2.0 (2026-10-05): a help flag anywhere after the verb never runs it; help-aware verbs keep their own help
 #   - v1.1.0 (2026-09-27): fleet green - file top, product imports hoisted, capsys over err_console,
 #     router effects asserted, stdlib-only StringIO test retired
-#   - v1.0.0 (2026-03-28): Initial creation — covers seedgo test_quality gaps
+#   - v1.0.0 (2026-03-28): Initial creation — covers sentry test_quality gaps
 #
 # CODE STANDARDS:
 #   - Pytest function style (no unittest classes)
@@ -22,7 +22,7 @@
 """Tests for apps/commons.py (main, route_command) and apps/handlers/json/json_handler.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — print_help's and print_introspection's display strings
+# sentry: no-test-needed(constant) — print_help's and print_introspection's display strings
 
 import importlib
 import signal
@@ -340,7 +340,7 @@ def test_reimport_after_mock_preserves_function():
     assert callable(jh.load_json)
 
     # Never restore a pre-reload binding: the reload rebinds all names to one fresh handle, and
-    # restoring one leaves two handles, which seedgo's one-handle shim contract catches later in CI.
+    # restoring one leaves two handles, which sentry's one-handle shim contract catches later in CI.
     assert len({id(getattr(jh, name).__self__) for name in ("load_json", "save_json", "get_json_path")}) == 1, (
         "the reload left this module holding more than one service handle"
     )

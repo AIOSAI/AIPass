@@ -3,14 +3,14 @@
 # Description: Tests for feedback storage — load, save, generate_id, directory creation
 # Version: 1.0.0
 # Created: 2026-04-14
-# Modified: 2026-10-18
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/feedback/storage.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that storage.py parses and imports
-# seedgo: no-test-needed(stdlib) — secrets.token_hex's randomness behind generate_id()
+# sentry: no-test-needed(ruff) — that storage.py parses and imports
+# sentry: no-test-needed(stdlib) — secrets.token_hex's randomness behind generate_id()
 
 import json
 from unittest.mock import patch
@@ -66,7 +66,7 @@ class TestLoadInbox:
             "mailbox": "feedback",
             "total_messages": 1,
             "unread_count": 1,
-            "messages": [{"id": "abcd1234", "from": "seedgo", "subject": "test"}],
+            "messages": [{"id": "abcd1234", "from": "sentry", "subject": "test"}],
         }
         inbox_path = mock_feedback_dir / "inbox.json"
         with open(inbox_path, "w", encoding="utf-8") as f:

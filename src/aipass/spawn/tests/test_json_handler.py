@@ -3,21 +3,21 @@
 # Description: Tests that spawn's shim is wired to the fleet json service
 # Version: 2.0.1
 # Created: 2026-03-25
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/json/json_handler.py — spawn's shim onto the fleet json service."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every file in apps/handlers/json/ parses and imports
-# seedgo: no-test-needed(covered_elsewhere) — behaviour, in tests/test_json_handler_contract.py
+# sentry: no-test-needed(ruff) — that every file in apps/handlers/json/ parses and imports
+# sentry: no-test-needed(covered_elsewhere) — behaviour, in tests/test_json_handler_contract.py
 
 import json
 from pathlib import Path
 
 from aipass.spawn.apps.handlers.json import json_handler
 
-# Only the WIRING is tested here; the service's behaviour is pinned once, fleet-wide, by seedgo's contract test.
+# Only the WIRING is tested here; the service's behaviour is pinned once, fleet-wide, by sentry's contract test.
 
 
 BOUND_NAMES = (

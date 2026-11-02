@@ -3,7 +3,7 @@
 # Description: Tests for email delivery handler
 # Version: 1.1.0
 # Created: 2026-03-29
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py."""
@@ -11,8 +11,8 @@
 # Inbox migration, private branch check, delivery.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — _auto_register_sender()'s broad except Exception around contact auto-registration
-# seedgo: no-test-needed(shared) — a wake event carries no mail address: tests/test_wake.py pins its exact call
+# sentry: no-test-needed(stdlib) — _auto_register_sender()'s broad except Exception around contact auto-registration
+# sentry: no-test-needed(shared) — a wake event carries no mail address: tests/test_wake.py pins its exact call
 
 import json
 import pytest

@@ -3,7 +3,7 @@
 # Description: The display consumer must survive an unrenderable event
 # Version: 1.2.1
 # Created: 2026-08-12
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/monitor.py and apps/handlers/monitoring/unified_stream.py."""
@@ -12,14 +12,14 @@
 # Rendered through the product's own console: a recording mock never renders, so it could not fail.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — handle_command and _run_monitor, covered by tests/test_monitor_module.py
-# seedgo: no-test-needed(through_the_command) — _start_threads, _stop_threads, covered by tests/test_monitor_module.py
-# seedgo: no-test-needed(through_the_command) — _get_watch_directories, covered by tests/test_monitor_module.py
-# seedgo: no-test-needed(through_the_command) — the observer fallback, covered by tests/test_monitor_module.py
-# seedgo: no-test-needed(through_the_command) — monitor.py's print_help(), covered by tests/test_help_markup.py
-# seedgo: no-test-needed(through_the_command) — print_status's formatting, covered by tests/test_monitoring_handlers.py
-# seedgo: no-test-needed(through_the_command) — the rate worker's scan_rates(), covered by tests/test_rate_tracker.py
-# seedgo: no-test-needed(constant) — LEVEL_COLORS and BRANCH_COLORS, the style tables print_event reads
+# sentry: no-test-needed(through_the_command) — handle_command and _run_monitor, covered by tests/test_monitor_module.py
+# sentry: no-test-needed(through_the_command) — _start_threads, _stop_threads, covered by tests/test_monitor_module.py
+# sentry: no-test-needed(through_the_command) — _get_watch_directories, covered by tests/test_monitor_module.py
+# sentry: no-test-needed(through_the_command) — the observer fallback, covered by tests/test_monitor_module.py
+# sentry: no-test-needed(through_the_command) — monitor.py's print_help(), covered by tests/test_help_markup.py
+# sentry: no-test-needed(through_the_command) — print_status's formatting, covered by tests/test_monitoring_handlers.py
+# sentry: no-test-needed(through_the_command) — the rate worker's scan_rates(), covered by tests/test_rate_tracker.py
+# sentry: no-test-needed(constant) — LEVEL_COLORS and BRANCH_COLORS, the style tables print_event reads
 
 import io
 import threading
@@ -76,8 +76,8 @@ class TestEventTextIsUntrustedMarkup:
 
     def test_branch_label_still_visible(self):
         """Escaping must not cost the bracketed branch column."""
-        output = self._render(lambda m: m.print_event("SEEDGO", "audit complete", "info"))
-        assert "[SEEDGO" in output
+        output = self._render(lambda m: m.print_event("SENTRY", "audit complete", "info"))
+        assert "[SENTRY" in output
         assert "audit complete" in output
 
     def test_lowercase_branch_label_survives(self):
@@ -92,8 +92,8 @@ class TestEventTextIsUntrustedMarkup:
 
     def test_hook_event_says_which_branch_fired(self):
         """The branch the hook fired in must reach the screen: it tells hook lines apart."""
-        output = self._render(lambda m: m.print_hook_event("SEEDGO", "cadence:fired loader=global", "fired"))
-        assert "SEEDGO" in output
+        output = self._render(lambda m: m.print_hook_event("SENTRY", "cadence:fired loader=global", "fired"))
+        assert "SENTRY" in output
         assert "cadence:fired loader=global" in output
 
     def test_command_separator_is_escaped(self):
@@ -171,7 +171,7 @@ class TestDisplayWorkerSurvivesBadEvent:
     def test_worker_keeps_consuming_after_render_error(self):
         """The event AFTER the poison one still reaches the renderer."""
         mod = _import_monitor()
-        good = _event("SEEDGO")
+        good = _event("SENTRY")
 
         def _side_effect(event):
             if event is not good:
@@ -237,12 +237,12 @@ class TestStandaloneRunArgs:
 
     def test_run_with_branches_keeps_the_scope(self):
         mod = _import_monitor()
-        assert mod._standalone_run_args(["run", "seedgo,cli"], []) == ["run", "seedgo,cli"]
+        assert mod._standalone_run_args(["run", "sentry,cli"], []) == ["run", "sentry,cli"]
 
     def test_branches_without_run_still_work(self):
-        """The documented standalone form `monitor.py seedgo` is unchanged."""
+        """The documented standalone form `monitor.py sentry` is unchanged."""
         mod = _import_monitor()
-        assert mod._standalone_run_args(["seedgo"], []) == ["run", "seedgo"]
+        assert mod._standalone_run_args(["sentry"], []) == ["run", "sentry"]
 
     def test_flags_pass_through(self):
         """`run --logs` reaches _dispatch_run, which owns flag validation."""

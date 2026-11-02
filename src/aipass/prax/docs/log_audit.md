@@ -58,7 +58,7 @@ drone rm --stale 10d ..        # '..' from src/aipass/prax is src/aipass
   killed between the two leaves the temp behind. The real document is intact
   whatever happens to it.
 - **When.** Weekly, Sunday 04:00 local. That is the quiet hour, clear of
-  @seedgo's Sunday 03:00 shadow cycle and @daemon's 09:00. The slot is
+  @sentry's Sunday 03:00 shadow cycle and @daemon's 09:00. The slot is
   `2026-09-13T04:00:00`, a Sunday. A never-run job is seeded from the slot, so
   the job never fires at whatever minute a tick first discovers it. A Sunday
   missed while the machine was off fires on the first tick after it is back.

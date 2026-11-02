@@ -3,7 +3,7 @@
 # Description: Tests for email_send.py's send lane and email.py's command routing
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/email_send.py's handle_send and the routing of apps/modules/email.py."""
@@ -11,8 +11,8 @@
 # All handler dependencies are mocked: these tests verify orchestration, not business logic.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that print_help, caller_refusal and resolve_broadcast_targets parse and import
-# seedgo: no-test-needed(shared) — handle_inbox() and the other reading handlers: tests/test_email_module.py
+# sentry: no-test-needed(ruff) — that print_help, caller_refusal and resolve_broadcast_targets parse and import
+# sentry: no-test-needed(shared) — handle_inbox() and the other reading handlers: tests/test_email_module.py
 
 import pytest
 from unittest.mock import MagicMock

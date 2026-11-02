@@ -3,14 +3,14 @@
 # Description: Pins daemon imports against a dead working directory
 # Version: 1.1.2
 # Created: 2026-08-31
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/module_root.py — every daemon module imports without a readable working directory."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — Path.resolve's own cwd read in the platform realpath; measured in the child worlds
-# seedgo: no-test-needed(ruff) — that each swept file parses; the sweeps ast.parse every one and would raise first
+# sentry: no-test-needed(stdlib) — Path.resolve's own cwd read in the platform realpath; measured in the child worlds
+# sentry: no-test-needed(ruff) — that each swept file parses; the sweeps ast.parse every one and would raise first
 
 import ast
 import os
@@ -25,7 +25,7 @@ from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.module_root import module_file
 
 # A dropbox, like .archive, is a sandbox nothing looks into or runs from; __pycache__ holds no source.
-# Named here, not seedgo's list: seedgo's handlers refuse a caller from another branch.
+# Named here, not sentry's list: sentry's handlers refuse a caller from another branch.
 SWEEP_SKIP_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
 
 # On Windows ntpath.realpath reads the cwd unconditionally, so module-level Path(__file__).resolve() and

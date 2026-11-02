@@ -23,7 +23,7 @@ code that is no longer in the tree.
 - **Repo-wide grep**, not branch-only: `learnings.manager`, `learnings import
   manager`, `search.vector_search`, `import vector_search` across every `.py`,
   `.json` and `.md` in `AIPass/`. Zero hits outside the files themselves — the
-  only matches were seedgo's own audit artifacts and one CHANGELOG paragraph.
+  only matches were sentry's own audit artifacts and one CHANGELOG paragraph.
   This matters because the `dead_code` checker only sees one branch; a cross-branch
   or hooks-side caller would have made either file load-bearing and the correct
   disposition a documented bypass instead.

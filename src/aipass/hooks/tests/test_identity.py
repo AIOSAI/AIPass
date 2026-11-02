@@ -4,7 +4,7 @@
 # Description: Tests for identity prompt handler (cadence-gated 1.1.0, char budget enforced 1.2.0)
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/prompt/identity.py."""
@@ -13,9 +13,9 @@
 # tests pin formatting alone. TestCadenceGate pins the gate itself.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that handlers/prompt/identity.py parses and imports
-# seedgo: no-test-needed(documentation) — the module docstring's account of the cadence period
-# seedgo: no-test-needed(stdlib) — importlib.import_module resolving the cadence module by name
+# sentry: no-test-needed(ruff) — that handlers/prompt/identity.py parses and imports
+# sentry: no-test-needed(documentation) — the module docstring's account of the cadence period
+# sentry: no-test-needed(stdlib) — importlib.import_module resolving the cadence module by name
 
 import json
 from pathlib import Path

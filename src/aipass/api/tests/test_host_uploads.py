@@ -3,7 +3,7 @@
 # Description: Tests for the host API photo lane — bytes onto disk, named by the server
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/host/uploads.py and its POST /v1/files/upload route."""
@@ -12,8 +12,8 @@
 # file left behind, a mode set after creation) and a mocked filesystem invents past them.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — handlers/host/attach.py, where the path goes; tests/test_host_attach.py
-# seedgo: no-test-needed(covered_elsewhere) — token issue and check in host_tokens; tests/test_host_token_store.py
+# sentry: no-test-needed(covered_elsewhere) — handlers/host/attach.py, where the path goes; tests/test_host_attach.py
+# sentry: no-test-needed(covered_elsewhere) — token issue and check in host_tokens; tests/test_host_token_store.py
 
 import os
 import stat

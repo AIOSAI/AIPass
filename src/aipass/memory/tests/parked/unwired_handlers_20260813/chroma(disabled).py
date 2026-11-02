@@ -3,7 +3,7 @@
 # Description: Chroma Vector Storage Handler
 # Version: 0.3.0
 # Created: 2025-11-16
-# Modified: 2026-03-06
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -105,7 +105,7 @@ class ChromaService:
         Generate collection name using pattern: {branch}_{type}
 
         Args:
-            branch: Branch name (SEEDGO, CLI, etc.)
+            branch: Branch name (SENTRY, CLI, etc.)
             memory_type: Memory type (observations, local)
 
         Returns:
@@ -240,7 +240,7 @@ def store_vectors(
     Creates or uses existing collection for branch + type combination.
 
     Args:
-        branch: Branch name (SEEDGO, CLI, etc.)
+        branch: Branch name (SENTRY, CLI, etc.)
         memory_type: Memory type (observations, local)
         embeddings: List of embedding vectors
         documents: List of original text documents
@@ -252,11 +252,11 @@ def store_vectors(
 
     Example:
         # Store in global memory
-        result = store_vectors("SEEDGO", "observations", embeddings, texts, metadatas)
+        result = store_vectors("SENTRY", "observations", embeddings, texts, metadatas)
 
-        # Store in SEEDGO's local Chroma
-        local_path = Path("path/to/seedgo/.chroma")
-        result = store_vectors("SEEDGO", "observations", embeddings, texts, metadatas, local_path)
+        # Store in SENTRY's local Chroma
+        local_path = Path("path/to/sentry/.chroma")
+        result = store_vectors("SENTRY", "observations", embeddings, texts, metadatas, local_path)
     """
     # Convert string db_path to Path (subprocess passes strings via JSON)
     if db_path is not None and isinstance(db_path, str):
@@ -372,7 +372,7 @@ def search_vectors(
 
     Example:
         # Search specific branch
-        results = search_vectors(query_emb, branch="SEEDGO", memory_type="observations")
+        results = search_vectors(query_emb, branch="SENTRY", memory_type="observations")
 
         # Global search across all branches
         results = search_vectors(query_emb, n_results=10)

@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-09-01
-# Modified: 2026-10-25
+# Modified: 2026-11-02
 # =============================================
 
 """Enforces the owner's 2026-09-01 ruling: agents do not create tests for now.
@@ -136,7 +136,7 @@ def _refuse_creation(targets: list[Path], policy: Any, branch: str, lane: str) -
         f"New test file blocked ({lane}): agents do not create tests right now.\n"
         f"{named}\n\n"
         "The owner's ruling, 2026-09-01 (DPLAN-0323): self-directed test creation is off across "
-        "the fleet while @seedgo's test_quality v5 pack lands. Editing an EXISTING test to fix "
+        "the fleet while @sentry's test_quality v5 pack lands. Editing an EXISTING test to fix "
         "a red is still allowed — this is about the corpus growing, not about freezing it.\n\n"
         f"Policy: {policy.path}\n"
         f'  to lift for one branch : add "{branch or "<branch>"}" to the "allow" array\n'
@@ -243,9 +243,9 @@ def handle(hook_data: dict) -> dict:
         return _block(GATE_CRASHED.format(error=f"{type(exc).__name__}: {exc}"))
 
 
-# Template pointer, @seedgo's contract: on PostToolUse in tests/**, one line pointing at the LOCAL page, read per call.
+# Template pointer, @sentry's contract: on PostToolUse in tests/**, one line pointing at the LOCAL page, read per call.
 
-#: The page @seedgo stamps into each branch's tests/, and the receipt beside it.
+#: The page @sentry stamps into each branch's tests/, and the receipt beside it.
 TEMPLATE_PAGE = "TEST_TEMPLATE.md"
 TEMPLATE_RECEIPT = ".template_version.json"
 
@@ -330,7 +330,7 @@ def template_pointer(hook_data: dict) -> dict:
 
         line = (
             f"Test template {_template_version(tests_dir)}: {_spelled(page, cwd)}"
-            f" - then drone @seedgo checklist {_spelled(touched, cwd)}"
+            f" - then drone @sentry checklist {_spelled(touched, cwd)}"
         )
         logger.info("[HOOKS] testwrite_gate: template pointer injected for %s", touched)
         document = {

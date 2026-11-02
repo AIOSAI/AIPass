@@ -3,13 +3,13 @@
 # Description: Tests for aipass ping_sweep handler Phase 3
 # Version: 1.1.2
 # Created: 2026-04-16
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/ping_sweep/__init__.py — Phase 3 (FPLAN-0188)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — _discover_branches and _aipass_inbox_path; every test mocks both
+# sentry: no-test-needed(covered_elsewhere) — _discover_branches and _aipass_inbox_path; every test mocks both
 
 import json
 import subprocess
@@ -87,13 +87,13 @@ class TestSendTestEmail:
 
         Mutant: `if result.returncode != 0:` -> `if result.returncode == 0:` -> red.
         """
-        results, _run = _sweep_one("seedgo", tmp_path / "inbox.json", 0, _run_rc(0))
-        assert results == {"seedgo": "timeout"}
+        results, _run = _sweep_one("sentry", tmp_path / "inbox.json", 0, _run_rc(0))
+        assert results == {"sentry": "timeout"}
 
     def test_nonzero_returncode_returns_false(self, tmp_path) -> None:
         """A send drone refuses (non-zero rc) marks the branch 'error'."""
-        results, _run = _sweep_one("seedgo", tmp_path / "inbox.json", 0, _run_rc(1))
-        assert results == {"seedgo": "error"}
+        results, _run = _sweep_one("sentry", tmp_path / "inbox.json", 0, _run_rc(1))
+        assert results == {"sentry": "error"}
 
     def test_drone_not_found_returns_false(self, tmp_path) -> None:
         """drone missing from PATH marks the branch 'error', not a traceback."""
@@ -128,47 +128,47 @@ class TestWaitForAck:
 
     def test_returns_timeout_when_no_inbox(self, tmp_path) -> None:
         """Returns 'timeout' when inbox file does not exist."""
-        results, _run = _sweep_one("seedgo", tmp_path / "nonexistent.json", 1, _run_rc(0))
-        assert results == {"seedgo": "timeout"}
+        results, _run = _sweep_one("sentry", tmp_path / "nonexistent.json", 1, _run_rc(0))
+        assert results == {"sentry": "timeout"}
 
     def test_returns_ack_when_matching_message(self, tmp_path) -> None:
         """Returns 'ack' when inbox has a matching new ack from branch.
 
         Mutant: `return "ack"` -> `return "timeout"` in the poll -> red.
         """
-        results, _run = _sweep_one("seedgo", _ack_inbox(tmp_path, "seedgo", "new"), 1, _run_rc(0))
-        assert results == {"seedgo": "ack"}
+        results, _run = _sweep_one("sentry", _ack_inbox(tmp_path, "sentry", "new"), 1, _run_rc(0))
+        assert results == {"sentry": "ack"}
 
     def test_ignores_message_from_other_branch(self, tmp_path) -> None:
         """Does not match ack from a different branch.
 
         Mutant: `msg_from == branch and` dropped from the match -> red.
         """
-        results, _run = _sweep_one("seedgo", _ack_inbox(tmp_path, "prax", "new"), 1, _run_rc(0))
-        assert results == {"seedgo": "timeout"}
+        results, _run = _sweep_one("sentry", _ack_inbox(tmp_path, "prax", "new"), 1, _run_rc(0))
+        assert results == {"sentry": "timeout"}
 
     def test_ignores_non_new_message(self, tmp_path) -> None:
         """Does not match already-read messages."""
-        results, _run = _sweep_one("seedgo", _ack_inbox(tmp_path, "seedgo", "read"), 1, _run_rc(0))
-        assert results == {"seedgo": "timeout"}
+        results, _run = _sweep_one("sentry", _ack_inbox(tmp_path, "sentry", "read"), 1, _run_rc(0))
+        assert results == {"sentry": "timeout"}
 
     def test_ignores_ack_older_than_send(self, tmp_path) -> None:
         """An ack left over from an earlier sweep does not count."""
-        inbox = _ack_inbox(tmp_path, "seedgo", "new", timestamp="2000-01-01 00:00:00")
-        results, _run = _sweep_one("seedgo", inbox, 1, _run_rc(0))
-        assert results == {"seedgo": "timeout"}
+        inbox = _ack_inbox(tmp_path, "sentry", "new", timestamp="2000-01-01 00:00:00")
+        results, _run = _sweep_one("sentry", inbox, 1, _run_rc(0))
+        assert results == {"sentry": "timeout"}
 
     def test_ignores_ack_inside_other_word(self, tmp_path) -> None:
         """'feedback' contains 'ack' but is not an ack."""
-        results, _run = _sweep_one("seedgo", _ack_inbox(tmp_path, "seedgo", "new", text="feedback"), 1, _run_rc(0))
-        assert results == {"seedgo": "timeout"}
+        results, _run = _sweep_one("sentry", _ack_inbox(tmp_path, "sentry", "new", text="feedback"), 1, _run_rc(0))
+        assert results == {"sentry": "timeout"}
 
     def test_handles_corrupt_inbox(self, tmp_path) -> None:
         """Gracefully handles corrupt inbox.json (returns 'timeout')."""
         inbox = tmp_path / "inbox.json"
         inbox.write_text("NOT JSON", encoding="utf-8")
-        results, _run = _sweep_one("seedgo", inbox, 1, _run_rc(0))
-        assert results == {"seedgo": "timeout"}
+        results, _run = _sweep_one("sentry", inbox, 1, _run_rc(0))
+        assert results == {"sentry": "timeout"}
 
 
 class TestSweepAllBranches:

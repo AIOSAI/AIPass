@@ -87,7 +87,7 @@ tests/                     # Existing files only -- a NEW test file needs the ga
 
 # Injection caps
 
-Read, never copied: branch prompt 9,000 and identity 4,000 are mine (grounding_content.py); .trinity caps and passport 6,000/600 are @memory's; README 10,000 is @seedgo's. Loaders fire on cadence 5 (`cadence.py`); an over-budget block is cut with a marker naming its file, never dropped.
+Read, never copied: branch prompt 9,000 and identity 4,000 are mine (grounding_content.py); .trinity caps and passport 6,000/600 are @memory's; README 10,000 is @sentry's. Loaders fire on cadence 5 (`cadence.py`); an over-budget block is cut with a marker naming its file, never dropped.
 
 # New handler? Check the provider wire
 
@@ -97,7 +97,7 @@ EVERY reply that adds/renames/moves a handler MUST say "provider settings update
 
 # Integration
 
-@prax logs (system_logger) · @seedgo audits the code · @devpulse dispatches the work · every Claude Code session in the fleet routes through this engine.
+@prax logs (system_logger) · @sentry audits the code · @devpulse dispatches the work · every Claude Code session in the fleet routes through this engine.
 
 # Working Habits
 

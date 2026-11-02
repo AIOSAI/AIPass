@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: scaffold(disabled).py
-# Description: Parked spawn/seedgo template scaffold smoke test
+# Description: Parked spawn/sentry template scaffold smoke test
 # Version: 1.1.0
 # Created: 2026-07-04
-# Modified: 2026-08-18
+# Modified: 2026-11-02
 # =============================================
 
 """Scaffold smoke test — proves pytest infrastructure works in this branch.

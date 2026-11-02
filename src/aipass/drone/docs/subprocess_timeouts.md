@@ -24,7 +24,7 @@ All five live in `apps/handlers/executor.py`.
 **The timeout is sized for the worst *legitimate* case**, so a command is never killed before it
 completes; processing time is fine. The slowest known fleet-wide runs, a trinity push across every
 branch and an `@all` mail broadcast, finish inside it. Per-verb budgets were considered and
-rejected: an integer per command cannot tell `email @seedgo` from `email @all`, which is one verb
+rejected: an integer per command cannot tell `email @sentry` from `email @all`, which is one verb
 with two very different worst cases.
 
 **`TIMEOUT_OVERRIDES` is empty on purpose.** A per-command entry below the 600s base is a *cap*,
@@ -76,7 +76,7 @@ did.
 ## Two lanes take no timeout, and say so
 
 Module routing runs in-process, and interactive commands inherit the terminal — neither is
-captured, so neither can be timed. The flag still *parses* there (`drone @seedgo audit aipass
+captured, so neither can be timed. The flag still *parses* there (`drone @sentry audit aipass
 --drone-timeout 5` runs unbounded), so both lanes emit a WARNING to the log and to stderr naming the
 number and the reason. A silently discarded cap is the same species of defect as a silent kill.
 

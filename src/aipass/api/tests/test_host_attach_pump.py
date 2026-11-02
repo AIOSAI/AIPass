@@ -3,7 +3,7 @@
 # Description: Tests for the attach lane's room and pump — the tmux command, a real PTY, resize and hangup
 # Version: 1.1.2
 # Created: 2026-10-08
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/host/attach.py's room and PTY, and apps/handlers/host/pump.py's control frames."""
@@ -11,8 +11,8 @@
 # REAL PTYs running `cat`/`echo`, never tmux: EOF on close, SIGHUP and TIOCSWINSZ order live where a mock invents.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered) — issue_token() and the token store's own locking, tests/test_host_token_store.py
-# seedgo: no-test-needed(generated) — the tmux client that attach_command() builds; these tests spawn cat, never tmux
+# sentry: no-test-needed(covered) — issue_token() and the token store's own locking, tests/test_host_token_store.py
+# sentry: no-test-needed(generated) — the tmux client that attach_command() builds; these tests spawn cat, never tmux
 
 import ast
 import asyncio
@@ -126,12 +126,12 @@ class TestTheCommandIsTheDesktopsCommand:
         `monitor_targets_are_branch_lists_or_commons` and `monitor_target_fence_refuses_command_shapes` in pty.rs."""
         # "" stays refused: open_monitor asks about absence itself, and folding it in would break the mirror.
         assert host_attach.valid_monitor_target("commons")
-        assert host_attach.valid_monitor_target("seedgo")
-        assert host_attach.valid_monitor_target("seedgo,cli")
+        assert host_attach.valid_monitor_target("sentry")
+        assert host_attach.valid_monitor_target("sentry,cli")
         assert host_attach.valid_monitor_target("ai_mail")
         assert not host_attach.valid_monitor_target("")
-        assert not host_attach.valid_monitor_target("seedgo; rm -rf /")
-        assert not host_attach.valid_monitor_target("SEEDGO")
+        assert not host_attach.valid_monitor_target("sentry; rm -rf /")
+        assert not host_attach.valid_monitor_target("SENTRY")
         assert not host_attach.valid_monitor_target("a b")
         assert not host_attach.valid_monitor_target("../etc")
 
@@ -140,17 +140,17 @@ class TestTheCommandIsTheDesktopsCommand:
         for build in (host_attach.client_command, host_attach.attach_only_command):
             with pytest.raises(host_attach.AttachRefused):
                 build(";")
-        for target in ("seedgo; rm -rf /", "--relay"):
+        for target in ("sentry; rm -rf /", "--relay"):
             with pytest.raises(host_attach.AttachRefused):
                 host_attach.monitor_command(target)
 
         assert host_attach.client_command("0")[4] == "0"
-        assert host_attach.monitor_command("seedgo,cli")[-1] == "seedgo,cli"
+        assert host_attach.monitor_command("sentry,cli")[-1] == "sentry,cli"
 
     def test_the_watch_command_is_the_desktops_command(self) -> None:
         """`drone @prax monitor run <target>` — pty.rs `monitor_create`'s exact
         command, minus its login shell: drone resolves from this server's PATH and no shell sees the target."""
-        assert host_attach.monitor_command("seedgo") == ["drone", "@prax", "monitor", "run", "seedgo"]
+        assert host_attach.monitor_command("sentry") == ["drone", "@prax", "monitor", "run", "sentry"]
 
     def test_a_shell_command_targets_the_shell_room_everywhere(self) -> None:
         """The shell lane reuses the agent lane's argv builder, so the mouse and

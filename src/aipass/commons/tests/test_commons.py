@@ -3,17 +3,17 @@
 # Description: Integration tests for The Commons social network (posts, comments, votes, rooms, feeds)
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-09-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/database/db.py and the handlers it drives (notifications, profiles, welcome, search)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the handlers this file drives parse and import
-# seedgo: no-test-needed(duplicate) — get_reactions_detailed and get_reaction_summary; test_curation.py pins them
-# seedgo: no-test-needed(duplicate) — search_all; test_search.py and test_space_catchup.py pin it
-# seedgo: no-test-needed(duplicate) — get_db and DB_PATH resolution; test_lifecycle.py pins db.py's live-path side
-# seedgo: no-test-needed(duplicate) — the commands' printed output; test_search.py, test_curation_explore_welcome_ops.py
+# sentry: no-test-needed(ruff) — that the handlers this file drives parse and import
+# sentry: no-test-needed(duplicate) — get_reactions_detailed and get_reaction_summary; test_curation.py pins them
+# sentry: no-test-needed(duplicate) — search_all; test_search.py and test_space_catchup.py pin it
+# sentry: no-test-needed(duplicate) — get_db and DB_PATH resolution; test_lifecycle.py pins db.py's live-path side
+# sentry: no-test-needed(duplicate) — the commands' printed output; test_search.py, test_curation_explore_welcome_ops.py
 
 import shutil
 import sqlite3

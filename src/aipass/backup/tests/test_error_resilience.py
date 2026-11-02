@@ -3,16 +3,16 @@
 # Description: Tests for error resilience in snapshot.py, versioned.py, the document handlers and audit trail
 # Version: 1.1.5
 # Created: 2026-06-12
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for error resilience in apps/modules/snapshot.py, versioned.py, the document handlers and audit trail."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that handlers/ and modules/ lint clean; the imports below prove only that they parse
-# seedgo: no-test-needed(documentation) — handler docstrings
-# seedgo: no-test-needed(constant) — the message each InvalidDocument carries; the tests pin the type only
-# seedgo: no-test-needed(stdlib) — json module parsing and dumps
+# sentry: no-test-needed(ruff) — that handlers/ and modules/ lint clean; the imports below prove only that they parse
+# sentry: no-test-needed(documentation) — handler docstrings
+# sentry: no-test-needed(constant) — the message each InvalidDocument carries; the tests pin the type only
+# sentry: no-test-needed(stdlib) — json module parsing and dumps
 
 import json
 from pathlib import Path

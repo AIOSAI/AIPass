@@ -9,8 +9,8 @@
 """Tests for apps/modules/dispatch.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the handler modules _orchestrate_dispatch_send reaches parse and import
-# seedgo: no-test-needed(constant) — DISPATCH_ID_ENV and the other literal env-var names dispatch.py reads
+# sentry: no-test-needed(ruff) — that the handler modules _orchestrate_dispatch_send reaches parse and import
+# sentry: no-test-needed(constant) — DISPATCH_ID_ENV and the other literal env-var names dispatch.py reads
 
 import json
 import os
@@ -404,11 +404,11 @@ class TestOrchestrateWake:
 
     def test_a_busy_target_fails_the_wake_verb_with_a_re_wake_line(self, monkeypatch, capsys):
         busy = DispatchStatus()
-        busy.warn(BUSY_STEP, "@seedgo busy (PID 166599, since 2026-10-25T15:16:22) — NOT woken; the mail waits")
+        busy.warn(BUSY_STEP, "@sentry busy (PID 166599, since 2026-10-25T15:16:22) — NOT woken; the mail waits")
         monkeypatch.setattr(f"{MOD}.console", _mock_console([]))
 
         with patch(f"{_H_WAKE}.wake_branch", MagicMock(return_value=(busy, True))):
-            _wake(["@seedgo"])
+            _wake(["@sentry"])
 
         assert "NOT woken" in capsys.readouterr().err
         assert display.command_failed() is True
@@ -476,11 +476,11 @@ class TestOrchestrateWake:
 
     def test_sender_flag_loses_to_the_verified_caller(self, monkeypatch):
         """With a rail, the wake is attributed to who actually ran it."""
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "sentry")
         monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
         wake_calls = self._run_sender_flag(monkeypatch)
         assert len(wake_calls) == 1
-        assert wake_calls[0]["sender"] == "@seedgo"
+        assert wake_calls[0]["sender"] == "@sentry"
 
     def test_custom_message(self, monkeypatch):
         """A custom message after the branch is passed to wake_branch."""
@@ -768,7 +768,7 @@ class TestOrchestrateDispatchSend:
 
     def test_a_busy_target_sends_the_mail_then_fails_the_command_and_says_re_wake(self, monkeypatch, capsys):
         busy = DispatchStatus()
-        busy.warn(BUSY_STEP, "@seedgo busy (PID 166599, since 2026-10-25T15:16:22) — NOT woken; the mail waits")
+        busy.warn(BUSY_STEP, "@sentry busy (PID 166599, since 2026-10-25T15:16:22) — NOT woken; the mail waits")
         send = MagicMock(return_value=(True, None))
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
@@ -776,11 +776,11 @@ class TestOrchestrateDispatchSend:
         with _send_patches(
             {f"{_ES}.send_to_single": send, f"{_H_WAKE}.wake_branch": MagicMock(return_value=(busy, True))}
         ):
-            _send(["@seedgo", "Subject", "Body"])
+            _send(["@sentry", "Subject", "Body"])
 
         send.assert_called_once()
         err = capsys.readouterr().err
-        assert "NOT woken" in err and "drone @ai_mail dispatch wake @seedgo" in err
+        assert "NOT woken" in err and "drone @ai_mail dispatch wake @sentry" in err
         assert display.command_failed() is True
         assert not any("Wake-back enabled" in line for line in printed)
 
@@ -907,6 +907,35 @@ class TestWakeBackMessaging:
         combined = " ".join(printed)
         assert "Wake-back enabled" not in combined
 
+    def test_a_manager_target_is_mailed_and_promises_no_wake_back(self, monkeypatch):
+        """The manager gate skips the wake and returns True; nothing runs, so nothing wakes back."""
+        skipped = DispatchStatus()
+        skipped.info("manager", "@devpulse is a manager — wake skipped, caller must mail")
+        printed: list[str] = []
+        monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
+
+        with _send_patches({f"{_H_WAKE}.wake_branch": MagicMock(return_value=(skipped, True))}):
+            result = _send(["@devpulse", "Subject", "Body"])
+
+        assert result is True
+        combined = " ".join(printed)
+        assert "Wake-back enabled" not in combined
+        assert "@devpulse is a manager — mailed, not woken; no wake-back" in combined
+
+    def test_a_bypassed_manager_gate_still_announces_wake_back(self, monkeypatch):
+        """An admin or scheduled lane wakes the manager: its gate step is ok, and the wake-back stands."""
+        woken = DispatchStatus()
+        woken.ok("manager", "@devpulse manager gate bypassed — verified admin dispatch")
+        printed: list[str] = []
+        monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
+
+        with _send_patches({f"{_H_WAKE}.wake_branch": MagicMock(return_value=(woken, True))}):
+            _send(["@devpulse", "Subject", "Body"])
+
+        combined = " ".join(printed)
+        assert "Wake-back enabled" in combined
+        assert "no wake-back" not in combined
+
     def test_no_watchdog_flag_still_accepted(self, monkeypatch):
         """--no-watchdog flag is consumed without error (backward compat)."""
         printed: list[str] = []
@@ -959,7 +988,7 @@ class TestSpoofedSenderRefusal:
 
     def test_spoofed_daemon_from_flag_never_reaches_wake(self, monkeypatch):
         """THE canary: --from @daemon out of a non-daemon seat wakes nothing."""
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "sentry")
         errors: list[str] = []
         monkeypatch.setattr(f"{MOD}.error", lambda msg: errors.append(msg))
         printed: list[str] = []
@@ -975,11 +1004,11 @@ class TestSpoofedSenderRefusal:
         wake.assert_not_called()
         send.assert_not_called()  # a refused dispatch must not send the email either
         assert errors, "refusal must be loud on stderr"
-        assert "@daemon" in errors[0] and "@seedgo" in errors[0]
+        assert "@daemon" in errors[0] and "@sentry" in errors[0]
 
     def test_spoofed_daemon_sender_flag_never_reaches_wake(self, monkeypatch):
         """Same hole, second door: `dispatch wake @x --sender @daemon`."""
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "sentry")
         errors: list[str] = []
         monkeypatch.setattr(f"{MOD}.error", lambda msg: errors.append(msg))
         printed: list[str] = []
@@ -1035,7 +1064,7 @@ class TestSpoofedSenderRefusal:
 
     def test_wake_sender_comes_from_the_rail_not_the_from_flag(self, monkeypatch):
         """A legal --from still moves the mail identity, never the wake identity."""
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "sentry")
         monkeypatch.setattr(f"{MOD}.error", lambda msg: None)
         monkeypatch.setattr(f"{MOD}.console", _mock_console([]))
 
@@ -1062,11 +1091,11 @@ class TestSpoofedSenderRefusal:
         # The mail is still authored by @spawn...
         assert resolve.call_args[0][0] == "@spawn"
         # ...and the wake is attributed to whoever actually ran the command.
-        assert wake_calls[0]["sender"] == "@seedgo"
+        assert wake_calls[0]["sender"] == "@sentry"
 
     def test_non_privileged_from_flag_still_dispatches(self, monkeypatch):
         """No collateral damage: an ordinary --from send is untouched."""
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "sentry")
         errors: list[str] = []
         monkeypatch.setattr(f"{MOD}.error", lambda msg: errors.append(msg))
         printed: list[str] = []
@@ -1180,7 +1209,7 @@ class TestBothVerbsAgreeAtTheManagerGate:
 
     def test_ordinary_seat_gets_one_verdict_from_both_verbs(self, monkeypatch):
         """The control: the gate is seen to CLOSE, so agreement above is not two Nones."""
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "sentry")
         verdicts = self._verdicts_from_both_verbs()
 
         assert len(verdicts) == 2
@@ -1226,7 +1255,7 @@ def running_dispatch(tmp_path, monkeypatch):
                 encoding="utf-8",
             )
             assert proc.stdout is not None
-            proc.agent_pid = int(proc.stdout.readline())
+            proc.agent_pid = int(proc.stdout.readline())  # pyright: ignore[reportAttributeAccessIssue]
             threading.Thread(target=proc.wait, daemon=True).start()
             procs.append(proc)
             # Returned only once the product's own checks see the stand-in; a slow runner otherwise raced them.
@@ -1261,18 +1290,18 @@ class TestDispatchStop:
         branch, dispatch_id, start, mails = running_dispatch
         proc = start()
 
-        _stop("@worker", "--by", "Beo")
+        _stop("@worker", "--by", "Seed")
 
         out, _ = capsys.readouterr()
-        assert out.strip() == f"stopped @worker (dispatch {dispatch_id}, by Beo)"
+        assert out.strip() == f"stopped @worker (dispatch {dispatch_id}, by Seed)"
         assert proc.wait(timeout=10) == -signal.SIGTERM
         assert not check_pid_alive(proc.agent_pid)
         assert register.outstanding() == []
         rows = [json.loads(line) for line in register.register_file().read_text(encoding="utf-8").splitlines()]
         assert rows[-1]["dispatch_id"] == dispatch_id and rows[-1]["status"] == "stopped"
         [(to, mail)] = mails
-        assert (to, mail["subject"]) == ("@boss", "Dispatch stopped: @worker (by Beo)")
-        assert "Beo stopped @worker's dispatch" in mail["message"]
+        assert (to, mail["subject"]) == ("@boss", "Dispatch stopped: @worker (by Seed)")
+        assert "Seed stopped @worker's dispatch" in mail["message"]
         assert not (branch / ".ai_mail.local" / ".dispatch.lock").exists()
 
     def test_the_stopped_line_stays_one_line_on_a_narrow_console(self, running_dispatch, capsys, monkeypatch):
@@ -1288,7 +1317,7 @@ class TestDispatchStop:
         _, _, start, _ = running_dispatch
         proc = start("deaf")
 
-        _stop("@worker", "--by", "Beo")
+        _stop("@worker", "--by", "Seed")
 
         assert proc.wait(timeout=10) == -signal.SIGKILL
 
@@ -1296,14 +1325,14 @@ class TestDispatchStop:
         branch, _, start, _ = running_dispatch
         start()
 
-        _stop("@worker", "--by", "Beo")
+        _stop("@worker", "--by", "Seed")
 
         assert (session_pointer.read_pointer(branch) or {}).get("session_id") == "sess-1"
 
     def test_nothing_running_fails_with_one_line_and_touches_no_row_and_no_mail(self, running_dispatch, capsys):
         _, dispatch_id, _, mails = running_dispatch
 
-        _stop("@worker", "--by", "Beo")
+        _stop("@worker", "--by", "Seed")
 
         out, err = capsys.readouterr()
         assert out == "" and "no dispatch is running for @worker" in err
@@ -1314,10 +1343,10 @@ class TestDispatchStop:
     def test_a_second_stop_is_the_nothing_running_line(self, running_dispatch, capsys):
         _, _, start, mails = running_dispatch
         start()
-        _stop("@worker", "--by", "Beo")
+        _stop("@worker", "--by", "Seed")
         capsys.readouterr()
 
-        _stop("@worker", "--by", "Beo")
+        _stop("@worker", "--by", "Seed")
 
         _, err = capsys.readouterr()
         assert "no dispatch is running for @worker" in err and len(mails) == 1
@@ -1326,7 +1355,7 @@ class TestDispatchStop:
         _, _, start, mails = running_dispatch
         proc = start(mark="someone_else")
 
-        _stop("@worker", "--by", "Beo")
+        _stop("@worker", "--by", "Seed")
 
         assert "no dispatch is running for @worker" in capsys.readouterr().err
         assert proc.poll() is None and mails == []
@@ -1334,7 +1363,7 @@ class TestDispatchStop:
     def test_an_unknown_agent_fails_and_says_so(self, monkeypatch, capsys):
         monkeypatch.setattr(f"{_H_WAKE}.resolve_branch", lambda email, admin=False: None)
 
-        _stop("@nobody", "--by", "Beo")
+        _stop("@nobody", "--by", "Seed")
 
         assert "unknown agent @nobody" in capsys.readouterr().err
         assert display.command_failed()

@@ -4,14 +4,14 @@
 # Description: Tests for email notification handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-10-05
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/notification/email.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — _find_repo_root, a pathlib walk up to a marker file, patched at the edge
-# seedgo: no-test-needed(generated) — logger.info on an unreadable inbox; its text is the exception's own
+# sentry: no-test-needed(stdlib) — _find_repo_root, a pathlib walk up to a marker file, patched at the edge
+# sentry: no-test-needed(generated) — logger.info on an unreadable inbox; its text is the exception's own
 
 import json
 from unittest.mock import patch

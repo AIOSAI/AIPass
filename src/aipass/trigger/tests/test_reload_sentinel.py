@@ -3,14 +3,14 @@
 # Description: Tests the handler-mtime reload sentinel that keeps the watcher on shipped code
 # Version: 1.0.1
 # Created: 2026-08-12
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/reload_sentinel.py, the handler-mtime reload sentinel."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — main() exiting RELOAD_EXIT_CODE, in test_log_watcher_service.py
-# seedgo: no-test-needed(external) — systemd restarting the unit on RELOAD_EXIT_CODE; AIPass tests only its own files
+# sentry: no-test-needed(covered_elsewhere) — main() exiting RELOAD_EXIT_CODE, in test_log_watcher_service.py
+# sentry: no-test-needed(external) — systemd restarting the unit on RELOAD_EXIT_CODE; AIPass tests only its own files
 
 import os
 import threading

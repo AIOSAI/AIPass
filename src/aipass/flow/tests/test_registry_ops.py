@@ -3,13 +3,13 @@
 # Description: Tests for registry_ops handler — template registry CRUD
 # Version: 1.1.0
 # Created: 2026-04-26
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/template/registry_ops.py and the plan registry save it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(ruff) — that the module parses and imports
 
 import json
 from functools import partial

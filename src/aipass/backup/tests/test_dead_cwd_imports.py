@@ -3,15 +3,15 @@
 # Description: Dead-cwd import defect — safe path helper, both worlds, the fence with its cwd removed
 # Version: 2.0.4
 # Created: 2026-08-31
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/path/module_paths.py and the fence in apps/handlers/__init__.py under a dead cwd."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that handlers/__init__.py and handlers/path/module_paths.py lint clean
-# seedgo: no-test-needed(documentation) — the docstrings of module_file() and branch_root()
-# seedgo: no-test-needed(stdlib) — linecache.getline(), which fills the fence message's Blocked: line
+# sentry: no-test-needed(ruff) — that handlers/__init__.py and handlers/path/module_paths.py lint clean
+# sentry: no-test-needed(documentation) — the docstrings of module_file() and branch_root()
+# sentry: no-test-needed(stdlib) — linecache.getline(), which fills the fence message's Blocked: line
 
 import ast
 import json

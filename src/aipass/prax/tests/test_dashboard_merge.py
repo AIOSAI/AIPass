@@ -3,7 +3,7 @@
 # Description: quick_status has many writers — none may delete another's key
 # Version: 1.2.0
 # Created: 2026-08-13
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/dashboard/status.py, refresh.py, operations.py, template_pusher.py and template_differ.py."""
@@ -11,17 +11,17 @@
 # Invariant: no quick_status writer deletes a key it did not write. The calculator's copies are pinned to agree.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — save_dashboard, covered by tests/test_operations.py
-# seedgo: no-test-needed(through_the_command) — create_fresh_dashboard, covered by tests/test_operations.py
-# seedgo: no-test-needed(through_the_command) — get_branch_paths, covered by tests/test_operations.py
-# seedgo: no-test-needed(through_the_command) — resolve_branch_path, covered by tests/test_operations.py
-# seedgo: no-test-needed(through_the_command) — refresh_all_dashboards, covered by tests/test_operations.py
-# seedgo: no-test-needed(through_the_command) — diff_dashboard_template, covered by tests/test_operations.py
-# seedgo: no-test-needed(through_the_command) — push_dashboard_template, covered by tests/test_operations.py
-# seedgo: no-test-needed(through_the_command) — get_template_status, covered by tests/test_operations.py
-# seedgo: no-test-needed(through_the_command) — _extract_flow_section, covered by tests/test_flow_section_contract.py
-# seedgo: no-test-needed(through_the_command) — plugin refresh(), covered by tests/test_devpulse_dashboard_plugin.py
-# seedgo: no-test-needed(json_structure) — the log_operation records of the refresh, push and diff, covered by that row
+# sentry: no-test-needed(through_the_command) — save_dashboard, covered by tests/test_operations.py
+# sentry: no-test-needed(through_the_command) — create_fresh_dashboard, covered by tests/test_operations.py
+# sentry: no-test-needed(through_the_command) — get_branch_paths, covered by tests/test_operations.py
+# sentry: no-test-needed(through_the_command) — resolve_branch_path, covered by tests/test_operations.py
+# sentry: no-test-needed(through_the_command) — refresh_all_dashboards, covered by tests/test_operations.py
+# sentry: no-test-needed(through_the_command) — diff_dashboard_template, covered by tests/test_operations.py
+# sentry: no-test-needed(through_the_command) — push_dashboard_template, covered by tests/test_operations.py
+# sentry: no-test-needed(through_the_command) — get_template_status, covered by tests/test_operations.py
+# sentry: no-test-needed(through_the_command) — _extract_flow_section, covered by tests/test_flow_section_contract.py
+# sentry: no-test-needed(through_the_command) — plugin refresh(), covered by tests/test_devpulse_dashboard_plugin.py
+# sentry: no-test-needed(json_structure) — the log_operation records of the refresh, push and diff, covered by that row
 
 import json
 from pathlib import Path

@@ -87,7 +87,7 @@ drone @ai_mail email @branch "Question: [topic]" "I'm working on X and need guid
 **Common examples:**
 - Building something email? Ask @ai_mail how delivery works
 - Need routing or @ resolution? Ask @drone
-- Unsure about standards? Ask @seedgo reference code
+- Unsure about standards? Ask @sentry reference code
 - Need persistent storage or search? Ask @memory
 - Event-driven behavior? Ask @trigger about their event system
 - Dashboard integration? Ask @devpulse about update_section()
@@ -124,10 +124,10 @@ drone @flow close {prefix}-XXXX           # Close plan
 drone @flow list open                  # List active plans
 drone @flow --help                     # Full help
 
-# Seedgo - Quality gates
-drone @seedgo checklist <file>           # 10-point check on file
-drone @seedgo audit aipass @branch       # Full branch audit (before master close)
-drone @seedgo --help                     # Full help
+# Sentry - Quality gates
+drone @sentry checklist <file>           # 10-point check on file
+drone @sentry audit aipass @branch       # Full branch audit (before master close)
+drone @sentry --help                     # Full help
 
 # AI_Mail - Status updates
 drone @ai_mail email @devpulse "Subject" "Message"
@@ -288,16 +288,16 @@ When you see issue, decide:
 
 ### False Positives Awareness
 
-Seedgo audits are helpful but not infallible.
+Sentry audits are helpful but not infallible.
 
-**When Seedgo flags something:**
+**When Sentry flags something:**
 1. Check if code actually correct from your understanding
 2. If confident it's right -> mark false positive, move on
 3. If unsure -> note it, continue, review later
 
 **Don't stop production for:**
 - Style preferences (comments, spacing)
-- Patterns that differ from Seedgo's but still work
+- Patterns that differ from Sentry's but still work
 - Checks that don't apply to your context
 
 ### Forward Momentum Summary
@@ -325,7 +325,7 @@ Quick status checks + debugging, these resources available:
 | Branch logs | `logs/` directory | Local execution logs |
 | JSON tree | `<branch>_json/` | Module firing status |
 | Prax monitor | `drone @prax monitor` | Real-time system events |
-| Seedgo audit | `drone @seedgo audit @branch` | Code quality check |
+| Sentry audit | `drone @sentry audit @branch` | Code quality check |
 
 Use when you need to confirm status or investigate issues.
 
@@ -335,7 +335,7 @@ Each phase = focused agent deployment:
 2. Write agent instructions in sub-plan
 3. Deploy agent with single-task focus
 4. Review agent output (don't rebuild yourself)
-5. Seedgo checklist on ! code
+5. Sentry checklist on ! code
 6. Close sub-plan
 7. Update memories
 8. Email status > @devpulse
@@ -382,7 +382,7 @@ DELIVERABLES:
 - Reports/logs -> artifacts/reports/ or artifacts/logs/
 
 CONSTRAINTS:
-- Follow Seedgo standards (3-layer architecture: apps/modules/handlers)
+- Follow Sentry standards (3-layer architecture: apps/modules/handlers)
 - Do NOT modify files outside your task scope
 - CROSS-BRANCH: Never modify other branches' files unless explicitly authorized by user in planning doc
 - 2-ATTEMPT RULE: If something fails twice, note issue + move on
@@ -403,7 +403,7 @@ WHEN COMPLETE:
 - [ ] Agent deployed
 - [ ] Agent completed
 - [ ] Output reviewed
-- [ ] Seedgo checklist passed
+- [ ] Sentry checklist passed
 - [ ] Sub-plan closed
 - [ ] Memories updated
 - [ ] Email > @devpulse
@@ -415,7 +415,7 @@ WHEN COMPLETE:
 - [ ] Agent deployed
 - [ ] Agent completed
 - [ ] Output reviewed
-- [ ] Seedgo checklist passed
+- [ ] Sentry checklist passed
 - [ ] Sub-plan closed
 - [ ] Memories updated
 - [ ] Email > @devpulse
@@ -427,7 +427,7 @@ WHEN COMPLETE:
 - [ ] Agent deployed
 - [ ] Agent completed
 - [ ] Output reviewed
-- [ ] Seedgo checklist passed
+- [ ] Sentry checklist passed
 - [ ] Sub-plan closed
 - [ ] Memories updated
 - [ ] Email > @devpulse
@@ -439,7 +439,7 @@ WHEN COMPLETE:
 - [ ] Agent deployed
 - [ ] Agent completed
 - [ ] Output reviewed
-- [ ] Seedgo checklist passed
+- [ ] Sentry checklist passed
 - [ ] Sub-plan closed
 - [ ] Memories updated
 - [ ] Email > @devpulse
@@ -488,7 +488,7 @@ Track issues here as encountered. Don't fix during build - log + continue.
 - [ ] All phases complete
 - [ ] All sub-plans closed
 - [ ] Issues Log reviewed - High/Med issues addressed
-- [ ] Full branch audit: `drone @seedgo audit aipass @branch`
+- [ ] Full branch audit: `drone @sentry audit aipass @branch`
 - [ ] Branch memories updated:
   - [ ] `BRANCH.local.json` - full session log
   - [ ] `BRANCH.observations.json` - patterns learned
@@ -501,7 +501,7 @@ Track issues here as encountered. Don't fix during build - log + continue.
 
 **Completion Order:** Memories -> README -> Email (README before email - don't report complete stale docs)
 
-**Note:** Devpulse will perform its own Seedgo audit for visibility into work.
+**Note:** Devpulse will perform its own Sentry audit for visibility into work.
 
 ### Definition of Done
 [What specifically defines project complete?]

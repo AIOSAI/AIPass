@@ -3,14 +3,14 @@
 # Description: strip_ansi and the capture console, fed display.py's real rendering
 # Version: 1.1.0
 # Created: 2026-08-16
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for tests/conftest.py strip_ansi and make_capture_console, fed apps/modules/display.py output."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — which style display.py picks per function; tests/test_display.py pins the visible text
-# seedgo: no-test-needed(generated) — the exact escape bytes around display.success output; Rich emits them
+# sentry: no-test-needed(constant) — which style display.py picks per function; tests/test_display.py pins the visible text
+# sentry: no-test-needed(generated) — the exact escape bytes around display.success output; Rich emits them
 
 import os
 import subprocess

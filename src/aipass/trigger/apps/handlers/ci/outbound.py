@@ -3,7 +3,7 @@
 # Description: CI red lane's doors out - mail, dispatch (mail plus wake), the notification feed, the awake count
 # Version: 1.0.0
 # Created: 2026-10-22
-# Modified: 2026-10-22
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -20,7 +20,7 @@ from aipass.trigger.apps.handlers.json import json_handler
 logger = trail_logger(TRIGGER_ROOT / "logs" / "ci_lane.jsonl")
 
 MANAGER = "@devpulse"
-REVIEWER = "@seedgo"
+REVIEWER = "@sentry"
 AWAKE_CAP = 2
 FEED_STATES = ("red", "dispatched", "pushed", "green", "held", "unowned")
 

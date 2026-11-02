@@ -3,7 +3,7 @@
 # Description: Case-insensitive filesystem pins for *_REGISTRY.json discovery
 # Version: 1.2.2
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for shared/registry_discovery.py and its case-insensitive-filesystem pins."""
@@ -11,7 +11,7 @@
 # and reaches *_registry.json plan counters. The pins run red on Linux by emulating that.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the registry-discovery module and the modules it imports parse and import
+# sentry: no-test-needed(ruff) — that the registry-discovery module and the modules it imports parse and import
 
 from __future__ import annotations
 

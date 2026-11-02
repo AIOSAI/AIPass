@@ -3,13 +3,13 @@
 # Description: Tests for command activation, listing, removal, and custom execution
 # Version: 1.0.5
 # Created: 2026-03-17
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/drone.py: activate, list, remove, target, and running a custom command."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module under test parses and imports
+# sentry: no-test-needed(ruff) — that the module under test parses and imports
 
 from __future__ import annotations
 
@@ -77,14 +77,14 @@ class TestFormatCommandList:
         commands = [
             {
                 "name": "audit",
-                "target": "@seedgo",
+                "target": "@sentry",
                 "command": "audit",
                 "args": ["aipass"],
                 "description": "Run audit",
             },
             {
                 "name": "check",
-                "target": "@seedgo",
+                "target": "@sentry",
                 "command": "check",
                 "args": [],
                 "description": "Run checks",
@@ -95,7 +95,7 @@ class TestFormatCommandList:
         captured = capsys.readouterr()
         assert "audit" in captured.out
         assert "check" in captured.out
-        assert "@seedgo" in captured.out
+        assert "@sentry" in captured.out
         assert "registered" in captured.out
         assert "custom" in captured.out
 
@@ -113,17 +113,17 @@ class TestFormatActivationResults:
 
     def test_shows_added(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Should display added commands."""
-        format_activation_results("seedgo", ["audit", "list"], [])
+        format_activation_results("sentry", ["audit", "list"], [])
 
         captured = capsys.readouterr()
         assert "Activated" in captured.out
-        assert "@seedgo" in captured.out
+        assert "@sentry" in captured.out
         assert "+ audit" in captured.out
         assert "+ list" in captured.out
 
     def test_shows_skipped(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Should display skipped commands."""
-        format_activation_results("seedgo", [], ["audit"])
+        format_activation_results("sentry", [], ["audit"])
 
         captured = capsys.readouterr()
         assert "Skipped" in captured.out
@@ -132,7 +132,7 @@ class TestFormatActivationResults:
 
     def test_shows_both_added_and_skipped(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Should display both added and skipped when both exist."""
-        format_activation_results("seedgo", ["list"], ["audit"])
+        format_activation_results("sentry", ["list"], ["audit"])
 
         captured = capsys.readouterr()
         assert "Activated" in captured.out
@@ -140,17 +140,17 @@ class TestFormatActivationResults:
 
     def test_shows_no_commands(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Should show a message when nothing was added or skipped."""
-        format_activation_results("seedgo", [], [])
+        format_activation_results("sentry", [], [])
 
         captured = capsys.readouterr()
         assert "No commands discovered" in captured.out
 
     def test_adds_at_prefix(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Should add @ prefix to branch name if missing."""
-        format_activation_results("seedgo", ["cmd"], [])
+        format_activation_results("sentry", ["cmd"], [])
 
         captured = capsys.readouterr()
-        assert "@seedgo" in captured.out
+        assert "@sentry" in captured.out
 
 
 class TestFormatRemoval:
@@ -198,7 +198,7 @@ class TestHandleActivate:
         ]
         mock_add.return_value = True
 
-        result = _drone("activate", "@seedgo")
+        result = _drone("activate", "@sentry")
 
         assert result == 0
         assert mock_add.call_count == 2
@@ -224,7 +224,7 @@ class TestHandleActivate:
         ]
         mock_add.return_value = False  # Already exists
 
-        result = _drone("activate", "@seedgo")
+        result = _drone("activate", "@sentry")
 
         assert result == 0
         call_args = mock_format.call_args
@@ -264,7 +264,7 @@ class TestHandleList:
     def test_calls_formatter(self, mock_format: MagicMock) -> None:
         """Should load commands and pass to formatter; mutant killed: main() not routing 'list'."""
 
-        ops.add_command("audit", "@seedgo", "audit")
+        ops.add_command("audit", "@sentry", "audit")
 
         result = _drone("list")
 
@@ -296,7 +296,7 @@ class TestHandleRemove:
     def test_removes_existing(self, mock_format: MagicMock) -> None:
         """Should remove an existing command and return 0; mutant killed: main() not routing 'remove'."""
 
-        ops.add_command("audit", "@seedgo", "audit")
+        ops.add_command("audit", "@sentry", "audit")
 
         result = _drone("remove", "audit")
 
@@ -317,7 +317,7 @@ class TestHandleRemove:
 class TestDamagedRegistryBuiltins:
     """activate, list and remove name a registry that cannot load, exit 1, no traceback."""
 
-    @pytest.mark.parametrize("argv", [("activate", "@seedgo"), ("list",), ("remove", "audit")])
+    @pytest.mark.parametrize("argv", [("activate", "@sentry"), ("list",), ("remove", "audit")])
     @patch("aipass.drone.apps.modules.scan.scan", return_value=[{"name": "audit"}])
     def test_a_damaged_registry_is_named_and_exits_1(
         self,
@@ -347,13 +347,13 @@ class TestHandleCustomCommand:
 
         Mutant killed: main() skipping the custom-command match."""
 
-        ops.add_command("audit", "@seedgo", "audit", args=["aipass"])
+        ops.add_command("audit", "@sentry", "audit", args=["aipass"])
 
         mock_route.return_value = CommandResult(
             stdout="ok\n",
             stderr="",
             exit_code=0,
-            branch="seedgo",
+            branch="sentry",
             command="audit",
         )
 
@@ -361,7 +361,7 @@ class TestHandleCustomCommand:
 
         assert result == 0
         mock_route.assert_called_once_with(
-            "@seedgo",
+            "@sentry",
             "audit",
             args=["aipass"],
             timeout=None,
@@ -372,13 +372,13 @@ class TestHandleCustomCommand:
     def test_appends_remaining_args(self, mock_route: MagicMock) -> None:
         """Should append remaining args to configured args; mutant killed: main() skipping the custom-command match."""
 
-        ops.add_command("audit", "@seedgo", "audit", args=["aipass"])
+        ops.add_command("audit", "@sentry", "audit", args=["aipass"])
 
         mock_route.return_value = CommandResult(
             stdout="",
             stderr="",
             exit_code=0,
-            branch="seedgo",
+            branch="sentry",
             command="audit",
         )
 
@@ -386,7 +386,7 @@ class TestHandleCustomCommand:
 
         assert result == 0
         mock_route.assert_called_once_with(
-            "@seedgo",
+            "@sentry",
             "audit",
             args=["aipass", "@drone"],
             timeout=None,
@@ -509,8 +509,8 @@ class TestHandleCustomCommand:
 
         Mutants killed: the log write unguarded; the warning removed (caplog assert)."""
 
-        ops.add_command("audit", "@seedgo", "audit")
-        mock_route.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="seedgo", command="audit")
+        ops.add_command("audit", "@sentry", "audit")
+        mock_route.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="sentry", command="audit")
 
         def broken_log(*_args: Any, **_kwargs: Any) -> bool:
             raise json_handler.InvalidDocument("log document is not a list")
@@ -520,7 +520,7 @@ class TestHandleCustomCommand:
         result = _drone("audit")
 
         assert result == 0
-        mock_route.assert_called_once_with("@seedgo", "audit", args=None, timeout=None, interactive=True)
+        mock_route.assert_called_once_with("@sentry", "audit", args=None, timeout=None, interactive=True)
         assert "could not load" not in capsys.readouterr().err
         assert "match log for 'audit' not written: log document is not a list" in caplog.text
 
@@ -582,11 +582,11 @@ class TestMainIntegration:
 
         mock_activate.return_value = 0
 
-        with patch("sys.argv", ["drone", "activate", "@seedgo"]):
+        with patch("sys.argv", ["drone", "activate", "@sentry"]):
             result = main()
 
         assert result == 0
-        mock_activate.assert_called_once_with("@seedgo")
+        mock_activate.assert_called_once_with("@sentry")
 
     def test_activate_no_target(self) -> None:
         """main() returns 0 and shows help when activate has no target."""
@@ -655,13 +655,13 @@ class TestMainIntegration:
     def test_custom_command_end_to_end(self, mock_route: MagicMock) -> None:
         """Full integration: registered command routes through route_command."""
 
-        ops.add_command("audit", "@seedgo", "audit", args=["aipass"])
+        ops.add_command("audit", "@sentry", "audit", args=["aipass"])
 
         mock_route.return_value = CommandResult(
             stdout="audit output\n",
             stderr="",
             exit_code=0,
-            branch="seedgo",
+            branch="sentry",
             command="audit",
         )
 
@@ -670,7 +670,7 @@ class TestMainIntegration:
 
         assert result == 0
         mock_route.assert_called_once_with(
-            "@seedgo",
+            "@sentry",
             "audit",
             args=["aipass"],
             timeout=None,
@@ -681,13 +681,13 @@ class TestMainIntegration:
     def test_custom_command_with_extra_args_end_to_end(self, mock_route: MagicMock) -> None:
         """Full integration: remaining args appended to configured args."""
 
-        ops.add_command("audit", "@seedgo", "audit", args=["aipass"])
+        ops.add_command("audit", "@sentry", "audit", args=["aipass"])
 
         mock_route.return_value = CommandResult(
             stdout="",
             stderr="",
             exit_code=0,
-            branch="seedgo",
+            branch="sentry",
             command="audit",
         )
 
@@ -696,7 +696,7 @@ class TestMainIntegration:
 
         assert result == 0
         mock_route.assert_called_once_with(
-            "@seedgo",
+            "@sentry",
             "audit",
             args=["aipass", "@drone"],
             timeout=None,
@@ -720,7 +720,7 @@ class TestMainIntegration:
         """@target routing should take priority over custom command matching."""
 
         with patch("aipass.drone.apps.drone._handle_target", return_value=0) as mock_target:
-            with patch("sys.argv", ["drone", "@seedgo", "audit"]):
+            with patch("sys.argv", ["drone", "@sentry", "audit"]):
                 result = main()
 
         assert result == 0

@@ -3,13 +3,13 @@
 # Description: Every flow module imports, and keeps logging, without a readable working directory
 # Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for aipass/flow/apps/__init__.py and every module beneath it importing with no readable working directory."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(ruff) — that the module parses and imports
 
 import ast
 import subprocess
@@ -970,7 +970,7 @@ print("FILE_ABS_TO_POSIX", posixpath.isabs(str(pathlib.__file__)))
         )
 
     def test_the_host_table_covers_every_dialect_it_is_built_from(self):
-        """@seedgo's SHORT-TABLE nomination, ruled on rather than inherited."""
+        """@sentry's SHORT-TABLE nomination, ruled on rather than inherited."""
         named_after = {"posixpath": "posix", "ntpath": "nt"}
         dialects = {
             module: name
@@ -990,7 +990,7 @@ print("FILE_ABS_TO_POSIX", posixpath.isabs(str(pathlib.__file__)))
         assert set(dialects) == {"posixpath", "ntpath"}, (
             "HOSTS no longer covers both path dialects. Every parametrisation over "
             "sorted(HOSTS) silently loses a row when this shrinks, and the remaining rows "
-            f"still pass — @seedgo's SHORT-TABLE species: {sorted(dialects)}"
+            f"still pass — @sentry's SHORT-TABLE species: {sorted(dialects)}"
         )
 
         # Recounted from the class body, not HOSTS: a host defined and never registered leaves every
@@ -1132,7 +1132,7 @@ except OSError:
         )
 
     def test_a_lazy_capture_would_prove_nothing(self):
-        """@seedgo's M9, pinned as a control on the emulation itself."""
+        """@sentry's M9, pinned as a control on the emulation itself."""
         lazy_shape = self.SHAPE.replace(
             "realpath = staticmethod(_source_realpath)   # captured EAGERLY, as 3.10 does",
             "realpath = staticmethod(lambda p, *a, **k: os.path.realpath(p, *a, **k))",

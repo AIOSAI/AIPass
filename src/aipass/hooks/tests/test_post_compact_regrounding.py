@@ -4,7 +4,7 @@
 # Description: Tests for post_compact_regrounding lifecycle handler (DPLAN-0276)
 # Branch: hooks
 # Created: 2026-08-01
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/lifecycle/post_compact_regrounding.py."""
@@ -13,9 +13,9 @@
 # runs: the PostToolUse backstop must ground via additionalContext exactly once per compact.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that handlers/lifecycle/post_compact_regrounding.py parses and imports
-# seedgo: no-test-needed(constant) — MANIFEST_REL's relative location of the scaffold manifest
-# seedgo: no-test-needed(stdlib) — tempfile.gettempdir() choosing cadence's guard directory
+# sentry: no-test-needed(ruff) — that handlers/lifecycle/post_compact_regrounding.py parses and imports
+# sentry: no-test-needed(constant) — MANIFEST_REL's relative location of the scaffold manifest
+# sentry: no-test-needed(stdlib) — tempfile.gettempdir() choosing cadence's guard directory
 
 import contextlib
 import json

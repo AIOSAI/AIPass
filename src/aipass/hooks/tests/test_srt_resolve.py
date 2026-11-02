@@ -4,7 +4,7 @@
 # Description: Regression tests for _srt_resolve.mjs candidate-list resolution
 # Branch: hooks
 # Created: 2026-08-01
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/_srt_resolve.mjs, the resolver apps/modules/sandbox.py calls (DPLAN-0279)."""
@@ -12,9 +12,9 @@
 # Real Node via subprocess (ESM); node's execPath prefix cannot be faked, so each test isolates one other mechanism.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(documentation) — the script's header comment, the documentation standard covers it
-# seedgo: no-test-needed(generated) — the full-mode wrapped command resolve_bwrap_command returns; sandbox-runtime builds it
-# seedgo: no-test-needed(stdlib) — subprocess.run's process launch, the stdlib's own
+# sentry: no-test-needed(documentation) — the script's header comment, the documentation standard covers it
+# sentry: no-test-needed(generated) — the full-mode wrapped command resolve_bwrap_command returns; sandbox-runtime builds it
+# sentry: no-test-needed(stdlib) — subprocess.run's process launch, the stdlib's own
 
 import os
 import shutil

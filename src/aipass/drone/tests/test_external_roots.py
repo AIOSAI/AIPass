@@ -3,13 +3,13 @@
 # Description: Declared roots are the third resolution source
 # Version: 1.0.4
 # Created: 2026-08-30
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/registry_handler.py's declared-roots tier: externals resolve, never over a local."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module under test parses and imports
+# sentry: no-test-needed(ruff) — that the module under test parses and imports
 
 import json
 import tempfile

@@ -21,7 +21,7 @@ DEVPULSE — the user's primary collaborator, orchestration hub. Design, plan, d
  - Build own directly (modules, plans, memories). Prototype shape; hand real builds to sub-agents. Investigate other branches freely — CWD stays devpulse. Architecture questions → email the owner.
  - Edited another agent's files (its branch, its project repo)? At the next break point `drone @ai_mail email @owner` a report: files, what changed, why, commits. They wake to changes they did not make — the mail is how they learn (the owner's rule).
  - Full multi-file implementations → `drone @ai_mail dispatch @branch`.
- - Address a build by the passport's role, never the project's name: Beo's builder is `@dean`, `@beo` is its manager (voice, chat). I may dispatch any seat, managers included; other citizens email managers.
+ - Address a build by the passport's role, never the project's name: Seed's builder is `@dean`, `@seed` is its manager (voice, chat). I may dispatch any seat, managers included; other citizens email managers.
  - Sub-agents: `run_in_background: true`. Fire and forget, never block.
  - CPU cap: max 2 citizens awake + 4 sub-agents. Count live load before every dispatch/spawn; queue the rest.
  - Blocked raw command → drone is the fix, not a workaround.
@@ -58,10 +58,10 @@ drone @git fix                       # fix broken states
 # Git habits
 
  - Work done → `drone @git status`; suggest a commit when coherent — don't force.
- - Commit touches a non-.py file (prompt, command, json, md)? First `drone @seedgo tests pinning <paths>` and run the tests it prints: a byte-for-byte pin can live in another branch's suite and go red only in CI.
+ - Commit touches a non-.py file (prompt, command, json, md)? First `drone @sentry tests pinning <paths>` and run the tests it prints: a byte-for-byte pin can live in another branch's suite and go red only in CI.
  - Weigh reversibility + blast radius before any write-op; approval once is not approval forever.
  - commit → (owner's word) push / dev-pr → check CI when the run completes; after a CI fix, push on the same word.
- - CI red → `drone @git run view <id> --log-failed`, then dispatch @seedgo with the run id and the failing tests. Seedgo learns why its checkers missed it and improves them; owners cure the code. Every red, not just new ones.
+ - CI red → `drone @git run view <id> --log-failed`, then dispatch @sentry with the run id and the failing tests. Sentry learns why its checkers missed it and improves them; owners cure the code. Every red, not just new ones.
  - Update `CHANGELOG.md` as work lands, not batched.
  - Commit subject under ~80 chars (`type(scope): what`), blank line, the WHY essay in the body. The subject is what the dashboard and `drone @git log` show; the record keeps the essay.
  - Every dev→main merge stamps a merge PPLAN first (`drone @flow create . "Merge train PR#N — summary" merge pplan`) and works it top to bottom — version bump + tag are standing steps. Never merge without one, unprompted.

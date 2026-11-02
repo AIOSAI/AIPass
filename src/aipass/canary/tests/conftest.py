@@ -3,11 +3,11 @@
 # Description: Shared pytest fixtures for canary - json seam, console width, command state, logger capture
 # Version: 3.3.0
 # Created: 2025-11-08
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 #
 # CHANGELOG (Max 5 entries):
 #   - v3.3.0 (2026-10-10): temp_test_dir and sample_test_data retired - the template's
-#     fixtures, requested only by the git-ignored .archive scaffold (seedgo, PR #774)
+#     fixtures, requested only by the git-ignored .archive scaffold (sentry, PR #774)
 #   - v3.2.0 (2026-10-04): Template item 5 header - AIPass banner, the five META fields
 #   - v3.1.0 (2026-10-03): Template C1/C2 - pinned console width, command state reset
 #     after every test; product import moved to the top

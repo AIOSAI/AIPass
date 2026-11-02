@@ -3,13 +3,13 @@
 # Description: Tests for doctor's system detection and progress helpers
 # Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-21
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/system_detect/system_detector.py and apps/handlers/ui/progress.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every handler module this file imports parses and imports
+# sentry: no-test-needed(ruff) — that every handler module this file imports parses and imports
 
 import os
 import sys

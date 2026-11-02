@@ -381,14 +381,14 @@ def routing_root(clean_venv: CleanVenv, tmp_path_factory: pytest.TempPathFactory
     no handlers, no passport.  Verified: that single file answers
     ``drone @ai_mail --help`` with full help text and exit 0.
 
-    ``seedgo`` and ``drone`` are registry rows only; their dirs are created
+    ``sentry`` and ``drone`` are registry rows only; their dirs are created
     empty because a nonexistent path currently passes containment by accident
     (``Path.resolve()`` is non-strict), and this fixture should not silently
     depend on that.
     """
     root = tmp_path_factory.mktemp("routing_root")
     src = root / "src" / "aipass"
-    for name in ("ai_mail", "seedgo", "drone"):
+    for name in ("ai_mail", "sentry", "drone"):
         (src / name).mkdir(parents=True)
 
     entry_dir = src / "ai_mail" / "apps"
@@ -405,7 +405,7 @@ def routing_root(clean_venv: CleanVenv, tmp_path_factory: pytest.TempPathFactory
         "metadata": {"name": "AIPASS", "version": "1.0.0", "total_branches": 3},
         "branches": [
             {"name": "ai_mail", "path": "src/aipass/ai_mail", "status": "active"},
-            {"name": "seedgo", "path": "src/aipass/seedgo", "status": "active"},
+            {"name": "sentry", "path": "src/aipass/sentry", "status": "active"},
             {"name": "drone", "path": "src/aipass/drone", "status": "active"},
         ],
     }
@@ -440,7 +440,7 @@ def test_t3_drone_systems_lists_branch(clean_venv: CleanVenv, routing_root: Path
     )
     assert proc.returncode == 0, f"drone systems failed:\n{proc.stdout}\n{proc.stderr}"
     out = proc.stdout.lower()
-    assert "seedgo" in out or "ai_mail" in out, f"no known branch listed:\n{proc.stdout}"
+    assert "sentry" in out or "ai_mail" in out, f"no known branch listed:\n{proc.stdout}"
 
 
 def test_t3_routing_root_never_writes_the_live_registry(routing_root: Path) -> None:

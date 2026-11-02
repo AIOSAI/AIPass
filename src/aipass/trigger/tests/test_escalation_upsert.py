@@ -3,7 +3,7 @@
 # Description: Tests that escalation digests upsert in place instead of stacking
 # Version: 1.0.0
 # Created: 2026-08-10
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/escalation.py digest upsert keys and the send adapter in handlers/events/registry.py."""
@@ -13,8 +13,8 @@
 # Medic and runaway sends carry NO key: unrelated errors stay one message each.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — counting, gating and digest bodies, in test_escalation.py
-# seedgo: no-test-needed(external) — ai_mail storing and upserting the message; AIPass tests only its own files
+# sentry: no-test-needed(covered_elsewhere) — counting, gating and digest bodies, in test_escalation.py
+# sentry: no-test-needed(external) — ai_mail storing and upserting the message; AIPass tests only its own files
 
 import json
 from pathlib import Path

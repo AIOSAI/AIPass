@@ -3,13 +3,13 @@
 # Description: Tests for the PID cache handler
 # Version: 1.2.0
 # Created: 2026-07-10
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/pid_cache.py"""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(json_structure) — refresh's log_operation("pid_cache_refresh") record, covered by that row
+# sentry: no-test-needed(json_structure) — refresh's log_operation("pid_cache_refresh") record, covered by that row
 
 import json
 import time

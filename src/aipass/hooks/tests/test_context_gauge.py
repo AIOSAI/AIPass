@@ -4,15 +4,15 @@
 # Description: Tests for context_gauge (per-window guard, real window, Codex, OpenCode store) and the grounding receipt
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-10-31
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/prompt/context_gauge.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that handlers/prompt/context_gauge.py parses and imports
-# seedgo: no-test-needed(stdlib) — tempfile.gettempdir() choosing the guard directory
-# seedgo: no-test-needed(documentation) — the module docstring's account of the trigger
+# sentry: no-test-needed(ruff) — that handlers/prompt/context_gauge.py parses and imports
+# sentry: no-test-needed(stdlib) — tempfile.gettempdir() choosing the guard directory
+# sentry: no-test-needed(documentation) — the module docstring's account of the trigger
 
 import json
 import sqlite3

@@ -3,7 +3,7 @@
 # Description: Tests for the host API's backup door — runs, cancels, jobs and status (DPLAN-0411, DPLAN-0412)
 # Version: 1.2.0
 # Created: 2026-10-16
-# Modified: 2026-10-22
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/host/backup.py."""
@@ -15,9 +15,9 @@
 # to it, and its status --json is always an answer written here.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that backup.py parses and imports
-# seedgo: no-test-needed(external) — route_command, patched at backup.py's reference so no lane runs
-# seedgo: no-test-needed(covered_elsewhere) — answer(), tests/test_host_api_routes.py
+# sentry: no-test-needed(ruff) — that backup.py parses and imports
+# sentry: no-test-needed(external) — route_command, patched at backup.py's reference so no lane runs
+# sentry: no-test-needed(covered_elsewhere) — answer(), tests/test_host_api_routes.py
 
 import json
 import threading

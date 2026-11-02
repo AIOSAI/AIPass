@@ -2,7 +2,7 @@
 
 # Docs
 
-Tracked public reference for the `SPAWN` branch: one page per module or handler group, in the shape `drone @seedgo standard docs_page` shows. Drafts and research go in `docs.local/`, which is untracked.
+Tracked public reference for the `SPAWN` branch: one page per module or handler group, in the shape `drone @sentry standard docs_page` shows. Drafts and research go in `docs.local/`, which is untracked.
 
 - [birth.md](birth.md) — citizen classes, the mint pipeline, the birth receipt and budget contract, adoption, the Python API
 - [update_engine.md](update_engine.md) — the template walk, `.updateignore`, markdown drift, the list policy, the passport heal

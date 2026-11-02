@@ -1,26 +1,26 @@
 # =================== AIPass ====================
 # Name: test_bypass_anchors.py
-# Description: Line-scoped seedgo waivers must still point at their reason
+# Description: Line-scoped sentry waivers must still point at their reason
 # Version: 1.2.0
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
-"""Tests that .seedgo/bypass.json line waivers still hit their anchor in apps/log_watcher_service.py and kin."""
+"""Tests that .sentry/bypass.json line waivers still hit their anchor in apps/log_watcher_service.py and kin."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — what a waived line does, in tests/test_runaway_handler.py
+# sentry: no-test-needed(covered_elsewhere) — what a waived line does, in tests/test_runaway_handler.py
 
 import json
 from pathlib import Path
 
 import pytest
 
-# A line-scoped waiver fails open and silent when its line moves. seedgo matches on `lines`
+# A line-scoped waiver fails open and silent when its line moves. sentry matches on `lines`
 # alone and never reads `anchor`, so this test is the only check that does.
 
 BRANCH_ROOT = Path(__file__).resolve().parents[1]
-BYPASS_FILE = BRANCH_ROOT / ".seedgo" / "bypass.json"
+BYPASS_FILE = BRANCH_ROOT / ".sentry" / "bypass.json"
 
 _ALL_RULES = json.loads(BYPASS_FILE.read_text(encoding="utf-8"))["bypass"]
 LINE_SCOPED = [rule for rule in _ALL_RULES if rule.get("lines")]

@@ -3,16 +3,16 @@
 # Description: Tests for the central writer handler
 # Version: 1.0.2
 # Created: 2026-04-05
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/central_writer.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — _find_repo_root's delegation to repo_root, in tests/test_repo_root.py
-# seedgo: no-test-needed(covered_elsewhere) — when the rollover calls update_central, in tests/test_orchestrator_exec.py
-# seedgo: no-test-needed(external) — the live central file CENTRAL_FILE names; every test here redirects it to tmp_path
-# seedgo: no-test-needed(shared) — the json_handler.log_operation entry update_central writes; the json handler's lane
+# sentry: no-test-needed(covered_elsewhere) — _find_repo_root's delegation to repo_root, in tests/test_repo_root.py
+# sentry: no-test-needed(covered_elsewhere) — when the rollover calls update_central, in tests/test_orchestrator_exec.py
+# sentry: no-test-needed(external) — the live central file CENTRAL_FILE names; every test here redirects it to tmp_path
+# sentry: no-test-needed(shared) — the json_handler.log_operation entry update_central writes; the json handler's lane
 
 import json
 import sqlite3

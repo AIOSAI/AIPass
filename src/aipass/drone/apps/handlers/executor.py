@@ -3,7 +3,7 @@
 # Description: Safe subprocess execution for branch command routing
 # Version: 1.1.2
 # Created: 2026-03-09
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -23,7 +23,7 @@ from aipass.prax import logger
 
 
 # A HANG GUARD sized for the worst legitimate case, not a per-verb budget: one
-# verb (`email @seedgo` vs `email @all`) has very different worst cases.
+# verb (`email @sentry` vs `email @all`) has very different worst cases.
 DEFAULT_TIMEOUT = 600
 
 # A child still talking at its deadline buys another IDLE_GRACE, up to MAX_TIMEOUT.

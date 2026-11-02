@@ -3,13 +3,13 @@
 # Description: Shared helper for test_email_module.py and test_email_module_send.py - the stdout line reader
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-11-02
 # =============================================
 
 """Helper for the tests of apps/modules/email.py and email_send.py (no test_ prefix: never collected)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(ruff) — that the module parses and imports
 
 import pytest
 

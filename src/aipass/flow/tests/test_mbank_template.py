@@ -3,13 +3,13 @@
 # Description: Tests for mbank/process.py and template handler functions
 # Version: 1.1.0
 # Created: 2026-09-20
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for mbank/process.py and template handler functions."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the mbank/template handler files parse and import
+# sentry: no-test-needed(ruff) — that the mbank/template handler files parse and import
 
 import json
 from pathlib import Path

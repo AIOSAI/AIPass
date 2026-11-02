@@ -3,7 +3,7 @@
 # Description: The trinity push — frame rebuild, vectorize-verify-prune, todos to the backlog file
 # Version: 1.7.0
 # Created: 2026-08-27
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # =============================================
 
 """Trinity Push Handler
@@ -54,7 +54,7 @@ _TEMPLATE_FILES = {"local": "LOCAL.template.json", "observations": "OBSERVATIONS
 
 _DOC_NAME_SUFFIX = {"local": ".LOCAL", "observations": ".OBSERVATIONS"}
 
-# A CLOSED set mirroring seedgo's trinity.md: anything not named is pruned, `status` included.
+# A CLOSED set mirroring sentry's trinity.md: anything not named is pruned, `status` included.
 DOC_META_FIELDS = (
     "document_type",
     "document_name",

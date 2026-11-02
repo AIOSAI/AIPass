@@ -3,15 +3,15 @@
 # Description: Tests for the watchdog feed handler (FPLAN-0451 P2 — push replaces poll)
 # Version: 1.1.0
 # Created: 2026-08-21
-# Modified: 2026-10-29
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/watchdog/feed.py, reading completions off @ai_mail's notification feed."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that handlers/watchdog/feed.py parses and imports
-# seedgo: no-test-needed(documentation) — that drain_feed, feed_file and format_feed_event carry docstrings
-# seedgo: no-test-needed(constant) — WIRE_CURSOR_NAME's text and the _ROOT_MARKERS file names
+# sentry: no-test-needed(ruff) — that handlers/watchdog/feed.py parses and imports
+# sentry: no-test-needed(documentation) — that drain_feed, feed_file and format_feed_event carry docstrings
+# sentry: no-test-needed(constant) — WIRE_CURSOR_NAME's text and the _ROOT_MARKERS file names
 
 import json
 import os

@@ -3,7 +3,7 @@
 # Description: Git workflow module — PR, status, sync, lock management
 # Version: 1.15.0
 # Created: 2026-03-17
-# Modified: 2026-10-30
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -1430,7 +1430,7 @@ def _get_console():
 
 
 def print_introspection() -> None:
-    """Print introspection (seedgo compliance)."""
+    """Print introspection (sentry compliance)."""
     c = _get_console()
     c.print()
     c.print("[bold cyan]@git[/bold cyan] [dim]— Tier-based git workflow, dev branch model (v3.0.0)[/dim]")
@@ -1475,7 +1475,7 @@ def print_introspection() -> None:
 
 
 def print_help(command: str | None = None) -> None:
-    """Print help (seedgo compliance).
+    """Print help (sentry compliance).
 
     ``markup=False``: Rich would read ``[count]``/``[path]`` placeholders as style tags and delete them.
     """

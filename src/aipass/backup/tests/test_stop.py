@@ -3,7 +3,7 @@
 # Description: Tests for the stop verb and the lane side of a stop: the SIGTERM flag, the stopped line, exit 130
 # Version: 1.0.1
 # Created: 2026-10-16
-# Modified: 2026-10-31
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/stop.py and the lane side it signals: snapshot, versioned, all and drive_sync stopping."""
@@ -14,7 +14,7 @@
 # is a stand-in behind lane_process.open_process, the one seam to the process table.
 #
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — signal.signal installing a handler in the main thread
+# sentry: no-test-needed(stdlib) — signal.signal installing a handler in the main thread
 
 from __future__ import annotations
 

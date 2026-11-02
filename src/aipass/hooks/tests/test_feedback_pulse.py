@@ -5,15 +5,15 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-18
-# Modified: 2026-10-25
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/prompt/feedback_pulse.py and apps/modules/feedback.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — _FEEDBACK_URL and _FEEDBACK_LINE's wording
-# seedgo: no-test-needed(stdlib) — tempfile.gettempdir, the state directory's default, patched out in every test
-# seedgo: no-test-needed(generated) — json_handler.log_operation's log entry; its shape is json_handler's
+# sentry: no-test-needed(constant) — _FEEDBACK_URL and _FEEDBACK_LINE's wording
+# sentry: no-test-needed(stdlib) — tempfile.gettempdir, the state directory's default, patched out in every test
+# sentry: no-test-needed(generated) — json_handler.log_operation's log entry; its shape is json_handler's
 
 import json
 from pathlib import Path

@@ -3,7 +3,7 @@
 # Description: Branch log watcher event producer for error detection
 # Version: 2.9.0
 # Created: 2026-02-02
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -16,7 +16,7 @@ import sys
 import hashlib
 import time
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePath
 from typing import Any, Dict, Set, Optional, Callable
 from aipass.trigger.apps.config import TRIGGER_ROOT, AIPASS_PKG_ROOT, atomic_write_json, json_file_lock
@@ -102,7 +102,7 @@ _SYSTEM_LOGS_BRANCH_PREFIXES: list = sorted(
         "flow",
         "prax",
         "trigger",
-        "seedgo",
+        "sentry",
         "memory",
         "spawn",
         "devpulse",
@@ -228,9 +228,14 @@ def is_stale_entry(timestamp_str: str) -> bool:
     ]
 
     stripped = timestamp_str.strip()
+    is_utc = stripped.endswith("Z")
+    body = stripped[:-1] if is_utc else stripped
     for fmt in formats:
         try:
-            entry_time = datetime.strptime(stripped, fmt)
+            entry_time = datetime.strptime(body, fmt)
+            if is_utc:
+                # cutoff is naive local time, so a 'Z' stamp converts to local before comparing
+                entry_time = entry_time.replace(tzinfo=timezone.utc).astimezone().replace(tzinfo=None)
             return entry_time < cutoff
         except ValueError:
             continue

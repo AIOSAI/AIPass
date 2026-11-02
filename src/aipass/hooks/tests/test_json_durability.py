@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-08-16
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/json/files.py's torn-write durability."""
@@ -14,9 +14,9 @@
 # trust registry, where a torn read darks every hook in the project.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(json_handler) — the nine standard json names, pinned by seedgo's cross-branch contract
-# seedgo: no-test-needed(stdlib) — os.replace's atomicity and json.dumps' encoding
-# seedgo: no-test-needed(documentation) — that read_json_file / write_json_file carry docstrings
+# sentry: no-test-needed(json_handler) — the nine standard json names, pinned by sentry's cross-branch contract
+# sentry: no-test-needed(stdlib) — os.replace's atomicity and json.dumps' encoding
+# sentry: no-test-needed(documentation) — that read_json_file / write_json_file carry docstrings
 
 import json
 import os

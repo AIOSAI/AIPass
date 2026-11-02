@@ -5,15 +5,15 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-15
-# Modified: 2026-10-10
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/config/trust_registry.py and apps/handlers/config/loader.py's trust integration."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — REGISTRY_PATH's default location; every test patches it to a tmp file
-# seedgo: no-test-needed(stdlib) — hashlib's sha256 itself; _hash_file's determinism is pinned, not the digest
-# seedgo: no-test-needed(documentation) — that the registry functions carry docstrings
+# sentry: no-test-needed(constant) — REGISTRY_PATH's default location; every test patches it to a tmp file
+# sentry: no-test-needed(stdlib) — hashlib's sha256 itself; _hash_file's determinism is pinned, not the digest
+# sentry: no-test-needed(documentation) — that the registry functions carry docstrings
 
 import contextlib
 import json

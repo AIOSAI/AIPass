@@ -3,16 +3,16 @@
 # Description: Tests for the intake auto_process handler and the pool module
 # Version: 1.2.0
 # Created: 2026-06-06
-# Modified: 2026-10-27
+# Modified: 2026-11-02
 # Category: memory/tests
 # =============================================
 
 """Tests for apps/handlers/intake/auto_process.py and apps/modules/pool.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — spawn_background and run_once, in tests/test_auto_process_background.py
-# seedgo: no-test-needed(covered_elsewhere) — what process_memory_pool does with a drop, in tests/test_intake.py
-# seedgo: no-test-needed(covered_elsewhere) — the rollover execute_rollover runs, in tests/test_orchestrator_exec.py
+# sentry: no-test-needed(covered_elsewhere) — spawn_background and run_once, in tests/test_auto_process_background.py
+# sentry: no-test-needed(covered_elsewhere) — what process_memory_pool does with a drop, in tests/test_intake.py
+# sentry: no-test-needed(covered_elsewhere) — the rollover execute_rollover runs, in tests/test_orchestrator_exec.py
 
 import json
 import sys

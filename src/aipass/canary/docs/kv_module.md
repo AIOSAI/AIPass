@@ -96,7 +96,7 @@ nothing and keeps a caller's own word storable.
 
 A help flag is the opposite case. `kv store.txt set --help colour` is somebody
 who does not know the verb yet, and storing a pair in answer to a question is
-exactly the harm @seedgo's `help_flag_safety` standard guards against: a help
+exactly the harm @sentry's `help_flag_safety` standard guards against: a help
 request that performs the action it asked about. So `--help` and `-h` explain from any position, like
 every other module in this branch. *The cost:* a key or a value spelled
 `--help` or `-h` cannot be set or looked up from the command line. The bare word

@@ -3,15 +3,15 @@
 # Description: watch module routing, help, session start/failure, runner handler, introspection
 # Version: 1.0.1
 # Created: 2026-08-13
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # Category: memory/tests
 # =============================================
 
 """Tests for apps/modules/watch.py and handlers/monitor/watch_runner.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — the SIGINT handler _start_session installs via signal.signal; needs a real signal
-# seedgo: no-test-needed(external) — watch_runner.wait_forever(), blocks until Ctrl+C; patched at every call here
+# sentry: no-test-needed(stdlib) — the SIGINT handler _start_session installs via signal.signal; needs a real signal
+# sentry: no-test-needed(external) — watch_runner.wait_forever(), blocks until Ctrl+C; patched at every call here
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch

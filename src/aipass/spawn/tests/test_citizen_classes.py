@@ -9,10 +9,10 @@
 """Tests for apps/handlers/class_registry.py and the citizen-class-aware create and update paths."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that class_registry.py, core.py, and update_ops.py parse and import cleanly
-# seedgo: no-test-needed(ruff) — that registry.py, metadata.py, placeholders.py parse and import cleanly
-# seedgo: no-test-needed(ruff) — that update.py and spawn.py parse and import cleanly
-# seedgo: no-test-needed(documentation) — that the public functions in those modules carry docstrings
+# sentry: no-test-needed(ruff) — that class_registry.py, core.py, and update_ops.py parse and import cleanly
+# sentry: no-test-needed(ruff) — that registry.py, metadata.py, placeholders.py parse and import cleanly
+# sentry: no-test-needed(ruff) — that update.py and spawn.py parse and import cleanly
+# sentry: no-test-needed(documentation) — that the public functions in those modules carry docstrings
 
 import json
 from pathlib import Path

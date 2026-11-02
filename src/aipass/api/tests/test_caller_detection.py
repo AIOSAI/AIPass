@@ -3,15 +3,15 @@
 # Description: Tests for caller detection internals (uncovered functions)
 # Version: 1.0.1
 # Created: 2026-05-12
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/openrouter/caller.py, its internal detection functions."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — MODULE_NAME, MODULE_VERSION and CALLER_PATTERNS' text
-# seedgo: no-test-needed(stdlib) — inspect.stack's frame order and pathlib's parts splitting
-# seedgo: no-test-needed(duplicate_test) — detect_caller_category on its own, covered by test_caller.py
+# sentry: no-test-needed(constant) — MODULE_NAME, MODULE_VERSION and CALLER_PATTERNS' text
+# sentry: no-test-needed(stdlib) — inspect.stack's frame order and pathlib's parts splitting
+# sentry: no-test-needed(duplicate_test) — detect_caller_category on its own, covered by test_caller.py
 
 from pathlib import Path
 from unittest.mock import patch, MagicMock

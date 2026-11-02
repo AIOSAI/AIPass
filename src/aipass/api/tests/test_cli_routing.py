@@ -3,14 +3,14 @@
 # Description: CLI Routing Tests (adapted for API module structure)
 # Version: 1.0.0
 # Created: 2026-03-27
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/api_key.py's command routing, help and introspection."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered) — get_key(), validate_key() and get_secret_cmd() bodies, tests/test_api_key.py
-# seedgo: no-test-needed(cli) — the console and header rendering itself, owned by @cli
+# sentry: no-test-needed(covered) — get_key(), validate_key() and get_secret_cmd() bodies, tests/test_api_key.py
+# sentry: no-test-needed(cli) — the console and header rendering itself, owned by @cli
 
 from unittest.mock import patch
 

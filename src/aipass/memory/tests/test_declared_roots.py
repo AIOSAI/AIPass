@@ -3,7 +3,7 @@
 # Description: Pins the declared-roots anchor and the external tier it opens
 # Version: 1.0.2
 # Created: 2026-08-30
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/monitor/registry_scope.py — the declared-roots anchor and the external tier."""
@@ -12,8 +12,8 @@
 # PRESENCE (a passport in a declared root's registry), never a residency field. Declared roots
 # only, never a walk at any depth: a walk counts every backup copy of every passport.
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — registry_scope.resident_registry_paths(); tests/test_residency_scope.py
-# seedgo: no-test-needed(covered_elsewhere) — registry_scope.overlaps_home(); tests/test_roots_lifecycle.py
+# sentry: no-test-needed(covered_elsewhere) — registry_scope.resident_registry_paths(); tests/test_residency_scope.py
+# sentry: no-test-needed(covered_elsewhere) — registry_scope.overlaps_home(); tests/test_roots_lifecycle.py
 
 import json
 from pathlib import Path

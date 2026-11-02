@@ -3,7 +3,7 @@
 # Description: Unit tests for the branch log watcher's parsing, detection and line pipeline
 # Version: 1.5.2
 # Created: 2026-04-03
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/log_watcher.py — parsing, detection and the line pipeline that fires events."""
@@ -11,10 +11,10 @@
 # Rotation and state have their own test files; conftest's log_watcher_infrastructure closes live state.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — the centralized system_logs watcher, in test_watchers_log_watcher.py
+# sentry: no-test-needed(covered_elsewhere) — the centralized system_logs watcher, in test_watchers_log_watcher.py
 
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 from typing import Any
@@ -75,8 +75,8 @@ class TestDetectBranchFromPath:
 
     def test_system_logs_prefix_match(self):
         """Matches prefix against known branch prefixes for system_logs files."""
-        path = str(lw.SYSTEM_LOGS_DIR / "seedgo_audit.log")
-        assert lw.detect_branch_from_path(path) == "SEEDGO"
+        path = str(lw.SYSTEM_LOGS_DIR / "sentry_audit.log")
+        assert lw.detect_branch_from_path(path) == "SENTRY"
 
     def test_system_logs_exact_stem_match(self):
         """Matches when stem equals a known prefix exactly."""
@@ -283,6 +283,15 @@ class TestIsStaleEntryFormats:
         old = datetime.now() - timedelta(seconds=600)
         ts = old.strftime("%Y-%m-%dT%H:%M:%S")
         assert lw.is_stale_entry(ts) is True
+
+    def test_a_fresh_utc_z_timestamp_is_not_dropped_as_stale(self):
+        """Shipped defect: '...926Z' matched no format and fresh errors were dropped."""
+        recent = datetime.now(timezone.utc) - timedelta(seconds=5)
+        assert lw.is_stale_entry(recent.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z") is False
+
+    def test_an_old_utc_z_timestamp_is_stale(self):
+        old = datetime.now(timezone.utc) - timedelta(seconds=600)
+        assert lw.is_stale_entry(old.strftime("%Y-%m-%dT%H:%M:%SZ")) is True
 
     def test_simple_format_no_microseconds_fresh(self):
         """Simple YYYY-MM-DD HH:MM:SS format, fresh."""
@@ -864,9 +873,9 @@ class TestSystemLogAttributionComesFromTheLiveTree:
     def test_static_prefixes_are_a_floor_not_a_ceiling(self, monkeypatch, tmp_path):
         """An unreadable tree falls back to the static list instead of UNKNOWN."""
         _point_at_tree(lw, monkeypatch, tmp_path)
-        path = str(tmp_path / "system_logs" / "seedgo_audit.log")
+        path = str(tmp_path / "system_logs" / "sentry_audit.log")
 
-        assert lw.detect_branch_from_path(path) == "SEEDGO"
+        assert lw.detect_branch_from_path(path) == "SENTRY"
 
 
 class TestLogPathClassificationOnBothPlatforms:

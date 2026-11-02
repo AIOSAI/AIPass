@@ -3,16 +3,16 @@
 # Description: Tests for OpenRouter model fetching handler
 # Version: 1.1.0
 # Created: 2026-05-12
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/openrouter/models.py, the OpenRouter model fetch."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that models.py parses and imports
-# seedgo: no-test-needed(constant) — OPENROUTER_API_URL, DEFAULT_TIMEOUT and MODULE_NAME's values
-# seedgo: no-test-needed(network) — a real call to OpenRouter; urlopen is patched at the edge
-# seedgo: no-test-needed(hardcoded_key) — any real key; the tests hand the handler a stand-in string
+# sentry: no-test-needed(ruff) — that models.py parses and imports
+# sentry: no-test-needed(constant) — OPENROUTER_API_URL, DEFAULT_TIMEOUT and MODULE_NAME's values
+# sentry: no-test-needed(network) — a real call to OpenRouter; urlopen is patched at the edge
+# sentry: no-test-needed(hardcoded_key) — any real key; the tests hand the handler a stand-in string
 
 from __future__ import annotations
 

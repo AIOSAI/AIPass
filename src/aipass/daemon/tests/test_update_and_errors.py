@@ -3,14 +3,14 @@
 # Description: Tests for update command and error message formatting
 # Version: 1.1.0
 # Created: 2026-03-30
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/update.py, the actions refusal and branch-health's bare summary."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that update.py, actions.py and activity_report.py parse and import
-# seedgo: no-test-needed(generated) — the digest's section layout; handlers/update/ builds its data
+# sentry: no-test-needed(ruff) — that update.py, actions.py and activity_report.py parse and import
+# sentry: no-test-needed(generated) — the digest's section layout; handlers/update/ builds its data
 
 from unittest.mock import patch, MagicMock
 

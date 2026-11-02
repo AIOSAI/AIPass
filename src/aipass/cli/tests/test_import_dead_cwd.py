@@ -4,15 +4,15 @@
 # Description: Every cli module imports, the fence decides, and call-time sites run, with the cwd deleted
 # Version: 1.2.0
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # Category: cli/tests
 # =============================================
 
 """Tests for apps/handlers/__init__.py and every cli import-time site — imports with no readable cwd."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — the OS cwd read behind Path.resolve(); emulated, the instrument tests pin it
-# seedgo: no-test-needed(standard) — the fence with a healthy cwd; tests/test_handlers_fence.py covers it
+# sentry: no-test-needed(stdlib) — the OS cwd read behind Path.resolve(); emulated, the instrument tests pin it
+# sentry: no-test-needed(standard) — the fence with a healthy cwd; tests/test_handlers_fence.py covers it
 
 import ast
 import shutil

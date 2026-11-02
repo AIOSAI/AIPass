@@ -3,7 +3,7 @@
 # Description: Tests for the escalation lane's signature, counting, windows, gates and state file
 # Version: 1.2.0
 # Created: 2026-08-08
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/escalation.py — the repeat signature, counting, windows, gates and state file."""
@@ -11,7 +11,7 @@
 # Digest send/mail/CLI tests live in test_escalation_digest.py; shared helpers in support_escalation.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — ai_mail delivery of the digest; AIPass tests only its own files
+# sentry: no-test-needed(external) — ai_mail delivery of the digest; AIPass tests only its own files
 
 import json
 from pathlib import Path
@@ -101,7 +101,7 @@ class TestComputeSignature:
 # One logical event (prax queue full) that minted 112 signatures; differs only by count and citizen.
 PRAX_QUEUE_A = (
     "[event_queue] The live monitor display queue is full — 20 events were skipped from the "
-    "terminal monitor view since the last report (latest: log from SEEDGO). Nothing is lost: "
+    "terminal monitor view since the last report (latest: log from SENTRY). Nothing is lost: "
     "the on-disk logs are complete."
 )
 PRAX_QUEUE_B = (
@@ -118,9 +118,9 @@ PRAX_QUEUE_LOG_DAEMON = (
     "terminal monitor view since the last report (latest: log from DAEMON). Nothing is lost: "
     "the on-disk logs are complete."
 )
-PRAX_QUEUE_AGENT_SEEDGO = (
+PRAX_QUEUE_AGENT_SENTRY = (
     "[event_queue] The live monitor display queue is full — 8 events were skipped from the "
-    "terminal monitor view since the last report (latest: agent from AIPASS/SEEDGO/opus). "
+    "terminal monitor view since the last report (latest: agent from AIPASS/SENTRY/opus). "
     "Nothing is lost: the on-disk logs are complete."
 )
 PRAX_QUEUE_AGENT_FABLE = (
@@ -142,7 +142,7 @@ class TestSignatureFragmentation:
         The registry is runtime state a CI checkout lacks; a test must build the world it needs.
         """
         registry = tmp_path / "AIPASS_REGISTRY.json"
-        names = ("SEEDGO", "PRAX", "DRONE", "DEVPULSE", "DAEMON", "HOOKS", "AIPASS", "FLOW")
+        names = ("SENTRY", "PRAX", "DRONE", "DEVPULSE", "DAEMON", "HOOKS", "AIPASS", "FLOW")
         registry.write_text(json.dumps({"branches": [{"name": n} for n in names]}), encoding="utf-8")
         monkeypatch.setattr(lane, "BRANCH_REGISTRY_FILE", registry)
         lane._branch_names_cache = (0.0, None)
@@ -175,7 +175,7 @@ class TestSignatureFragmentation:
 
     def test_named_citizen_does_not_fork_the_signature(self, lane) -> None:
         """A branch NAMED in the text is a detail; the OWNING branch is the identity."""
-        first = lane.compute_signature("WARNING", "prax", "queue", "queue full (latest: log from SEEDGO)")
+        first = lane.compute_signature("WARNING", "prax", "queue", "queue full (latest: log from SENTRY)")
         second = lane.compute_signature("WARNING", "prax", "queue", "queue full (latest: log from DRONE)")
         assert first == second
 
@@ -191,13 +191,13 @@ class TestSignatureFragmentation:
         """
         signatures = {
             lane.compute_signature("WARNING", "prax", "direct_prax_event_queue", message)
-            for message in (PRAX_QUEUE_AGENT_SEEDGO, PRAX_QUEUE_AGENT_FABLE, PRAX_QUEUE_AGENT_FABLE_OTHER_COUNT)
+            for message in (PRAX_QUEUE_AGENT_SENTRY, PRAX_QUEUE_AGENT_FABLE, PRAX_QUEUE_AGENT_FABLE_OTHER_COUNT)
         }
         assert len(signatures) == 1
 
     def test_a_model_name_carrying_a_digit_does_not_fork_the_signature(self, lane) -> None:
         """'opus' vs 'claude-fable-5' — the trailing digit must not mint a second row."""
-        first = lane.compute_signature("WARNING", "prax", "queue", "latest: agent from AIPASS/SEEDGO/opus")
+        first = lane.compute_signature("WARNING", "prax", "queue", "latest: agent from AIPASS/SENTRY/opus")
         second = lane.compute_signature("WARNING", "prax", "queue", "latest: agent from AIPASS/DEVPULSE/claude-fable-5")
         assert first == second
 
@@ -206,13 +206,13 @@ class TestSignatureFragmentation:
         Residual source kinds are meaning, not fragmentation; this pins that ruling.
         """
         as_log = lane.compute_signature("WARNING", "prax", "direct_prax_event_queue", PRAX_QUEUE_LOG_DAEMON)
-        as_agent = lane.compute_signature("WARNING", "prax", "direct_prax_event_queue", PRAX_QUEUE_AGENT_SEEDGO)
+        as_agent = lane.compute_signature("WARNING", "prax", "direct_prax_event_queue", PRAX_QUEUE_AGENT_SENTRY)
         assert as_log != as_agent
 
     def test_owning_branch_still_separates_signatures(self, lane) -> None:
         """Collapsing names in the TEXT must not collapse the branch field itself."""
-        first = lane.compute_signature("WARNING", "prax", "queue", "queue full (latest: log from SEEDGO)")
-        second = lane.compute_signature("WARNING", "seedgo", "queue", "queue full (latest: log from SEEDGO)")
+        first = lane.compute_signature("WARNING", "prax", "queue", "queue full (latest: log from SENTRY)")
+        second = lane.compute_signature("WARNING", "sentry", "queue", "queue full (latest: log from SENTRY)")
         assert first != second
 
     def test_genuinely_different_conditions_stay_apart(self, lane) -> None:

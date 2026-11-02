@@ -3,7 +3,7 @@
 # Description: Completion report tests — build_report, write_report, fire_completed, and the sent-mail attribution scan
 # Version: 1.0.1
 # Created: 2026-08-22
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/dispatch/report.py."""
@@ -11,8 +11,8 @@
 # The completion report: what the finishing agent can honestly say about its run.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — REPORTS_DIRNAME, REPORTS_MAX_FILES, REPORTS_KEEP_FILES, RESULT_EXCERPT_CHARS values
-# seedgo: no-test-needed(stdlib) — build_report's reported_at datetime.now() wall-clock stamp is not asserted
+# sentry: no-test-needed(constant) — REPORTS_DIRNAME, REPORTS_MAX_FILES, REPORTS_KEEP_FILES, RESULT_EXCERPT_CHARS values
+# sentry: no-test-needed(stdlib) — build_report's reported_at datetime.now() wall-clock stamp is not asserted
 
 import json
 import time

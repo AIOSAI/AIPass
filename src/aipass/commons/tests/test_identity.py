@@ -3,13 +3,13 @@
 # Description: Unit tests for identity module and identity_ops handler
 # Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/commons_identity.py and apps/handlers/identity/identity_ops.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that commons_identity.py and identity_ops.py parse and import
+# sentry: no-test-needed(ruff) — that commons_identity.py and identity_ops.py parse and import
 
 import sqlite3
 from pathlib import Path

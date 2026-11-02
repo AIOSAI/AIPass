@@ -3,7 +3,7 @@
 # Description: The hook engine's safeguards: trust, timeouts, one document, the ledger, fail-closed gates, promote
 # Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-10-29
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/engine.py: trust, timeouts, the ledger and the fail-closed gates."""
@@ -15,7 +15,7 @@
 # test_engine_contracts.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that engine.py parses and imports, ruff and collection cover it
+# sentry: no-test-needed(ruff) — that engine.py parses and imports, ruff and collection cover it
 
 import importlib
 import json

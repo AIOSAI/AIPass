@@ -3,13 +3,13 @@
 # Description: The realpath denial and the guard's test harness, measured on hosts this box is not
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for the worlds that pin templates/citizen/apps/handlers/__init__.py, measured across hosts."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — Path.resolve and ntpath.realpath on other interpreters, emulated here, never run
+# sentry: no-test-needed(stdlib) — Path.resolve and ntpath.realpath on other interpreters, emulated here, never run
 
 import ast
 import ntpath

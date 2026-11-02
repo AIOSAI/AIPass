@@ -3,13 +3,13 @@
 # Description: Tests for email header handler
 # Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/email/header.py -- get_dispatch_header, prepend_dispatch_header."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — DISPATCH_HEADER and NO_MEMORY_SAVE_HEADER's exact wording
+# sentry: no-test-needed(constant) — DISPATCH_HEADER and NO_MEMORY_SAVE_HEADER's exact wording
 
 import ast
 
@@ -20,7 +20,7 @@ from pathlib import Path
 
 import aipass.ai_mail.apps.handlers.email.header as mod
 
-# Written here, not imported: seedgo's handlers guard refuses a caller from another branch.
+# Written here, not imported: sentry's handlers guard refuses a caller from another branch.
 _SWEEP_SKIP_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
 
 
@@ -147,7 +147,7 @@ def test_culture_fence_reaches_the_recipient():
     assert "never invent an author" in result
 
 
-# A docstring after an import is evaluated and discarded: __doc__ stays None for help() and seedgo.
+# A docstring after an import is evaluated and discarded: __doc__ stays None for help() and sentry.
 
 
 def test_header_module_has_a_real_docstring():

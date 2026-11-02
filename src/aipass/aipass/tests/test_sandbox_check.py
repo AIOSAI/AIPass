@@ -3,13 +3,13 @@
 # Description: Tests for sandbox prerequisite checker and doctor integration
 # Version: 1.2.0
 # Created: 2026-06-10
-# Modified: 2026-10-21
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/sandbox_check/sandbox_checker.py and the doctor integration it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
+# sentry: no-test-needed(ruff) — that every module this file imports parses and imports
 
 import os
 import shutil

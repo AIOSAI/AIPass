@@ -3,13 +3,13 @@
 # Description: Tests for aggregate_ops -- registry, central file, and aggregation helpers
 # Version: 1.1.0
 # Created: 2026-03-29
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/plan/aggregate_ops.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module parses and imports
+# sentry: no-test-needed(ruff) — that the module parses and imports
 
 import json
 import logging

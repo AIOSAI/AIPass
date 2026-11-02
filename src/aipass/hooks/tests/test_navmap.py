@@ -4,15 +4,15 @@
 # Description: Tests for navmap prompt handler and its edit-time cap warning
 # Branch: hooks
 # Created: 2026-06-18
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/prompt/navmap.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(documentation) — that load_content() and handle() carry docstrings
-# seedgo: no-test-needed(ruff) — that the module parses and its logger import resolves
-# seedgo: no-test-needed(generated) — the navmap text itself; grounding_content.load_navmap reads it from disk
+# sentry: no-test-needed(documentation) — that load_content() and handle() carry docstrings
+# sentry: no-test-needed(ruff) — that the module parses and its logger import resolves
+# sentry: no-test-needed(generated) — the navmap text itself; grounding_content.load_navmap reads it from disk
 
 import contextlib
 import json

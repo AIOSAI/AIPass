@@ -4,16 +4,16 @@
 # Description: Tests for wire_verify module — provider ↔ project hook wiring checker
 # Branch: hooks
 # Created: 2026-07-09
-# Modified: 2026-10-29
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/wire_verify.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that wire_verify.py parses and imports, ruff and collection cover it
-# seedgo: no-test-needed(documentation) — verify_wiring()'s and handle_command()'s docstrings, the documentation checker
-# seedgo: no-test-needed(constant) — HELP_COMMANDS' entries and _META_KEYS' members, fixed literals
-# seedgo: no-test-needed(stdlib) — json.loads' parsing of the settings file, the stdlib's own
+# sentry: no-test-needed(ruff) — that wire_verify.py parses and imports, ruff and collection cover it
+# sentry: no-test-needed(documentation) — verify_wiring()'s and handle_command()'s docstrings, the documentation checker
+# sentry: no-test-needed(constant) — HELP_COMMANDS' entries and _META_KEYS' members, fixed literals
+# sentry: no-test-needed(stdlib) — json.loads' parsing of the settings file, the stdlib's own
 
 import json
 from unittest.mock import patch

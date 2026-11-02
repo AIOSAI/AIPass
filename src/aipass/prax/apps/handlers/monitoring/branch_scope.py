@@ -3,7 +3,7 @@
 # Description: Launch-time branch scoping for Mission Control
 # Version: 1.0.0
 # Created: 2026-08-11
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Branch scoping for `drone @prax monitor run <branches>`.
@@ -104,7 +104,7 @@ class BranchScope:
 
 
 def parse_scope(args: Sequence[str]) -> BranchScope:
-    """Build a scope from raw `monitor run` arguments (``seedgo,cli`` or ``seedgo cli``)."""
+    """Build a scope from raw `monitor run` arguments (``sentry,cli`` or ``sentry cli``)."""
     names: List[str] = []
     widened = False
     for arg in args or ():

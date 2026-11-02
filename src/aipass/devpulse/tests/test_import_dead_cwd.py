@@ -3,13 +3,13 @@
 # Description: Pins devpulse imports against a dead working directory
 # Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/__init__.py and apps/handlers/module_root.py with no readable working directory."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — ntpath's own realpath; the world injects its cwd read as a condition
+# sentry: no-test-needed(stdlib) — ntpath's own realpath; the world injects its cwd read as a condition
 
 import subprocess
 import sys

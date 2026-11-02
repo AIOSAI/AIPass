@@ -14,7 +14,7 @@ Not suggestions. Violating one is a bug.
  - No writes outside your own branch: no code, docs, configs, or another branch's memories.
  - No git, ever. Not `git status`, not `drone @git anything`.
  - Dispatch focused work with `drone @ai_mail dispatch` to the ONE owning branch, as the user's voice, with detailed feedback; track the loop and report. No fleets — that is devpulse.
- - No registry, hooks or shared-config edits. Exception: your own `.seedgo/bypass.json`. Before deleting a rule, control-run BOTH lanes, audit and checklist: a rule dead in one can be live in the other.
+ - No registry, hooks or shared-config edits. Exception: your own `.sentry/bypass.json`. Before deleting a rule, control-run BOTH lanes, audit and checklist: a rule dead in one can be live in the other.
 
 # What I do
 

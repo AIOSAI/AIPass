@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: stop.py
 # Description: End a running dispatch from outside: the stop verb's handler, and the live-monitor test close uses
-# Version: 1.0.1
+# Version: 1.0.3
 # Created: 2026-11-01
 # Modified: 2026-11-02
 # =============================================
@@ -32,6 +32,8 @@ from aipass.ai_mail.apps.handlers.email.delivery import deliver_email_to_branch
 
 STATUS_STOPPED = "stopped"
 GRACE_SECONDS = 5.0
+# How long a signalled monitor may take to leave the process table before the stop calls it alive.
+EXIT_SETTLE_SECONDS = 2.0
 MONITOR_MARK = "dispatch_monitor"
 
 
@@ -142,7 +144,13 @@ def stop_dispatch(branch_path: Path, email: str, by: str) -> Tuple[bool, str, st
         entry = None
 
     _end_process_group(pid, GRACE_SECONDS)
+    # The group reads empty while the monitor is still exiting: on macOS it answers kill(pid, 0) and ps shows
+    # no Z yet, so a stop right behind the signal called a dead monitor alive (CI 2026-11-02).
+    deadline = time.monotonic() + EXIT_SETTLE_SECONDS
+    while check_pid_alive(pid) and time.monotonic() < deadline:
+        time.sleep(0.05)
     if check_pid_alive(pid):
+        logger.warning("[stop] %s's monitor PID %s still alive after the stop", email, pid)
         return False, f"{email}'s monitor (PID {pid}) is still running after SIGKILL", ""
     check_lock(branch_path)
     when = datetime.now().astimezone().isoformat(timespec="seconds")

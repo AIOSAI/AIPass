@@ -3,12 +3,12 @@
 # Description: Tests for symbolic handler storage and search - store, delete, dedupe, chroma client, retrieval
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/symbolic/storage.py, deduplicator.py, chroma_client.py, retriever.py and extractor.py."""
 
-# Covers imports required by the seedgo test scanner:
+# Covers imports required by the sentry test scanner:
 #     from aipass.memory.apps.handlers.symbolic.storage import flatten_dimensions
 #     from aipass.memory.apps.handlers.symbolic.storage import store_fragment
 #     from aipass.memory.apps.handlers.symbolic.storage import store_fragments_batch
@@ -25,7 +25,7 @@
 # The symbolic tier is PARKED; kept to document it. Revive: tests/parked/symbolic_20260814/README.md
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — SymbolicTierParked, the parked import; tests/test_symbolic_parked.py
+# sentry: no-test-needed(covered_elsewhere) — SymbolicTierParked, the parked import; tests/test_symbolic_parked.py
 
 import pytest as _parked
 

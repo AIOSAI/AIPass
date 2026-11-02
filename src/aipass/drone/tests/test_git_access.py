@@ -3,13 +3,13 @@
 # Description: Tests for tier-based git access — the tiers, the owner gate and its log severity
 # Version: 1.5.0
 # Created: 2026-05-12
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/auth.py: the git tiers and how owner tier is earned per repo."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — subprocess.run; git is stubbed wherever a verb is routed here
+# sentry: no-test-needed(stdlib) — subprocess.run; git is stubbed wherever a verb is routed here
 
 from __future__ import annotations
 
@@ -112,14 +112,14 @@ class TestVerifyGitAccessGlobal:
     def test_status_allowed_for_any_branch(self, devpulse_dir: Path) -> None:
         assert verify_git_access("status") == "devpulse"
 
-    def test_diff_allowed_for_seedgo(self, seedgo_dir: Path) -> None:
-        assert verify_git_access("diff") == "seedgo"
+    def test_diff_allowed_for_sentry(self, sentry_dir: Path) -> None:
+        assert verify_git_access("diff") == "sentry"
 
-    def test_log_allowed_for_any_branch(self, seedgo_dir: Path) -> None:
-        assert verify_git_access("log") == "seedgo"
+    def test_log_allowed_for_any_branch(self, sentry_dir: Path) -> None:
+        assert verify_git_access("log") == "sentry"
 
-    def test_lock_allowed_for_any_branch(self, seedgo_dir: Path) -> None:
-        assert verify_git_access("lock") == "seedgo"
+    def test_lock_allowed_for_any_branch(self, sentry_dir: Path) -> None:
+        assert verify_git_access("lock") == "sentry"
 
 
 class TestVerifyGitAccessOwner:
@@ -128,23 +128,23 @@ class TestVerifyGitAccessOwner:
     def test_commit_allowed_for_devpulse(self, devpulse_dir: Path) -> None:
         assert verify_git_access("commit") == "devpulse"
 
-    def test_commit_denied_for_seedgo(self, seedgo_dir: Path) -> None:
+    def test_commit_denied_for_sentry(self, sentry_dir: Path) -> None:
         with pytest.raises(PermissionError, match="not authorized"):
             verify_git_access("commit")
 
-    def test_checkout_denied_for_seedgo(self, seedgo_dir: Path) -> None:
+    def test_checkout_denied_for_sentry(self, sentry_dir: Path) -> None:
         with pytest.raises(PermissionError, match="not authorized"):
             verify_git_access("checkout")
 
-    def test_sync_denied_for_seedgo(self, seedgo_dir: Path) -> None:
+    def test_sync_denied_for_sentry(self, sentry_dir: Path) -> None:
         with pytest.raises(PermissionError, match="not authorized"):
             verify_git_access("sync")
 
-    def test_unlock_denied_for_seedgo(self, seedgo_dir: Path) -> None:
+    def test_unlock_denied_for_sentry(self, sentry_dir: Path) -> None:
         with pytest.raises(PermissionError, match="not authorized"):
             verify_git_access("unlock")
 
-    def test_pr_denied_for_seedgo(self, seedgo_dir: Path) -> None:
+    def test_pr_denied_for_sentry(self, sentry_dir: Path) -> None:
         with pytest.raises(PermissionError, match="not authorized"):
             verify_git_access("pr")
 
@@ -213,7 +213,7 @@ class TestOwnerTierIsEarnedPerRepo:
 
     def test_non_manager_denied(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Forged/insufficient class: everything else correct, class is not manager."""
-        make_owner_project(tmp_path, branch="seedgo", citizen_class="builder")
+        make_owner_project(tmp_path, branch="sentry", citizen_class="builder")
         monkeypatch.chdir(tmp_path)
         with pytest.raises(PermissionError, match="citizen_class"):
             verify_git_access("commit")
@@ -459,9 +459,9 @@ class TestOwnerTierIsEarnedPerRepo:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str
     ) -> None:
         """Regression: read-only stays open to any citizen."""
-        make_owner_project(tmp_path, branch="seedgo", citizen_class="builder", owner=False)
+        make_owner_project(tmp_path, branch="sentry", citizen_class="builder", owner=False)
         monkeypatch.chdir(tmp_path)
-        assert verify_git_access(command) == "seedgo"
+        assert verify_git_access(command) == "sentry"
 
 
 class TestExternalRepoVerbTranslation:
@@ -569,7 +569,7 @@ class TestRegistryIdIsNotASecret:
         (rogue / ".trinity" / "passport.json").write_text(
             json.dumps(
                 {
-                    "branch_info": {"branch_name": "seedgo"},
+                    "branch_info": {"branch_name": "sentry"},
                     "identity": {"citizen_class": "manager"},
                     "citizenship": {"registry_id": OWNER_REGISTRY_ID},
                 }
@@ -605,7 +605,7 @@ class TestGitAccessLogSeverity:
         mock_logger.info.assert_called_once()
         mock_logger.warning.assert_not_called()
 
-    def test_owner_tier_denial_still_logs_error(self, seedgo_dir: Path) -> None:
+    def test_owner_tier_denial_still_logs_error(self, sentry_dir: Path) -> None:
         """An identified branch reaching for owner-tier IS a fault — must still page."""
         with patch("aipass.drone.apps.plugins.devpulse_ops.auth.logger") as mock_logger:
             with pytest.raises(PermissionError, match="not authorized"):

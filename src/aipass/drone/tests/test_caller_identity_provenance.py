@@ -3,13 +3,13 @@
 # Description: Caller identity ships with the evidence it came from
 # Version: 1.0.2
 # Created: 2026-08-21
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/router_handler.py: a caller's identity ships with the provenance it came from."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the module under test parses and imports
+# sentry: no-test-needed(ruff) — that the module under test parses and imports
 
 import json
 import shutil

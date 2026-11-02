@@ -13,7 +13,7 @@ audible hooks). Copy a **Run Record** (bottom of this file) per machine and fill
 
 | Layer | What | Where it runs | Catches |
 |-------|------|---------------|---------|
-| 1 — **Static** | `drone @seedgo` Windows-compat scan | any OS, no execution | POSIX-only patterns (`os.kill`, `start_new_session`, `/tmp`, `fcntl`…) before you run |
+| 1 — **Static** | `drone @sentry` Windows-compat scan | any OS, no execution | POSIX-only patterns (`os.kill`, `start_new_session`, `/tmp`, `fcntl`…) before you run |
 | 2 — **Automated** | `pytest tests/e2e` (the `e2e-wheel.yml` 4-tier gate) | CI on ubuntu+macos, and locally; layer 1 is the only Windows guard | the wiring contract: clean-wheel install → `aipass init` scaffold → hook fires → `drone` routes |
 | 3 — **Manual** | **this checklist** | a real box / VM, by hand | full install, interactive `init run`, daemons, sound, per-branch smoke |
 
@@ -104,7 +104,7 @@ you do when you get hardware (a VM, a borrowed Mac, a new laptop).
 |---|---------|----------|
 | 4.1 | `drone systems` | lists all registered branches + modules |
 | 4.2 | `drone @ai_mail --help` | help text, **exit 0** (real registry-branch subprocess — the T3 path) |
-| 4.3 | `drone @seedgo --help` | help text, exit 0 (in-process module path) |
+| 4.3 | `drone @sentry --help` | help text, exit 0 (in-process module path) |
 | 4.4 | `drone @ai_mail inbox` | inbox renders (empty is fine) |
 
 ---
@@ -154,7 +154,7 @@ under test.
 | Branch | `--help` ⬜ | Read-only smoke | Side-effect (run deliberately) |
 |--------|:---------:|-----------------|--------------------------------|
 | **drone** | ⬜ | `drone systems` · `drone list` · `drone --version` | `drone scan @<b>` · `drone activate @<b>` |
-| **seedgo** | ⬜ | `drone @seedgo audit` · `drone @seedgo standards_query` · `drone @seedgo diagnostics` | `drone @seedgo audit aipass` (full scan) |
+| **sentry** | ⬜ | `drone @sentry audit` · `drone @sentry standards_query` · `drone @sentry diagnostics` | `drone @sentry audit aipass` (full scan) |
 | **prax** | ⬜ | `drone @prax status` · `drone @prax dashboard` · `drone @prax log-audit` | `drone @prax monitor` (interactive) |
 | **cli** | ⬜ | `drone @cli` · `drone @cli display` · `drone @cli templates` | `drone @cli display demo` |
 | **ai_mail** | ⬜ | `drone @ai_mail inbox` · `drone @ai_mail sent` · `drone @ai_mail contacts` | ⚠️ `dispatch` / `email` / `reply` / `close` |
@@ -181,12 +181,12 @@ Source of truth: **DPLAN-0194**. Status: ✅ fixed · 🔧 owner assigned · ❓
 | 3 | `start_new_session=` kwarg | Win | daemon spawn throws (POSIX-only) | ai_mail / flow | ❓ |
 | 4 | `os.kill` | Win | watchdog / daemon stop throws | flow + others | ❓ |
 | 5 | `.venv/bin` vs `Scripts` | Win | path resolution misses console scripts | memory / drone / ai_mail | ❓ |
-| 6 | hardcoded `/tmp` | Win | scratch-dir writes fail | hooks / seedgo | ❓ |
+| 6 | hardcoded `/tmp` | Win | scratch-dir writes fail | hooks / sentry | ❓ |
 | 7 | `aplay`-only audio | Win/mac | hook sound silent / errors | hooks (+ template hooks) | ❓ (mac needs `afplay`, Win `winsound`) |
 | 8 | `shell=True` usage | Win | quoting/semantics differ | hooks | ❓ |
 | 9 | `route_command` masks errors | all | real exceptions printed as "Unknown command" | aipass | 🔧 recommended (not fixed — hid gap #1 for hours) |
 
-> @seedgo's `windows_compat_check.py` already scans for several of these statically — extending it
+> @sentry's `windows_compat_check.py` already scans for several of these statically — extending it
 > to flag the cp1252/entry-point pattern (#1) and the `aplay`/`/tmp`/`os.kill` patterns is **P2**.
 
 ---
@@ -223,4 +223,4 @@ Overall verdict: PASS / PARTIAL / FAIL
 
 ---
 
-*Layer 3 of cross-OS confidence. Pairs with `tests/e2e/` (layer 2) and `drone @seedgo` Windows-compat scan (layer 1). See DPLAN-0194 for the full strategy.*
+*Layer 3 of cross-OS confidence. Pairs with `tests/e2e/` (layer 2) and `drone @sentry` Windows-compat scan (layer 1). See DPLAN-0194 for the full strategy.*

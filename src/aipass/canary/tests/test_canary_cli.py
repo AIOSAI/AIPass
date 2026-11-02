@@ -3,14 +3,14 @@
 # Description: Tests for canary's entry point routing, help and introspection
 # Version: 1.1.0
 # Created: 2026-08-22
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/canary.py, the entry point: routing, help and introspection."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(windows_compat) — that a Windows console is switched to utf-8 before any print
-# seedgo: no-test-needed(logged_fallback) — that a module which fails to import is logged and skipped
+# sentry: no-test-needed(windows_compat) — that a Windows console is switched to utf-8 before any print
+# sentry: no-test-needed(logged_fallback) — that a module which fails to import is logged and skipped
 
 import os
 import subprocess

@@ -52,7 +52,7 @@ jobs:
           export PYTHONUTF8=1
           drone --version
           drone systems
-          drone @seedgo --help
+          drone @sentry --help
 
       - name: Run full test suite
         shell: bash

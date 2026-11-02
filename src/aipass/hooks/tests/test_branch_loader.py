@@ -4,15 +4,15 @@
 # Description: Tests for branch_loader prompt handler (injection caps since 1.1.0)
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-10-05
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/prompt/branch_loader.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that branch_loader.py parses and imports, ruff and collection cover it
-# seedgo: no-test-needed(documentation) — handle()'s and load_content()'s docstrings, the documentation standard
-# seedgo: no-test-needed(stdlib) — importlib.import_module's module resolution, the stdlib's own
+# sentry: no-test-needed(ruff) — that branch_loader.py parses and imports, ruff and collection cover it
+# sentry: no-test-needed(documentation) — handle()'s and load_content()'s docstrings, the documentation standard
+# sentry: no-test-needed(stdlib) — importlib.import_module's module resolution, the stdlib's own
 
 import contextlib
 import sys

@@ -3,14 +3,14 @@
 # Description: Tests for feedback module command routing
 # Version: 1.1.0
 # Created: 2026-04-11
-# Modified: 2026-10-22
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/feedback.py, driven through handle_command()."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(help_flag_safety) — that handle_command calls _wants_help before acting
-# seedgo: no-test-needed(constant) — the Rich colour tags in HELP_TEXT and print_introspection()
+# sentry: no-test-needed(help_flag_safety) — that handle_command calls _wants_help before acting
+# sentry: no-test-needed(constant) — the Rich colour tags in HELP_TEXT and print_introspection()
 
 from unittest.mock import patch
 
@@ -59,7 +59,7 @@ def populated_inbox(mock_feedback_dir):
             "messages": [
                 {
                     "id": "aaa11111",
-                    "from": "seedgo",
+                    "from": "sentry",
                     "subject": "Test",
                     "body": "Body text.",
                     "timestamp": "2026-04-11T10:00:00",
@@ -151,14 +151,14 @@ class TestCommandRouting:
 
     def test_feedback_send(self, empty_inbox, monkeypatch):
         """The sender is the drone rail: three tokens are subject + a two-token body, never sender + subject + body."""
-        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "sentry")
         monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
         result = feedback_module.handle_command("feedback", ["send", "Bug report", "line one", "line two"])
         assert result is True
 
         data = storage.load_inbox()
         assert data["total_messages"] == 1
-        assert data["messages"][0]["from"] == "seedgo"
+        assert data["messages"][0]["from"] == "sentry"
         assert data["messages"][0]["subject"] == "Bug report"
         assert data["messages"][0]["body"] == "line one line two"
 
@@ -219,7 +219,7 @@ class TestOwnerGate:
     def test_send_open_for_non_owner(self, empty_inbox):
         """send bypasses the owner gate — any agent can drop feedback."""
         with patch.object(feedback_module, "_guard_caller", return_value=False):
-            result = feedback_module.handle_command("feedback", ["send", "seedgo", "Bug report", "Found an issue"])
+            result = feedback_module.handle_command("feedback", ["send", "sentry", "Bug report", "Found an issue"])
         assert result is True
 
         data = storage.load_inbox()

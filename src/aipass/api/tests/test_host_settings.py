@@ -3,14 +3,14 @@
 # Description: Host API settings handler — the desktop's gear rules, held in Python
 # Version: 1.2.0
 # Created: 2026-08-16
-# Modified: 2026-11-01
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/host/settings.py, the desktop's settings lane."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — @baud's settings.rs, the other face; @baud's own tests
-# seedgo: no-test-needed(covered_elsewhere) — the flag path HOOKS_SOUND_STATE's child reads; @hooks' tests of sound.py
+# sentry: no-test-needed(external) — @baud's settings.rs, the other face; @baud's own tests
+# sentry: no-test-needed(covered_elsewhere) — the flag path HOOKS_SOUND_STATE's child reads; @hooks' tests of sound.py
 
 import json
 import os

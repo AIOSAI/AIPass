@@ -80,4 +80,4 @@ prax/
 
 # Tests
 
-Run `pytest tests/` from the branch root; `drone @seedgo audit aipass @prax` for standards. New test files are gated — extend an existing file, or mail @devpulse with the defect the new file would pin. Conventions and fixtures: `docs/tests.md`.
+Run `pytest tests/` from the branch root; `drone @sentry audit aipass @prax` for standards. New test files are gated — extend an existing file, or mail @devpulse with the defect the new file would pin. Conventions and fixtures: `docs/tests.md`.

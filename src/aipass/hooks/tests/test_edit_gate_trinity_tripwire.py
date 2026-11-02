@@ -3,7 +3,7 @@
 # Description: edit_gate's memory tripwire: a .trinity write a shell made is reported at PostToolUse, project-wide
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py: tripwire_snapshot and tripwire."""
@@ -12,7 +12,7 @@
 # test_edit_gate_trinity_edit.py; the advisories are test_edit_gate_trinity.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that edit_gate.py parses and its imports resolve
+# sentry: no-test-needed(ruff) — that edit_gate.py parses and its imports resolve
 
 import json
 import logging

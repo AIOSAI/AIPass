@@ -3,7 +3,7 @@
 # Description: Windows dead-cwd import defect - every api module imports without a readable cwd
 # Version: 1.0.0
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests that every module under apps/ imports without a readable cwd, and apps/handlers/__init__.py's guard."""
@@ -17,9 +17,9 @@
 #   B - realpath denied, abspath alive. Convicts inspect.stack via getmodule.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every api module parses; this file measures only the import's cwd
-# seedgo: no-test-needed(windows_compat) — a real Windows host's ntpath; world A emulates it here on POSIX
-# seedgo: no-test-needed(covered_elsewhere) — POSIX-only imports on Windows, tests/test_windows_import.py
+# sentry: no-test-needed(ruff) — that every api module parses; this file measures only the import's cwd
+# sentry: no-test-needed(windows_compat) — a real Windows host's ntpath; world A emulates it here on POSIX
+# sentry: no-test-needed(covered_elsewhere) — POSIX-only imports on Windows, tests/test_windows_import.py
 
 import ast
 import json

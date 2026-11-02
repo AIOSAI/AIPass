@@ -3,13 +3,13 @@
 # Description: Tests for trust CLI commands, init enrollment, setup.sh enrollment
 # Version: 1.2.6
 # Created: 2026-07-15
-# Modified: 2026-10-21
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/trust.py and the handlers it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/modules/trust.py parses and imports
+# sentry: no-test-needed(ruff) — that apps/modules/trust.py parses and imports
 
 import os
 import shutil

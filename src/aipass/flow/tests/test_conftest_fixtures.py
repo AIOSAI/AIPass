@@ -3,13 +3,13 @@
 # Description: The autouse fixtures must actually reach what they claim to mock
 # Version: 1.0.1
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for tests/conftest.py's mock_logger and pre-import fixtures."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that conftest.py and save_registry parse and import
+# sentry: no-test-needed(ruff) — that conftest.py and save_registry parse and import
 
 import sys
 from pathlib import Path

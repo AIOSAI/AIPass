@@ -136,11 +136,11 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 
 - Every branch — creation, template updates, retirement, and citizenship itself
 - Every branch — the class-registry gateway for resolving a `citizen_class`
-- **@seedgo** — the docs page skeleton its `docs_page` standard renders, read live through
+- **@sentry** — the docs page skeleton its `docs_page` standard renders, read live through
   the same gateway
 - Registry CRUD on `AIPASS_REGISTRY.json` and any project's own `*_REGISTRY.json`
 - **@devpulse** — the owner check behind admin dispatch, through `door_owner`
-- **@aipass**, **@seedgo** — the citizen classes and their refusals, through `door_class_registry`
+- **@aipass**, **@sentry** — the citizen classes and their refusals, through `door_class_registry`
 
 ---
 

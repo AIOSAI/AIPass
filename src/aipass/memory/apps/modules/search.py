@@ -3,7 +3,7 @@
 # Description: Search Orchestration Module
 # Version: 0.6.0
 # Created: 2025-11-27
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -37,7 +37,7 @@ from aipass.memory.apps.handlers.repo_root import module_file
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """Handle search commands with seedgo-compliant introspection."""
+    """Handle search commands with sentry-compliant introspection."""
     # The entry point may still route top-level help here.
     if command in ("--help", "-h", "help"):
         print_help()
@@ -104,7 +104,7 @@ def print_help() -> None:
     console.print("  [cyan]help[/cyan]                Show this help message")
     console.print()
     console.print("[bold]OPTIONS:[/bold]")
-    console.print("  [cyan]--branch BRANCH[/cyan]    Filter by branch (e.g., SEEDGO, CLI)")
+    console.print("  [cyan]--branch BRANCH[/cyan]    Filter by branch (e.g., SENTRY, CLI)")
     console.print("  [cyan]--type TYPE[/cyan]        Filter by memory type (observations, local)")
     console.print("  [cyan]--n N[/cyan]              Number of results (default: 5)")
     console.print()
@@ -113,7 +113,7 @@ def print_help() -> None:
     console.print('  [dim]drone @memory search "performance patterns"[/dim]')
     console.print()
     console.print("  # Search specific branch")
-    console.print('  [dim]drone @memory search "registry bugs" --branch SEEDGO[/dim]')
+    console.print('  [dim]drone @memory search "registry bugs" --branch SENTRY[/dim]')
     console.print()
     console.print("  # Search specific memory type")
     console.print('  [dim]drone @memory search "collaboration" --type observations --n 10[/dim]')
@@ -238,7 +238,7 @@ def _discover_handlers() -> dict[str, list[str]]:
 
 
 def print_introspection() -> None:
-    """Display module introspection info (seedgo standard)."""
+    """Display module introspection info (sentry standard)."""
     console.print()
     console.print("[bold cyan]search Module[/bold cyan]")
     console.print("Orchestrates semantic search across memory collections via vector embeddings and ChromaDB")
@@ -256,7 +256,7 @@ def print_introspection() -> None:
 
     console.print("[yellow]Next:[/yellow]")
     console.print('  [green]drone @memory search "your query"[/green]              [dim]# Semantic search[/dim]')
-    console.print('  [green]drone @memory search "query" --branch SEEDGO[/green]     [dim]# Filter by branch[/dim]')
+    console.print('  [green]drone @memory search "query" --branch SENTRY[/green]     [dim]# Filter by branch[/dim]')
     console.print("  [green]drone @memory search --help[/green]                    [dim]# Full usage guide[/dim]")
     console.print()
 

@@ -16,7 +16,7 @@ A gate at `args[0]` alone is not enough on a messaging branch: a flag one positi
 would be discarded and `dispatch @target "Subject" "Body" --help` would **send the mail and
 wake the branch** it was asked to describe; `email`, `close all` and `reply` act on the
 mailbox the same way. The check is the module's, not the router's, because the standalone
-`__main__` path calls `handle_command` with raw argv (seedgo standard `help_flag_safety`).
+`__main__` path calls `handle_command` with raw argv (sentry standard `help_flag_safety`).
 
 `apps/handlers/cli/help_flags.py` holds the whole check — `wants_help(args)`, a pure
 predicate with no I/O and no imports beyond typing, so it can run ahead of every layer:

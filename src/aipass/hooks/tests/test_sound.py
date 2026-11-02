@@ -4,7 +4,7 @@
 # Description: Tests for shared sound module
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-01
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/sound.py."""
@@ -12,8 +12,8 @@
 # Shared speak/play; silent unless hook sounds are switched on.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — PIPER_BIN and PIPER_VOICE's install locations under the home directory
-# seedgo: no-test-needed(documentation) — print_introspection() output, a help screen
+# sentry: no-test-needed(constant) — PIPER_BIN and PIPER_VOICE's install locations under the home directory
+# sentry: no-test-needed(documentation) — print_introspection() output, a help screen
 
 import os
 import subprocess as real_sub

@@ -3,13 +3,13 @@
 # Description: Unit tests for search handler, search queries, and log export
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/search/search_ops.py, search_queries.py, and log_export.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that search_ops.py, search_queries.py, and log_export.py parse and import
+# sentry: no-test-needed(ruff) — that search_ops.py, search_queries.py, and log_export.py parse and import
 
 import sqlite3
 

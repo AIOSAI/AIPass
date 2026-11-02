@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli.py
-# Description: Entry point for drone @cli — seedgo-compliant module discovery and routing
+# Description: Entry point for drone @cli — sentry-compliant module discovery and routing
 # Version: 2.3.3
 # Created: 2026-03-08
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -66,7 +66,7 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
 
 
 def print_introspection() -> None:
-    """Display auto-discovered modules — seedgo-compliant introspection."""
+    """Display auto-discovered modules — sentry-compliant introspection."""
     modules = discover_modules()
 
     command_modules = [m for m in modules if getattr(m, "__name__", "").split(".")[-1] not in SERVICE_MODULES]

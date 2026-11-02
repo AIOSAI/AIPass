@@ -3,7 +3,7 @@
 # Description: Store command - drone @canary kv FILE set|get|delete|list keeps pairs between runs
 # Version: 1.0.0
 # Created: 2026-09-20
-# Modified: 2026-10-19
+# Modified: 2026-11-02
 # =============================================
 
 """Key/value store: a pair written in one run, read back in the next.
@@ -196,7 +196,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    # Help anywhere never executes (seedgo help_flag_safety): 'kv FILE set --help x' must not write.
+    # Help anywhere never executes (sentry help_flag_safety): 'kv FILE set --help x' must not write.
     # The bare word stays in first position: 'help' is a plausible VALUE.
     if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
         print_help()

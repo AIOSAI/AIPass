@@ -3,14 +3,14 @@
 # Description: Tests for the commons live feed handler
 # Version: 1.1.0
 # Created: 2026-07-21
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/commons_feed.py."""
 
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — routing to run_commons_feed, covered by tests/test_monitor_module.py
+# sentry: no-test-needed(through_the_command) — routing to run_commons_feed, covered by tests/test_monitor_module.py
 
 import importlib
 import sqlite3

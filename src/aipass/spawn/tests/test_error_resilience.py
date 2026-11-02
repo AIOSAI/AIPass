@@ -3,15 +3,15 @@
 # Description: Error resilience tests for spawn json_handler
 # Version: 1.0.1
 # Created: 2026-03-28
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/json/json_handler.py's read_json and write_json error handling."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every file in apps/handlers/json/ parses and imports
-# seedgo: no-test-needed(covered_elsewhere) — the happy path, in test_json_handler.py
-# seedgo: no-test-needed(covered_elsewhere) — write_json's OSError-false branch, in test_json_handler.py
+# sentry: no-test-needed(ruff) — that every file in apps/handlers/json/ parses and imports
+# sentry: no-test-needed(covered_elsewhere) — the happy path, in test_json_handler.py
+# sentry: no-test-needed(covered_elsewhere) — write_json's OSError-false branch, in test_json_handler.py
 
 import json
 from pathlib import Path

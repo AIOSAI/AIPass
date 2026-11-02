@@ -5,7 +5,7 @@
 # Date: 2026-03-28
 # Version: 1.0.1
 # Created: 2026-03-28
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -20,8 +20,8 @@
 """Tests for apps/handlers/artifacts/artifact_ops.py, trade_ops.py and capsule_ops.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every file in handlers/artifacts/ parses and imports
-# seedgo: no-test-needed(constant) — the VALID_TYPES and VALID_RARITIES rosters; craft's success case names one of each
+# sentry: no-test-needed(ruff) — that every file in handlers/artifacts/ parses and imports
+# sentry: no-test-needed(constant) — the VALID_TYPES and VALID_RARITIES rosters; craft's success case names one of each
 
 import json
 import sqlite3

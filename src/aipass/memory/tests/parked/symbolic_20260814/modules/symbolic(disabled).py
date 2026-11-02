@@ -3,7 +3,7 @@
 # Description: Symbolic Memory Module
 # Version: 0.1.1
 # Created: 2026-03-17
-# Modified: 2026-08-11
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -591,7 +591,7 @@ def get_hook_session_state() -> Dict[str, Any]:
 
 
 # =============================================================================
-# INTROSPECTION (seedgo standard)
+# INTROSPECTION (sentry standard)
 # =============================================================================
 
 
@@ -611,7 +611,7 @@ def _discover_handlers() -> dict[str, list[str]]:
 
 
 def print_introspection() -> None:
-    """Display module introspection (seedgo standard: no args = structure/discovery)."""
+    """Display module introspection (sentry standard: no args = structure/discovery)."""
     console.print()
     console.print("[bold cyan]symbolic[/bold cyan] — Fragmented Memory Extraction")
     console.print(
@@ -668,7 +668,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     if command == "symbolic":
-        # No args -> introspection (seedgo standard)
+        # No args -> introspection (sentry standard)
         if not args:
             print_introspection()
             return True
@@ -1420,7 +1420,7 @@ def _find_bootstrap_sessions(max_sessions: int = 8) -> List[Path]:
     aipass_src = Path(__file__).resolve().parents[3]
     priority_dirs = [
         str(aipass_src / name).replace("/", "-").replace("_", "-")
-        for name in ["memory", "devpulse", "seedgo", "drone", "flow", "prax", "ai_mail", "api"]
+        for name in ["memory", "devpulse", "sentry", "drone", "flow", "prax", "ai_mail", "api"]
     ]
 
     selected = []

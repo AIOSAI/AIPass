@@ -76,7 +76,7 @@ for the last three. Both halves are pinned in `tests/test_display.py`
 
 ## The checker
 
-seedgo's `Rich_Markup` checker follows a string literal one hop to the console
+sentry's `Rich_Markup` checker follows a string literal one hop to the console
 call that consumes it, so a help page assembled as a returned literal and printed
 by a caller elsewhere is judged where it prints, not where it is written. It
 deliberately does not flag a hand-escape, because of the styled-literal

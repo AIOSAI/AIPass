@@ -3,13 +3,13 @@
 # Description: The Commons lifecycle integration tests — full social platform flow
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/database/db.py and the full posts/comments/votes lifecycle it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that db.py parses and imports
+# sentry: no-test-needed(ruff) — that db.py parses and imports
 
 from pathlib import Path
 

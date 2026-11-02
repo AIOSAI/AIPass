@@ -3,14 +3,14 @@
 # Description: Tests for apps/handlers/cli/help_flags.py -- whole-sequence help detection (DPLAN-0291 rule E)
 # Version: 1.1.0
 # Created: 2026-08-13
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py and the flow command modules that call it."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that help_flags.py and the command modules parse and import
-# seedgo: no-test-needed(constant) — each module's print_help() and print_introspection() literal text
+# sentry: no-test-needed(ruff) — that help_flags.py and the command modules parse and import
+# sentry: no-test-needed(constant) — each module's print_help() and print_introspection() literal text
 
 import os
 import re

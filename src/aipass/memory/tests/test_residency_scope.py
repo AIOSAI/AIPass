@@ -3,7 +3,7 @@
 # Description: Red-first pins for passport-declared residency as the fleet classifier (DPLAN-0319)
 # Version: 1.1.0
 # Created: 2026-08-28
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/monitor/registry_scope.py and the callers that classify through it."""
@@ -12,8 +12,8 @@
 # never walks passports: a backup copy of a passport is a real passport declaring.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — registry_scope.external_branches(); tests/test_declared_roots.py
-# seedgo: no-test-needed(covered_elsewhere) — registry_scope.overlaps_home(); tests/test_roots_lifecycle.py
+# sentry: no-test-needed(covered_elsewhere) — registry_scope.external_branches(); tests/test_declared_roots.py
+# sentry: no-test-needed(covered_elsewhere) — registry_scope.overlaps_home(); tests/test_roots_lifecycle.py
 
 import json
 import logging
@@ -312,19 +312,19 @@ class TestEveryLaneReadsTheOneDefinition:
         assert "accepted" not in caller_loop.split("return branches")[0]
 
 
-class TestTheLiveFleetStillCountsTwentyTwo:
+class TestTheLiveFleetStillCountsTwentyFour:
     """The receipt the dispatch asked for, measured rather than asserted."""
 
-    def test_discovery_names_exactly_the_four_resident_projects(self, live_residents):
+    def test_discovery_names_exactly_the_five_resident_projects(self, live_residents):
         """What the deleted anchor used to be compared against, measured directly."""
         found = {path.parent.name for path in rs.resident_registry_paths(live_residents)}
-        assert found == {"baud", "earmark", "finch", "aipass-site"}
+        assert found == {"baud", "earmark", "finch", "aipass-site", "seed"}
 
-    def test_the_live_fleet_is_eighteen_core_and_four_residents(self, live_residents):
-        """Counted BY TIER now, not by total — and the change is the point."""
+    def test_the_live_fleet_is_eighteen_core_and_six_residents(self, live_residents):
+        """Counted BY TIER now, not by total — and the change is the point (seed holds two seats, seed and dean)."""
         branches = rs.fleet_branches(live_residents)
         tiers = Counter(item["residency"] for item in branches)
-        assert (tiers[rs.RESIDENCY_CORE], tiers[rs.RESIDENCY_RESIDENT]) == (18, 4), [item["name"] for item in branches]
+        assert (tiers[rs.RESIDENCY_CORE], tiers[rs.RESIDENCY_RESIDENT]) == (18, 6), [item["name"] for item in branches]
         externals = [item for item in branches if item["residency"] == rs.RESIDENCY_EXTERNAL]
         assert len(externals) == tiers[rs.RESIDENCY_EXTERNAL]
         assert bool(externals) == bool(rs.declared_roots(live_residents)), (

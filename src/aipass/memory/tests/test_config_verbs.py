@@ -3,7 +3,7 @@
 # Description: Tests for the `config` verbs (rollover limit get/set/set-default): writes, display, help, isolation
 # Version: 1.9.0
 # Created: 2026-08-16
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/rollover_config.py — config verbs' writes, display and help, via apps/modules/rollover.py."""
@@ -12,8 +12,8 @@
 # so these pin exact sentences. Siblings: test_config_verbs_{refusals,json,todo}.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — push_defaults_to_per_branch() itself, tests/test_config_loader.py
-# seedgo: no-test-needed(covered_elsewhere) — get_count_ceilings() arithmetic, pinned in tests/test_config_loader.py
+# sentry: no-test-needed(covered_elsewhere) — push_defaults_to_per_branch() itself, tests/test_config_loader.py
+# sentry: no-test-needed(covered_elsewhere) — get_count_ceilings() arithmetic, pinned in tests/test_config_loader.py
 
 import importlib
 import json
@@ -389,7 +389,7 @@ class TestHelpNeverWrites:
 
 
 class TestIntrospectionAndHelp:
-    """Seedgo standard: bare verb introspects, --help documents."""
+    """Sentry standard: bare verb introspects, --help documents."""
 
     def test_no_args_returns_true(self, verbs) -> None:
         assert _run(verbs) is True
@@ -454,7 +454,7 @@ class TestHelpOutranksJson:
     """`--help --json` is still a question. The push scar, one flag later."""
 
     _COMBOS = _HELP_WITH_JSON
-    # seedgo SHORT-TABLE (2026-08-31): same guard as _CASES above.
+    # sentry SHORT-TABLE (2026-08-31): same guard as _CASES above.
     assert len(_COMBOS) == 5
 
     @pytest.mark.parametrize("args", _COMBOS)

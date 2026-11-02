@@ -3,7 +3,7 @@
 # Description: Tests for the Stage 0 host API's commands — routing, tokens, serve/status/stop, config, the door
 # Version: 1.3.1
 # Created: 2026-08-14
-# Modified: 2026-10-22
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for the host-api commands in apps/modules/host_api.py, host_serve.py and host_config_cli.py."""
@@ -12,11 +12,11 @@
 # test_host_api_routes.py; helpers in support_host_api.py, the store fixture in conftest.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — hashlib.sha256 and secrets.token_urlsafe themselves, behind issue_token()
-# seedgo: no-test-needed(constant) — print_help() and print_introspection() display text beyond the names asserted
-# seedgo: no-test-needed(windows_compat) — the 0o600 token file mode on Windows; the POSIX tests carry a skipif
-# seedgo: no-test-needed(duplicate_test) — the face lane in depth, covered by tests/test_host_face.py
-# seedgo: no-test-needed(duplicate_test) — the lifetime and fleet lanes in depth, tests/test_host_lifetime.py
+# sentry: no-test-needed(stdlib) — hashlib.sha256 and secrets.token_urlsafe themselves, behind issue_token()
+# sentry: no-test-needed(constant) — print_help() and print_introspection() display text beyond the names asserted
+# sentry: no-test-needed(windows_compat) — the 0o600 token file mode on Windows; the POSIX tests carry a skipif
+# sentry: no-test-needed(duplicate_test) — the face lane in depth, covered by tests/test_host_face.py
+# sentry: no-test-needed(duplicate_test) — the lifetime and fleet lanes in depth, tests/test_host_lifetime.py
 
 import os
 import re
@@ -120,7 +120,7 @@ class TestCommandRouting:
     """Routing, and the help gate this branch has now been burned by twice."""
 
     def test_no_args_prints_introspection(self, store: Path, quiet_module: dict) -> None:
-        """Bare command shows the module's self-map (seedgo no-args gate)."""
+        """Bare command shows the module's self-map (sentry no-args gate)."""
         with patch("aipass.api.apps.modules.host_api.print_introspection") as mock_intro:
             assert handle_command("host-api", []) is True
 

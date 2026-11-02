@@ -3,14 +3,14 @@
 # Description: Rollover pipeline - the extractor's safety valve, snapshot budget and newest-first guard
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-26
+# Modified: 2026-11-02
 # Category: memory/tests
 # =============================================
 
 """Tests for apps/handlers/rollover/extractor.py — the safety valve, the snapshot budget and the ordering guard."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — write_memory_file_simple(), stood in here; tests/test_memory_files.py
+# sentry: no-test-needed(covered_elsewhere) — write_memory_file_simple(), stood in here; tests/test_memory_files.py
 
 import json
 import logging

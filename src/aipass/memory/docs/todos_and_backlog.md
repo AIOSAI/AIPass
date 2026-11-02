@@ -5,7 +5,7 @@
 **Branch** memory · **Code** `apps/modules/todo.py`, `apps/handlers/rollover/todo_roll.py`, `apps/handlers/rollover/todo_report.py`
 
 A todo is a sticky note: one line of what to
-do — "Check on seedgo's errors in logs", "fix drone help". The pad holds a few; the ones that roll
+do — "Check on sentry's errors in logs", "fix drone help". The pad holds a few; the ones that roll
 off wait in a plain file.
 
 The field-by-field contract — every key, its type, who may write it, and what each surface must do
@@ -105,7 +105,7 @@ verbatim, and that text can be long.
   the branch's own tab last rendered. `high_water` is raised (never lowered) on every memory backlog
   write — roll, push move, restore — and read back; a backlog without it has no floor, never an error.
   The tab floor is why a re-render after deleting the top todo still says the same `next #N`. `#?` or an
-  unrecognised tab is no floor; a bool is not a number. seedgo's check masks the `next #N` slot, so it
+  unrecognised tab is no floor; a bool is not a number. sentry's check masks the `next #N` slot, so it
   needs nothing. **Residual:** a todo added by hand and deleted by hand with no memory write or tab
   render in between leaves no trace, so its number can be issued again once.
 - **Every refusal exits non-zero** (2: routed, refused); a refused argument also names the valid forms.

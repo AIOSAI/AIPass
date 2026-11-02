@@ -3,7 +3,7 @@
 # Description: Project structure repair — thin CLI layer for move, cleanup, scan
 # Version: 1.0.1
 # Created: 2026-05-15
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Repair orchestrator for project structure fixes."""
@@ -16,6 +16,7 @@ from aipass.cli.apps.modules import console, header, error, warning
 
 from aipass.spawn.apps.handlers.repair_ops import (
     move_branch,
+    rename_branch,
     cleanup_pollution,
     repair_project,
 )
@@ -30,7 +31,7 @@ def print_introspection():
     console.print()
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print("  [cyan]handlers/[/cyan]")
-    console.print("    [dim]- repair_ops.py (move_branch, cleanup_pollution, repair_project)[/dim]")
+    console.print("    [dim]- repair_ops.py (move_branch, rename_branch, cleanup_pollution, repair_project)[/dim]")
     console.print()
 
 
@@ -65,6 +66,9 @@ def handle_repair(args: list[str]) -> int:
 
     if "--relocate" in args:
         return _handle_relocate(args, dry_run)
+
+    if "--rename" in args:
+        return _handle_rename(args, dry_run)
 
     if "--clean-pollution" in args:
         return _handle_clean_pollution(args, dry_run)
@@ -106,6 +110,39 @@ def _handle_relocate(args, dry_run):
         json_handler.log_operation("repair_relocate", data={"branch": branch_name, "new_path": new_path})
 
     return 0 if result.get("success") else 1
+
+
+def _handle_rename(args, dry_run):
+    """Handle --rename @old @new [registry]: the directory is already renamed; re-point entry and passport."""
+    positional = [a for a in args if a not in {"--dry-run", "--apply", "--rename"}]
+    if len(positional) < 2:
+        error("--rename requires @old and @new")
+        warning("Usage: drone @spawn repair --rename @old @new [registry_path] [--apply]")
+        return 1
+
+    old, new = positional[0], positional[1]
+    try:
+        result = rename_branch(old, new, registry_path=positional[2] if len(positional) > 2 else None, dry_run=dry_run)
+    except Exception as exc:
+        logger.error("[repair] Unexpected error renaming %s: %s", old, exc)
+        error(f"Error renaming {old}: {exc}")
+        return 1
+
+    console.print()
+    if not result.get("success"):
+        error(f"Rename refused: {result.get('error', 'unknown')}")
+        return 1
+    mode = "[dim](dry-run)[/dim] " if dry_run else ""
+    console.print(f"[green]Rename {mode}{result['old']} -> {result['new']}[/green]")
+    console.print(f"  Path:  {result['new_path']}")
+    console.print(f"  Registry: {result['registry']}")
+    for name, rel in result.get("repathed", {}).items():
+        console.print(f"  Re-pathed: {name} -> {rel}")
+    console.print("  Registry entry: name, path, email · Passport: names, path, module, email · ids kept")
+    if dry_run:
+        console.print("  [dim]Nothing written. Add --apply to rename.[/dim]")
+    console.print()
+    return 0
 
 
 def _handle_clean_pollution(args, dry_run):
@@ -160,6 +197,7 @@ def _print_help():
     console.print("  [green]--apply[/green]                  Execute changes (default is preview-only)")
     console.print("  [green]--dry-run[/green]                Preview changes without modifying [dim](default)[/dim]")
     console.print("  [green]--relocate[/green] @branch path  Move a branch to a new location")
+    console.print("  [green]--rename[/green] @old @new       Re-point entry and passport at an already-renamed dir")
     console.print(
         "  [green]--relocate-artifacts[/green]    Move .chroma/ into branch (with --relocate, single-branch only)"
     )

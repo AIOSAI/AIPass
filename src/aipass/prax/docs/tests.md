@@ -8,7 +8,7 @@ How the suite is organised, what the fixtures guarantee, and how to run it.
 
 ## Running the suite
 
-`pytest tests/` from the branch root runs everything; `drone @seedgo audit aipass @prax`
+`pytest tests/` from the branch root runs everything; `drone @sentry audit aipass @prax`
 scores the sources behind it. The case count is whatever the run reports — it is not written
 down here, because it changes on the commit that adds a test.
 

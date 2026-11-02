@@ -3,14 +3,14 @@
 # Description: Tests for the apps.modules package gateway re-exports
 # Version: 1.1.3
 # Created: 2026-08-28
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/__init__.py's gateway re-exports (DPLAN-0319 wave 3)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(documentation) — docstrings on get_template_dir, refuse_legacy_class and docs_page_template
-# seedgo: no-test-needed(ruff) — that apps/handlers/class_registry.py and apps/handlers/docs_page.py parse and import
+# sentry: no-test-needed(documentation) — docstrings on get_template_dir, refuse_legacy_class and docs_page_template
+# sentry: no-test-needed(ruff) — that apps/handlers/class_registry.py and apps/handlers/docs_page.py parse and import
 
 import inspect
 import subprocess
@@ -27,7 +27,7 @@ from aipass.spawn.apps.handlers.class_registry import refuse_legacy_class as _cl
 from aipass.spawn.apps.handlers.docs_page import docs_page_template as _docs_page_module_docs_page_template
 from aipass.spawn.apps.modules import docs_page_template, get_template_dir, refuse_legacy_class
 
-# @seedgo imports the class registry through this gateway instead of keeping a mirror; the
+# @sentry imports the class registry through this gateway instead of keeping a mirror; the
 # ``is`` pins fail if a second copy of the logic appears here and drifts from the handler.
 
 
@@ -36,7 +36,7 @@ SPAWN_BRANCH = Path(__file__).resolve().parents[1]
 
 
 class TestGatewayImportPath:
-    """The exact import statement that replaces seedgo's mirror."""
+    """The exact import statement that replaces sentry's mirror."""
 
     def test_both_names_import_from_the_modules_package(self):
         """The documented one-liner works verbatim."""
@@ -53,7 +53,7 @@ class TestGatewayImportPath:
     def test_gateway_import_works_from_outside_the_spawn_branch(self, tmp_path):
         """The whole point: a caller outside this branch must get through.
 
-        A separate process from a file outside src/aipass/spawn/, where seedgo's auditor imports from.
+        A separate process from a file outside src/aipass/spawn/, where sentry's auditor imports from.
         """
         probe = tmp_path / "probe_gateway_from_outside.py"
         probe.write_text(
@@ -80,7 +80,7 @@ class TestGatewayImportPath:
         assert result.stdout.split() == ["citizen", "True"]
 
     def test_the_docs_page_door_is_public_and_answers_an_outside_caller(self, tmp_path):
-        """@seedgo's docs_page render reads the skeleton through this door."""
+        """@sentry's docs_page render reads the skeleton through this door."""
 
         assert "docs_page_template" in modules.__all__
 
@@ -144,7 +144,7 @@ class TestGatewayIsTheHandlerItself:
 
 
 class TestSignaturesAreStable:
-    """Signature pins — seedgo calls these positionally, by name, and bare."""
+    """Signature pins — sentry calls these positionally, by name, and bare."""
 
     def test_get_template_dir_signature(self):
 
@@ -164,13 +164,13 @@ class TestSignaturesAreStable:
         param = sig.parameters["name"]
         assert param.default is inspect.Parameter.empty
         assert param.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
-        assert param.annotation == (str | None), "None must stay callable — seedgo passes a missing class straight in"
+        assert param.annotation == (str | None), "None must stay callable — sentry passes a missing class straight in"
         assert sig.return_annotation is str
 
     def test_docs_page_template_signature(self):
 
         sig = inspect.signature(docs_page_template)
-        assert list(sig.parameters) == [], "seedgo calls the door bare on every render"
+        assert list(sig.parameters) == [], "sentry calls the door bare on every render"
         assert sig.return_annotation is str
 
 
@@ -190,7 +190,7 @@ class TestGetTemplateDirThroughGateway:
         assert get_template_dir().name == "citizen"
 
     def test_retired_name_raises_naming_its_replacement(self):
-        """seedgo reads this message straight into its violation text."""
+        """sentry reads this message straight into its violation text."""
 
         with pytest.raises(ValueError) as exc:
             get_template_dir("aipass_framework")
@@ -217,7 +217,7 @@ class TestGetTemplateDirThroughGateway:
 
 
 class TestRefuseLegacyClassThroughGateway:
-    """The retired-name lane, which seedgo reports as 'not yet migrated'."""
+    """The retired-name lane, which sentry reports as 'not yet migrated'."""
 
     @pytest.mark.parametrize(
         "retired,replacement",

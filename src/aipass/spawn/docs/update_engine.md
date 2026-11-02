@@ -132,7 +132,7 @@ that differs only in escaping is `unchanged` and is not rewritten.
 
 Never re-added, never overwritten: everything under `.trinity/` except the passport heal,
 everything under `.ai_mail.local/` (a live mailbox is @ai_mail's data, not spawn's), plus
-`DASHBOARD.local.json`, `artifacts/birth_certificate.json`, `.seedgo/bypass.json` and
+`DASHBOARD.local.json`, `artifacts/birth_certificate.json`, `.sentry/bypass.json` and
 `tests/test_scaffold.py`.
 
 `.py` files are skipped by design in every branch, which is why a template `.py` change

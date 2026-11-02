@@ -3,14 +3,14 @@
 # Description: Tests for tab_renderer handler (FPLAN-0285)
 # Version: 1.4.0
 # Created: 2026-06-25
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/tracking/tab_renderer.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — template_usage(), template_semantics(): tests/test_trinity_standard.py
-# seedgo: no-test-needed(covered_elsewhere) — receipt.bump_config_rendered() per refresh: tests/test_trinity_standard.py
+# sentry: no-test-needed(covered_elsewhere) — template_usage(), template_semantics(): tests/test_trinity_standard.py
+# sentry: no-test-needed(covered_elsewhere) — receipt.bump_config_rendered() per refresh: tests/test_trinity_standard.py
 
 import importlib
 import json

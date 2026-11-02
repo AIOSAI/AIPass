@@ -3,13 +3,13 @@
 # Description: Tests for the read lane's feed cursor and name fence — limits, robustness, branch roots, the seat
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/host/feed.py (the cursor) and the name fence in apps/handlers/host/reads.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that feed.py and reads.py parse and import
+# sentry: no-test-needed(ruff) — that feed.py and reads.py parse and import
 
 import json
 import sys
@@ -23,7 +23,7 @@ from aipass.api.apps.handlers.host import reads as host_reads
 from aipass.api.tests.support_host_read_lane import _RegistryBroken, _event, _write_feed
 
 # The patch target stays this file's own constant rather than conftest's:
-# seedgo's discarded_patch rule reads a target imported from this branch's
+# sentry's discarded_patch rule reads a target imported from this branch's
 # package as one it judges.
 PATCH_FEED_PATH = "aipass.api.apps.handlers.host.feed.feed_path"
 

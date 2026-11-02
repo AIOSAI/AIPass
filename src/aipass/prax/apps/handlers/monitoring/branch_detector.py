@@ -3,7 +3,7 @@
 # Description: Branch Attribution Handler
 # Version: 0.2.0
 # Created: 2025-11-23
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -175,7 +175,7 @@ class BranchDetector:
 
     def _load_fallback_branches(self):
         """Load fallback branch names when registry is unavailable"""
-        fallback = ["SEEDGO", "CLI", "FLOW", "PRAX", "DRONE", "BACKUP", "SECURITY", "AIPASS"]
+        fallback = ["SENTRY", "CLI", "FLOW", "PRAX", "DRONE", "BACKUP", "SECURITY", "AIPASS"]
         self.known_branches.update(fallback)
         logger.info(f"Using fallback branches: {fallback}")
 
@@ -545,7 +545,7 @@ if __name__ == "__main__":
 
     test_paths = [
         "src/aipass/prax/apps/handlers/monitoring/branch_detector.py",
-        "src/aipass/seedgo/core/validator.py",  # seedgo branch
+        "src/aipass/sentry/core/validator.py",  # sentry branch
         "src/aipass/flow/apps/modules/planners.py",
     ]
 
@@ -556,7 +556,7 @@ if __name__ == "__main__":
         print(f"  -> {branch}\n")
 
     test_logs = [
-        "seedgo_audit.log",
+        "sentry_audit.log",
         "flow_plan.log",
         "prax_monitor_20251123.log",
     ]

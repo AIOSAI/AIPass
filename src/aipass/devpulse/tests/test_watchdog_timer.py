@@ -3,15 +3,15 @@
 # Description: Tests for the watchdog timer handler + router integration
 # Version: 1.0.2
 # Created: 2026-04-14
-# Modified: 2026-11-01
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/watchdog/timer.py and the watchdog timer command that drives it."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that handlers/watchdog/timer.py parses and imports
-# seedgo: no-test-needed(documentation) — that wake_in and the timer_* functions carry docstrings
-# seedgo: no-test-needed(constant) — the wording of _TIMER_HELP_TEXT
+# sentry: no-test-needed(ruff) — that handlers/watchdog/timer.py parses and imports
+# sentry: no-test-needed(documentation) — that wake_in and the timer_* functions carry docstrings
+# sentry: no-test-needed(constant) — the wording of _TIMER_HELP_TEXT
 
 import json
 import sys

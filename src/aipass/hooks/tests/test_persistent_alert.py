@@ -4,7 +4,7 @@
 # Description: Tests for persistent_alert handler and alert_dismiss module (cadence-gated since 1.1.0)
 # Branch: hooks
 # Created: 2026-07-14
-# Modified: 2026-10-25
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/prompt/persistent_alert.py and apps/modules/alert_dismiss.py."""
@@ -16,9 +16,9 @@
 # the session running it.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that handlers/prompt/persistent_alert.py and modules/alert_dismiss.py parse and import
-# seedgo: no-test-needed(constant) — HELP_COMMANDS' display strings in alert_dismiss
-# seedgo: no-test-needed(stdlib) — tempfile.gettempdir() choosing the default guard directory
+# sentry: no-test-needed(ruff) — that handlers/prompt/persistent_alert.py and modules/alert_dismiss.py parse and import
+# sentry: no-test-needed(constant) — HELP_COMMANDS' display strings in alert_dismiss
+# sentry: no-test-needed(stdlib) — tempfile.gettempdir() choosing the default guard directory
 
 import json
 import time

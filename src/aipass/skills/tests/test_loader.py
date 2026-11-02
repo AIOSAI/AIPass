@@ -3,15 +3,15 @@
 # Description: Unit tests for skills loader
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # Category: skills/tests
 # =============================================
 
 """Tests for apps/modules/loader.py and the skill loading it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that loader.py and loader_handler.py parse and import
-# seedgo: no-test-needed(constant) — the "skill_loaded" log-operation name json_handler records
+# sentry: no-test-needed(ruff) — that loader.py and loader_handler.py parse and import
+# sentry: no-test-needed(constant) — the "skill_loaded" log-operation name json_handler records
 
 import sys
 

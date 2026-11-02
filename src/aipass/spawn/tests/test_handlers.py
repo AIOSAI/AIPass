@@ -3,14 +3,14 @@
 # Description: Tests for spawn update handler modules
 # Version: 1.0.3
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/meta_ops.py and the shared json_ops update relies on."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/handlers/meta_ops.py parses and imports
-# seedgo: no-test-needed(documentation) — docstrings on the handler functions this file exercises
+# sentry: no-test-needed(ruff) — that apps/handlers/meta_ops.py parses and imports
+# sentry: no-test-needed(documentation) — docstrings on the handler functions this file exercises
 
 import pytest
 from pathlib import Path

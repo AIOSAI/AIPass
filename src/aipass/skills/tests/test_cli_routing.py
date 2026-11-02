@@ -3,15 +3,15 @@
 # Description: Unit tests for skills.py CLI routing
 # Version: 1.2.0
 # Created: 2026-03-10
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # Category: skills/tests
 # =============================================
 
 """Tests for apps/skills.py — the entry point's routing, help, introspection and exit codes."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/skills.py parses and carries no unused import
-# seedgo: no-test-needed(constant) — the wording of print_help's rows beyond the doors pinned below
+# sentry: no-test-needed(ruff) — that apps/skills.py parses and carries no unused import
+# sentry: no-test-needed(constant) — the wording of print_help's rows beyond the doors pinned below
 
 import subprocess
 import sys

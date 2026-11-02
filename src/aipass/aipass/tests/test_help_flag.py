@@ -3,14 +3,14 @@
 # Description: Tests for the help_flag predicate + per-module help-gate canaries
 # Version: 1.2.4
 # Created: 2026-08-13
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/help_flag.py and every module's help gate."""
 # Every doing-path is stubbed first: a red canary must never reach a real init, install, enroll or spawn.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/modules/ this file gates parses and imports
+# sentry: no-test-needed(ruff) — that every module under apps/modules/ this file gates parses and imports
 
 from __future__ import annotations
 

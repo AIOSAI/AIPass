@@ -3,7 +3,7 @@
 # Description: Tests for log file monitoring handler
 # Version: 1.3.0
 # Created: 2026-04-03
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/log_watcher.py."""
@@ -16,8 +16,8 @@
 # - initialize_positions() -- seek-to-end on startup
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — detect_branch_from_log, covered by tests/test_monitoring_handlers.py
-# seedgo: no-test-needed(json_structure) — start_log_watcher's log_watcher_started log_operation record
+# sentry: no-test-needed(through_the_command) — detect_branch_from_log, covered by tests/test_monitoring_handlers.py
+# sentry: no-test-needed(json_structure) — start_log_watcher's log_watcher_started log_operation record
 
 from pathlib import Path
 from types import ModuleType
@@ -161,13 +161,13 @@ class TestExtractCommandInfo:
         result = watcher._extract_command_info(line)
         assert result == {"command": "flow open plan 0098", "caller": None, "target": None}
 
-    def test_seedgo_audit(self):
+    def test_sentry_audit(self):
         mod = _import_log_watcher()
         watcher, _ = _make_watcher(mod)
-        line = "[seedgo] Auditing PRAX branch"
+        line = "[sentry] Auditing PRAX branch"
         result = watcher._extract_command_info(line)
         assert result is not None
-        assert "seedgo audit" in result["command"]
+        assert "sentry audit" in result["command"]
         assert result["target"] == "PRAX"
 
     def test_ai_mail_send(self):
@@ -219,10 +219,10 @@ class TestExtractCommandInfo:
     def test_executing_command_with_caller(self):
         mod = _import_log_watcher()
         watcher, _ = _make_watcher(mod)
-        line = "Executing command [CALLER:SEEDGO]: /path/to/aipass/prax/apps/status.py audit @prax"
+        line = "Executing command [CALLER:SENTRY]: /path/to/aipass/prax/apps/status.py audit @prax"
         result = watcher._extract_command_info(line)
         assert result is not None
-        assert result["caller"] == "SEEDGO"
+        assert result["caller"] == "SENTRY"
 
     def test_non_command_line_returns_none(self):
         mod = _import_log_watcher()
@@ -648,13 +648,13 @@ class TestMatchFlowCommand:
 class TestExtractCommandInfoAdditional:
     """Additional command extraction tests for uncovered patterns."""
 
-    def test_seedgo_checklist_running(self):
-        """Should detect seedgo checklist commands."""
+    def test_sentry_checklist_running(self):
+        """Should detect sentry checklist commands."""
         mod = _import_log_watcher()
         watcher, _ = _make_watcher(mod)
         line = "standards_checklist Running full standard check on prax"
         result = watcher._extract_command_info(line)
-        assert result == {"command": "seedgo checklist prax", "caller": None, "target": None}
+        assert result == {"command": "sentry checklist prax", "caller": None, "target": None}
 
     def test_backup_versioned(self):
         """Should detect backup versioned commands."""
@@ -720,7 +720,7 @@ class TestMatchExecutingCommand:
         """Should extract caller and simplify aipass paths to @branch."""
         mod = _import_log_watcher()
         watcher, _ = _make_watcher(mod)
-        line = "Executing command [CALLER:DRONE]: /path/to/aipass/seedgo/apps/audit.py @prax"
+        line = "Executing command [CALLER:DRONE]: /path/to/aipass/sentry/apps/audit.py @prax"
         result = watcher._match_executing_command(line)
         assert result is not None
         assert result["caller"] == "DRONE"
@@ -747,9 +747,9 @@ class TestExtractTargetFromCmd:
     def test_extracts_path_target(self, tmp_path):
         """Should extract target from /aipass/branch pattern."""
         mod = _import_log_watcher()
-        cmd_path = str(tmp_path / "aipass" / "seedgo" / "run.py")
+        cmd_path = str(tmp_path / "aipass" / "sentry" / "run.py")
         result = mod.LogFileWatcher._extract_target_from_cmd(cmd_path)
-        assert result == "SEEDGO"
+        assert result == "SENTRY"
 
     def test_extracts_path_target_windows_form(self):
         """Should extract target from a Windows-form path with backslashes.
@@ -757,9 +757,9 @@ class TestExtractTargetFromCmd:
         Mutant: searching the raw cmd instead of its slash-normalised copy reddens this.
         """
         mod = _import_log_watcher()
-        cmd = "D:\\dev\\AIPass\\src\\aipass\\seedgo\\run.py"
+        cmd = "D:\\dev\\AIPass\\src\\aipass\\sentry\\run.py"
         result = mod.LogFileWatcher._extract_target_from_cmd(cmd)
-        assert result == "SEEDGO"
+        assert result == "SENTRY"
 
     def test_returns_none_when_no_target(self):
         """Should return None when no target pattern matches."""

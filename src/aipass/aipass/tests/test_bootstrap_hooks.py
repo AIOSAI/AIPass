@@ -3,7 +3,7 @@
 # Description: Tests for the hooks.json and tier files init and update scaffold into a project
 # Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-27
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py: hooks.json, its union merge, and the tier files."""
@@ -12,7 +12,7 @@
 # operations use tmp_path; the templates are read from the detected AIPASS_HOME.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
+# sentry: no-test-needed(ruff) — that every module this file imports parses and imports
 
 import hashlib
 import json

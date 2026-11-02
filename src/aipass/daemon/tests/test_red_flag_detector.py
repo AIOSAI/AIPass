@@ -3,14 +3,14 @@
 # Description: Red flag detection engine tests — code changed without a memory update
 # Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/red_flag_detector.py — code changed with no memory update."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — the four STATUS_* strings (RED_FLAG, OK, NO_ACTIVITY, ERROR), compared by name
-# seedgo: no-test-needed(stdlib) — datetime.fromisoformat's accepted formats beyond the three pinned here
+# sentry: no-test-needed(constant) — the four STATUS_* strings (RED_FLAG, OK, NO_ACTIVITY, ERROR), compared by name
+# sentry: no-test-needed(stdlib) — datetime.fromisoformat's accepted formats beyond the three pinned here
 
 from datetime import datetime
 from unittest.mock import patch

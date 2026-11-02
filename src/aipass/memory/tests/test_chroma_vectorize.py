@@ -3,7 +3,7 @@
 # Description: Text-in vectorize_and_store — the store owns the embedding model choice
 # Version: 1.0.1
 # Created: 2026-08-24
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/storage/chroma_subprocess.py _vectorize_and_store."""
@@ -11,9 +11,9 @@
 # The store owns the embedding model: two callers' models in one collection are silently unsearchable.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — the embed subprocess's fastembed model load; stubbed at subprocess.run here
-# seedgo: no-test-needed(external) — ChromaDB's own write inside _store_vectors; stubbed, no live store is opened
-# seedgo: no-test-needed(covered_elsewhere) — _check_plan(), behind main()'s check_plan: test_chroma_source_match.py
+# sentry: no-test-needed(external) — the embed subprocess's fastembed model load; stubbed at subprocess.run here
+# sentry: no-test-needed(external) — ChromaDB's own write inside _store_vectors; stubbed, no live store is opened
+# sentry: no-test-needed(covered_elsewhere) — _check_plan(), behind main()'s check_plan: test_chroma_source_match.py
 
 import io
 import json

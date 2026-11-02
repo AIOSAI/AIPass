@@ -42,7 +42,7 @@ the route has no reason to know the seal exists.
 A fire writes the wake transcript twice: to the daemon's own `daemon_json` and to the owner's
 `.daemon/last_wake_prompt.txt`, which `_branch_daemon_dir` resolves through
 `discovery.active_citizens()` to the **real** branch tree. Real citizen addresses (`@commons`,
-`@backup`, `@vera`, `@devpulse`, `@daemon`, `@seedgo`, `@baud`, `@flow`, `@api`) appear as
+`@backup`, `@vera`, `@devpulse`, `@daemon`, `@sentry`, `@baud`, `@flow`, `@api`) appear as
 fixture owners, so `_seal_branch_wake_prompt` redirects every branch-side write to a tmp
 directory. It returns that directory rather than `None`, so a test can still assert the
 branch-side write *happened*; only its destination changes.

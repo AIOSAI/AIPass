@@ -3,13 +3,13 @@
 # Description: Tests for update_project: the plan, stamp-only, the retrofit, seeds and cleanup
 # Version: 1.6.0
 # Created: 2026-10-08
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py: update_project and the plans it reads."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
+# sentry: no-test-needed(ruff) — that every module this file imports parses and imports
 
 import json
 import os
@@ -346,7 +346,7 @@ def test_update_project_never_touches_the_registry_or_readme(tmp_path):
 def test_update_project_creates_missing_managed_dirs(tmp_path, monkeypatch, throwaway_home):
     """update_project recreates .aipass/ and .claude/; settings.local.json only for a non-throwaway home.
 
-    The home's throwaway answer is pinned: a checkout under /tmp (CI, seedgo's audit env) reads as one.
+    The home's throwaway answer is pinned: a checkout under /tmp (CI, sentry's audit env) reads as one.
     Mutant: bootstrap's `aipass_home and not is_throwaway_path(...)` -> `aipass_home` -> red on throwaway_home.
     """
     monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda home: throwaway_home)

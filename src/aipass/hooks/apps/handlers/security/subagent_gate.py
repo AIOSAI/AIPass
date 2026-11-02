@@ -1,14 +1,14 @@
 # =================== AIPass ====================
 # Name: subagent_gate.py
 # Version: 1.0.4
-# Description: Checks modified Python files against seedgo standards on SubagentStop
+# Description: Checks modified Python files against sentry standards on SubagentStop
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-22
-# Modified: 2026-11-01
+# Modified: 2026-11-02
 # =============================================
 
-"""Checks modified Python files against seedgo standards and blocks on violations.
+"""Checks modified Python files against sentry standards and blocks on violations.
 
 Failure mode: OPEN, by decision (DPLAN-0356) — a crash, a `drone @git status` timeout or a dead
 subprocess lets the stop through, logged. A block at SubagentStop keeps the sub-agent running, so a gate
@@ -104,13 +104,13 @@ def _get_modified_py_files(cwd: str, repo_root: Path) -> list[str]:
     return files
 
 
-def _run_seedgo_checklist(file_path: str, repo_root: Path, timeout: float = _CHECKLIST_TIMEOUT_SECONDS) -> list[str]:
-    """Run seedgo checklist on a single file, return violation strings."""
+def _run_sentry_checklist(file_path: str, repo_root: Path, timeout: float = _CHECKLIST_TIMEOUT_SECONDS) -> list[str]:
+    """Run sentry checklist on a single file, return violation strings."""
     # The caller hands str(repo_root / filepath), which is backslashed on Windows.
     if "/.claude/" in file_path.replace("\\", "/"):
         return []
     result = subprocess.run(
-        ["drone", "@seedgo", "checklist", file_path],
+        ["drone", "@sentry", "checklist", file_path],
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -189,7 +189,7 @@ def _check_within_budget(modified: list[str], repo_root: Path) -> tuple[dict[str
             unchecked.append(name)
             continue
         try:
-            vs = _run_seedgo_checklist(f, repo_root, timeout=min(_CHECKLIST_TIMEOUT_SECONDS, remaining))
+            vs = _run_sentry_checklist(f, repo_root, timeout=min(_CHECKLIST_TIMEOUT_SECONDS, remaining))
         except subprocess.TimeoutExpired as exc:
             logger.info("[HOOKS] subagent_gate: checklist timed out on %s after %.0fs", name, exc.timeout)
             unchecked.append(name)
@@ -208,7 +208,7 @@ def _check_within_budget(modified: list[str], repo_root: Path) -> tuple[dict[str
 
 
 def handle(hook_data: dict) -> dict:
-    """Check modified files against seedgo standards on subagent stop."""
+    """Check modified files against sentry standards on subagent stop."""
     try:
         agent_type = hook_data.get("agent_type", "")
         if not agent_type:
@@ -236,7 +236,7 @@ def handle(hook_data: dict) -> dict:
             lines.append("\nFix these violations before finishing.")
             if unchecked:
                 names = ", ".join(unchecked)
-                lines.append(f"\nNot checked (time budget): {names} - run drone @seedgo checklist on them.")
+                lines.append(f"\nNot checked (time budget): {names} - run drone @sentry checklist on them.")
             if readme_reminder:
                 lines.append(f"\n{readme_reminder}")
             return _block("\n".join(lines))

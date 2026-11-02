@@ -3,13 +3,13 @@
 # Description: Tests for help_chat module — section-aware v2 (DPLAN-0282 P3)
 # Version: 2.1.4
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/help_chat.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that help_chat.py and the modules it imports parse and import
+# sentry: no-test-needed(ruff) — that help_chat.py and the modules it imports parse and import
 
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ def _ask(
     return out, err, (call.kwargs["data"] if call else {})
 
 
-_FAKE_BRANCHES = ["drone", "seedgo", "prax", "cli", "flow", "ai_mail", "spawn"]
+_FAKE_BRANCHES = ["drone", "sentry", "prax", "cli", "flow", "ai_mail", "spawn"]
 
 _SAMPLE_README = """\
 # Drone

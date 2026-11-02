@@ -8,7 +8,7 @@
 # CHANGELOG (Max 5 entries):
 #   - v3.1.0 (2026-10-10): temp_test_dir and sample_test_data retired - their one
 #     requester was the scaffold smoke test, and a fixture nothing requests is a
-#     seedgo unused_conftest_fixture row in every newborn (DPLAN-0354)
+#     sentry unused_conftest_fixture row in every newborn (DPLAN-0354)
 #   - v3.0.0 ({{DATE}}): The json redirect is the AIPASS_TEST_LOG_DIR seam - the
 #     fleet service resolves its directory per call, so there is no singleton
 #     and no private attribute left to patch (DPLAN-0325)

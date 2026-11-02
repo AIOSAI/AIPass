@@ -32,7 +32,7 @@ drone @canary                # self-map: identity, purpose, discovered modules
 drone @canary --help         # usage, flags, examples
 drone @canary --version      # branch and version
 pytest src/aipass/canary/tests -v
-drone @seedgo audit aipass @canary
+drone @sentry audit aipass @canary
 ```
 
 Canary registers no persistent subcommands. Modules are added for a specific test and removed after.

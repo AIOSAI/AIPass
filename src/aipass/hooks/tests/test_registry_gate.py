@@ -4,15 +4,15 @@
 # Description: Tests for registry_gate security handler
 # Branch: hooks
 # Created: 2026-07-10
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/security/registry_gate.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(documentation) — that the gate's functions carry docstrings
-# seedgo: no-test-needed(ruff) — that the module parses and its logger import resolves
-# seedgo: no-test-needed(stdlib) — re's matching and pathlib's Path.name; the gate's own patterns are pinned here
+# sentry: no-test-needed(documentation) — that the gate's functions carry docstrings
+# sentry: no-test-needed(ruff) — that the module parses and its logger import resolves
+# sentry: no-test-needed(stdlib) — re's matching and pathlib's Path.name; the gate's own patterns are pinned here
 
 import json
 from unittest.mock import patch

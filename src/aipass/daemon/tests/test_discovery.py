@@ -3,14 +3,14 @@
 # Description: Tests for registry-led citizen discovery and .daemon/ schedule job discovery
 # Version: 1.3.1
 # Created: 2026-06-15
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/schedule/discovery.py — citizens from the registries, jobs from their .daemon/."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — parsing the registry files inside fleet.fleet_branches(); @memory's own tests
-# seedgo: no-test-needed(constant) — RESIDENCY_CORE and RESIDENCY_RESIDENT spellings, re-exported from @memory's fleet
+# sentry: no-test-needed(external) — parsing the registry files inside fleet.fleet_branches(); @memory's own tests
+# sentry: no-test-needed(constant) — RESIDENCY_CORE and RESIDENCY_RESIDENT spellings, re-exported from @memory's fleet
 
 import errno
 import json

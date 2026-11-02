@@ -3,13 +3,13 @@
 # Description: Tests for simple event handler functions and the warning escalation lane
 # Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-10-17
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/events/memory_template_updated.py and warning_logged.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(behaviour) — the lane internals in apps/handlers/escalation.py; the escalation tests cover them
+# sentry: no-test-needed(behaviour) — the lane internals in apps/handlers/escalation.py; the escalation tests cover them
 
 import json
 from pathlib import Path

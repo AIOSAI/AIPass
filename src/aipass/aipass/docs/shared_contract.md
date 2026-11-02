@@ -15,7 +15,7 @@ modules** in production code —
   (`find_registry` via `handlers/registry.py`, `registries_in` via
   `handlers/delete_ops.py`).
 
-This branch's `.seedgo/bypass.json` names the same dependency in its
+This branch's `.sentry/bypass.json` names the same dependency in its
 `backup_json` rule. The fourth module is
 [`shared/scaffold_content.py`](../shared/scaffold_content.py), the template
 text `apps/handlers/init/` re-exports.

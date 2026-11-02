@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: auto_fix.py
 # Version: 1.5.1
-# Description: Post-edit diagnostics — syntax, lint, type, pattern, seedgo checks (PostToolUse)
+# Description: Post-edit diagnostics — syntax, lint, type, pattern, sentry checks (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Runs diagnostics on edited files and surfaces errors for the agent to fix."""
@@ -264,15 +264,15 @@ _CHECKLIST_MARKER_FALLBACK = "[FAIL]"
 
 
 def _load_checklist_module():
-    """Import @seedgo's checklist module, where the finding marker is published.
+    """Import @sentry's checklist module, where the finding marker is published.
 
     A seam: tests replace it by name instead of patching importlib.import_module process-wide.
     """
-    return importlib.import_module("aipass.seedgo.apps.modules.checklist")
+    return importlib.import_module("aipass.sentry.apps.modules.checklist")
 
 
 def _checklist_marker() -> str:
-    """The token @seedgo's checklist prints on a finding — read, never restated.
+    """The token @sentry's checklist prints on a finding — read, never restated.
 
     A restated marker once went stale silently: an empty list reads like a clean file. So the fallback is loud.
     """
@@ -280,7 +280,7 @@ def _checklist_marker() -> str:
         checklist = _load_checklist_module()
     except Exception as exc:
         logger.warning(
-            "[HOOKS] auto_fix: seedgo checklist module unreadable (%s) — using fallback marker %r",
+            "[HOOKS] auto_fix: sentry checklist module unreadable (%s) — using fallback marker %r",
             exc,
             _CHECKLIST_MARKER_FALLBACK,
         )
@@ -289,7 +289,7 @@ def _checklist_marker() -> str:
     if isinstance(marker, str) and marker:
         return marker
     logger.warning(
-        "[HOOKS] auto_fix: seedgo publishes no FINDING_MARKER — using fallback %r",
+        "[HOOKS] auto_fix: sentry publishes no FINDING_MARKER — using fallback %r",
         _CHECKLIST_MARKER_FALLBACK,
     )
     return _CHECKLIST_MARKER_FALLBACK
@@ -321,7 +321,7 @@ def _parse_checklist_findings(stdout: str, marker: str) -> list[str]:
     return [f for f in findings if f]
 
 
-def _run_seedgo_checklist(file_path: str) -> list[str]:
+def _run_sentry_checklist(file_path: str) -> list[str]:
     if "/.claude/hooks/" in file_path.replace("\\", "/"):
         return []
     aipass_home = os.environ.get("AIPASS_HOME", "")
@@ -329,7 +329,7 @@ def _run_seedgo_checklist(file_path: str) -> list[str]:
         return []
     try:
         result = subprocess.run(
-            ["drone", "@seedgo", "checklist", file_path],
+            ["drone", "@sentry", "checklist", file_path],
             capture_output=True,
             text=True,
             timeout=15,
@@ -338,15 +338,15 @@ def _run_seedgo_checklist(file_path: str) -> list[str]:
         # checklist exits 0 even with findings: parse stdout whatever the code, and only log a non-zero one.
         if result.returncode != 0:
             logger.info(
-                "[HOOKS] auto_fix: seedgo checklist exited %d for %s (parsing stdout anyway)",
+                "[HOOKS] auto_fix: sentry checklist exited %d for %s (parsing stdout anyway)",
                 result.returncode,
                 Path(file_path).name,
             )
         return _parse_checklist_findings(result.stdout, _checklist_marker())[:5]
     except FileNotFoundError:
-        logger.info("[HOOKS] auto_fix: drone not found for seedgo checklist")
+        logger.info("[HOOKS] auto_fix: drone not found for sentry checklist")
     except Exception as exc:
-        logger.info("[HOOKS] auto_fix: seedgo checklist failed: %s", exc)
+        logger.info("[HOOKS] auto_fix: sentry checklist failed: %s", exc)
     return []
 
 
@@ -422,7 +422,7 @@ def _fit(error_text: str, frame: str, file_path: str) -> str:
     limit = importlib.import_module("aipass.hooks.apps.handlers.config.output_merge").CONTEXT_LIMIT
     if _units(frame) + _units(error_text) <= limit:
         return error_text
-    marker = f"\n  … cut to fit what the model is shown whole: drone @seedgo checklist {file_path} has every row"
+    marker = f"\n  … cut to fit what the model is shown whole: drone @sentry checklist {file_path} has every row"
     room = limit - _units(frame) - _units(marker)
     kept = error_text[: max(0, room)]
     while kept and _units(kept) > room:  # a character outside the BMP counts twice
@@ -459,9 +459,9 @@ def handle(hook_data: dict) -> dict:
         if file_path.endswith(".py"):
             errors = _run_python_checks(file_path)
 
-            seedgo_violations = _run_seedgo_checklist(file_path)
-            for v in seedgo_violations:
-                errors.append(f"SEEDGO: {v}")
+            sentry_violations = _run_sentry_checklist(file_path)
+            for v in sentry_violations:
+                errors.append(f"SENTRY: {v}")
 
             type_errors = _run_pyright_check(file_path, unanswered)
             for te in type_errors or []:

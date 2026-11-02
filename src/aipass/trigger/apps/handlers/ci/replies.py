@@ -1,13 +1,13 @@
 # =================== AIPass ====================
 # Name: replies.py
-# Description: CI red lane reply contracts - owner and seedgo reply parsers, the two briefs, the CHANGELOG insert
+# Description: CI red lane reply contracts - owner and sentry reply parsers, the two briefs, the CHANGELOG insert
 # Version: 1.0.0
 # Created: 2026-10-22
-# Modified: 2026-10-22
+# Modified: 2026-11-02
 # =============================================
 
 """
-CI Replies Handler - the shapes the owner and @seedgo answer in, and the briefs that ask for them
+CI Replies Handler - the shapes the owner and @sentry answer in, and the briefs that ask for them
 """
 
 import re
@@ -46,7 +46,7 @@ def parse_owner_reply(text: str) -> Dict[str, Any]:
 
 
 def parse_verdict(text: str) -> Optional[Dict[str, str]]:
-    """Read seedgo's reply: None unless the first non-blank line is `VERDICT: OK` or `VERDICT: HELD`."""
+    """Read sentry's reply: None unless the first non-blank line is `VERDICT: OK` or `VERDICT: HELD`."""
     lines = text.strip().splitlines()
     match = _VERDICT.match(lines[0]) if lines else None
     if not match:
@@ -124,10 +124,10 @@ Failing lines:
 {failing}
 
 You have no git. Do not commit, push or open a PR: @trigger takes your files through
-@seedgo's review and pushes the cure through drone's ci-cure door.
+@sentry's review and pushes the cure through drone's ci-cure door.
 
 1. Medic-mute yourself before editing: drone @trigger medic mute @{owner}
-2. Cure the cause in src/aipass/{owner}/ only; run your tests and drone @seedgo audit aipass @{owner}.
+2. Cure the cause in src/aipass/{owner}/ only; run your tests and drone @sentry audit aipass @{owner}.
 3. Reply to THIS mail (drone @ai_mail reply <this mail's id> "...") in exactly this shape,
    each label on its own line:
 
@@ -143,8 +143,8 @@ A reply with no FILES: block holds the run: nothing is pushed and @devpulse gets
 """
 
 
-def seedgo_brief(cure: Dict[str, Any]) -> str:
-    """The dispatch body for @seedgo's one review of a cure."""
+def sentry_brief(cure: Dict[str, Any]) -> str:
+    """The dispatch body for @sentry's one review of a cure."""
     failing = "\n".join(f"  {line}" for line in cure.get("lines", [])) or "  (no failing lines captured)"
     files = "\n".join(f"  {path}" for path in cure.get("files", []))
     return f"""Review a CI cure before @trigger pushes it.
@@ -167,7 +167,7 @@ Diff:
 
 Answer two things:
 1. Does the cure address the cause or silence the symptom? Run the owner's tests and
-   drone @seedgo audit aipass @{cure["owner"]} as part of the answer.
+   drone @sentry audit aipass @{cure["owner"]} as part of the answer.
 2. What does the checker learn from this red?
 
 Reply to THIS mail (drone @ai_mail reply <this mail's id> "...") with the first line exactly

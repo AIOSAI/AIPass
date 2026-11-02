@@ -3,13 +3,13 @@
 # Description: A failed fire must not consume its own period
 # Version: 1.1.0
 # Created: 2026-08-30
-# Modified: 2026-10-23
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/handlers/schedule/runstate.py — a failed fire must not consume its own period."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — _FAILURE_BACKOFF_MINUTES by value; the bounded-fires walk measures its effect
+# sentry: no-test-needed(constant) — _FAILURE_BACKOFF_MINUTES by value; the bounded-fires walk measures its effect
 
 from datetime import datetime, timedelta
 

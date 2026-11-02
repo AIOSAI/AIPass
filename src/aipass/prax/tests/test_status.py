@@ -3,16 +3,16 @@
 # Description: Unit tests for PRAX status module
 # Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/status.py and apps/handlers/status/sync.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(error_handling) — sync_status's error on an absent or unreadable registry, covered by that row
-# seedgo: no-test-needed(error_handling) — _handle_sync's error line when sync_status raises, covered by that row
-# seedgo: no-test-needed(json_structure) — sync_status's status_sync_declined log_operation record, covered by that row
-# seedgo: no-test-needed(log_level) — sync_status's info line counting what it scanned, covered by that row
+# sentry: no-test-needed(error_handling) — sync_status's error on an absent or unreadable registry, covered by that row
+# sentry: no-test-needed(error_handling) — _handle_sync's error line when sync_status raises, covered by that row
+# sentry: no-test-needed(json_structure) — sync_status's status_sync_declined log_operation record, covered by that row
+# sentry: no-test-needed(log_level) — sync_status's info line counting what it scanned, covered by that row
 
 import json
 from unittest.mock import MagicMock

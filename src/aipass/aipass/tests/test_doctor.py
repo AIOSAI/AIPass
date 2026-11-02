@@ -3,7 +3,7 @@
 # Description: Tests for aipass doctor: the command, the run and the provider checks
 # Version: 1.9.0
 # Created: 2026-04-16
-# Modified: 2026-10-28
+# Modified: 2026-11-02
 # =============================================
 
 """Tests for apps/modules/doctor.py and apps/modules/_doctor_wire.py: the run and the provider checks."""
@@ -12,7 +12,7 @@
 # test_doctor_detection.py, the home and seating rows in test_doctor_home.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every handler module this file imports parses and imports
+# sentry: no-test-needed(ruff) — that every handler module this file imports parses and imports
 
 import io
 import json
