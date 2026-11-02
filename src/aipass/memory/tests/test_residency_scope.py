@@ -318,10 +318,10 @@ class TestTheLiveFleetStillCountsTwentyFour:
     def test_discovery_names_exactly_the_five_resident_projects(self, live_residents):
         """What the deleted anchor used to be compared against, measured directly."""
         found = {path.parent.name for path in rs.resident_registry_paths(live_residents)}
-        assert found == {"baud", "earmark", "finch", "aipass-site", "beo"}
+        assert found == {"baud", "earmark", "finch", "aipass-site", "seed"}
 
     def test_the_live_fleet_is_eighteen_core_and_six_residents(self, live_residents):
-        """Counted BY TIER now, not by total — and the change is the point (beo holds two seats, beo and dean)."""
+        """Counted BY TIER now, not by total — and the change is the point (seed holds two seats, seed and dean)."""
         branches = rs.fleet_branches(live_residents)
         tiers = Counter(item["residency"] for item in branches)
         assert (tiers[rs.RESIDENCY_CORE], tiers[rs.RESIDENCY_RESIDENT]) == (18, 6), [item["name"] for item in branches]

@@ -457,7 +457,7 @@ class TestPinning:
         assert ".claude/commands/codex.md: 3 test files" in err
 
     def test_an_empty_git_dir_below_the_repo_is_a_sandbox_mount_point_not_a_root(self, capsys, pinned_repo):
-        """THE DEFECT: Codex's sandbox leaves an empty .git in its cwd; beo read itself as the repo and found nothing."""
+        """THE DEFECT: Codex's sandbox leaves an empty .git in its cwd; seed read itself as the repo and found nothing."""
         (pinned_repo / "src" / "aipass" / "alpha" / ".git").mkdir()
 
         tests_lane.handle_command("tests", ["pinning", ".claude/commands/codex.md"])

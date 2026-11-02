@@ -589,7 +589,7 @@ def _infrastructure_handlers(branch_root_str: str) -> frozenset:
 def _branch_root(module_path: str) -> Optional[Path]:
     """The ``src/aipass/<branch>`` directory above a file, else the nearest package holding ``apps/``, or None.
 
-    The second reading is a project branch (``beo/beo``); it comes second so a nested
+    The second reading is a project branch (``seed/seed``); it comes second so a nested
     ``aipass.skills.lib.telegram`` still answers skills, not telegram.
     """
     parents = Path(module_path).resolve().parents

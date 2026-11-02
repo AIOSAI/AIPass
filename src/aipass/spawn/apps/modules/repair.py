@@ -135,6 +135,9 @@ def _handle_rename(args, dry_run):
     mode = "[dim](dry-run)[/dim] " if dry_run else ""
     console.print(f"[green]Rename {mode}{result['old']} -> {result['new']}[/green]")
     console.print(f"  Path:  {result['new_path']}")
+    console.print(f"  Registry: {result['registry']}")
+    for name, rel in result.get("repathed", {}).items():
+        console.print(f"  Re-pathed: {name} -> {rel}")
     console.print("  Registry entry: name, path, email · Passport: names, path, module, email · ids kept")
     if dry_run:
         console.print("  [dim]Nothing written. Add --apply to rename.[/dim]")

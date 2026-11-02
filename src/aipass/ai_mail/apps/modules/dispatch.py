@@ -59,7 +59,7 @@ WAKE ONLY:
 
 STOP:
   drone @ai_mail dispatch stop @branch                       # --by defaults to the caller's seat
-  drone @ai_mail dispatch stop @branch --by Beo              # Who stopped it, named in the mail
+  drone @ai_mail dispatch stop @branch --by Seed              # Who stopped it, named in the mail
   Ends the monitor and its agent (TERM, 5s grace, KILL), closes the register row as stopped and
   mails the dispatcher "Dispatch stopped: @branch (by <who>)"; no wake-back follows. The session
   pointer is kept, so a resume in the branch continues. Exit 0 prints

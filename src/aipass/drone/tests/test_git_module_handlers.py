@@ -583,55 +583,57 @@ def _remote_ledger(tmp_path: Path) -> list[dict]:
 
 
 @pytest.fixture()
-def beo_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """An external project's git repo with BEO's manager seat at its root, standing in it; git sees no host config."""
+def seed_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """An external project's git repo with SEED's manager seat at its root, standing in it; git sees no host config."""
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
     for name in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
-        monkeypatch.setenv(name, "beo@test.invalid")
-    root = make_owner_project(tmp_path / "beo", branch="BEO", registry_name="BEO_REGISTRY.json")
+        monkeypatch.setenv(name, "seed@test.invalid")
+    root = make_owner_project(tmp_path / "seed", branch="SEED", registry_name="SEED_REGISTRY.json")
     _git(root, "init", "-q", "-b", "main")
     monkeypatch.chdir(root)
     return root
 
 
-_BEO = "https://github.com/AIOSAI/BEO.git"
+_SEED = "https://github.com/AIOSAI/SEED.git"
 
 
 class TestRemoteSet:
     """remote set points a remote at a github.com repo, owner tier, and records the change."""
 
-    def test_a_missing_remote_is_added_and_the_change_is_recorded(self, beo_repo: Path, tmp_path: Path) -> None:
+    def test_a_missing_remote_is_added_and_the_change_is_recorded(self, seed_repo: Path, tmp_path: Path) -> None:
         """Mutant: set-url used when the remote is absent — git refuses 'No such remote'."""
-        result = handle_command("remote", ["set", "origin", _BEO])
+        result = handle_command("remote", ["set", "origin", _SEED])
 
         assert result["exit_code"] == 0, result["stderr"]
-        assert "(none) -> " + _BEO in result["stdout"]
-        assert _git(beo_repo, "remote", "get-url", "origin").stdout.strip() == _BEO
+        assert "(none) -> " + _SEED in result["stdout"]
+        assert _git(seed_repo, "remote", "get-url", "origin").stdout.strip() == _SEED
         [record] = _remote_ledger(tmp_path)
         assert (record["caller"], record["name"], record["old"], record["new"], record["outcome"]) == (
-            "BEO",
+            "SEED",
             "origin",
             "",
-            _BEO,
+            _SEED,
             "set",
         )
 
-    def test_an_existing_remote_is_re_pointed_and_the_old_url_is_recorded(self, beo_repo: Path, tmp_path: Path) -> None:
+    def test_an_existing_remote_is_re_pointed_and_the_old_url_is_recorded(
+        self, seed_repo: Path, tmp_path: Path
+    ) -> None:
         old = "https://github.com/AIOSAI/hark.git"
-        _git(beo_repo, "remote", "add", "origin", old)
+        _git(seed_repo, "remote", "add", "origin", old)
 
-        result = handle_command("remote", ["set", "origin", "git@github.com:AIOSAI/BEO.git"])
+        result = handle_command("remote", ["set", "origin", "git@github.com:AIOSAI/SEED.git"])
 
         assert result["exit_code"] == 0, result["stderr"]
-        assert _git(beo_repo, "remote", "get-url", "origin").stdout.strip() == "git@github.com:AIOSAI/BEO.git"
+        assert _git(seed_repo, "remote", "get-url", "origin").stdout.strip() == "git@github.com:AIOSAI/SEED.git"
         assert _remote_ledger(tmp_path)[0]["old"] == old
 
-    def test_the_same_url_again_is_reported_unchanged(self, beo_repo: Path, tmp_path: Path) -> None:
-        _git(beo_repo, "remote", "add", "origin", _BEO)
+    def test_the_same_url_again_is_reported_unchanged(self, seed_repo: Path, tmp_path: Path) -> None:
+        _git(seed_repo, "remote", "add", "origin", _SEED)
 
-        result = handle_command("remote", ["set", "origin", _BEO])
+        result = handle_command("remote", ["set", "origin", _SEED])
 
         assert result["exit_code"] == 0
         assert "already points at" in result["stdout"]
@@ -640,41 +642,41 @@ class TestRemoteSet:
     @pytest.mark.parametrize(
         "url",
         [
-            "http://github.com/AIOSAI/BEO.git",
-            "https://ghp_token@github.com/AIOSAI/BEO.git",
-            "https://gitlab.com/AIOSAI/BEO.git",
+            "http://github.com/AIOSAI/SEED.git",
+            "https://ghp_token@github.com/AIOSAI/SEED.git",
+            "https://gitlab.com/AIOSAI/SEED.git",
             "git@github.com:AIOSAI",
-            "https://github.com/AIOSAI/BEO/extra",
-            "ssh://git@evil.example/AIOSAI/BEO.git",
+            "https://github.com/AIOSAI/SEED/extra",
+            "ssh://git@evil.example/AIOSAI/SEED.git",
         ],
     )
     def test_a_url_that_is_not_a_plain_github_repo_is_refused_and_nothing_changes(
-        self, beo_repo: Path, tmp_path: Path, url: str
+        self, seed_repo: Path, tmp_path: Path, url: str
     ) -> None:
         """Mutant: the url check dropped — a token lands in .git/config in clear."""
         result = handle_command("remote", ["set", "origin", url])
 
         assert result["exit_code"] == 1
         assert result["stderr"] == remote_handler.REFUSE_URL
-        assert _git(beo_repo, "remote").stdout.strip() == ""
+        assert _git(seed_repo, "remote").stdout.strip() == ""
         assert _remote_ledger(tmp_path) == []
 
-    @pytest.mark.parametrize("args", [["-f", _BEO], ["origin"], ["origin", _BEO, "extra"]])
-    def test_a_bad_name_or_arity_is_refused_before_git(self, beo_repo: Path, args: list[str]) -> None:
+    @pytest.mark.parametrize("args", [["-f", _SEED], ["origin"], ["origin", _SEED, "extra"]])
+    def test_a_bad_name_or_arity_is_refused_before_git(self, seed_repo: Path, args: list[str]) -> None:
         result = handle_command("remote", ["set", *args])
 
         assert result["exit_code"] == 1
         assert result["stderr"].startswith(("remote set refused", "Usage: drone @git remote set"))
-        assert _git(beo_repo, "remote").stdout.strip() == ""
+        assert _git(seed_repo, "remote").stdout.strip() == ""
 
     def test_a_seat_without_owner_tier_is_refused_and_listing_stays_global(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Mutant: remote set left on the global key — any citizen re-points origin."""
-        root = make_owner_project(tmp_path / "beo", branch="scout", citizen_class="specialist")
+        root = make_owner_project(tmp_path / "seed", branch="scout", citizen_class="specialist")
         monkeypatch.chdir(root)
 
-        refused = handle_command("remote", ["set", "origin", _BEO])
+        refused = handle_command("remote", ["set", "origin", _SEED])
 
         assert refused["exit_code"] == 1
         assert "not authorized for 'remote-write'" in refused["stderr"]
@@ -683,7 +685,7 @@ class TestRemoteSet:
             assert handle_command("remote", [])["exit_code"] == 0
 
     def test_the_admin_door_sets_a_remote_in_another_repo(
-        self, beo_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, seed_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Mutant: remote off DOOR_VERBS — --repo refuses the verb."""
         ext = tmp_path / "ext"
@@ -691,9 +693,9 @@ class TestRemoteSet:
         _git(ext, "init", "-q", "-b", "main")
         monkeypatch.setattr(repo_door, "admin_verdict", lambda: repo_door.AdminVerdict(True, "devpulse", ""))
 
-        result = handle_command("remote", ["set", "origin", _BEO, "--repo", str(ext)])
+        result = handle_command("remote", ["set", "origin", _SEED, "--repo", str(ext)])
 
         assert result["exit_code"] == 0, result["stderr"]
-        assert _git(ext, "remote", "get-url", "origin").stdout.strip() == _BEO
-        assert _git(beo_repo, "remote").stdout.strip() == ""
+        assert _git(ext, "remote", "get-url", "origin").stdout.strip() == _SEED
+        assert _git(seed_repo, "remote").stdout.strip() == ""
         assert _remote_ledger(tmp_path)[0]["caller"] == "devpulse"

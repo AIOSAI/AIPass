@@ -189,11 +189,11 @@ class TestCreateDryRun:
     def test_dry_run_names_the_nearest_registry_not_the_framework_one(
         self, tmp_path, capsys: pytest.CaptureFixture[str]
     ):
-        (tmp_path / "BEO_REGISTRY.json").write_text('{"metadata": {}, "branches": []}', encoding="utf-8")
+        (tmp_path / "SEED_REGISTRY.json").write_text('{"metadata": {}, "branches": []}', encoding="utf-8")
 
         assert handle_create([str(tmp_path / "src" / "dean"), "--dry-run"]) == 0
         out = " ".join(capsys.readouterr().out.split())
-        assert f"Registry: add to {tmp_path / 'BEO_REGISTRY.json'}" in out
+        assert f"Registry: add to {tmp_path / 'SEED_REGISTRY.json'}" in out
         assert "AIPASS_REGISTRY" not in out
 
     def test_dry_run_with_no_registry_above_says_create_would_refuse(

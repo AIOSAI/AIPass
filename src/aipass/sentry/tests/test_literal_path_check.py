@@ -131,7 +131,7 @@ class TestWhatIsNeverConvicted:
         assert _values('client.get("/v1/whoami")\n') == []
 
     def test_a_route_through_a_helper_that_hands_it_to_a_client_verb_is_a_url(self):
-        """THE DEFECT: beo's _get(server, "/widgets/mail") read as a file, one hop from conn.request."""
+        """THE DEFECT: seed's _get(server, "/widgets/mail") read as a file, one hop from conn.request."""
         helpers = (
             "def _get(srv, path):\n    return srv.request('GET', path)\ndef _read(p):\n    return open(p).read()\n"
             "def _ping(srv):\n    url = '/health'\n    return srv.get(url)\n"

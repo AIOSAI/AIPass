@@ -38,8 +38,8 @@ every fixture it requests.
 | a path from `__file__` | `Path(__file__).parents[1] / "apps"` | it points into the repo tree; a test that reads the guard file's text is testing the guard |
 
 The product is `aipass` plus the top package the test file imports under: the highest directory
-of its unbroken `__init__.py` chain. On a project branch that is its own package, so a beo test
-importing `beo.beo.apps.handlers.memory` names its product just as an AIPass test names `aipass`.
+of its unbroken `__init__.py` chain. On a project branch that is its own package, so a seed test
+importing `seed.seed.apps.handlers.memory` names its product just as an AIPass test names `aipass`.
 
 ---
 

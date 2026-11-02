@@ -157,13 +157,13 @@ class TestCheckOwnerIdentity:
         assert "alpha, trigger" in said
 
     def test_a_seated_specialist_owner_is_a_note_and_the_check_stays_clean(self, tmp_path, monkeypatch, capsys):
-        _make_branch(tmp_path, "beo", "src/beo", citizen_class="manager", passport_rid="proj-id")
+        _make_branch(tmp_path, "seed", "src/seed", citizen_class="manager", passport_rid="proj-id")
         _make_branch(tmp_path, "dean", "src/dean", passport_rid="proj-id")
         reg = _write_registry(
             tmp_path,
             metadata={"version": "1.0.0", "last_updated": "2026-07-11", "id": "proj-id"},
             branches=[
-                _entry("beo", "src/beo", owner=False, registry_id="uid-b"),
+                _entry("seed", "src/seed", owner=False, registry_id="uid-b"),
                 _entry("dean", "src/dean", created="2026-10-31", owner=True, registry_id="uid-d"),
             ],
         )

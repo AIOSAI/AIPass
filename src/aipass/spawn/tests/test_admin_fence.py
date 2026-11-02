@@ -314,9 +314,9 @@ class TestOwnerMove:
     def _registry(self, tmp_path):
         framework = _write_registry(
             tmp_path,
-            [_entry("BEO", owner=True, custom_key="keep-me"), _entry("DEAN"), _entry("SCOUT", owner=False)],
+            [_entry("SEED", owner=True, custom_key="keep-me"), _entry("DEAN"), _entry("SCOUT", owner=False)],
         )
-        return framework.rename(tmp_path / "BEO_REGISTRY.json")
+        return framework.rename(tmp_path / "SEED_REGISTRY.json")
 
     def test_apply_moves_the_seat_to_the_citizen_and_clears_every_other(self, tmp_path, capsys):
         registry = self._registry(tmp_path)
@@ -325,10 +325,10 @@ class TestOwnerMove:
 
         data = json.loads(registry.read_text(encoding="utf-8"))
         assert code == 0
-        assert "BEO -> DEAN" in capsys.readouterr().out
+        assert "SEED -> DEAN" in capsys.readouterr().out
         assert [b["name"] for b in data["branches"] if b.get("owner") is True] == ["DEAN"]
-        assert _read_entry(registry, "beo")["owner"] is False
-        assert _read_entry(registry, "beo")["custom_key"] == "keep-me"
+        assert _read_entry(registry, "seed")["owner"] is False
+        assert _read_entry(registry, "seed")["custom_key"] == "keep-me"
         assert data["metadata"]["last_updated"] != "2026-08-12"
 
     def test_a_preview_names_the_move_and_writes_nothing(self, tmp_path, capsys):
@@ -338,17 +338,17 @@ class TestOwnerMove:
         code = handle_owner(["@dean", "--registry", str(registry)])
 
         assert code == 0
-        assert "Would move the owner seat BEO -> DEAN" in " ".join(capsys.readouterr().out.split())
+        assert "Would move the owner seat SEED -> DEAN" in " ".join(capsys.readouterr().out.split())
         assert registry.read_text(encoding="utf-8") == before
 
     def test_the_current_owner_reports_already_and_writes_nothing(self, tmp_path, capsys):
         registry = self._registry(tmp_path)
         before = registry.read_text(encoding="utf-8")
 
-        code = handle_owner(["@beo", "--registry", str(registry), "--apply"])
+        code = handle_owner(["@seed", "--registry", str(registry), "--apply"])
 
         assert code == 0
-        assert "BEO already holds the owner seat" in " ".join(capsys.readouterr().out.split())
+        assert "SEED already holds the owner seat" in " ".join(capsys.readouterr().out.split())
         assert registry.read_text(encoding="utf-8") == before
 
     def test_a_citizen_not_in_the_registry_is_refused_and_nothing_written(self, tmp_path, capsys):
@@ -374,7 +374,7 @@ class TestOwnerMove:
     def test_the_handler_returns_the_holders_it_found(self, tmp_path):
         registry = self._registry(tmp_path)
 
-        assert move_owner("dean", registry, apply=True)[::2] == ("moved", ["BEO"])
+        assert move_owner("dean", registry, apply=True)[::2] == ("moved", ["SEED"])
 
     def test_entry_point_routes_owner(self, tmp_path, monkeypatch):
         registry = self._registry(tmp_path)

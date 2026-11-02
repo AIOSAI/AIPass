@@ -318,7 +318,7 @@ def _renamed_citizen(tmp_path, citizen_id="cid-old"):
 class TestRenameBranch:
     """repair --rename @old @new — the entry and the passport follow a directory that was already renamed."""
 
-    def test_apply_renames_the_entry_and_passport_and_keeps_every_id(self, tmp_path, monkeypatch, capsys):
+    def test_apply_renames_the_entry_passport_and_purpose_word_and_keeps_every_id(self, tmp_path, monkeypatch, capsys):
         project, reg, passport_path = _renamed_citizen(tmp_path)
         monkeypatch.setattr(repair_ops, "find_registry", lambda *a, **k: reg)
 
@@ -337,7 +337,7 @@ class TestRenameBranch:
         assert passport["document_metadata"]["document_name"] == "new.PASSPORT"
         assert passport["document_metadata"]["managed_by"] == "new"
         assert passport["citizenship"]["citizen_id"] == "cid-old"
-        assert passport["identity"]["purpose"] == "old prose stays"
+        assert passport["identity"]["purpose"] == "new prose stays"
         assert "old -> new" in capsys.readouterr().out
 
     def test_a_preview_writes_nothing(self, tmp_path):
@@ -389,6 +389,142 @@ class TestRenameBranch:
         assert saves == [reg]
         assert result["success"] is False and "passport was restored" in result["error"]
         assert passport_path.read_text(encoding="utf-8") == before
+
+
+def _renamed_project(tmp_path, dean_id="cid-dean"):
+    """AIPass root plus a project whose namesake BEO seat and the src package were renamed to seed on disk."""
+    root = tmp_path / "root"
+    project = root / "projects" / "seed"
+    project.mkdir(parents=True)
+    (root / "AIPASS_REGISTRY.json").write_text(json.dumps({"metadata": {}, "branches": []}), encoding="utf-8")
+    rows = [
+        {
+            "name": "BEO",
+            "path": "src/beo/beo",
+            "email": "@beo",
+            "registry_id": "cid-beo",
+            "owner": False,
+            "description": "Resident agent of the beo project.",
+        },
+        {
+            "name": "DEAN",
+            "path": "src/beo/dean",
+            "email": "@dean",
+            "registry_id": "cid-dean",
+            "owner": True,
+            "description": "The Beo project's builder.",
+        },
+        {"name": "OTHER", "path": "src/other", "email": "@other", "registry_id": "cid-other", "description": "x"},
+    ]
+    registry = project / "BEO_REGISTRY.json"
+    registry.write_text(json.dumps({"metadata": {"name": "BEO", "id": "proj-id"}, "branches": rows}), encoding="utf-8")
+    (project / ".BEO_REGISTRY.lock").write_text("", encoding="utf-8")
+    for name, cid, module in (("seed", "cid-beo", "beo"), ("dean", dean_id, "dean")):
+        trinity = project / "src" / "seed" / name / ".trinity"
+        trinity.mkdir(parents=True)
+        old = "beo" if name == "seed" else name
+        passport = {
+            "document_metadata": {"document_name": f"{old}.PASSPORT", "managed_by": old},
+            "branch_info": {"branch_name": old, "path": f"src/beo/{old}", "module": module, "email": f"@{old}"},
+            "citizenship": {"citizen_id": cid, "registry_id": "proj-id"},
+            "identity": {"purpose": "the Beo project's manager"},
+        }
+        (trinity / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+    return root, project
+
+
+def _read(path):
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+class TestRenameProjectCitizen:
+    """repair --rename on a project's namesake seat: the registry file, its rows and both passports follow."""
+
+    def test_apply_renames_the_registry_file_the_rows_and_both_passports(self, tmp_path, monkeypatch):
+        root, project = _renamed_project(tmp_path)
+        monkeypatch.setattr(repair_ops, "find_registry", lambda *a, **k: root / "AIPASS_REGISTRY.json")
+
+        assert handle_repair(["--rename", "@beo", "@seed", "--apply"]) == 0
+
+        assert not (project / "BEO_REGISTRY.json").exists()
+        registry = _read(project / "SEED_REGISTRY.json")
+        assert (registry["metadata"]["name"], registry["metadata"]["id"]) == ("SEED", "proj-id")
+        seed, other, dean = sorted(registry["branches"], key=lambda r: r["name"], reverse=True)
+        assert other == {
+            "name": "OTHER",
+            "path": "src/other",
+            "email": "@other",
+            "registry_id": "cid-other",
+            "description": "x",
+        }
+        assert (seed["name"], seed["path"], seed["email"], seed["registry_id"]) == (
+            "SEED",
+            "src/seed/seed",
+            "@seed",
+            "cid-beo",
+        )
+        assert seed["description"] == "Resident agent of the seed project." and seed["owner"] is False
+        assert (dean["name"], dean["path"], dean["registry_id"], dean["owner"]) == (
+            "DEAN",
+            "src/seed/dean",
+            "cid-dean",
+            True,
+        )
+        assert dean["description"] == "The Seed project's builder."
+        passport = _read(project / "src" / "seed" / "seed" / ".trinity" / "passport.json")
+        assert passport["branch_info"] == {
+            "branch_name": "seed",
+            "path": "src/seed/seed",
+            "module": "seed",
+            "email": "@seed",
+        }
+        assert passport["document_metadata"]["document_name"] == "seed.PASSPORT"
+        assert passport["identity"]["purpose"] == "the Seed project's manager"
+        assert passport["citizenship"] == {"citizen_id": "cid-beo", "registry_id": "proj-id"}
+        dean_passport = _read(project / "src" / "seed" / "dean" / ".trinity" / "passport.json")
+        assert dean_passport["branch_info"] == {
+            "branch_name": "dean",
+            "path": "src/seed/dean",
+            "module": "dean",
+            "email": "@dean",
+        }
+        assert not (project / ".BEO_REGISTRY.lock").exists()
+        assert [p.name.split(".lock")[0] for p in (project / ".archive").iterdir()] == [".BEO_REGISTRY"]
+
+    def test_a_project_preview_names_the_file_and_sibling_and_writes_nothing(self, tmp_path, monkeypatch):
+        root, project = _renamed_project(tmp_path)
+        monkeypatch.setattr(repair_ops, "find_registry", lambda *a, **k: root / "AIPASS_REGISTRY.json")
+        before = (project / "BEO_REGISTRY.json").read_text(encoding="utf-8")
+
+        result = rename_branch("beo", "seed")
+
+        assert (result["registry"], result["repathed"]) == ("SEED_REGISTRY.json", {"dean": "src/seed/dean"})
+        assert (project / "BEO_REGISTRY.json").read_text(encoding="utf-8") == before
+        assert not (project / "SEED_REGISTRY.json").exists()
+
+    def test_a_sibling_passport_of_another_citizen_is_refused_and_nothing_written(self, tmp_path, monkeypatch):
+        root, project = _renamed_project(tmp_path, dean_id="someone-else")
+        monkeypatch.setattr(repair_ops, "find_registry", lambda *a, **k: root / "AIPASS_REGISTRY.json")
+        before = (project / "BEO_REGISTRY.json").read_text(encoding="utf-8")
+
+        result = rename_branch("beo", "seed", dry_run=False)
+
+        assert result["success"] is False and "'DEAN'" in result["error"]
+        assert (project / "BEO_REGISTRY.json").read_text(encoding="utf-8") == before
+        assert (
+            _read(project / "src" / "seed" / "seed" / ".trinity" / "passport.json")["branch_info"]["path"]
+            == "src/beo/beo"
+        )
+
+    def test_an_existing_new_registry_file_is_refused(self, tmp_path, monkeypatch):
+        root, project = _renamed_project(tmp_path)
+        monkeypatch.setattr(repair_ops, "find_registry", lambda *a, **k: root / "AIPASS_REGISTRY.json")
+        (project / "SEED_REGISTRY.json").write_text("{}", encoding="utf-8")
+
+        result = rename_branch("beo", "seed", dry_run=False)
+
+        assert result["success"] is False and "SEED_REGISTRY.json already exists" in result["error"]
+        assert (project / "BEO_REGISTRY.json").is_file()
 
 
 class TestDetectPollution:

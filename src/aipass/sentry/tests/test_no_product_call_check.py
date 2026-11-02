@@ -286,14 +286,14 @@ class TestTheEntryPoint:
         assert no_product_call_check.check_module(str(path))["score"] == 100
 
     def test_a_project_branch_s_own_package_is_its_product(self, tmp_path):
-        """THE DEFECT: beo's tests calling beo.beo.* read as reaching nothing; another package still does."""
-        package = tmp_path / "beo" / "beo"
+        """THE DEFECT: seed's tests calling seed.seed.* read as reaching nothing; another package still does."""
+        package = tmp_path / "seed" / "seed"
         (package / "tests").mkdir(parents=True)
         for directory in (package.parent, package, package / "tests"):
             (directory / "__init__.py").write_text("", encoding="utf-8")
         own = package / "tests" / "test_own.py"
         own.write_text(
-            "from beo.beo.apps import memory\ndef test_it():\n    assert memory.recall()\n", encoding="utf-8"
+            "from seed.seed.apps import memory\ndef test_it():\n    assert memory.recall()\n", encoding="utf-8"
         )
         other = package / "tests" / "test_other.py"
         other.write_text("from json import loads\ndef test_it():\n    assert loads('1')\n", encoding="utf-8")

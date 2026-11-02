@@ -357,14 +357,14 @@ class TestTestsAreKinToTheirOwnBranchOnly:
         assert result["score"] == 100
 
     def test_a_project_branch_is_kin_to_its_own_handlers_and_no_other(self, tmp_path):
-        """THE DEFECT: beo's tests importing beo.beo.apps.handlers read as foreign: no root outside src/aipass."""
-        branch = tmp_path / "beo" / "beo"
+        """THE DEFECT: seed's tests importing seed.seed.apps.handlers read as foreign: no root outside src/aipass."""
+        branch = tmp_path / "seed" / "seed"
         (branch / "apps").mkdir(parents=True)
         (branch / "tests").mkdir()
         for directory in (branch.parent, branch):
             (directory / "__init__.py").write_text("", encoding="utf-8")
         own = branch / "tests" / "test_own.py"
-        own.write_text("from beo.beo.apps.handlers import memory\n", encoding="utf-8")
+        own.write_text("from seed.seed.apps.handlers import memory\n", encoding="utf-8")
         other = branch / "tests" / "test_other.py"
         other.write_text("from aipass.memory.apps.handlers.json import entry_limits\n", encoding="utf-8")
         loose = tmp_path / "loose"

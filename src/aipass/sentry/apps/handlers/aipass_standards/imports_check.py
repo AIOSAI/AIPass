@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: imports_check.py
 # Description: Imports Standards Checker Handler
-# Version: 2.4.0
+# Version: 2.4.1
 # Created: 2026-03-05
 # Modified: 2026-11-02
 # =============================================
@@ -369,7 +369,8 @@ def check_no_bare_imports(lines: List[str], file_path: str = "", bypass_rules: l
         "devpulse",
     }
 
-    old_namespaces = {"seed", "cortex", "nexus", "atlas", "sentinel"}
+    # "seed" left this set when the Beo project became Seed (seed.seed is a live resident namespace).
+    old_namespaces = {"cortex", "nexus", "atlas", "sentinel"}
 
     violations = []
 

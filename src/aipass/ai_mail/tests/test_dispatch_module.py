@@ -1290,18 +1290,18 @@ class TestDispatchStop:
         branch, dispatch_id, start, mails = running_dispatch
         proc = start()
 
-        _stop("@worker", "--by", "Beo")
+        _stop("@worker", "--by", "Seed")
 
         out, _ = capsys.readouterr()
-        assert out.strip() == f"stopped @worker (dispatch {dispatch_id}, by Beo)"
+        assert out.strip() == f"stopped @worker (dispatch {dispatch_id}, by Seed)"
         assert proc.wait(timeout=10) == -signal.SIGTERM
         assert not check_pid_alive(proc.agent_pid)
         assert register.outstanding() == []
         rows = [json.loads(line) for line in register.register_file().read_text(encoding="utf-8").splitlines()]
         assert rows[-1]["dispatch_id"] == dispatch_id and rows[-1]["status"] == "stopped"
         [(to, mail)] = mails
-        assert (to, mail["subject"]) == ("@boss", "Dispatch stopped: @worker (by Beo)")
-        assert "Beo stopped @worker's dispatch" in mail["message"]
+        assert (to, mail["subject"]) == ("@boss", "Dispatch stopped: @worker (by Seed)")
+        assert "Seed stopped @worker's dispatch" in mail["message"]
         assert not (branch / ".ai_mail.local" / ".dispatch.lock").exists()
 
     def test_the_stopped_line_stays_one_line_on_a_narrow_console(self, running_dispatch, capsys, monkeypatch):
@@ -1317,7 +1317,7 @@ class TestDispatchStop:
         _, _, start, _ = running_dispatch
         proc = start("deaf")
 
-        _stop("@worker", "--by", "Beo")
+        _stop("@worker", "--by", "Seed")
 
         assert proc.wait(timeout=10) == -signal.SIGKILL
 
@@ -1325,14 +1325,14 @@ class TestDispatchStop:
         branch, _, start, _ = running_dispatch
         start()
 
-        _stop("@worker", "--by", "Beo")
+        _stop("@worker", "--by", "Seed")
 
         assert (session_pointer.read_pointer(branch) or {}).get("session_id") == "sess-1"
 
     def test_nothing_running_fails_with_one_line_and_touches_no_row_and_no_mail(self, running_dispatch, capsys):
         _, dispatch_id, _, mails = running_dispatch
 
-        _stop("@worker", "--by", "Beo")
+        _stop("@worker", "--by", "Seed")
 
         out, err = capsys.readouterr()
         assert out == "" and "no dispatch is running for @worker" in err
@@ -1343,10 +1343,10 @@ class TestDispatchStop:
     def test_a_second_stop_is_the_nothing_running_line(self, running_dispatch, capsys):
         _, _, start, mails = running_dispatch
         start()
-        _stop("@worker", "--by", "Beo")
+        _stop("@worker", "--by", "Seed")
         capsys.readouterr()
 
-        _stop("@worker", "--by", "Beo")
+        _stop("@worker", "--by", "Seed")
 
         _, err = capsys.readouterr()
         assert "no dispatch is running for @worker" in err and len(mails) == 1
@@ -1355,7 +1355,7 @@ class TestDispatchStop:
         _, _, start, mails = running_dispatch
         proc = start(mark="someone_else")
 
-        _stop("@worker", "--by", "Beo")
+        _stop("@worker", "--by", "Seed")
 
         assert "no dispatch is running for @worker" in capsys.readouterr().err
         assert proc.poll() is None and mails == []
@@ -1363,7 +1363,7 @@ class TestDispatchStop:
     def test_an_unknown_agent_fails_and_says_so(self, monkeypatch, capsys):
         monkeypatch.setattr(f"{_H_WAKE}.resolve_branch", lambda email, admin=False: None)
 
-        _stop("@nobody", "--by", "Beo")
+        _stop("@nobody", "--by", "Seed")
 
         assert "unknown agent @nobody" in capsys.readouterr().err
         assert display.command_failed()
