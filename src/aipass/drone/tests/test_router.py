@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_router.py
 # Description: Command routing - router module and router_handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-14
-# Modified: 2026-11-02
+# Modified: 2026-11-03
 # =============================================
 
 """Tests for apps/modules/router.py and apps/handlers/router_handler.py."""
@@ -817,6 +817,40 @@ class TestIdentityMessageSeverity:
             resolve_caller_identity(home)
 
         assert len(mock_logger.warning.call_args_list) == 2
+
+    def test_conflict_prints_one_line_to_the_terminal(self, temp_test_dir: Path, monkeypatch, capsys):
+        """The seat must see it, not only the log: both names and the winner, once per invocation."""
+        home = _plant_passport(temp_test_dir / "devpulse", "DEVPULSE")
+        monkeypatch.setenv("AIPASS_BRANCH_NAME", "seed_dev")
+
+        resolve_caller_identity(home)
+        resolve_caller_identity(home)  # a route resolves twice; still one line
+        lines = capsys.readouterr().err.splitlines()
+
+        assert len(lines) == 1
+        assert "seed_dev" in lines[0] and "DEVPULSE" in lines[0] and "using 'seed_dev'" in lines[0]
+
+    def test_every_invocation_prints_again(self, temp_test_dir: Path, monkeypatch, capsys):
+        """No gate: the next drone call (a fresh process) says it again."""
+        home = _plant_passport(temp_test_dir / "devpulse", "DEVPULSE")
+        monkeypatch.setenv("AIPASS_BRANCH_NAME", "seed_dev")
+
+        resolve_caller_identity(home)
+        monkeypatch.setattr(router_handler, "_LOGGED_IDENTITY_SIGNATURES", set())
+        resolve_caller_identity(home)
+
+        assert len(capsys.readouterr().err.splitlines()) == 2
+
+    def test_agreement_and_project_root_print_nothing(self, temp_test_dir: Path, monkeypatch, capsys):
+        """Only a passport disagreement is a conflict; a registry is location, not a second citizen."""
+        home = _plant_passport(temp_test_dir / "aipass", "AIPASS")
+        root = self._plant_registry(temp_test_dir / "AIPass")
+        monkeypatch.setenv("AIPASS_BRANCH_NAME", "aipass")
+        resolve_caller_identity(home)
+        monkeypatch.setenv("AIPASS_BRANCH_NAME", "prax")
+        resolve_caller_identity(root)
+
+        assert capsys.readouterr().err == ""
 
     def test_signal_reports_passport_provenance(self, temp_test_dir: Path):
         """Provenance is the whole fix — a name alone cannot tell these apart."""

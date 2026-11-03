@@ -9,6 +9,11 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+### Changed
+- **drone**: when `AIPASS_BRANCH_NAME` and the passport at cwd name two citizens, the router prints one line to stderr on every invocation (`drone: identity conflict: ... using '<env name>'`) beside its log warning. The env name still wins, nothing is gated: a seat spawned with another citizen's name in its environment now sees it on the first command instead of in a log digest ten repeats later. Agreement prints nothing, and so does a registry-only cwd. The commit gate's ruff calls carry `--force-exclude` and the test suites it runs no longer inherit `AIPASS_CALLER_*`, both pinned.
+
 ## [2026-11-02] — v2.8.34: seedgo is sentry, Beo is Seed, the settings gate asks on a write
 
 ### Changed

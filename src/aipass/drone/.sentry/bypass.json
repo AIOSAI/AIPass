@@ -207,7 +207,7 @@
       "file": "apps/handlers/router_handler.py",
       "standard": "logged_fallback",
       "lines": [
-        89
+        90
       ],
       "reason": "_project_name_from_registry: None = this registry file yields no project name, whether unreadable (here, logged WARNING) or named exactly '_REGISTRY.json'. Its one caller (detect_caller_signal, line 271) does the same right thing for both: keeps walking up for another registry. The answer to the caller is the same fact either way. Fleet green leg 6, drone's decision.",
       "anchor": "return None"
