@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_aggregate_ops.py
 # Description: Tests for aggregate_ops -- registry, central file, and aggregation helpers
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-29
 # Modified: 2026-11-02
 # =============================================
@@ -31,49 +31,31 @@ def _import(name: str):
     return getattr(mod, name)
 
 
-class TestFindBranchRegistry:
-    def test_returns_none_when_branch_path_missing(self, tmp_path):
-        find_branch_registry = _import("find_branch_registry")
-        missing = tmp_path / "no_such_dir"
-        assert find_branch_registry(missing, "flow") is None
+@pytest.fixture(autouse=True)
+def registry_dir(tmp_path, monkeypatch) -> Path:
+    """Heal reads the central per-type registries; every test gets its own, never the live flow_json."""
+    reg_dir = tmp_path / "flow_json"
+    reg_dir.mkdir()
+    monkeypatch.setattr(mod, "REGISTRY_DIR", reg_dir)
+    return reg_dir
 
-    def test_pattern1_flow_json(self, tmp_path):
-        find_branch_registry = _import("find_branch_registry")
-        registry = tmp_path / "flow_json" / "flow_registry.json"
-        registry.parent.mkdir(parents=True)
-        registry.write_text("{}", encoding="utf-8")
-        result = find_branch_registry(tmp_path, "flow")
-        assert result == registry
 
-    def test_pattern2_branch_json(self, tmp_path):
-        find_branch_registry = _import("find_branch_registry")
-        registry = tmp_path / "drone_json" / "drone_registry.json"
-        registry.parent.mkdir(parents=True)
-        registry.write_text("{}", encoding="utf-8")
-        result = find_branch_registry(tmp_path, "drone")
-        assert result == registry
+def _write_registry(reg_dir: Path, name: str, plans: dict) -> Path:
+    reg_file = reg_dir / name
+    reg_file.write_text(json.dumps({"plans": plans, "next_number": 2}), encoding="utf-8")
+    return reg_file
 
-    def test_pattern3_bare_registry(self, tmp_path):
-        find_branch_registry = _import("find_branch_registry")
-        registry = tmp_path / "registry.json"
-        registry.write_text("{}", encoding="utf-8")
-        result = find_branch_registry(tmp_path, "any_branch")
-        assert result == registry
 
-    def test_pattern1_takes_priority(self, tmp_path):
-        """Pattern 1 should be found before pattern 3."""
-        find_branch_registry = _import("find_branch_registry")
-        p1 = tmp_path / "flow_json" / "flow_registry.json"
-        p1.parent.mkdir(parents=True)
-        p1.write_text("{}", encoding="utf-8")
-        p3 = tmp_path / "registry.json"
-        p3.write_text("{}", encoding="utf-8")
-        result = find_branch_registry(tmp_path, "flow")
-        assert result == p1
+class TestCentralRegistryFor:
+    def test_a_plan_resolves_to_its_own_types_registry_not_the_fplan_one(self, registry_dir):
+        _write_registry(registry_dir, "fplan_registry.json", {})
+        dplan = _write_registry(registry_dir, "dplan_registry.json", {})
+        assert mod.central_registry_for("DPLAN-0437") == dplan
 
-    def test_returns_none_when_no_registry_files(self, tmp_path):
-        find_branch_registry = _import("find_branch_registry")
-        assert find_branch_registry(tmp_path, "flow") is None
+    def test_a_type_with_no_registry_or_no_prefix_resolves_to_none(self, registry_dir):
+        _write_registry(registry_dir, "fplan_registry.json", {})
+        assert mod.central_registry_for("APLAN-0025") is None
+        assert mod.central_registry_for("0025") is None
 
 
 class TestLoadBranchRegistry:
@@ -245,17 +227,14 @@ class TestValidateAndHealBranch:
         assert len(valid) == 0
         assert len(closed) == 0  # heal=False so nothing auto-closed
 
-    def test_missing_plans_healed(self, tmp_path):
+    def test_missing_plans_healed(self, tmp_path, registry_dir):
         validate_and_heal_branch = _import("validate_and_heal_branch")
 
-        reg_dir = tmp_path / "flow_json"
-        reg_dir.mkdir()
-        reg_file = reg_dir / "test_registry.json"
-        reg_data = {
-            "plans": {"0001": {"status": "open", "subject": "Test", "file_path": str(tmp_path / "FPLAN-0001_test.md")}},
-            "next_number": 2,
-        }
-        reg_file.write_text(json.dumps(reg_data), encoding="utf-8")
+        reg_file = _write_registry(
+            registry_dir,
+            "fplan_registry.json",
+            {"0001": {"status": "open", "subject": "Test", "file_path": str(tmp_path / "FPLAN-0001_test.md")}},
+        )
 
         branch_data = {
             "branch_path": str(tmp_path),
@@ -264,12 +243,48 @@ class TestValidateAndHealBranch:
             ],
             "recently_closed": [],
         }
-        with patch(f"{_MOD}.find_branch_registry", return_value=reg_file):
-            valid, closed = validate_and_heal_branch("test", branch_data, heal=True)
+        valid, closed = validate_and_heal_branch("test", branch_data, heal=True)
         assert len(valid) == 0
         assert len(closed) == 1
         assert closed[0]["status"] == "closed"
         assert closed[0]["closed_reason"] == "auto_closed_missing_file"
+        assert json.loads(reg_file.read_text(encoding="utf-8"))["plans"]["0001"]["status"] == "closed"
+
+    def test_a_renamed_file_is_re_pointed_and_stays_open_not_auto_closed(self, tmp_path, registry_dir):
+        """A rename sed rewrote the registry's file name while the file kept its own (DPLAN-0441)."""
+        old_name = tmp_path / "DPLAN-0441_seed_everywhere_2026-11-01.md"
+        real = tmp_path / "DPLAN-0441_beo_everywhere_2026-11-01.md"
+        real.write_text("# DPLAN-0441", encoding="utf-8")
+        reg_file = _write_registry(
+            registry_dir, "dplan_registry.json", {"0441": {"status": "open", "file_path": str(old_name)}}
+        )
+        branch_data = {
+            "branch_path": str(tmp_path),
+            "active_plans": [{"plan_id": "DPLAN-0441", "file_path": str(old_name)}],
+            "recently_closed": [],
+        }
+        valid, closed = mod.validate_and_heal_branch("seed_dev", branch_data, heal=True)
+        row = json.loads(reg_file.read_text(encoding="utf-8"))["plans"]["0441"]
+        assert row == {"status": "open", "file_path": str(real)}
+        assert [p["file_path"] for p in valid] == [str(real)]
+        assert closed == []
+
+    def test_two_files_with_the_plans_id_leave_the_row_untouched(self, tmp_path, registry_dir):
+        old_name = tmp_path / "FPLAN-0806_old.md"
+        for name in ("FPLAN-0806_a.md", "FPLAN-0806_b.md"):
+            (tmp_path / name).write_text("x", encoding="utf-8")
+        reg_file = _write_registry(
+            registry_dir, "fplan_registry.json", {"0806": {"status": "open", "file_path": str(old_name)}}
+        )
+        before = reg_file.read_text(encoding="utf-8")
+        branch_data = {
+            "branch_path": str(tmp_path),
+            "active_plans": [{"plan_id": "FPLAN-0806", "file_path": str(old_name)}],
+            "recently_closed": [],
+        }
+        valid, closed = mod.validate_and_heal_branch("spawn", branch_data, heal=True)
+        assert reg_file.read_text(encoding="utf-8") == before
+        assert (valid, closed) == ([], [])
 
     def test_recently_closed_preserved(self, tmp_path):
         validate_and_heal_branch = _import("validate_and_heal_branch")

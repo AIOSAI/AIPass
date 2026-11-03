@@ -394,8 +394,8 @@
       "file": "apps/handlers/plan/aggregate_ops.py",
       "standard": "logged_fallback",
       "category": "false_positive",
-      "lines": [77, 227, 349],
-      "reason": "Each False means 'not done' on every path; no success path answers False. 201 save_branch_registry: its one caller, auto_close_plan, logs the failure and returns False, and the plan is then not reported healed. 434 save_central: its one caller, aggregate_central_impl, logs it and returns False. 601 aggregate_central_impl: the aggregate command prints 'Central plans aggregation failed'; push_to_plans_central now raises it into its own failure (leg 10), and close, create and restore warn on that (flow's decision, leg 10)."
+      "lines": [71, 252, 374],
+      "reason": "Each False means 'not done' on every path; no success path answers False. save_branch_registry: its callers, auto_close_plan and repoint_plan, log the failure and return False, and the plan is then not reported healed. 434 save_central: its one caller, aggregate_central_impl, logs it and returns False. 601 aggregate_central_impl: the aggregate command prints 'Central plans aggregation failed'; push_to_plans_central now raises it into its own failure (leg 10), and close, create and restore warn on that (flow's decision, leg 10)."
     },
     {
       "file": "tests/test_project_scope.py",
