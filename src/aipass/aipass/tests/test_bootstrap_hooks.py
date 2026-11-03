@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_bootstrap_hooks.py
 # Description: Tests for the hooks.json and tier files init and update scaffold into a project
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-03
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py: hooks.json, its union merge, and the tier files."""
@@ -257,6 +257,22 @@ def test_merge_hooks_json_preserves_hooks_enabled_false(tmp_path):
     update_project(target=hooks_json.parent.parent)
 
     assert json.loads(hooks_json.read_text(encoding="utf-8"))["hooks_enabled"] is False
+
+
+def test_update_keeps_a_scalar_config_key_and_does_not_crash_on_it(tmp_path):
+    """Pins seed_dev's crash: handler_namespace, a string, was merged as an event ('str'.items)."""
+    hooks_json, template = _init_hooks_project(tmp_path)
+    data = json.loads(hooks_json.read_text(encoding="utf-8"))
+    data["handler_namespace"] = "proj"
+    event = next(key for key in template if isinstance(template[key], dict))
+    del data[event]
+    hooks_json.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    update_project(target=hooks_json.parent.parent)
+
+    updated = json.loads(hooks_json.read_text(encoding="utf-8"))
+    assert updated["handler_namespace"] == "proj"
+    assert updated[event] == template[event]
 
 
 def test_update_project_hooks_json_already_current(tmp_path):
