@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.8.0
+# Version: 1.9.0
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-11-02
+# Modified: 2026-11-03
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's scripted lane and apps/modules/bash_writes.py."""
@@ -53,6 +53,12 @@ def sibling_projects(tmp_path: Path) -> dict:
     (vera / "VERA-STUDIO_REGISTRY.json").write_text("{}", encoding="utf-8")
     schedule = vera / ".daemon" / "schedule.json"
     schedule.write_text('{"jobs": []}', encoding="utf-8")
+
+    # FPLAN-0839: a git work tree with no registry (~/Projects/seed), one whose .git is empty, a plain folder.
+    (projects / "seed" / ".git").mkdir(parents=True)
+    (projects / "seed" / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (projects / "hollow" / ".git").mkdir(parents=True)
+    (projects / "plain").mkdir()
 
     return {
         "aipass": aipass,
@@ -220,6 +226,45 @@ class TestAdminExemptionStaysNarrow:
     ):
         command = f"tee {sibling_projects['foreign_file']}"
         assert _blocked(_run(sibling_projects["plain_seat"], command=command))
+
+
+class TestAGitWorkTreeWithNoRegistryIsAProject:
+    """FPLAN-0839: ~/Projects/seed has no registry, so an AIPass seat wrote into it on both lanes."""
+
+    def _both_lanes(self, sibling_projects: dict, folder: str) -> list[dict]:
+        target = sibling_projects["aipass"].parent / folder / "README.md"
+        seat = sibling_projects["plain_seat"]
+        return [_run(seat, file_path=str(target), tool="Write"), _run(seat, command=f"echo x > {target.as_posix()}")]
+
+    def test_both_lanes_refuse_it_and_name_its_root(self, sibling_projects: dict, grant_withheld):
+        seed = sibling_projects["aipass"].parent / "seed"
+        for result in self._both_lanes(sibling_projects, "seed"):
+            assert _blocked(result)
+            assert f"'seed' ({seed}, a git work tree with no AIPass registry)" in _reason(result)
+
+    @pytest.mark.parametrize("folder", ["hollow", "plain"])
+    def test_an_empty_git_folder_or_none_is_no_work_tree(self, sibling_projects: dict, grant_withheld, folder: str):
+        assert [r["exit_code"] for r in self._both_lanes(sibling_projects, folder)] == [0, 0]
+
+    def test_the_verified_admin_still_crosses_into_it(self, sibling_projects: dict, grant_granted):
+        target = sibling_projects["aipass"].parent / "seed" / "README.md"
+        seat = sibling_projects["admin_seat"]
+        assert _run(seat, file_path=str(target), tool="Write")["exit_code"] == 0
+        assert _run(seat, command=f"echo x > {target.as_posix()}")["exit_code"] == 0
+
+    def test_a_seat_inside_the_work_tree_writes_its_own_files(self, sibling_projects: dict):
+        seed = sibling_projects["aipass"].parent / "seed"
+        assert _run(str(seed), file_path=str(seed / "README.md"), tool="Write")["exit_code"] == 0
+
+    def test_a_repo_nested_in_the_seats_own_project_is_still_that_project(self, sibling_projects: dict):
+        """The registry is read first, so a vendored repo inside AIPass is AIPass's, as before."""
+        vendored = sibling_projects["aipass"] / "vendor" / "lib"
+        (vendored / ".git").mkdir(parents=True)
+        (vendored / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+        seat = str(sibling_projects["aipass"])
+        target = vendored / "README.md"
+        assert _run(seat, file_path=str(target), tool="Write")["exit_code"] == 0
+        assert _run(seat, command=f"echo x > {target.as_posix()}")["exit_code"] == 0
 
 
 class TestScriptedLaneCatches:

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: git_gate.py
-# Version: 5.3.0
+# Version: 5.3.1
 # Description: Raw git and gh, GitHub writes, credentials and the secrets store for every seat; protected changes
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-10-24
+# Modified: 2026-11-03
 # =============================================
 
 """Blocks raw git and gh, GitHub writes without gh, the gh credential, and changes to the protected files.
@@ -397,7 +397,7 @@ def _protected_refusal(path: str, what: str, lane: str, seat: _Seat) -> dict | N
     if what == _protected_paths().SECRETS:
         logger.warning("[HOOKS] git_gate: secrets store write refused: %s (%s) caller=%s", path, lane, seat.named)
         return _block(SECRETS_WRITE_REFUSED.format(caller=seat.named, what=f"{path} ({lane})"))
-    if seat.admin:
+    if seat.admin and what != _protected_paths().REGISTER:  # no seat writes it: only @ai_mail's in-process verbs do
         logger.info("[HOOKS] git_gate: protected change ALLOWED for the admin seat: %s (%s)", path, lane)
         return None
     logger.warning("[HOOKS] git_gate: protected change refused: %s (%s) caller=%s", path, lane, seat.named)

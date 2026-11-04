@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_git_gate.py
-# Version: 5.5.0
+# Version: 5.6.0
 # Description: Tests for git_gate: raw git, gh and the secrets store refused for every seat; protected writes
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-11-02
+# Modified: 2026-11-03
 # =============================================
 
 """Tests for apps/handlers/security/git_gate.py."""
@@ -1144,3 +1144,27 @@ class TestWritingTheSecretsStoreIsNoSeats:
                 {"tool_name": "Bash", "tool_input": {"command": "echo x > ~/Projects/AIPass/n.md"}, "cwd": DEVPULSE_CWD}
             )
         _assert_allowed(result)
+
+
+class TestTheDispatchRegisterIsNoSeats:
+    """FPLAN-0839: @ai_mail writes every project's dispatch register in-process; no tool call writes it."""
+
+    @pytest.mark.parametrize("grant", (False, True))
+    def test_the_edit_tools_refuse_it_for_every_seat(self, grant, tmp_path):
+        register = tmp_path / "proj" / ".aipass" / "dispatch_register.jsonl"
+        seat = _seat(tmp_path / "proj", "devpulse" if grant else "canary")
+        for tool in ("Edit", "Write"):
+            assert "the dispatch register" in _reason(_edit(str(register), seat, grant=grant, tool=tool)), tool
+
+    @pytest.mark.parametrize("grant", (False, True))
+    def test_the_shell_refuses_a_redirect_and_an_interpreter_for_every_seat(self, grant, tmp_path):
+        register = _word(tmp_path / "proj" / ".aipass" / "dispatch_register.jsonl")
+        seat = _seat(tmp_path / "proj", "devpulse" if grant else "canary")
+        for command in (f"echo x >> {register}", f"python -c \"open('{register}','a')\""):
+            with patch(_RAIL, return_value=grant):
+                result = handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": seat})
+            assert "the dispatch register" in _reason(result), command
+
+    def test_a_sibling_file_in_the_same_folder_stays_open(self, tmp_path):
+        notes = tmp_path / "proj" / ".aipass" / "notes.jsonl"
+        _assert_allowed(_edit(str(notes), _seat(tmp_path / "proj", "canary"), grant=False, tool="Write"))

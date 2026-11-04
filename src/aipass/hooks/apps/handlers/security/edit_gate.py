@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.20.3
+# Version: 1.20.4
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-11-01
+# Modified: 2026-11-03
 # =============================================
 
 """Blocks unsafe edits: inbox, cross-project, cross-branch and shell-to-memory writes, daemon confinement, diagnostics
@@ -128,14 +128,14 @@ def _check_project_boundary(cwd: str, caller: Any, landing: Any, target: Path) -
         landing.root,
         target,
     )
-    return _cross_project_block(caller.root, landing.root, target, "")
+    return _cross_project_block(caller.root, landing, target, "")
 
 
-def _cross_project_block(caller_root: Path, target_root: Path, target: Path, how: str) -> dict:
+def _cross_project_block(caller_root: Path, landing: Any, target: Path, how: str) -> dict:
     """Build the refusal both lanes print. *how* names the shell verb, or "" for a tool edit."""
     lane = f"Cross-project write blocked ({how})" if how else "Cross-project write blocked"
     reason = (
-        f"{lane}: project '{caller_root.name}' cannot write into project '{target_root.name}'.\n"
+        f"{lane}: project '{caller_root.name}' cannot write into project {landing.label}.\n"
         f"Target: {target}\n"
         "A project writes inside itself only — never into its host, a sibling or a project it holds. This is the "
         "file-layer twin of the mail fence that refuses cross-project sends.\n"
@@ -169,7 +169,7 @@ def _check_bash_project_boundary(cwd: str, caller: Any, targets: list[tuple[Path
     if caller is None:
         return None
     for target, how in targets:
-        landing = wo.project_of(target)
+        landing = wo.landing_of(target)
         if not wo.is_crossing(caller, landing):
             continue
         if _is_admin_seat(cwd):
@@ -188,7 +188,7 @@ def _check_bash_project_boundary(cwd: str, caller: Any, targets: list[tuple[Path
             how,
             target,
         )
-        return _cross_project_block(caller.root, landing.root, target, how)
+        return _cross_project_block(caller.root, landing, target, how)
     return None
 
 
@@ -955,7 +955,7 @@ def handle(hook_data: dict) -> dict:
 
         # Outermost boundary first, then daemon confinement, then whose file it is.
         wo = _ownership()
-        caller, landing = wo.project_of(Path(cwd)), wo.project_of(fp)
+        caller, landing = wo.project_of(Path(cwd)), wo.landing_of(fp)
         block = _check_project_boundary(cwd, caller, landing, fp)
         if block:
             return block
