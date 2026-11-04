@@ -160,11 +160,12 @@
       "file": "apps/modules/dispatch.py",
       "standard": "logged_fallback",
       "lines": [
-        350,
-        399,
-        472
+        353,
+        402,
+        457,
+        484
       ],
-      "reason": "Same CLI handler contract (ai_mail, fleet green legs 9 and 10): 472 is the send phase failing to resolve the sender, 350 is dispatch stop and 399 dispatch close meeting an unreadable registry; each has already called error() (mark_command_failed). True tells the router the command was recognised."
+      "reason": "Same CLI handler contract (ai_mail, fleet green legs 9 and 10): 484 is the send phase failing to resolve the sender, 457 a refused grant, 353 is dispatch stop and 402 dispatch close meeting an unreadable registry; each has already called error() (mark_command_failed). True tells the router the command was recognised."
     },
     {
       "file": "apps/handlers/email/send.py",
@@ -223,8 +224,8 @@
       "file": "apps/handlers/dispatch/register.py",
       "standard": "logged_fallback",
       "lines": [
-        217,
-        368
+        227,
+        380
       ],
       "reason": "The value is the true answer (ai_mail, fleet green leg 11; re-lined DPLAN-0404 leg 15). 368: record_monitor_pid returns True only when the annotation was appended; False is its documented failure answer, the same as for a bad pid, and its one caller (wake.py's spawn, after the monitor is already running) must not cancel a live dispatch over a lost annotation; the row then falls back to expected_by. 611: _is_overdue cannot read expected_by, so it cannot say the row is late; the row stays listed as outstanding, the warning names it, and the flag is read as a bool by @devpulse's watchdog (dispatches.py:164, wire.py:531), so a third value would reach another branch."
     },
@@ -240,8 +241,8 @@
       "file": "apps/handlers/notify.py",
       "standard": "logged_fallback",
       "lines": [
-        204,
-        219
+        215,
+        230
       ],
       "reason": "The value is the true answer (ai_mail, fleet green leg 10; re-lined in leg 16): _trim_jsonl returns whether the log was trimmed, and a read or replace that failed trimmed nothing (320 also removes its temp file). Its one caller, notify.py:199, ignores the answer, under the lock, after the append has landed; the failure is logged at error. A raise would fail a notification that was already written."
     },
@@ -301,8 +302,8 @@
       "file": "apps/handlers/dispatch/register.py",
       "standard": "logged_fallback",
       "lines": [
-        126,
-        129
+        127,
+        130
       ],
       "reason": "monitor_alive (ai_mail, fleet green legs 9 and 10, os.kill family): PermissionError from os.kill(pid, 0) means the process exists under another user, so True at 207 is the answer. 210 answers None, 'could not probe', a third value the success path never returns (it answers True or False), and the register's readers show it as unknown; the checker reads a tri-state as a fallback."
     },
@@ -331,6 +332,19 @@
         159
       ],
       "reason": "read_pointer (ai_mail, fleet green leg 9): the docstring states the contract - None, never a raise, when the pointer is missing, unreadable or malformed, because a pointer that cannot be trusted IS no pointer: every caller (wake.py fresh/resume decision, dispatch_monitor attempt 3) falls back to -c the same way. 208 is the plain truth (no file, no pointer); 211/217 are the documented equivalence. A raise here would cost the wake itself, which the module exists to avoid."
+    },
+    {
+      "file": "apps/modules/grants.py",
+      "standard": "introspection",
+      "reason": "The bare verb is the listing (drone @ai_mail grants), as inbox is in email.py; a no-args gate would hide the open grants behind introspection."
+    },
+    {
+      "file": "apps/modules/grants.py",
+      "standard": "logged_fallback",
+      "lines": [
+        70
+      ],
+      "reason": "Same CLI handler contract as dispatch.py: an unreadable register has already called error() (mark_command_failed) and logged; True tells the router the command was recognised."
     }
   ],
   "notes": {

@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_dispatch_register.py
 # Description: Tests for the dispatch register append-only log
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-22
-# Modified: 2026-11-02
+# Modified: 2026-11-03
 # =============================================
 
-"""Tests for apps/handlers/dispatch/register.py: the append-only dispatch register."""
+"""Tests for apps/handlers/dispatch/register.py: the append-only dispatch register, and the grant its rows carry."""
 
 # An entry past expected_by with no completion is a fact about a file; these pin append-only and honest parsing.
 
@@ -15,6 +15,7 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timedelta
@@ -23,6 +24,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from aipass.ai_mail.apps.handlers.dispatch import grant as grant_mod
 from aipass.ai_mail.apps.handlers.dispatch import register, report
 from aipass.ai_mail.apps.handlers.notify import jsonl_records
 
@@ -606,3 +608,218 @@ def test_a_reply_closes_the_oldest_open_row_first(repo):
 
     assert closed == first
     assert [row["dispatch_id"] for row in register.outstanding(repo_root=repo)] == [second]
+
+
+# --- The grant: one key on the open row, decided at every read ---------------------------------
+
+
+@pytest.fixture
+def seed(tmp_path):
+    """A foreign project: two granted shapes, a sibling file, a sibling dir sharing a prefix, and .git."""
+    root = tmp_path / "seed"
+    for rel in ("src/loop.ts", "src/hooks/a.ts", "src/hooks-other/x.ts", "package.json", ".git/config"):
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text("x", encoding="utf-8")
+    return root
+
+
+_VERIFY = "aipass.ai_mail.apps.handlers.users.verified_caller.verify_admin_caller"
+
+
+@pytest.fixture
+def admin(monkeypatch):
+    """The seat is @devpulse and its 5-leg check (@devpulse's door, the edge) passes."""
+    monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
+    monkeypatch.setattr(_VERIFY, lambda: (True, "admin grant verified"))
+
+
+def _grant_on(seed, paths):
+    return grant_mod.parse_grant(str(seed), paths, seed.parent / "aipass")
+
+
+def _live_grant(repo, seed, paths="src/loop.ts,src/hooks"):
+    """An open @hooks row carrying a grant, its monitor this live test process."""
+    dispatch_id = register.open_dispatch(
+        "@devpulse", "@hooks", "Build slice A", 7200, repo_root=repo, grant=_grant_on(seed, paths)
+    )
+    assert isinstance(dispatch_id, str)
+    register.record_monitor_pid(dispatch_id, os.getpid(), repo_root=repo)
+    return dispatch_id
+
+
+class TestAGrantRidesTheOpenRow:
+    def test_the_row_carries_the_grant_and_its_granter(self, repo, seed, admin):
+        dispatch_id = _live_grant(repo, seed)
+
+        [row] = grant_mod.open_grants(repo_root=repo)
+        assert row["dispatch_id"] == dispatch_id
+        assert row["grant"] == {
+            "root": str(seed.resolve()),
+            "files": ["src/loop.ts"],
+            "dirs": ["src/hooks"],
+            "granted_by": "@devpulse",
+        }
+
+    def test_a_writer_the_admin_rail_does_not_verify_is_refused_and_writes_no_row(self, repo, seed, monkeypatch):
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
+        monkeypatch.setattr(_VERIFY, lambda: (False, "leg 3 failed"))
+
+        with pytest.raises(grant_mod.GrantRefused, match="only the verified admin seat"):
+            register.open_dispatch("@x", "@hooks", "forged", 7200, repo_root=repo, grant=_grant_on(seed, "src"))
+
+        assert not register.register_file(repo).exists()
+
+    def test_an_overlap_is_refused_under_the_lock_naming_the_first_dispatch_and_a_sibling_is_not(
+        self, repo, seed, admin
+    ):
+        first = _live_grant(repo, seed, "src/hooks")
+
+        with pytest.raises(grant_mod.GrantRefused, match=f"overlaps open dispatch {first}"):
+            register.open_dispatch(
+                "@devpulse", "@api", "b", 7200, repo_root=repo, grant=_grant_on(seed, "src/hooks/a.ts")
+            )
+        with pytest.raises(grant_mod.GrantRefused, match=f"overlaps open dispatch {first}"):
+            register.open_dispatch("@devpulse", "@api", "b", 7200, repo_root=repo, grant=_grant_on(seed, "src"))
+        register.open_dispatch("@devpulse", "@api", "c", 7200, repo_root=repo, grant=_grant_on(seed, "src/hooks-other"))
+
+        assert len(grant_mod.open_grants(repo_root=repo)) == 2
+
+    def test_the_same_monitor_pid_twice_appends_no_second_row(self, repo):
+        dispatch_id = register.open_dispatch("@devpulse", "@hooks", "s", 7200, repo_root=repo) or ""
+
+        register.record_monitor_pid(dispatch_id, os.getpid(), repo_root=repo)
+        register.record_monitor_pid(dispatch_id, os.getpid(), repo_root=repo)
+
+        assert len(_lines(repo)) == 2
+
+
+class TestTheDoorDecidesOneWrite:
+    def test_a_granted_file_and_a_new_file_under_a_granted_dir_are_allowed(self, repo, seed, admin):
+        dispatch_id = _live_grant(repo, seed)
+
+        for target in (seed / "src" / "loop.ts", seed / "src" / "hooks" / "new.ts"):
+            decision = grant_mod.granted("hooks", dispatch_id, str(target.resolve()), repo_root=repo)
+            assert decision["allowed"] is True, decision
+            assert decision["dispatch_id"] == dispatch_id
+
+    def test_a_sibling_outside_the_grant_is_refused_even_sharing_a_prefix(self, repo, seed, admin):
+        dispatch_id = _live_grant(repo, seed)
+
+        for target in (
+            seed / "package.json",
+            seed / "src" / "hooks-other" / "x.ts",
+            seed / "src" / "hooks" / ".." / "x",
+        ):
+            decision = grant_mod.granted("hooks", dispatch_id, str(target), repo_root=repo)
+            assert decision["allowed"] is False and "outside" in decision["reason"], target
+
+    def test_only_the_rows_own_dispatch_id_and_target_hold_the_grant(self, repo, seed, admin):
+        dispatch_id = _live_grant(repo, seed)
+        target = str((seed / "src" / "loop.ts").resolve())
+
+        assert grant_mod.granted("hooks", "another-id", target, repo_root=repo)["allowed"] is False
+        assert grant_mod.granted("hooks", None, target, repo_root=repo)["allowed"] is False
+        refused = grant_mod.granted("sentry", dispatch_id, target, repo_root=repo)
+        assert refused["allowed"] is False and "not sentry" in refused["reason"]
+
+    @pytest.mark.parametrize(
+        "end",
+        [
+            lambda repo, did: register.close_dispatch(did, "completed", repo_root=repo),
+            lambda repo, did: register.close_on_reply("@hooks", "@devpulse", "RE: Build slice A", repo_root=repo),
+            lambda repo, did: register.close_dispatch(did, "stopped", repo_root=repo),
+            lambda repo, did: register.close_dispatch(did, "closed: by hand", repo_root=repo),
+        ],
+        ids=["monitor-exit", "reply", "stop", "close"],
+    )
+    def test_every_closer_of_the_row_ends_the_grant(self, repo, seed, admin, end):
+        dispatch_id = _live_grant(repo, seed)
+        target = str((seed / "src" / "loop.ts").resolve())
+        assert grant_mod.granted("hooks", dispatch_id, target, repo_root=repo)["allowed"] is True
+
+        end(repo, dispatch_id)
+
+        decision = grant_mod.granted("hooks", dispatch_id, target, repo_root=repo)
+        assert decision["allowed"] is False and "not open" in decision["reason"]
+
+    def test_a_monitor_not_known_alive_or_a_row_past_expected_by_refuses(self, repo, seed, admin):
+        target = str((seed / "src" / "loop.ts").resolve())
+        unknown = register.open_dispatch(
+            "@devpulse", "@hooks", "a", 7200, repo_root=repo, grant=_grant_on(seed, "src/loop.ts")
+        )
+        dead = register.open_dispatch(
+            "@devpulse", "@hooks", "b", 7200, repo_root=repo, grant=_grant_on(seed, "src/hooks")
+        )
+        assert isinstance(unknown, str) and isinstance(dead, str)
+        register.record_monitor_pid(dead, _a_pid_that_is_gone(), repo_root=repo)
+        late = datetime.now().astimezone() + timedelta(seconds=7300)
+
+        for did, path in ((unknown, target), (dead, str(seed / "src" / "hooks" / "a.ts"))):
+            decision = grant_mod.granted("hooks", did, path, repo_root=repo)
+            assert decision["allowed"] is False and decision["reason"].endswith("has no monitor known to be alive")
+        register.record_monitor_pid(unknown, os.getpid(), repo_root=repo)
+        assert grant_mod.granted("hooks", unknown, target, repo_root=repo)["allowed"] is True
+        late_decision = grant_mod.granted("hooks", unknown, target, repo_root=repo, now=late)
+        assert late_decision["allowed"] is False and late_decision["reason"].endswith("is past its expected_by")
+
+    def test_a_malformed_grant_is_refused_naming_its_dispatch(self, repo, seed):
+        row: dict = {
+            "dispatch_id": "bad-1",
+            "ts": "2026-11-03T00:00:00+00:00",
+            "target": "@hooks",
+            "status": "outstanding",
+        }
+        row.update(grant={"root": str(seed)}, monitor_pid=os.getpid())
+        register.register_file(repo).parent.mkdir(parents=True)
+        register.register_file(repo).write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+        decision = grant_mod.granted("hooks", "bad-1", str(seed / "src" / "loop.ts"), repo_root=repo)
+
+        assert decision == {
+            "allowed": False,
+            "dispatch_id": "bad-1",
+            "reason": "dispatch bad-1 carries a malformed grant",
+        }
+
+
+class TestAGrantIsValidatedBeforeTheSend:
+    def test_files_and_directories_are_told_apart_relative_to_the_resolved_root(self, seed):
+        assert _grant_on(seed, " src/loop.ts , src/hooks/ ") == {
+            "root": str(seed.resolve()),
+            "files": ["src/loop.ts"],
+            "dirs": ["src/hooks"],
+        }
+
+    @pytest.mark.parametrize(
+        "paths, said",
+        [
+            ("src/../src/loop.ts", "without .."),
+            ("src,,src/loop.ts", "''"),
+            (".", "root itself"),
+            (".git/config", ".git"),
+            ("nope.ts", "does not exist"),
+        ],
+    )
+    def test_each_bad_path_is_refused_naming_it(self, seed, paths, said):
+        with pytest.raises(grant_mod.GrantRefused, match=re.escape(said)):
+            _grant_on(seed, paths)
+
+    def test_an_absolute_path_is_refused(self, seed):
+        with pytest.raises(grant_mod.GrantRefused, match="must be relative"):
+            _grant_on(seed, str((seed / "src").resolve()))
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="creating a symlink needs privilege on Windows")
+    def test_a_symlink_escaping_the_root_is_refused(self, seed, tmp_path):
+        (tmp_path / "elsewhere").mkdir()
+        (seed / "src" / "out").symlink_to(tmp_path / "elsewhere")
+
+        with pytest.raises(grant_mod.GrantRefused, match="resolves outside"):
+            _grant_on(seed, "src/out")
+
+    def test_a_root_that_is_missing_or_holds_the_repo_or_a_flag_alone_is_refused(self, seed):
+        with pytest.raises(grant_mod.GrantRefused, match="not a directory"):
+            grant_mod.parse_grant(str(seed / "gone"), "src", seed.parent)
+        with pytest.raises(grant_mod.GrantRefused, match="overlaps the AIPass repo"):
+            grant_mod.parse_grant(str(seed), "src", seed / "src")
+        with pytest.raises(grant_mod.GrantRefused, match="go together"):
+            grant_mod.parse_grant(str(seed), None, seed.parent)

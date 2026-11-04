@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: register.py
 # Description: Dispatch Register
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-08-22
-# Modified: 2026-10-25
+# Modified: 2026-11-03
 # =============================================
 
 """The dispatch register — what was promised, written before anything spawns.
@@ -19,7 +19,7 @@ import sys
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
@@ -42,6 +42,7 @@ STATUS_REPLIED = "completed (replied)"
 
 # Absent on old rows and on the systemd-scope path; monitor_alive reads that as None, not dead.
 MONITOR_PID_KEY = "monitor_pid"
+GRANT_KEY = "grant"
 
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _STILL_ACTIVE = 259
@@ -155,11 +156,14 @@ def open_dispatch(
     repo_root: Optional[Path] = None,
     wake_back: bool = True,
     provider: str = "claude",
+    grant: Optional[Dict] = None,
 ) -> Optional[str]:
     """Record that a dispatch was promised, and return its id.
 
     Called BEFORE the spawn. expected_seconds must be the lane's HARD_TIMEOUT, so "past
     expected_by" means the monitor died. None means unrecorded; the caller must still dispatch.
+    A *grant* is re-verified here, whoever calls: the admin seat, then overlap under the
+    register lock. Either refusal raises grant.GrantRefused and writes nothing.
     """
     json_handler.log_operation("register_open_dispatch", {"sender": sender, "target": target})
 
@@ -180,7 +184,13 @@ def open_dispatch(
         # A reader can then tell a declined wake-back from a lost one.
         record["wake_back"] = False
 
-    if not _append(record, repo_root):
+    precheck = None
+    if grant is not None:
+        granted = {**grant, "granted_by": str(sender)}
+        record[GRANT_KEY] = granted
+        precheck = _grant_precheck(granted, repo_root)
+
+    if not _append(record, repo_root, precheck):
         logger.warning(
             "[register] could not record dispatch %s -> %s (%r) — dispatch proceeds UNREGISTERED, "
             "so its completion will not be attributable and it will not show as outstanding",
@@ -224,6 +234,8 @@ def record_monitor_pid(
         )
         return False
 
+    if current.get(MONITOR_PID_KEY) == monitor_pid:
+        return True
     record = dict(current)
     record[MONITOR_PID_KEY] = monitor_pid
     record["status"] = STATUS_OUTSTANDING
@@ -373,7 +385,33 @@ def _is_overdue(entry: Dict, moment: datetime) -> bool:
     return moment > expected
 
 
-def _append(record: Dict, repo_root: Optional[Path]) -> bool:
+def _grant_precheck(grant: Dict, repo_root: Optional[Path]) -> Callable[[], None]:
+    """Verify the admin seat now, and return the overlap check the register lock runs before the write."""
+    from aipass.ai_mail.apps.handlers.dispatch.grant import GrantRefused, overlapping
+    from aipass.ai_mail.apps.handlers.users.verified_caller import is_verified_admin_caller
+
+    # A row written by python -c importing this function must pass the same rail the CLI does.
+    try:
+        admin = is_verified_admin_caller()
+    except Exception as exc:
+        raise GrantRefused(f"grant not issued: admin verification failed ({exc})") from exc
+    if not admin:
+        raise GrantRefused("grant not issued: only the verified admin seat may grant")
+
+    def check() -> None:
+        """Refuse a grant that shares a path with one already open (the same-second race)."""
+        try:
+            rows = outstanding(repo_root=repo_root)
+        except OSError as exc:
+            raise GrantRefused(f"grant not issued: the register is unreadable ({exc})") from exc
+        clash = overlapping(grant, rows)
+        if clash:
+            raise GrantRefused(f"grant not issued: it overlaps open dispatch {clash}")
+
+    return check
+
+
+def _append(record: Dict, repo_root: Optional[Path], precheck: Optional[Callable[[], None]] = None) -> bool:
     """Append one record. register_file() cannot fail, so only the write can."""
     return append_jsonl(
         register_file(repo_root),
@@ -381,4 +419,5 @@ def _append(record: Dict, repo_root: Optional[Path]) -> bool:
         lock_name=REGISTER_LOCK_NAME,
         max_lines=REGISTER_MAX_LINES,
         keep_lines=REGISTER_KEEP_LINES,
+        precheck=precheck,
     )

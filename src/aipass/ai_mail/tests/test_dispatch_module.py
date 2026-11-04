@@ -3,7 +3,7 @@
 # Description: Tests for dispatch.py orchestrator functions
 # Version: 1.3.1
 # Created: 2026-04-26
-# Modified: 2026-11-02
+# Modified: 2026-11-03
 # =============================================
 
 """Tests for apps/modules/dispatch.py."""
@@ -33,6 +33,7 @@ from aipass.ai_mail.apps.modules.dispatch import (
 )
 import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
 import aipass.ai_mail.apps.handlers.dispatch.stop as stop_mod
+import aipass.ai_mail.apps.modules.grants as grants_module
 from aipass.ai_mail.apps.handlers.dispatch import register, session_pointer
 from aipass.ai_mail.apps.handlers.dispatch.pid_lock import check_pid_alive
 
@@ -1215,6 +1216,110 @@ class TestBothVerbsAgreeAtTheManagerGate:
         assert len(verdicts) == 2
         assert verdicts[0] == verdicts[1]
         assert verdicts[0][0] == "info" and "wake skipped" in verdicts[0][2]
+
+
+# ===========================================================================
+# dispatch --grant-root/--grant, and grants
+# ===========================================================================
+
+
+@pytest.fixture
+def grant_seat(tmp_path, monkeypatch):
+    """A foreign project, the admin seat verified at the edge, and a target that is no manager."""
+    seed = tmp_path / "seed"
+    (seed / "src" / "hooks").mkdir(parents=True)
+    (seed / "src" / "loop.ts").write_text("x", encoding="utf-8")
+    monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
+    monkeypatch.setattr(f"{_H_VERIFIED}.verify_admin_caller", lambda: (True, "admin grant verified"))
+    monkeypatch.setattr(f"{_H_WAKE}.is_manager", lambda email: email == "@devpulse")
+    return seed
+
+
+def _granted_send(seed, *paths, overrides=None):
+    """Send with a grant; returns (the send mock, the wake mock)."""
+    send = MagicMock(return_value=(True, None))
+    status = DispatchStatus()
+    status.ok("grant", "Grant issued on d-1")
+    wake = MagicMock(return_value=(status, True))
+    with _send_patches({f"{_ES}.send_to_single": send, f"{_H_WAKE}.wake_branch": wake, **(overrides or {})}):
+        _send(["@hooks", "Build", "Body", "--grant-root", str(seed), *paths])
+    return send, wake
+
+
+class TestADispatchCarriesAGrant:
+    def test_a_sender_the_admin_rail_does_not_verify_is_refused_before_anything_is_sent(
+        self, grant_seat, monkeypatch, capsys
+    ):
+        monkeypatch.setattr(f"{_H_VERIFIED}.verify_admin_caller", lambda: (False, "leg 3 failed"))
+
+        send, wake = _granted_send(grant_seat, "--grant", "src/loop.ts")
+
+        send.assert_not_called()
+        wake.assert_not_called()
+        assert "only the verified admin seat may send a grant" in capsys.readouterr().err
+        assert display.command_failed()
+
+    def test_a_trailing_grant_with_no_value_is_refused_never_sent_as_body(self, grant_seat, capsys):
+        send, _ = _granted_send(grant_seat, "--grant")
+
+        send.assert_not_called()
+        assert "--grant needs a value" in capsys.readouterr().err
+
+    def test_a_manager_target_is_refused(self, grant_seat, monkeypatch, capsys):
+        monkeypatch.setattr(f"{_H_WAKE}.is_manager", lambda email: email == "@hooks")
+
+        send, _ = _granted_send(grant_seat, "--grant", "src/loop.ts")
+
+        send.assert_not_called()
+        assert "@hooks is a manager" in capsys.readouterr().err
+
+    def test_an_overlap_with_an_open_grant_is_refused_at_send_naming_it(self, grant_seat, capsys):
+        first = register.open_dispatch(
+            "@devpulse", "@api", "earlier", 600, grant={"root": str(grant_seat.resolve()), "files": [], "dirs": ["src"]}
+        )
+
+        send, _ = _granted_send(grant_seat, "--grant", "src/loop.ts")
+
+        send.assert_not_called()
+        assert f"the grant overlaps open dispatch {first}" in capsys.readouterr().err
+
+    def test_the_body_shows_the_grant_and_the_wake_carries_the_same_values(self, grant_seat):
+        header = MagicMock(return_value="[DISPATCH] Body")
+
+        _, wake = _granted_send(
+            grant_seat, "--grant", "src/loop.ts,src/hooks", overrides={f"{_ES}.prepend_dispatch_header": header}
+        )
+
+        sent_grant = wake.call_args.kwargs["grant"]
+        assert sent_grant == {"root": str(grant_seat.resolve()), "files": ["src/loop.ts"], "dirs": ["src/hooks"]}
+        body = header.call_args.args[0]
+        assert body.startswith("Body\n\n--- GRANT ---")
+        assert f"Write access in {sent_grant['root']}" in body and "Files: src/loop.ts" in body
+        assert "Directories (new files allowed under these): src/hooks" in body
+
+    def test_a_wake_that_issues_no_grant_says_so_and_fails(self, grant_seat, capsys):
+        wake = MagicMock(return_value=(DispatchStatus(), True))
+
+        _granted_send(grant_seat, "--grant", "src/loop.ts", overrides={f"{_H_WAKE}.wake_branch": wake})
+
+        assert "Grant for @hooks not issued: no dispatch row was opened" in capsys.readouterr().err
+        assert display.command_failed()
+
+    def test_grants_lists_each_open_grant_with_its_paths(self, grant_seat, capsys):
+        dispatch_id = register.open_dispatch(
+            "@devpulse",
+            "@hooks",
+            "s",
+            600,
+            grant={"root": str(grant_seat), "files": ["src/loop.ts"], "dirs": ["src/hooks"]},
+        )
+
+        grants_module.handle_command("grants", [])
+
+        out = capsys.readouterr().out
+        assert f"{dispatch_id}  @devpulse -> @hooks" in out
+        assert f"{grant_seat}: src/loop.ts, src/hooks/" in out
+        assert "monitor unknown" in out
 
 
 # ===========================================================================

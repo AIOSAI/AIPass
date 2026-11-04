@@ -3,7 +3,7 @@
 # Description: Tests for wake dispatch handler
 # Version: 1.6.0
 # Created: 2026-03-29
-# Modified: 2026-11-02
+# Modified: 2026-11-03
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's wake_branch: the spawn, session pointer, model, provider and marking."""
@@ -1485,3 +1485,38 @@ class TestOpenCodeConfigDoor:
 
         assert ok is False and calls["popen"] == []
         assert status.find_step("config")[0] == "fail"
+
+
+class TestAGrantTheRowCannotCarryWakesNobody:
+    def _wake_with_grant(self, tmp_path, monkeypatch, admin):
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", lambda: admin
+        )
+        lock = branch_path / ".ai_mail.local" / ".dispatch.lock"
+        lock.write_text("{}", encoding="utf-8")  # acquire_lock is stubbed; this is the lock it would hold
+        grant = {"root": str(tmp_path / "seed"), "files": ["a.ts"], "dirs": []}
+        status, ok = wake_branch("@testbranch", sender="@devpulse", grant=grant)
+        return status, ok, calls, lock
+
+    def test_a_refused_grant_spawns_nothing_and_releases_the_lock(self, tmp_path, monkeypatch):
+        status, ok, calls, lock = self._wake_with_grant(tmp_path, monkeypatch, admin=False)
+
+        assert ok is False and calls["popen"] == []
+        assert status.find_step("grant") == (
+            "fail",
+            "grant",
+            "grant not issued: only the verified admin seat may grant — @testbranch not woken",
+        )
+        assert not lock.exists()
+        assert register_mod.outstanding() == []
+
+    def test_an_issued_grant_names_its_row_and_the_spawn_carries_that_id(self, tmp_path, monkeypatch):
+        status, ok, calls, _ = self._wake_with_grant(tmp_path, monkeypatch, admin=True)
+
+        [row] = register_mod.outstanding()
+        assert ok is True and status.find_step("grant") == ("ok", "grant", f"Grant issued on {row['dispatch_id']}")
+        assert row["grant"]["files"] == ["a.ts"] and row["grant"]["granted_by"] == "@devpulse"
+        assert calls["popen"][0]["env"]["AIPASS_DISPATCH_ID"] == row["dispatch_id"]

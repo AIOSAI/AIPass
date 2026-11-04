@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch.py
 # Description: Dispatch Module
-# Version: 3.9.0
+# Version: 3.10.0
 # Created: 2026-02-02
-# Modified: 2026-11-02
+# Modified: 2026-11-03
 # =============================================
 
 """
@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, error, warning
 from aipass.ai_mail.apps.handlers.cli.help_flags import wants_help
+from aipass.ai_mail.apps.handlers.dispatch import grant as grant_handler
 from aipass.ai_mail.apps.handlers.json import json_handler
 
 if sys.platform == "win32":
@@ -50,6 +51,7 @@ DISPATCH (send + wake):
   drone @ai_mail dispatch @branch "Subject" "Body" --provider codex --model gpt-6.1-sol  # Wake on Codex
   drone @ai_mail dispatch @branch "Subject" "Body" --provider opencode --model opencode/glm-5.3-flash-free  # Wake on OpenCode
   drone @ai_mail dispatch @branch "Subject" "Body" --no-memory-save
+  drone @ai_mail dispatch @branch "S" "B" --grant-root <dir> --grant a.ts,src  # Admin: write grant (grants --help)
 
 WAKE ONLY:
   drone @ai_mail dispatch wake @branch                       # Wake with default inbox check
@@ -210,6 +212,7 @@ def _parse_opencode_config(raw: Optional[str], provider: str) -> Tuple[Optional[
 
 # The run's own flags, shared by both verbs: a flag added to one and not the other would become message text.
 _RUN_FLAGS = ("--model", "--provider", "--opencode-config")
+_GRANT_FLAGS = ("--grant-root", "--grant")
 
 
 def _parse_flags(
@@ -410,7 +413,9 @@ def _orchestrate_close(args: List[str]) -> bool:
 
 def _orchestrate_dispatch_send(args: List[str]) -> bool:
     """Orchestrate combined dispatch: send email with --dispatch flag + wake branch."""
-    flags, filtered = _parse_flags(args, ("--from",) + _RUN_FLAGS, ("--fresh", "--no-memory-save", "--no-watchdog"))
+    flags, filtered = _parse_flags(
+        args, ("--from",) + _RUN_FLAGS + _GRANT_FLAGS, ("--fresh", "--no-memory-save", "--no-watchdog")
+    )
     use_fresh = flags.get("--fresh", False)
     no_memory_save = flags.get("--no-memory-save", False)
     from_branch = flags.get("--from")
@@ -444,6 +449,13 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
         return True
 
     is_admin = _admin_lane()
+
+    try:
+        grant = grant_handler.from_send_args(flags, filtered, _GRANT_FLAGS, target, is_admin)
+    except grant_handler.GrantRefused as exc:
+        error(f"Dispatch to {target} not sent: {exc}")
+        return True
+    body = f"{body}\n\n{grant_handler.render_block(grant)}" if grant else body
 
     logger.info(f"[dispatch] Combined dispatch: send + wake for {target}")
     json_handler.log_operation("dispatch_send_and_wake", {"target": target, "subject": subject, "fresh": use_fresh})
@@ -498,8 +510,13 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
         subject=subject,
         provider=use_provider,
         opencode_config=opencode_config,
+        grant=grant,
     )
     console.print(dispatch_status.format())
+
+    issued = dispatch_status.find_step("grant")
+    if grant is not None and not (issued and issued[0] == "ok"):
+        error(f"Grant for {target} not issued: {issued[2] if issued else 'no dispatch row was opened'}")
 
     if not wake_ok:
         logger.warning("[dispatch] Wake failed for %s — email was sent", target)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.11.1
+# Version: 3.12.0
 # Created: 2026-03-02
-# Modified: 2026-11-02
+# Modified: 2026-11-03
 # =============================================
 
 """
@@ -660,12 +660,14 @@ def wake_branch(
     wake_back: bool = True,
     provider: str = PROVIDER_CLAUDE,
     opencode_config: Optional[Dict[str, Any]] = None,
+    grant: Optional[Dict[str, Any]] = None,
 ) -> Tuple[DispatchStatus, bool]:
     """
     Spawn an agent (Claude, or Codex / OpenCode by provider) at the target branch with step-by-step status.
 
     admin is an ALREADY-DECIDED verdict (dispatch.py ran the grant check), never a request.
     True means "did what it should", not "woke an agent": check status.find_step("manager").
+    A *grant* rides the register row; when the row cannot carry it, nothing is spawned.
     """
     json_handler.log_operation(
         "wake_branch",
@@ -946,14 +948,28 @@ def wake_branch(
     # Clear an INHERITED id, or a child's mail would be attributed to the parent's run.
     spawn_env.pop("AIPASS_DISPATCH_ID", None)
 
-    dispatch_id = register.open_dispatch(
-        sender=sender,
-        target=email,
-        subject=subject or "",
-        expected_seconds=HARD_TIMEOUT,
-        wake_back=wake_back,
-        provider=provider,
-    )
+    from aipass.ai_mail.apps.handlers.dispatch.grant import GrantRefused
+
+    try:
+        dispatch_id = register.open_dispatch(
+            sender=sender,
+            target=email,
+            subject=subject or "",
+            expected_seconds=HARD_TIMEOUT,
+            wake_back=wake_back,
+            provider=provider,
+            grant=grant,
+        )
+        grant_refusal = "" if dispatch_id else "grant not issued: the register could not be written"
+    except GrantRefused as exc:
+        dispatch_id, grant_refusal = None, str(exc)
+    if grant is not None and not dispatch_id:
+        (branch_path / ".ai_mail.local" / ".dispatch.lock").unlink(missing_ok=True)
+        logger.warning("[wake] %s not woken — %s", email, grant_refusal)
+        status.fail("grant", f"{grant_refusal} — {email} not woken")
+        return status, False
+    if grant is not None:
+        status.ok("grant", f"Grant issued on {dispatch_id}")
     if dispatch_id:
         spawn_env["AIPASS_DISPATCH_ID"] = dispatch_id
         status.ok("register", f"Registered as {dispatch_id[:8]}")
