@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.9.0
+# Version: 1.10.0
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
@@ -265,6 +265,48 @@ class TestAGitWorkTreeWithNoRegistryIsAProject:
         target = vendored / "README.md"
         assert _run(seat, file_path=str(target), tool="Write")["exit_code"] == 0
         assert _run(seat, command=f"echo x > {target.as_posix()}")["exit_code"] == 0
+
+
+class TestADispatchGrantOnTheScriptedLane:
+    """Every crossing target of a shell call must be granted on its own, or the whole call is refused."""
+
+    @pytest.mark.parametrize(
+        "shape",
+        ["echo x > {t}", "sed -i s/x/y/ {t}", "python3 -c \"open('{t}', 'w').write('y')\""],
+    )
+    def test_a_granted_target_passes_and_its_ungranted_twin_is_refused(self, dispatch_grant, shape: str):
+        seed = dispatch_grant.seed
+        granted = shape.format(t=(seed / "src" / "hooks" / "x.ts").as_posix())
+        assert _run(dispatch_grant.seat, command=granted)["exit_code"] == 0
+        refused = _run(dispatch_grant.seat, command=shape.format(t=(seed / "package.json").as_posix()))
+        assert _blocked(refused) and "is outside dispatch d1's grant" in _reason(refused)
+
+    def test_the_done_scenario_cp_onto_package_json_is_refused(self, dispatch_grant):
+        hooks, pkg = (dispatch_grant.seed / "src" / "hooks" / "x.ts").as_posix(), (dispatch_grant.seed / "package.json")
+        assert _blocked(_run(dispatch_grant.seat, command=f"cp a {hooks} {pkg.as_posix()}"))
+
+    def test_one_granted_target_never_carries_an_ungranted_one_after_it(self, dispatch_grant):
+        hooks, pkg = dispatch_grant.seed / "src" / "hooks" / "x.ts", dispatch_grant.seed / "package.json"
+        result = _run(dispatch_grant.seat, command=f"echo a > {hooks.as_posix()}; echo b > {pkg.as_posix()}")
+        assert _blocked(result) and f"Target: {pkg}" in _reason(result)
+
+    def test_a_mv_needs_both_ends_inside_the_grant(self, dispatch_grant):
+        inside = [(dispatch_grant.seed / "src" / "hooks" / n).as_posix() for n in ("x.ts", "y.ts")]
+        pkg = (dispatch_grant.seed / "package.json").as_posix()
+        assert _run(dispatch_grant.seat, command=f"mv {inside[0]} {inside[1]}")["exit_code"] == 0
+        assert _blocked(_run(dispatch_grant.seat, command=f"mv {inside[0]} {pkg}"))
+        assert _blocked(_run(dispatch_grant.seat, command=f"mv {pkg} {inside[1]}"))
+
+    def test_a_dot_dot_out_of_a_granted_dir_is_judged_where_it_lands(self, dispatch_grant):
+        climb = (dispatch_grant.seed / "src" / "hooks" / ".." / ".." / "package.json").as_posix()
+        assert _blocked(_run(dispatch_grant.seat, command=f"echo x > {climb}"))
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need a privilege on Windows")
+    def test_a_symlink_escaping_a_granted_dir_is_refused(self, dispatch_grant):
+        (dispatch_grant.seed / "private").mkdir()
+        (dispatch_grant.seed / "src" / "hooks" / "link").symlink_to(dispatch_grant.seed / "private")
+        through = (dispatch_grant.seed / "src" / "hooks" / "link" / "a.ts").as_posix()
+        assert _blocked(_run(dispatch_grant.seat, command=f"echo x > {through}"))
 
 
 class TestScriptedLaneCatches:

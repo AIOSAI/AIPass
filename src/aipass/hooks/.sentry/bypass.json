@@ -1376,16 +1376,26 @@
       "reason": "Not a drone command surface: the who-may-write-whose-files reader consumed by handlers/security/edit_gate.py inside a PreToolUse hook. print_introspection states the rule; a CLI verdict would read the operator's cwd as a seat."
     },
     {
+      "file": "apps/modules/write_grant.py",
+      "standard": "json_structure",
+      "reason": "Asks @ai_mail's dispatch-grant door one question per crossing write and stamps/unstamps one env var. Opens no JSON itself (the door reads the register and logs its own grant_decision); same profile as admin_seat.py."
+    },
+    {
+      "file": "apps/modules/write_grant.py",
+      "standard": "modules",
+      "reason": "Not a drone command surface: consumed by handlers/security/edit_gate.py inside a PreToolUse hook. A CLI verdict would stamp the operator's cwd and env as a dispatched seat. print_introspection() reports the contract. Same profile as admin_seat.py."
+    },
+    {
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "logged_fallback",
       "lines": [
-        493,
-        531,
-        583,
-        820,
-        876
+        503,
+        541,
+        593,
+        830,
+        886
       ],
-      "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 493 _allowed_fields: the refusal's wording only, the refusal stands. 531 _evaluate_file_budget: an older @memory publishes no check_file_budget, so there is no rule to apply (logged). 583: the todos advisory text, never a verdict. 820 _seat_trinity and 876 _read_pending: the tripwire, which reports after the call and decides nothing. The two that did let a write through were cured fail-closed in leg 5."
+      "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 503 _allowed_fields: the refusal's wording only, the refusal stands. 541 _evaluate_file_budget: an older @memory publishes no check_file_budget, so there is no rule to apply (logged). 593: the todos advisory text, never a verdict. 830 _seat_trinity and 886 _read_pending: the tripwire, which reports after the call and decides nothing. The two that did let a write through were cured fail-closed in leg 5."
     },
     {
       "file": "apps/handlers/security/subagent_gate.py",
@@ -1714,7 +1724,7 @@
       "file": "tests/test_edit_gate_bash.py",
       "standard": "stdlib_patch",
       "lines": [
-        907
+        994
       ],
       "reason": "Fleet green row 0 (leg 8, landed leg 10): bash_writes.Path flavour oracle; threading flavour through every path builder is the cost; closes the leg 5 write_targets flavour HELD."
     },
