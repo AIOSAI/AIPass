@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.10.0
+# Version: 1.11.0
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-11-03
+# Modified: 2026-11-04
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's scripted lane and apps/modules/bash_writes.py."""
@@ -265,6 +265,49 @@ class TestAGitWorkTreeWithNoRegistryIsAProject:
         target = vendored / "README.md"
         assert _run(seat, file_path=str(target), tool="Write")["exit_code"] == 0
         assert _run(seat, command=f"echo x > {target.as_posix()}")["exit_code"] == 0
+
+
+class TestASessionInNoProjectCrossesIntoARegistryProject:
+    """A cwd in no project (a Seed workspace, /var/tmp) wrote into AIPass on both lanes; devpulse ruled it a crossing."""
+
+    @pytest.fixture
+    def outside(self, tmp_path: Path) -> str:
+        (tmp_path / "workspace").mkdir()
+        return str(tmp_path / "workspace")
+
+    def _both_lanes(self, cwd: str, target: Path) -> list[dict]:
+        return [_run(cwd, file_path=str(target), tool="Write"), _run(cwd, command=f"echo x > {target.as_posix()}")]
+
+    def test_a_tool_write_into_a_registry_project_is_refused_and_names_it(
+        self, sibling_projects, outside, grant_withheld
+    ):
+        result = _run(
+            outside, file_path=str(sibling_projects["aipass"] / "src" / "aipass" / "devpulse" / "p.txt"), tool="Write"
+        )
+        assert _blocked(result)
+        assert "a session outside every project cannot write into project 'AIPass'" in _reason(result)
+
+    def test_a_shell_write_into_a_registry_project_is_refused_and_names_it(
+        self, sibling_projects, outside, grant_withheld
+    ):
+        target = sibling_projects["aipass"] / "src" / "aipass" / "devpulse" / "p.txt"
+        result = _run(outside, command=f"echo x > {target.as_posix()}")
+        assert _blocked(result)
+        assert "a session outside every project cannot write into project 'AIPass'" in _reason(result)
+
+    def test_plain_folders_and_its_own_workspace_stay_open(self, sibling_projects, outside, grant_withheld):
+        plain = sibling_projects["aipass"].parent / "plain" / "a.txt"
+        own = Path(outside) / "a.txt"
+        assert [r["exit_code"] for r in self._both_lanes(outside, plain) + self._both_lanes(outside, own)] == [0] * 4
+
+    def test_a_bare_git_work_tree_stays_open_as_before(self, sibling_projects, outside, grant_withheld):
+        """The ruling names registry projects only: a no-project seat still writes a registry-less repo."""
+        target = sibling_projects["aipass"].parent / "seed" / "README.md"
+        assert [r["exit_code"] for r in self._both_lanes(outside, target)] == [0, 0]
+
+    def test_the_verified_admin_still_crosses_from_no_project(self, sibling_projects, outside, grant_granted):
+        target = sibling_projects["aipass"] / "src" / "aipass" / "devpulse" / "p.txt"
+        assert [r["exit_code"] for r in self._both_lanes(outside, target)] == [0, 0]
 
 
 class TestADispatchGrantOnTheScriptedLane:

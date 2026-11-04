@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_edit_gate.py
-# Version: 1.9.1
+# Version: 1.10.0
 # Description: Tests for edit_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
@@ -508,6 +508,14 @@ class TestADispatchGrantOpensOnlyItsPaths:
         refused = _refusal(_write(dispatch_grant.seat, dispatch_grant.seed / "src" / "hooks" / "new.ts"))
         assert refused.startswith("Cross-project write blocked: project 'AIPass'")
         assert "grants nothing" not in refused
+        assert dispatch_grant.calls == []
+
+    def test_a_grant_check_with_no_caller_project_refuses_cleanly_and_asks_no_door(self, dispatch_grant, tmp_path):
+        outside = tmp_path / "workspace"
+        outside.mkdir()
+        refused = _refusal(_write(str(outside), dispatch_grant.aipass / "src" / "aipass" / "hooks" / "x.py", "Write"))
+        assert refused.startswith("Cross-project write blocked: a session outside every project cannot write")
+        assert "Dispatch d1's grant was not read: this session stands in no project, so it has no register." in refused
         assert dispatch_grant.calls == []
 
     def test_a_door_that_raises_refuses_with_a_warning(self, dispatch_grant, monkeypatch, caplog):

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: write_ownership.py
-# Version: 2.6.0
+# Version: 2.7.0
 # Description: Who may write whose files: project roots and branch owners read from the registries
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-18
-# Modified: 2026-11-03
+# Modified: 2026-11-04
 # =============================================
 
 """Answers, for the edit gate's two lanes, whose file a write lands in and whether this seat may make it.
@@ -208,8 +208,18 @@ def is_crossing(caller: Project | None, landing: Project | None) -> bool:
     """True when a write leaves the caller's project for another one, in ANY direction.
 
     Downward too: a nested project keeps its own registry; only the admin seat reaches it.
+    A seat in no project crosses into every registry project, never into a bare work tree (devpulse, 2026-11-04).
     """
-    return caller is not None and landing is not None and landing.root != caller.root
+    if landing is None:
+        return False
+    if caller is None:
+        return landing.registry.name != GIT_MARKER
+    return landing.root != caller.root
+
+
+def seat_label(caller: Project | None) -> str:
+    """Who a crossing refusal names as the writer: the caller's project, or a session that stands in none."""
+    return f"project '{caller.root.name}'" if caller is not None else "a session outside every project"
 
 
 def package_of(cwd: Path) -> str:

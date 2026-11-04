@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: write_grant.py
-# Version: 1.0.1
+# Version: 1.1.0
 # Description: Whether a dispatch's write grant covers one cross-project write, read through @ai_mail's door
 # Branch: hooks
 # Layer: apps/modules
@@ -35,11 +35,16 @@ class Grant:
     why: str = ""
 
 
-def granted(cwd: str, caller_root: Path, landing: Project, target: Path) -> Grant:
+def granted(cwd: str, caller_root: Path | None, landing: Project, target: Path) -> Grant:
     """Whether this session's dispatch grants *target* in foreign *landing*; no AIPASS_DISPATCH_ID is a plain no."""
     dispatch_id = os.environ.get(DISPATCH_ENV, "")
     if not dispatch_id:
         return Grant(False)
+    if caller_root is None:
+        return Grant(
+            False,
+            f"Dispatch {dispatch_id}'s grant was not read: this session stands in no project, so it has no register.",
+        )
     try:
         return _ask(cwd, caller_root, landing, target, dispatch_id)
     # Every caller is a gate: a raising rail or door fails closed, and the warning tells it from a no.

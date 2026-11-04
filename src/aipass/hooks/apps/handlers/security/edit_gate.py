@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.21.0
+# Version: 1.22.0
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-11-03
+# Modified: 2026-11-04
 # =============================================
 
 """Blocks unsafe edits: inbox, cross-project, cross-branch and shell-to-memory writes, daemon confinement, diagnostics
@@ -116,7 +116,7 @@ def _check_project_boundary(cwd: str, caller: Any, landing: Any, target: Path) -
         logger.info(
             "[HOOKS] edit_gate: cross-project write ALLOWED for the admin seat (@%s): %s -> %s (%s)",
             ADMIN_SEAT,
-            caller.root.name,
+            _ownership().seat_label(caller),
             landing.root.name,
             target,
         )
@@ -124,24 +124,24 @@ def _check_project_boundary(cwd: str, caller: Any, landing: Any, target: Path) -
     if (grant := _write_grant(cwd, caller, landing, target)).allowed:
         return None, True
     logger.warning(
-        "[HOOKS] edit_gate: cross-project write refused: caller root %s != target root %s (%s)",
-        caller.root,
+        "[HOOKS] edit_gate: cross-project write refused: caller %s != target root %s (%s)",
+        _ownership().seat_label(caller),
         landing.root,
         target,
     )
-    return _cross_project_block(caller.root, landing, target, "", grant.why), False
+    return _cross_project_block(caller, landing, target, "", grant.why), False
 
 
 def _write_grant(cwd: str, caller: Any, landing: Any, target: Path) -> Any:
     """modules/write_grant's ruling on one crossing; an unimportable module raises into the crash refusal."""
-    return _import_module("aipass.hooks.apps.modules.write_grant").granted(cwd, caller.root, landing, target)
+    return _import_module("aipass.hooks.apps.modules.write_grant").granted(cwd, caller and caller.root, landing, target)
 
 
-def _cross_project_block(caller_root: Path, landing: Any, target: Path, how: str, why: str = "") -> dict:
+def _cross_project_block(caller: Any, landing: Any, target: Path, how: str, why: str = "") -> dict:
     """Build the refusal both lanes print. *how* names the shell verb, or "" for a tool edit; *why*, the grant's."""
     lane = f"Cross-project write blocked ({how})" if how else "Cross-project write blocked"
     reason = (
-        f"{lane}: project '{caller_root.name}' cannot write into project {landing.label}.\n"
+        f"{lane}: {_ownership().seat_label(caller)} cannot write into project {landing.label}.\n"
         f"Target: {target}\n"
         "A project writes inside itself only — never into its host, a sibling or a project it holds. This is the "
         "file-layer twin of the mail fence that refuses cross-project sends.\n"
@@ -173,8 +173,6 @@ def _check_bash_project_boundary(cwd: str, caller: Any, targets: list[tuple[Path
     wo = _ownership()
     if unprobeable := wo.unprobeable(targets):
         return _refuse(unprobeable)
-    if caller is None:
-        return None
     for target, how in targets:
         landing = wo.landing_of(target)
         if not wo.is_crossing(caller, landing):
@@ -183,7 +181,7 @@ def _check_bash_project_boundary(cwd: str, caller: Any, targets: list[tuple[Path
             logger.info(
                 "[HOOKS] edit_gate: scripted cross-project write ALLOWED for the admin seat (@%s): %s -> %s (%s)",
                 ADMIN_SEAT,
-                caller.root.name,
+                wo.seat_label(caller),
                 landing.root.name,
                 target,
             )
@@ -193,12 +191,12 @@ def _check_bash_project_boundary(cwd: str, caller: Any, targets: list[tuple[Path
             continue
         logger.warning(
             "[HOOKS] edit_gate: scripted cross-project write refused: %s -> %s via %s (%s)",
-            caller.root,
+            wo.seat_label(caller),
             landing.root,
             how,
             target,
         )
-        return _cross_project_block(caller.root, landing, target, how, grant.why)
+        return _cross_project_block(caller, landing, target, how, grant.why)
     return None
 
 

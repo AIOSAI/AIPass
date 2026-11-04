@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_codex_bridge.py
-# Version: 2.9.0
+# Version: 2.10.0
 # Description: Tests for the Codex, OpenCode and Seed bridges: payload mapping, output envelope, apply_patch, fail closed
 # Branch: hooks
 # Layer: tests
@@ -674,6 +674,32 @@ class TestSeedBridge:
         block = json.dumps({"decision": "block", "reason": "Raw delete refused"})
         sd.answer = (block, 2)
         assert sd.run("PreToolUse", {**_SEED_PAYLOAD, "tool_name": "Bash"}) == (block, "Raw delete refused\n", 2)
+
+
+class TestSeedThroughTheRealEngine:
+    """A Seed Write from its workspace (in no project) into AIPass was allowed: the bridge exited 0."""
+
+    def test_a_write_into_a_registry_project_exits_2_and_one_into_its_workspace_exits_0(
+        self, monkeypatch, capsys, tmp_path
+    ):
+        real_run_event = engine.run_event
+        sd = SeedBridge(monkeypatch, capsys)
+        monkeypatch.setattr(engine, "run_event", real_run_event)
+        aipass, workspace = tmp_path / "AIPass", tmp_path / "seed_home" / "agents" / "a"
+        (aipass / "src" / "aipass" / "devpulse").mkdir(parents=True)
+        workspace.mkdir(parents=True)
+        rows = [{"name": "devpulse", "path": "src/aipass/devpulse", "owner": True}]
+        (aipass / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": rows}), encoding="utf-8")
+        monkeypatch.chdir(workspace)
+
+        def write(target: Path) -> tuple[str, str, int]:
+            tool_input = {"file_path": str(target), "content": "x"}
+            payload = {**_SEED_PAYLOAD, "cwd": str(workspace), "tool_name": "Write", "tool_input": tool_input}
+            return sd.run("PreToolUse", {**payload, "hook_event_name": "PreToolUse", "tool_use_id": "t1"})
+
+        _, err, code = write(aipass / "src" / "aipass" / "devpulse" / "probe.txt")
+        assert (code, "a session outside every project cannot write into project 'AIPass'" in err) == (2, True)
+        assert write(workspace / "notes.txt")[2] == 0
 
 
 class TestSeedBrokenEngine:
