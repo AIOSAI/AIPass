@@ -140,6 +140,29 @@ named path already matches. Untracked files under a named path are left alone an
 the paths restored and left, or the refusal. Pinned by `TestRestore` in
 `tests/test_git_access_gh_door.py`, against a real repo.
 
+## `uncommit` — un-record unpushed commits, changes left staged
+
+`drone @git uncommit [n]` is the safe subset of `git reset --soft HEAD~n`, owner tier, n defaulting
+to 1. The last n commits on the current branch are un-recorded and every change of theirs stays
+staged, so one `drone @git commit` re-records them under the right message. It never runs
+`--hard` or `--mixed` and never touches the remote. Raw resets and force pushes are blocked
+because they lose work that no door can restore.
+
+Every check runs before the reset, and any refusal leaves HEAD where it was:
+
+- a commit already reachable from the branch's remote tracking branch is never un-recorded, so no
+  force push can follow. A branch that tracks nothing is refused, since nothing proves its
+  commits unpushed;
+- n larger than the commits ahead of the tracking branch, or deeper than the branch's root;
+- a merge commit among the n, which a soft reset would flatten;
+- unstaged edits to a file the n commits touch, which the reset would mix into their changes;
+  unstaged edits elsewhere are left alone;
+- a detached HEAD, and any argument but one whole count of 1 or more. There is no force flag.
+
+It prints each commit un-recorded (short sha and subject), the new HEAD and the staged name-status,
+and logs the operation through the json service as `uncommit`. Pinned by `TestUncommit` in
+`tests/test_git_module_handlers.py`, against a real repo.
+
 ---
 
 ## The `--all` pre-commit lane

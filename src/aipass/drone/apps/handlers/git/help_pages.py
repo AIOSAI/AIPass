@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: help_pages.py
 # Description: The @git help pages, one per verb and the whole page
-# Version: 1.9.0
+# Version: 1.10.0
 # Created: 2026-10-04
-# Modified: 2026-11-02
+# Modified: 2026-11-03
 # =============================================
 
 """The @git help pages: one per verb, and the whole page.
@@ -26,6 +26,7 @@ from aipass.drone.apps.handlers.git import (
     release_handler,
     restore_handler,
     repo_door,
+    uncommit_handler,
     untrack_handler,
 )
 
@@ -142,6 +143,27 @@ def page(command: str | None = None) -> str:
                 restore_handler.REFUSE_NOT_AT_SOURCE.format(path="<path>", source="<ref>"),
             )
             + "  Example: drone @git restore --source 9fc0e3b5^ apps/handlers/git/show_handler.py\n"
+        )
+    if command == "uncommit":
+        return (
+            "git uncommit [n] — Un-record the last n unpushed commits, staged [owner]\n"
+            "  The safe subset of git reset --soft HEAD~n (n defaults to 1). Every change\n"
+            "  of those commits stays staged, so one commit re-records them under the right\n"
+            "  message. Prints each commit un-recorded (sha, subject), the new HEAD and\n"
+            "  what is staged. Never --hard, never --mixed, never the remote: a commit\n"
+            "  already on the tracking branch is never un-recorded, so no force push can\n"
+            "  follow. Refused, exactly as printed, nothing un-recorded:\n"
+            + _printed(
+                uncommit_handler.USAGE,
+                uncommit_handler.REFUSE_COUNT.format(arg="<arg>"),
+                uncommit_handler.REFUSE_DETACHED,
+                uncommit_handler.REFUSE_NO_UPSTREAM.format(branch="<branch>"),
+                uncommit_handler.REFUSE_PUSHED.format(sha="<sha>", subject="<subject>", upstream="<upstream>"),
+                uncommit_handler.REFUSE_TOO_MANY.format(n="<n>", branch="<branch>", ahead="<k>", upstream="<upstream>"),
+                uncommit_handler.REFUSE_MERGE.format(sha="<sha>", subject="<subject>"),
+                uncommit_handler.REFUSE_DIRTY.format(paths="<paths>"),
+            )
+            + '  Example: drone @git uncommit 2, then drone @git commit "fix(x): one message"\n'
         )
     if command == "untrack":
         return (
@@ -372,6 +394,7 @@ def page(command: str | None = None) -> str:
         "  commit <msg> [--all | files]  Commit changes (selective or --all)\n"
         "  untrack <path ...>     Out of the index, files stay on disk (git rm --cached)\n"
         "  restore [--source <ref>] <path ...>  Tracked files back to HEAD or <ref>\n"
+        "  uncommit [n]           Un-record the last n unpushed commits, changes staged\n"
         "  checkout <main|dev>    Switch branches\n"
         "  pr <desc>              Push current branch and create PR to main\n"
         "  dev-pr <desc>          Push dev and create PR to main\n"
@@ -399,9 +422,9 @@ def page(command: str | None = None) -> str:
         "  ci-cure <run_id> @<owner> <msg> <path ...>  Commit a CI cure on dev, push dev\n"
         "                         (paths under src/aipass/<owner>/ or CHANGELOG.md; ci-cure --help)\n"
         "  An external project's manager, from its own seat, runs: commit, untrack,\n"
-        "  restore, checkout, sync, push, merge-main, unlock, merge, dev-pr, prune-temp,\n"
-        "  tag, issue <write>, run <write>, workflow <write>, release <write>, label\n"
-        "  <write>, alerts <write>, remote <write>. The rest refuse there.\n"
+        "  restore, uncommit, checkout, sync, push, merge-main, unlock, merge, dev-pr,\n"
+        "  prune-temp, tag, issue <write>, run <write>, workflow <write>, release <write>,\n"
+        "  label <write>, alerts <write>, remote <write>. The rest refuse there.\n"
         "  Every write is fenced by the session: one started in another project is\n"
         "  refused here even from this project's seat, unless the seat is admin.\n"
         "\n"
@@ -419,6 +442,7 @@ def page(command: str | None = None) -> str:
         "  git log origin/dev..HEAD         drone @git log origin/dev..HEAD\n"
         "  git archive <ref> | tar -x       drone @git export <ref> <dir>\n"
         "  git restore -s <ref> -- <p>      drone @git restore --source <ref> <p>\n"
+        "  git reset --soft HEAD~<n>        drone @git uncommit <n>  (unpushed only)\n"
         "  gh issue list|view|status  drone @git issue list|view|status\n"
         "  gh run list|view|watch     drone @git run list|view|watch\n"
         "  gh workflow list|view      drone @git workflow list|view\n"
