@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_mbank_template.py
 # Description: Tests for mbank/process.py and template handler functions
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-20
-# Modified: 2026-11-02
+# Modified: 2026-11-03
 # =============================================
 
 """Tests for mbank/process.py and template handler functions."""
@@ -12,6 +12,7 @@
 # sentry: no-test-needed(ruff) — that the mbank/template handler files parse and import
 
 import json
+import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -616,6 +617,26 @@ class TestGetTemplate:
 
         assert "## Listen" not in result
         assert "Spoken summary: written only when the user asks for one" in result
+
+    def test_a_fresh_tdplan_says_sections_arrive_by_mail_and_never_edit_freely(self):
+        """The edit gate refuses a participant's write into the coordinator's tree."""
+        result = get_template(template_path=TEMPLATES_DIR / "team_dev_plans" / "default.md", number=1, prefix="TDPLAN")
+        header = result.split("## Team Sections", 1)[1].split("###", 1)[0]
+
+        assert "The coordinator's branch holds this file and is its only writer." in header
+        assert "sends it in its reply to the dispatch" in header
+        assert "Edit freely" not in result
+
+    @pytest.mark.parametrize(
+        "tpl",
+        sorted([*TEMPLATES_DIR.glob("flow_plans/*.md"), *TEMPLATES_DIR.glob("team_dev_plans/*.md")]),
+        ids=lambda p: f"{p.parent.name}/{p.name}",
+    )
+    def test_fplan_and_tdplan_templates_carry_no_grant_field(self, tpl):
+        """A grant's truth is the dispatch register row; a copy on the page outlives it."""
+        result = get_template(template_path=tpl, number=1, subject="Fresh")
+
+        assert not re.search(r"(?im)^\W*grant\b", result)
 
 
 # ===================================================================
