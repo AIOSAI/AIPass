@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: conftest.py
-# Version: 2.8.0
+# Version: 2.8.1
 # Description: Shared pytest fixtures for hooks tests
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-11-03
+# Modified: 2026-11-04
 # =============================================
 
 """Shared pytest fixtures for hooks tests.
@@ -353,7 +353,14 @@ def dispatch_grant(tmp_path: Path, monkeypatch) -> SimpleNamespace:
         return {"allowed": False, "dispatch_id": dispatch_id, "reason": reason}
 
     def open_grants(repo_root=None, now=None):
-        return [{"dispatch_id": "d1", "target": state.grantee, door_dispatch_grant.GRANT_KEY: state.grant}]
+        return [
+            {
+                "dispatch_id": "d1",
+                "sender": "@grantor",
+                "target": state.grantee,
+                door_dispatch_grant.GRANT_KEY: state.grant,
+            }
+        ]
 
     monkeypatch.setattr(door_dispatch_grant, "granted", granted)
     monkeypatch.setattr(door_dispatch_grant, "open_grants", open_grants)

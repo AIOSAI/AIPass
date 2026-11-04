@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: write_grant.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Description: Whether a dispatch's write grant covers one cross-project write, read through @ai_mail's door
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-11-03
-# Modified: 2026-11-03
+# Modified: 2026-11-04
 # =============================================
 
 """Whether this session's dispatch grant covers one crossing write: @ai_mail's door decides, any doubt refuses."""
@@ -80,7 +80,9 @@ def _ask(cwd: str, caller_root: Path, landing: Project, target: Path, dispatch_i
         False,
         f"{ended}\nIt grants, under {grant.get('root', '?')}: files {', '.join(grant.get('files', [])) or 'none'}; "
         f"directories (new files allowed under these) {', '.join(grant.get('dirs', [])) or 'none'}.\n"
-        f"To widen it: drone @ai_mail reply {dispatch_id} 'need {resolved}'",
+        # An email, not a reply: replying closes the dispatch, and the grant with it.
+        f"To widen it: drone @ai_mail email {row.get('sender') or '@devpulse'} "
+        f"'Widen grant {dispatch_id[:8]}' 'need {resolved}'",
     )
 
 

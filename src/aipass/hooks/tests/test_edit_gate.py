@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate.py
-# Version: 1.9.0
+# Version: 1.9.1
 # Description: Tests for edit_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-11-03
+# Modified: 2026-11-04
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py and its PreToolUse sibling settings_backup.py."""
@@ -472,7 +472,10 @@ class TestADispatchGrantOpensOnlyItsPaths:
         assert "seat @hooks, project 'seed'" in caplog.text and "dispatch d1" in caplog.text
         refused = _refusal(_write(dispatch_grant.seat, dispatch_grant.seed / "package.json"))
         assert "files README.md; directories (new files allowed under these) src/hooks" in refused
-        assert f"drone @ai_mail reply d1 'need {dispatch_grant.seed / 'package.json'}'" in refused
+        # The sender is read off the row, and never a reply: replying closes the dispatch and its grant.
+        widen = f"drone @ai_mail email @grantor 'Widen grant d1' 'need {dispatch_grant.seed / 'package.json'}'"
+        assert widen in refused
+        assert "ai_mail reply" not in refused
 
     def test_a_granted_file_passes_and_an_unlisted_one_beside_it_does_not(self, dispatch_grant):
         assert _write(dispatch_grant.seat, dispatch_grant.seed / "README.md")["exit_code"] == 0
