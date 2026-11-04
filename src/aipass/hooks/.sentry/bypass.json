@@ -1,8 +1,8 @@
 {
   "metadata": {
-    "version": "2.0.0",
+    "version": "2.0.1",
     "created": "2026-05-18",
-    "updated": "2026-09-18",
+    "updated": "2026-11-04",
     "description": "Standards bypass configuration for this branch",
     "audit_context": "DPLAN-0191: Full ownership hardening. All handler wiring verified against .aipass/hooks.json + engine.jsonl firing evidence. Dynamic dispatch via engine._run_handler (importlib.import_module + getattr) means handlers are never statically imported — sentry's dead_code/unused_function checks are false positives for this architecture."
   },
@@ -1839,6 +1839,36 @@
     },
     {
       "file": "apps/handlers/bridges/opencode.py",
+      "standard": "imports",
+      "reason": "Bridge imports engine module by design — sole purpose."
+    },
+    {
+      "file": "apps/handlers/bridges/seed.py",
+      "standard": "dead_code",
+      "reason": "Bridge called externally by a Seed head's hooks.json command rows — no internal import. Written by drone @hooks seed install."
+    },
+    {
+      "file": "apps/handlers/bridges/seed.py",
+      "standard": "unused_function",
+      "reason": "main() called as subprocess entry point from a Seed head's hooks.json — never statically imported."
+    },
+    {
+      "file": "apps/handlers/bridges/seed.py",
+      "standard": "handlers",
+      "reason": "Bridges import engine module by design — that is their entire purpose."
+    },
+    {
+      "file": "apps/handlers/bridges/seed.py",
+      "standard": "json_structure",
+      "reason": "Thin entry point using stdlib json for Seed's answer document — no JSON file ops needing json_handler."
+    },
+    {
+      "file": "apps/handlers/bridges/seed.py",
+      "standard": "architecture",
+      "reason": "Bridge importing engine module is its architectural purpose."
+    },
+    {
+      "file": "apps/handlers/bridges/seed.py",
       "standard": "imports",
       "reason": "Bridge imports engine module by design — sole purpose."
     }

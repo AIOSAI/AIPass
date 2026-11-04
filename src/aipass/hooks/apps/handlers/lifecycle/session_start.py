@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: session_start.py
-# Version: 1.4.0
+# Version: 1.5.0
 # Description: Resets cadence counter on new chat / clear; injects the culture file; writes the session pointer
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-07
-# Modified: 2026-10-26
+# Modified: 2026-11-04
 # =============================================
 
 """SessionStart: resets the cadence counter, injects the culture file, writes the session pointer.
@@ -61,7 +61,9 @@ def handle_culture(hook_data: dict) -> dict:
 def _interactive(provider: str, hook_data: dict) -> bool:
     """Whether a person runs this session: Codex's rollout session_meta source is not "exec", Claude's argv has no -p.
 
-    Unreadable answers False: a missed pointer costs a resume, a headless one reopens a chat nobody sits in."""
+    Unreadable, or a Seed head (no resume to reopen), answers False: a headless pointer reopens an empty chat."""
+    if provider == "seed":
+        return False
     if provider == "codex":
         try:
             with open(hook_data.get("transcript_path") or "", encoding="utf-8") as fh:

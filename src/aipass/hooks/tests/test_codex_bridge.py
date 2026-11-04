@@ -1,14 +1,14 @@
 # =================== AIPass ====================
 # Name: test_codex_bridge.py
-# Version: 2.8.0
-# Description: Tests for the Codex and OpenCode bridges: payload mapping, output envelope, apply_patch, fail closed
+# Version: 2.9.0
+# Description: Tests for the Codex, OpenCode and Seed bridges: payload mapping, output envelope, apply_patch, fail closed
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-10
-# Modified: 2026-11-02
+# Modified: 2026-11-04
 # =============================================
 
-"""Tests for apps/handlers/bridges/codex.py, apps/handlers/bridges/opencode.py and its plugin, opencode_plugin.ts."""
+"""Tests for bridges/codex.py, bridges/opencode.py and its plugin opencode_plugin.ts, and bridges/seed.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that handlers/bridges/codex.py parses and imports its engine and loader
@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from aipass.hooks.apps.handlers.bridges import codex, opencode
+from aipass.hooks.apps.handlers.bridges import codex, opencode, seed
 from aipass.hooks.apps.modules import engine
 from aipass.prax.apps.modules import logger as prax_logger
 
@@ -604,3 +604,108 @@ class TestOpenCodePlugin:
         assert [(s["mode"], s["sync"], s["payload"]["hook_event_name"]) for s in doc["seen"][3:]] == [
             ("stop", True, "Stop")
         ]
+
+
+class SeedBridge:
+    """Runs seed.main() as a Seed head's command row does: argv event, payload on stdin, read stdout, stderr, exit."""
+
+    def __init__(self, monkeypatch, capsys) -> None:
+        self.received: list[str] = []
+        self.sessions: list[str | None] = []
+        self.answer = ("", 0)
+        self._monkeypatch = monkeypatch
+        self._capsys = capsys
+        monkeypatch.setenv(seed.SESSION_ENV, "launcher-session")
+        monkeypatch.setattr(seed, "_mount", lambda: "test")
+        monkeypatch.setattr(engine, "run_event", self._run_event)
+
+    def _run_event(self, arg: str, stdin_data: str) -> tuple[str, int]:
+        self.received.append(stdin_data)
+        self.sessions.append(os.environ.get(seed.SESSION_ENV))
+        return self.answer
+
+    def run(self, event: str, payload: dict) -> tuple[str, str, int]:
+        self._monkeypatch.setattr(sys, "argv", ["seed.py", event])
+        self._monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+        code = 0
+        try:
+            seed.main()
+        except SystemExit as exc:
+            code = int(exc.code or 0)
+        out, err = self._capsys.readouterr()
+        return out, err, code
+
+
+@pytest.fixture
+def sd(monkeypatch, capsys) -> SeedBridge:
+    return SeedBridge(monkeypatch, capsys)
+
+
+_SEED_PAYLOAD = {"session_id": "seed-run-1", "cwd": "/agents/a", "provider": "seed", "agent": "a", "prompt": "hi"}
+
+
+class TestSeedBridge:
+    def test_the_payload_reaches_the_engine_unrenamed_under_the_seed_session(self, sd):
+        payload = {**_SEED_PAYLOAD, "tool_name": "remember", "tool_input": {"text": "x"}, "tool_use_id": "t1"}
+        sd.run("PreToolUse", payload)
+        assert [json.loads(raw) for raw in sd.received] == [payload]
+        assert sd.sessions == ["seed-run-1"]
+
+    def test_a_payload_naming_no_provider_is_named_seed(self, sd):
+        sd.run("Stop", {"session_id": "s"})
+        assert json.loads(sd.received[0])["provider"] == "seed"
+
+    def test_a_json_answer_passes_as_is_and_exits_zero(self, sd):
+        doc = json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "ID"}})
+        sd.answer = (doc, 0)
+        assert sd.run("UserPromptSubmit", _SEED_PAYLOAD) == (doc, "", 0)
+
+    def test_plain_text_becomes_context_on_a_prompt_and_a_message_elsewhere(self, sd):
+        sd.answer = ("# Identity", 0)
+        out, _, code = sd.run("UserPromptSubmit", _SEED_PAYLOAD)
+        assert (json.loads(out)["hookSpecificOutput"]["additionalContext"], code) == ("# Identity", 0)
+        out, _, code = sd.run("PostToolUse", _SEED_PAYLOAD)
+        assert (json.loads(out), code) == ({"systemMessage": "# Identity"}, 0)
+
+    def test_no_answer_is_empty_stdout(self, sd):
+        assert sd.run("Stop", _SEED_PAYLOAD) == ("", "", 0)
+
+    def test_a_block_exits_2_with_its_reason_on_stderr(self, sd):
+        block = json.dumps({"decision": "block", "reason": "Raw delete refused"})
+        sd.answer = (block, 2)
+        assert sd.run("PreToolUse", {**_SEED_PAYLOAD, "tool_name": "Bash"}) == (block, "Raw delete refused\n", 2)
+
+
+class TestSeedBrokenEngine:
+    def test_a_broken_engine_refuses_pretooluse_with_exit_2_and_records_it(self, sd, monkeypatch, tmp_path):
+        def _engine_gone():
+            raise ImportError("engine gone")
+
+        monkeypatch.setattr(seed, "_mount", _engine_gone)
+        monkeypatch.setattr(seed, "BREAK_LOG", str(tmp_path / "bridge.log"))
+        out, err, code = sd.run("PreToolUse", {**_SEED_PAYLOAD, "tool_name": "Bash"})
+        assert (out, code) == ("", 2)
+        assert err.startswith("HOOKS BROKEN") and "engine gone" in err
+        assert "bridges.seed | ERROR" in (tmp_path / "bridge.log").read_text(encoding="utf-8")
+
+    def test_a_broken_engine_answers_nothing_with_exit_0_elsewhere(self, sd, monkeypatch, tmp_path):
+        def _engine_gone():
+            raise ImportError("engine gone")
+
+        monkeypatch.setattr(seed, "_mount", _engine_gone)
+        monkeypatch.setattr(seed, "BREAK_LOG", str(tmp_path / "bridge.log"))
+        out, err, code = sd.run("UserPromptSubmit", _SEED_PAYLOAD)
+        assert (out, code) == ("", 0)
+        assert "HOOKS BROKEN" in err
+
+    def test_a_suite_run_break_never_lands_in_the_live_bridge_log(self, sd, monkeypatch):
+        live = Path(seed.LIVE_BREAK_LOG)
+        before = live.read_bytes() if live.exists() else b""
+
+        def _engine_gone():
+            raise ImportError("engine gone")
+
+        monkeypatch.setattr(seed, "_mount", _engine_gone)
+        _, err, _ = sd.run("PreToolUse", _SEED_PAYLOAD)
+        assert "HOOKS BROKEN" in err, "the break must happen for the pin to mean anything"
+        assert (live.read_bytes() if live.exists() else b"") == before, "medic reads that log as a real break"

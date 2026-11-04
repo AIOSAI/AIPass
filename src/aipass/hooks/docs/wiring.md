@@ -127,6 +127,22 @@ There is no Notification event, and SubagentStop is not wired. `opencode.py` doe
 
 ---
 
+## Seed
+
+A Seed head (the Seed repo's `src/hooks/hooks.md`) fires Claude Code's events itself and runs the command rows of `hooks.json` in its home (`$SEED_HOME`, else `~/.config/seed`), read once at start. The rows are flat, `{matcher?, command?, builtin?, timeout?}`. `drone @hooks seed install` writes one row per event Seed fires, `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostCompact` and `Stop`: `<the venv python> <absolute path>/bridges/seed.py <Event>`, timeout 120 s, since one row runs every handler of its event. A re-run replaces its own rows and keeps every other; `drone @hooks seed remove` takes them out. The manifest has no `cli.seed` section yet, so the event list is `wire_verify.SEED_EVENTS`.
+
+| What arrives | `seed.py` does | Seed reads |
+|---|---|---|
+| Claude's payload, `provider: "seed"`, a `session_id` per head run | sets `CLAUDE_CODE_SESSION_ID`, names the provider when the payload does not, renames nothing, calls `run_event` | |
+| an engine answer in JSON, exit 0 | stdout as is | the document: `decision`, `hookSpecificOutput`, `systemMessage` |
+| plain text, exit 0 | `additionalContext` on SessionStart and UserPromptSubmit, `systemMessage` elsewhere | the document |
+| a block, exit 2 | stdout as is, the reason on stderr, exit 2 | stderr as the reason |
+| an engine that cannot load or raises | `HOOKS BROKEN` on stderr and in `logs/bridge.log`; exit 2 on PreToolUse, else exit 0 and no stdout | a block, or no answer |
+
+`seed.py` runs from the source tree and mounts the promoted copy, as every bridge does. The engine resolves its config from the working directory, which Seed sets to the agent's directory: an agent outside an AIPass project gets the gate set only, so no grounding and no identity. Seed's `transcript.jsonl` is its own shape (`who`, `text`, `time`, `compaction`), not Claude's. On `provider: "seed"` the context gauge and the PreCompact snapshot read no fill, `context_window` answers no usage and no model without parsing a line, the session pointer is not written (Seed has no resume), the culture file is injected (Seed reads no AGENTS.md), and cadence counts turns by the file's size, as on every CLI. `drone @hooks verify` reads the Seed file too: no file or no AIPass row is a head not wired (INFO), a missing event row an ERROR naming the cure, a duplicate a WARN, a file Seed would refuse at start an ERROR.
+
+---
+
 ## Related
 
 - [engine.md](engine.md) — what the engine does with the event once the bridge hands it over

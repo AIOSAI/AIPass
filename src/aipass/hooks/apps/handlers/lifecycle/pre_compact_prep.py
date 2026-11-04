@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: pre_compact_prep.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Description: Stamps a mechanical AUTO-COMPACT SNAPSHOT into the compacting branch's memory (PreCompact)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-20
-# Modified: 2026-10-25
+# Modified: 2026-11-04
 # =============================================
 
 """Mechanical /prep AT compact time (DPLAN-0253).
@@ -43,7 +43,7 @@ def _find_repo_root(start: Path) -> Path | None:
 def _context_fill_pct(hook_data: dict, cwd: str) -> str | None:
     context_window = importlib.import_module("aipass.hooks.apps.modules.context_window")
     transcript_path = hook_data.get("transcript_path", "")
-    usage = context_window.read_latest_usage(transcript_path)
+    usage = context_window.read_latest_usage(transcript_path, provider=hook_data.get("provider") or "")
     if usage is None:
         return None
     fill = context_window.context_fill_tokens(usage)

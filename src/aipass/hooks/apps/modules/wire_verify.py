@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: wire_verify.py
-# Version: 1.6.0
+# Version: 1.7.0
 # Description: Wire verification — cross-checks provider settings vs project hook config
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-09
-# Modified: 2026-10-29
+# Modified: 2026-11-04
 # =============================================
 
 """Wire verification — catches silent hook-wiring breaks.
@@ -13,13 +13,16 @@
 Cross-checks ~/.claude/settings.json (provider hooks) against .aipass/hooks.json (project hook config).
 A handler wired only in Codex's user-level hooks.json, or only in the manifest's cli.opencode rows that
 OpenCode's plugin runs, counts as wired; that file or plugin missing (or the plugin stale) is an ERROR.
+A Seed head's hooks.json is checked for one seed.py row per event Seed fires; `seed install` writes them.
 Detects: empty provider hook arrays; enabled handlers with no bridge entry; duplicate and orphaned
 entries; a tool a gate guards that the provider's PreToolUse bridge never sees (R7: NotebookEdit).
 Invoked via: drone @hooks verify
 """
 
 import json
+import os
 import re
+import shlex
 import sys
 from pathlib import Path
 
@@ -38,6 +41,7 @@ CONSOLE = err_console
 
 HELP_COMMANDS = [
     ("verify", "Cross-check provider settings vs project hook config"),
+    ("seed", "Write (install) or take out (remove) the seed.py rows in a Seed head's hooks.json"),
 ]
 
 _BRIDGE_MARKER = "bridges/claude.py"
@@ -45,6 +49,13 @@ _CODEX_MARKER = "bridges/codex.py"
 _OPENCODE_MARKER = "bridges/opencode.py"
 OPENCODE_PLUGIN_SOURCE = module_file(__file__).parents[1] / "handlers" / "bridges" / "opencode_plugin.ts"
 _META_KEYS = frozenset({"_comment", "hooks_enabled"})
+
+_SEED_MARKER = "bridges/seed.py"
+SEED_BRIDGE = module_file(__file__).parents[1] / "handlers" / "bridges" / "seed.py"
+#: The events a Seed head fires (its src/hooks/hooks.md); the manifest has no cli.seed section to name them.
+SEED_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostCompact", "Stop")
+#: One row runs every handler of its event in turn; Seed's 60 s default would break a slow UserPromptSubmit.
+SEED_TIMEOUT = 120
 
 
 def _read_provider_hooks(path=None):
@@ -157,6 +168,82 @@ def _opencode_wired(plugin, manifest, errors) -> frozenset[str]:
     return frozenset(wired)
 
 
+def seed_hooks_path() -> Path:
+    """The Seed home's hooks.json: $SEED_HOME, else ~/.config/seed."""
+    home = os.environ.get("SEED_HOME")
+    return (Path(home) if home else Path.home() / ".config" / "seed") / "hooks.json"
+
+
+def _seed_event(row) -> str | None:
+    """The event a Seed row hands to seed.py, or None when the row is not this bridge's.
+
+    Raises ValueError on a seed.py row the shell cannot split: Seed would run it broken."""
+    command = row.get("command") if isinstance(row, dict) else None
+    if not isinstance(command, str) or _SEED_MARKER not in command:
+        return None
+    words = shlex.split(command)
+    found = [i for i, word in enumerate(words) if word.endswith(_SEED_MARKER)]
+    return words[found[0] + 1] if found and found[0] + 1 < len(words) else None
+
+
+def _read_seed_table(path: Path) -> dict:
+    """A Seed hooks.json, {} when there is none; ValueError for a file the Seed head would refuse at start."""
+    if not path.is_file():
+        return {}
+    table = json_files.read_json_file(path)
+    if not isinstance(table, dict) or not all(isinstance(rows, list) for rows in table.values()):
+        raise ValueError(f"{path} is not an object of event names to lists of rows")
+    return table
+
+
+def _seed_wired(seed_path, errors, warnings, info) -> None:
+    """One seed.py row per Seed event. No file, or a file with none of them, is a head not wired: INFO."""
+    if seed_path is None:
+        return
+    try:
+        table = _read_seed_table(Path(seed_path))
+    except (OSError, ValueError) as exc:
+        errors.append(f"Seed hooks file unreadable: {exc}, so the Seed head will not start")
+        return
+    try:
+        counts = {e: sum(1 for row in table.get(e, []) if _seed_event(row) == e) for e in SEED_EVENTS}
+    except ValueError as exc:
+        errors.append(f"Seed hooks file {seed_path}: a seed.py row the shell cannot split ({exc})")
+        return
+    if not any(counts.values()):
+        info.append(f"Seed: no AIPass rows in {seed_path} (drone @hooks seed install wires them)")
+        return
+    for event, count in counts.items():
+        if count == 0:
+            errors.append(f"Seed {event}: no seed.py row in {seed_path}. Fix: drone @hooks seed install")
+        elif count > 1:
+            warnings.append(f"Seed {event}: {count} seed.py rows in {seed_path}, each runs every handler")
+    info.append(f"Seed: {sum(1 for c in counts.values() if c)} of {len(SEED_EVENTS)} events bridged in {seed_path}")
+
+
+def seed_install(path: Path | None = None, remove: bool = False) -> Path:
+    """Write one seed.py row per Seed event into *path*, or with *remove* none; every other row is kept.
+
+    A re-run replaces this bridge's rows, wherever they point. Raises ValueError on a file Seed would refuse.
+    """
+    path = path or seed_hooks_path()
+    table = _read_seed_table(path)
+    python = shlex.quote(sys.executable)
+    for event in sorted(set(table) | set(SEED_EVENTS)):
+        rows = table.get(event, [])
+        kept = [row for row in rows if _seed_event(row) is None]
+        if not remove and event in SEED_EVENTS:
+            command = f"{python} {shlex.quote(str(SEED_BRIDGE))} {event}"
+            kept.append({"command": command, "timeout": SEED_TIMEOUT})
+        if kept:
+            table[event] = kept
+        elif rows:
+            del table[event]
+    json_files.make_directory(path.parent)
+    json_files.write_json_file(path, table)
+    return path
+
+
 def _check_event_wiring(event_type, hooks_group, pidx, errors, warnings, info, elsewhere=None, namespace=""):
     """Check one project config event against its provider index entry; *elsewhere* maps a CLI to its wired set.
 
@@ -241,11 +328,13 @@ def _check_guarded_tools(provider_hooks, errors, marker=_BRIDGE_MARKER, tools=No
             )
 
 
-def verify_wiring(provider_path=None, project_config=None, codex_path=None, opencode_plugin=None, manifest_path=None):
+def verify_wiring(
+    provider_path=None, project_config=None, codex_path=None, opencode_plugin=None, manifest_path=None, seed_path=None
+):
     """Cross-check provider settings against project hook config; *codex_path* is Codex's user-level hooks.json.
 
     A *codex_path* that names no file is an ERROR: a Codex seat with no hooks file runs ungated.
-    *opencode_plugin* is OpenCode's installed plugin, run on *manifest_path*'s cli.opencode rows.
+    *opencode_plugin* is OpenCode's plugin, run on *manifest_path*'s cli.opencode rows; *seed_path* Seed's hooks.json.
 
     Returns dict with keys: errors (list), warnings (list), info (list), ok (bool).
     """
@@ -265,6 +354,7 @@ def verify_wiring(provider_path=None, project_config=None, codex_path=None, open
     elsewhere = {"Codex": _codex_wired(codex_path, errors)}
     if opencode_plugin is not None:
         elsewhere["OpenCode"] = _opencode_wired(opencode_plugin, manifest_path, errors)
+    _seed_wired(seed_path, errors, warnings, info)
 
     for event_type, hooks_group in config.items():
         if event_type in _META_KEYS or not isinstance(hooks_group, dict):
@@ -309,15 +399,39 @@ def print_introspection():
     CONSOLE.print("[bold cyan]wire_verify[/bold cyan] — Provider ↔ project hook wiring checker")
 
 
+def _handle_seed(args) -> bool:
+    """`drone @hooks seed install|remove`: the bridge rows in the Seed home's hooks.json."""
+    if len(args) != 1 or args[0] not in ("install", "remove"):
+        CONSOLE.print("[bold cyan]seed[/bold cyan] — the AIPass rows in a Seed head's hooks.json")
+        CONSOLE.print("  drone @hooks seed install   one seed.py row per Seed event; a re-run replaces them")
+        CONSOLE.print("  drone @hooks seed remove    takes them out; every other row is kept")
+        CONSOLE.print("The file is $SEED_HOME/hooks.json, else ~/.config/seed/hooks.json. A head reads it at start.")
+        return True
+    try:
+        path = seed_install(remove=args[0] == "remove")
+    except (OSError, ValueError) as exc:
+        logger.error("[WIRE_VERIFY] seed %s failed: %s", args[0], exc)
+        CONSOLE.print(f"[red]seed {args[0]} failed:[/red] {exc}")
+        sys.exit(1)
+    logger.info("[WIRE_VERIFY] seed %s: %s", args[0], path)
+    CONSOLE.print(f"seed {args[0]}: {path} (restart the Seed head to load it)")
+    return True
+
+
 def handle_command(command, args) -> bool:
-    """Route verify commands from drone @hooks."""
+    """Route verify and seed commands from drone @hooks."""
+    if command == "seed":
+        return _handle_seed(args)
     if command != "verify":
         return False
 
     if not args:
         print_introspection()
         results = verify_wiring(
-            codex_path=codex_hooks_path(), opencode_plugin=opencode_plugin_path(), manifest_path=_manifest_path()
+            codex_path=codex_hooks_path(),
+            opencode_plugin=opencode_plugin_path(),
+            manifest_path=_manifest_path(),
+            seed_path=seed_hooks_path(),
         )
         _render_results(results)
         if not results["ok"]:
@@ -332,7 +446,8 @@ def handle_command(command, args) -> bool:
         CONSOLE.print()
         CONSOLE.print("Reads ~/.claude/settings.json, .aipass/hooks.json and Codex's user-level hooks.json")
         CONSOLE.print("($CODEX_HOME, else ~/.codex) and OpenCode's plugin with the manifest's cli.opencode rows;")
-        CONSOLE.print("a missing Codex file or OpenCode plugin is an ERROR. It")
+        CONSOLE.print("a missing Codex file or OpenCode plugin is an ERROR. It also reads a Seed head's")
+        CONSOLE.print("hooks.json ($SEED_HOME, else ~/.config/seed) for one seed.py row per Seed event. It")
         CONSOLE.print("verifies every enabled handler has a working provider bridge entry.")
         CONSOLE.print("Exits non-zero on any ERROR finding.")
         return True

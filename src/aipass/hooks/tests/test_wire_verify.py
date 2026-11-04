@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_wire_verify.py
-# Version: 1.6.0
+# Version: 1.7.0
 # Description: Tests for wire_verify module — provider ↔ project hook wiring checker
 # Branch: hooks
 # Created: 2026-07-09
-# Modified: 2026-11-02
+# Modified: 2026-11-04
 # =============================================
 
 """Tests for apps/modules/wire_verify.py."""
@@ -503,6 +503,7 @@ class TestHandleCommand:
         monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex_home"))
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
         monkeypatch.setenv("AIPASS_HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("SEED_HOME", str(tmp_path / "seed_home"))
         mock_result = {"ok": True, "errors": [], "warnings": [], "info": []}
         with patch.object(wire_verify, "verify_wiring", return_value=mock_result) as mock_verify:
             assert wire_verify.handle_command("verify", []) is True
@@ -510,6 +511,7 @@ class TestHandleCommand:
             codex_path=tmp_path / "codex_home" / "hooks.json",
             opencode_plugin=tmp_path / "cfg" / "opencode" / "plugins" / "aipass.ts",
             manifest_path=tmp_path / "home" / ".claude" / "provider_manifest.json",
+            seed_path=tmp_path / "seed_home" / "hooks.json",
         )
         err = capsys.readouterr().err
         assert "Wire check passed" in err
@@ -549,6 +551,7 @@ class TestHandleCommand:
         monkeypatch.setenv("USERPROFILE", str(tmp_path))
         monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
         monkeypatch.setenv("AIPASS_HOME", str(tmp_path / "home"))
+        monkeypatch.delenv("SEED_HOME", raising=False)
         mock_result = {"ok": True, "errors": [], "warnings": ["cosmetic"], "info": []}
         with patch.object(wire_verify, "verify_wiring", return_value=mock_result) as mock_verify:
             assert wire_verify.handle_command("verify", []) is True
@@ -556,6 +559,7 @@ class TestHandleCommand:
             codex_path=tmp_path / ".codex" / "hooks.json",
             opencode_plugin=tmp_path / ".config" / "opencode" / "plugins" / "aipass.ts",
             manifest_path=tmp_path / "home" / ".claude" / "provider_manifest.json",
+            seed_path=tmp_path / ".config" / "seed" / "hooks.json",
         )
         err = capsys.readouterr().err
         assert "Wire check passed" in err
@@ -604,3 +608,101 @@ class TestPrintIntrospection:
         wire_verify.print_introspection()
 
         assert "wire_verify — Provider ↔ project hook wiring checker" in capsys.readouterr().err
+
+
+class TestSeedWiring:
+    """A Seed head's hooks.json: install writes one seed.py row per event, verify reads them, remove takes them out."""
+
+    def _verify(self, tmp_path, seed_path):
+        settings = tmp_path / "settings.json"
+        settings.write_text(json.dumps({"hooks": _PRETOOL}), encoding="utf-8")
+        return wire_verify.verify_wiring(provider_path=settings, project_config={}, seed_path=seed_path)
+
+    def _bridged(self, path) -> dict:
+        table = json.loads(path.read_text(encoding="utf-8"))
+        ours = {event: f"seed.py {event}" for event in table}
+        return {event: [r for r in rows if r.get("command", "").endswith(ours[event])] for event, rows in table.items()}
+
+    def test_install_twice_leaves_one_row_per_event_and_keeps_every_other_row(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SEED_HOME", str(tmp_path / "seed"))
+        own = {"Stop": [{"builtin": "temporal"}], "Custom": [{"command": "echo hi"}]}
+        (tmp_path / "seed").mkdir()
+        (tmp_path / "seed" / "hooks.json").write_text(json.dumps(own), encoding="utf-8")
+        wire_verify.seed_install()
+        path = wire_verify.seed_install()
+        assert path == tmp_path / "seed" / "hooks.json"
+        bridged = self._bridged(path)
+        assert {event: len(bridged.get(event, [])) for event in wire_verify.SEED_EVENTS} == dict.fromkeys(
+            wire_verify.SEED_EVENTS, 1
+        )
+        (row,) = bridged["PreToolUse"]
+        assert row["command"].split()[-2:] == [str(wire_verify.SEED_BRIDGE), "PreToolUse"]
+        table = json.loads(path.read_text(encoding="utf-8"))
+        assert table["Stop"][0] == {"builtin": "temporal"} and table["Custom"] == [{"command": "echo hi"}]
+
+    def test_remove_leaves_no_bridge_row_and_every_other_row(self, tmp_path):
+        path = tmp_path / "hooks.json"
+        path.write_text(json.dumps({"Stop": [{"builtin": "temporal"}]}), encoding="utf-8")
+        wire_verify.seed_install(path)
+        wire_verify.seed_install(path, remove=True)
+        assert json.loads(path.read_text(encoding="utf-8")) == {"Stop": [{"builtin": "temporal"}]}
+
+    def test_a_file_seed_would_refuse_is_never_overwritten(self, tmp_path):
+        path = tmp_path / "hooks.json"
+        path.write_text(json.dumps({"Stop": {"command": "x"}}), encoding="utf-8")
+        with pytest.raises(ValueError):
+            wire_verify.seed_install(path)
+        assert json.loads(path.read_text(encoding="utf-8")) == {"Stop": {"command": "x"}}
+
+    def test_verify_reports_an_installed_seed_wiring(self, tmp_path):
+        path = wire_verify.seed_install(tmp_path / "hooks.json")
+        result = self._verify(tmp_path, path)
+        assert result["errors"] == [] and result["ok"]
+        assert f"Seed: 6 of 6 events bridged in {path}" in result["info"]
+
+    def test_verify_names_a_missing_event_as_an_error_with_the_cure(self, tmp_path):
+        path = wire_verify.seed_install(tmp_path / "hooks.json")
+        table = json.loads(path.read_text(encoding="utf-8"))
+        del table["PreToolUse"]
+        path.write_text(json.dumps(table), encoding="utf-8")
+        result = self._verify(tmp_path, path)
+        assert result["errors"] == [f"Seed PreToolUse: no seed.py row in {path}. Fix: drone @hooks seed install"]
+
+    def test_verify_warns_on_a_duplicate_bridge_row(self, tmp_path):
+        path = wire_verify.seed_install(tmp_path / "hooks.json")
+        table = json.loads(path.read_text(encoding="utf-8"))
+        table["Stop"].append(dict(table["Stop"][0]))
+        path.write_text(json.dumps(table), encoding="utf-8")
+        assert [w for w in self._verify(tmp_path, path)["warnings"] if w.startswith("Seed Stop: 2 seed.py rows")]
+
+    def test_no_seed_file_or_no_bridge_row_is_a_head_not_wired_not_an_error(self, tmp_path):
+        (tmp_path / "hooks.json").write_text(json.dumps({"Stop": [{"builtin": "temporal"}]}), encoding="utf-8")
+        for path in (tmp_path / "absent.json", tmp_path / "hooks.json"):
+            result = self._verify(tmp_path, path)
+            assert result["errors"] == []
+            assert f"Seed: no AIPass rows in {path} (drone @hooks seed install wires them)" in result["info"]
+
+    def test_a_malformed_seed_file_is_an_error(self, tmp_path):
+        path = tmp_path / "hooks.json"
+        path.write_text("[]", encoding="utf-8")
+        (error,) = self._verify(tmp_path, path)["errors"]
+        assert error.startswith("Seed hooks file unreadable") and "will not start" in error
+
+    def test_the_seed_command_installs_and_removes_in_the_seed_home(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setenv("SEED_HOME", str(tmp_path))
+        assert wire_verify.handle_command("seed", ["install"]) is True
+        assert self._bridged(tmp_path / "hooks.json")["Stop"]
+        assert wire_verify.handle_command("seed", ["remove"]) is True
+        assert json.loads((tmp_path / "hooks.json").read_text(encoding="utf-8")) == {}
+        assert wire_verify.handle_command("seed", []) is True
+        assert "drone @hooks seed install" in capsys.readouterr().err
+
+    def test_a_seed_row_the_shell_cannot_split_is_an_error_and_blocks_install(self, tmp_path):
+        path = tmp_path / "hooks.json"
+        broken = {"Stop": [{"command": "python 'bridges/seed.py Stop"}]}
+        path.write_text(json.dumps(broken), encoding="utf-8")
+        (error,) = self._verify(tmp_path, path)["errors"]
+        assert error.startswith(f"Seed hooks file {path}: a seed.py row the shell cannot split")
+        with pytest.raises(ValueError):
+            wire_verify.seed_install(path)
+        assert json.loads(path.read_text(encoding="utf-8")) == broken

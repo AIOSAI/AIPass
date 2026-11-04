@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.12.1
+# Version: 2.12.2
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-08
-# Modified: 2026-10-25
+# Modified: 2026-11-04
 # =============================================
 
 """Turn counter for prompt injection cadence — fires loaders every Nth turn.
@@ -123,7 +123,9 @@ def _state_path() -> Path | None:
 
 
 def _get_turn_token(hook_data: dict) -> int:
-    """Per-turn token: transcript_path size, identical across siblings; -1 when unmeasurable (no size is)."""
+    """Per-turn token: transcript_path size, identical across siblings; -1 when unmeasurable (no size is).
+
+    Only the size is read, never a line, so Seed's own transcript shape counts turns the same way."""
     tp = hook_data.get("transcript_path", "")
     if not tp:
         return -1
