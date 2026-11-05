@@ -1,26 +1,33 @@
 # =================== AIPass ====================
 # Name: test_host_attach.py
 # Description: Tests for the host API attach lane — the pump's shape and the socket's records
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-08-14
-# Modified: 2026-11-02
+# Modified: 2026-11-05
 # =============================================
 
-"""Tests for the attach socket's records in apps/handlers/host/server.py and the pump's shape in pump.py."""
+"""Tests for the attach socket's records in apps/handlers/host/server.py, pump.py's shape, and speech.py's stream."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(covered) — issue_token() and the token store's own locking, tests/test_host_token_store.py
 
+import asyncio
+import gc
 import json
+import os
 import re
+import sys
 import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import pytest
+
 from aipass.api.apps.handlers.host import attach as host_attach
 from aipass.api.apps.handlers.host import pump as host_pump
 from aipass.api.apps.handlers.host import server as host_server
+from aipass.api.apps.handlers.host import speech
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.tests.support_host_attach import (
     StubSession,
@@ -243,3 +250,145 @@ class TestTypingIntoAWatchLeavesARecord:
                         line = wait_for_log(log, "socket detached from")
 
         assert "close 1008" in line
+
+
+# =============================================
+# SPEECH — handlers/host/speech.py, agent_extras_route.py
+# =============================================
+
+PCM = b"\x01\x02" * 3000
+# A stand-in Piper: records its pid and what it was asked to say, then writes PCM, once or until killed.
+FAKE_PIPER = """#!{python}
+import os, sys, time
+open(os.path.join(os.path.dirname(__file__), "pid"), "w").write(str(os.getpid()))
+open(os.path.join(os.path.dirname(__file__), "said"), "wb").write(sys.stdin.buffer.read())
+while True:
+    os.write(1, {pcm!r})
+    if not {forever}:
+        break
+    time.sleep(0.01)
+"""
+
+
+def _install_piper(home: Path, forever: bool = False) -> Path:
+    """A fake Piper and its voice under *home*, where speech.py looks; the directory the script records into."""
+    binary = home / speech.PIPER_BIN
+    binary.parent.mkdir(parents=True)
+    binary.write_text(FAKE_PIPER.format(python=sys.executable, pcm=PCM, forever=forever), encoding="utf-8")
+    binary.chmod(0o755)
+    voice = home / speech.PIPER_VOICE
+    voice.parent.mkdir(parents=True)
+    voice.write_bytes(b"onnx")
+    voice.with_suffix(".onnx.json").write_text(json.dumps({"audio": {"sample_rate": 22050}}), encoding="utf-8")
+    return binary.parent
+
+
+def _gone(pid: int) -> bool:
+    """Whether no process holds *pid* any more (killed and reaped); its callers skip off posix."""
+    if os.name == "posix":
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+    return False
+
+
+@pytest.fixture
+def speaker(store: Any, host_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """The real app, a read token, HOME in tmp_path; Piper is whatever a test installs there."""
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    with patch(PATCH_SERVER_LOGGER):
+        _, raw = host_tokens.issue_token("extension", "read")
+        yield TestClient(host_app, raise_server_exceptions=False), {"Authorization": f"Bearer {raw}"}
+
+
+@pytest.mark.skipif(os.name != "posix", reason="a script with a shebang stands in for the Piper binary")
+@fastapi_required
+class TestSpeakStreamsPipersPcm:
+    """POST /v1/speak: audio/L16 with the voice's rate, the text cleaned; 503 without Piper, 400 without text."""
+
+    def test_the_pcm_streams_with_the_voices_rate_and_piper_is_reaped(self, speaker: Any, tmp_path: Path) -> None:
+        api, read = speaker
+        recorded = _install_piper(tmp_path)
+
+        response = api.post("/v1/speak", json={"text": "  hello\nworld  "}, headers=read)
+
+        assert (response.status_code, response.headers["content-type"]) == (200, "audio/L16")
+        assert (response.headers["x-sample-rate"], response.content) == ("22050", PCM)
+        assert (recorded / "said").read_bytes() == b"hello world"
+        assert _gone(int((recorded / "pid").read_text(encoding="utf-8")))
+
+    def test_no_piper_is_a_503_that_names_no_path(self, speaker: Any, tmp_path: Path) -> None:
+        api, read = speaker
+
+        response = api.post("/v1/speak", json={"text": "hello"}, headers=read)
+
+        assert (response.status_code, response.json()["error"]["code"]) == (503, "speech_unavailable")
+        assert str(tmp_path) not in response.text
+
+    @pytest.mark.parametrize("body", [{"text": " \r\n"}, {}, {"text": 3}])
+    def test_no_text_is_a_400(self, speaker: Any, tmp_path: Path, body: Any) -> None:
+        api, read = speaker
+        _install_piper(tmp_path)
+
+        assert api.post("/v1/speak", json=body, headers=read).status_code == 400
+
+
+@pytest.mark.skipif(os.name != "posix", reason="a script with a shebang stands in for the Piper binary")
+class TestAHungUpListenerKillsPiper:
+    """Piper never outlives its listener: closing the stream, or the client going away, kills the child."""
+
+    def test_closing_the_stream_early_kills_piper(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("HOME", str(tmp_path))
+        recorded = _install_piper(tmp_path, forever=True)
+        chunks = speech.stream("hello")
+
+        assert next(chunks)
+        chunks.close()
+
+        assert _gone(int((recorded / "pid").read_text(encoding="utf-8")))
+
+    def test_a_client_that_disconnects_mid_stream_leaves_no_piper(
+        self, store: Any, host_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HOME", str(tmp_path))
+        recorded = _install_piper(tmp_path, forever=True)
+        _, raw = host_tokens.issue_token("extension", "read")
+        body = json.dumps({"text": "hello"}).encode("utf-8")
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.4"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/v1/speak",
+            "raw_path": b"/v1/speak",
+            "query_string": b"",
+            "root_path": "",
+            "headers": [(b"authorization", f"Bearer {raw}".encode()), (b"content-type", b"application/json")],
+            "client": ("127.0.0.1", 5000),
+            "server": ("127.0.0.1", 8787),
+        }
+        sent: list = []
+
+        async def receive() -> dict:
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        async def send(message: dict) -> None:
+            # The server's side of a hung-up socket: the first audio chunk cannot be written.
+            if message.get("body"):
+                raise OSError("the client went away")
+            sent.append(message)
+
+        with patch(PATCH_SERVER_LOGGER):
+            try:
+                asyncio.run(host_app(scope, receive, send))
+            except Exception as e:  # the disconnect surfaces as starlette's ClientDisconnect
+                assert type(e).__name__ == "ClientDisconnect"
+        gc.collect()
+
+        assert sent[0]["status"] == 200
+        assert _gone(int((recorded / "pid").read_text(encoding="utf-8")))

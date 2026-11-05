@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_pair_cli.py
-# Description: Host API Pair Module — a one-use pairing QR in the terminal, for the phone's camera
-# Version: 1.0.1
+# Description: Host API Pair Module — a one-use pairing QR for the phone's camera, or a code for the extension
+# Version: 1.1.0
 # Created: 2026-10-13
-# Modified: 2026-10-17
+# Modified: 2026-11-05
 # =============================================
 
 """
@@ -24,7 +24,9 @@ from aipass.api.apps.handlers.host import pairings as host_pairings
 from aipass.api.apps.modules import host_serve
 
 SUBCOMMANDS = ("pair",)
-USAGE = "drone @api host-api pair <label> [--scope read|operate] [--ttl SECONDS]"
+USAGE = "drone @api host-api pair <label>|extension [--scope read|operate] [--ttl SECONDS]"
+EXTENSION_MODE = "extension"
+PAIR_FRAGMENT = "/#pair="
 
 
 def _life(seconds: int) -> str:
@@ -36,8 +38,10 @@ def _life(seconds: int) -> str:
 
 
 def _cmd_pair(args: List[str]) -> None:
-    """Mint a pairing code; print its QR, a blank line, its URL and its expiry. Refusals exit 1."""
-    scope = host_serve.flag_value(args, "--scope") or "read"
+    """Mint a pairing code; print its QR, a blank line, its URL and its expiry. Refusals exit 1.
+    `extension` mode: operate by default, loopback allowed (same machine), the code and base URL as text, no QR."""
+    extension = bool(args) and args[0] == EXTENSION_MODE
+    scope = host_serve.flag_value(args, "--scope") or ("operate" if extension else "read")
     ttl_text = host_serve.flag_value(args, "--ttl")
     flag_values = {scope, ttl_text}
     labels = [arg for arg in args if not arg.startswith("-") and arg not in flag_values]
@@ -55,25 +59,33 @@ def _cmd_pair(args: List[str]) -> None:
 
     try:
         # Before the mint: a loopback bind would print a code no phone can open.
-        host_pairings.bind_address(allow_loopback=False)
+        host_pairings.bind_address(allow_loopback=extension)
         minted = host_pairings.mint_pairing(labels[0], scope, ttl)
-        qr = host_pairings.render_qr(minted["url"])
+        qr = "" if extension else host_pairings.render_qr(minted["url"])
     except host_pairings.PairingError as e:
         logger.warning("[host_api] pair refused: %s", e)
         error(str(e))
         sys.exit(1)
 
     expires = datetime.fromisoformat(minted["expires_at"]).astimezone().strftime("%H:%M")
-    console.print(qr, markup=False, highlight=False, soft_wrap=True)
-    console.print()
-    console.print(minted["url"], markup=False, highlight=False, soft_wrap=True)
-    console.print(
-        f"Expires {expires} ({_life(ttl)}), one use. Open your phone's camera and point it at the code.",
-        markup=False,
-        highlight=False,
-        soft_wrap=True,
+    if extension:
+        lines = [
+            f"Pairing code: {minted['code']}",
+            f"Host: {minted['url'].partition(PAIR_FRAGMENT)[0]}",
+            f"Expires {expires} ({_life(ttl)}), one use. Paste both into the extension's options page.",
+        ]
+    else:
+        console.print(qr, markup=False, highlight=False, soft_wrap=True)
+        console.print()
+        lines = [
+            minted["url"],
+            f"Expires {expires} ({_life(ttl)}), one use. Open your phone's camera and point it at the code.",
+        ]
+    for line in lines:
+        console.print(line, markup=False, highlight=False, soft_wrap=True)
+    json_handler.log_operation(
+        "host_api_pair_printed", {"id": minted["id"], "scope": minted["scope"], "ttl": ttl, "extension": extension}
     )
-    json_handler.log_operation("host_api_pair_printed", {"id": minted["id"], "scope": minted["scope"], "ttl": ttl})
 
 
 def handle_command(command: str, args: List[str]) -> bool:
@@ -103,4 +115,8 @@ def print_introspection() -> None:
     console.print("[bold cyan]host_pair_cli — a phone signs in by its camera[/bold cyan]")
     console.print()
     console.print("  [cyan]host-api pair <label>[/cyan]  [dim]A one-use QR, five minutes; the phone redeems it[/dim]")
+    console.print(
+        "  [cyan]host-api pair extension[/cyan]  [dim]A one-use code and the host URL as text, operate scope, "
+        "loopback allowed; paste both into the browser extension's options page[/dim]"
+    )
     console.print()

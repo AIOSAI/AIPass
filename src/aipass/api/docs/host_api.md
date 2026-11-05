@@ -34,20 +34,17 @@ real. The trail records `token_revoked` (with the token's id) or
 `token_unrecognised` (with none), so the log can say whether a refused device
 presented a credential this host once issued or garbage.
 
-**The store answers three questions about every credential:** `minted_by`
-(best-effort, from the branch drone names in the child environment —
-**provenance, never permission**, since the value comes from the caller's own
-environment), `revoked_at`, and `last_used`, which separates a live token from one
-that is merely un-revoked. `drone @api host-api list-tokens` prints all three.
+**The store keeps three facts per credential:** `minted_by` (best-effort, from
+the caller's own environment: **provenance, never permission**), `revoked_at`,
+and `last_used`, which tells a live token from a merely un-revoked one.
+`drone @api host-api list-tokens` prints all three.
 
-`last_used` means a write on every authenticated request, so the store is written
-atomically (temp file, `fsync`, `os.replace`, created `0o600` rather than
-chmod'd after) behind a cross-platform lock with stale-lock breaking. Two rules
-hold it together: **telemetry never undoes security** — the touch re-reads inside
-the lock, so a stale record list can never write a revoked token back to life, and
-a lock it cannot take means the timestamp is dropped, never raised — and writes
-are coalesced to one per minute per token, so feed polling does not rewrite the
-store every few seconds. The envelope is versioned; records predating the fields
+`last_used` writes on every authenticated request, so the store is written
+atomically (temp file, `fsync`, `os.replace`, created `0o600`) behind a
+cross-platform lock with stale-lock breaking. **Telemetry never undoes security**:
+the touch re-reads inside the lock, so a stale list never revives a revoked token,
+and a lock it cannot take drops the timestamp, never raises. Writes coalesce to
+one per minute per token. The envelope is versioned; records predating the fields
 still verify, and read back as `unknown`.
 
 **A raw token is never printed.** `issue-token` writes its receipt to
@@ -78,10 +75,11 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `GET /v1/git-log?branch=&project=&limit=` | read | Recent commits — sha + subject. **Always repo grain.** `limit` 1–50, outside is refused, never clamped |
 | `GET /v1/commit?branch=&ref=&project=` | read | One commit: author, date, subject, message, files with ± counts. Its patch rides on `/v1/diff` |
 | `GET /v1/git-remote?branch=&project=` | read | The repository's remote, for link-cards out to the forge. `url` as configured (password redacted), `web` browsable or `null`, `remote` names which one answered. No remote: 200, all three `null` |
-| `GET /v1/fleet?project=` | read | @baud's snapshot envelope, unchanged. `project` is case-sensitive |
+| `GET /v1/fleet?project=` | read | @baud's snapshot envelope; rows only gain live state. `project` is case-sensitive |
+| `/v1/agent/…`, `/v1/models`, `/v1/speak` | read / operate | Agent chat: [host_agent_chat.md](host_agent_chat.md) |
 | `GET /v1/rooms?project=` | read | A filter over that same snapshot — never a room judgment of its own |
 | `GET /v1/projects` | read | @baud's project census — the switcher menu's rows, unchanged |
-| `GET /v1/roster` | read | Every working agent in **every** project. Takes no parameters — any is a 400, never a silent drop |
+| `GET /v1/roster` | read | Every working agent in **every** project, rows with live state as /v1/fleet's. Takes no parameters — any is a 400, never a silent drop |
 | `GET /v1/machine` | read | @skills' `machine_vitals()`, **verbatim**: `ok`, `schema`, `sampled_at` and nine sections (cpu, load, memory, swap, temp, fan, network, processes, battery), each carrying `available`/`reason`/`sentence`/`detail`. 1 s single-flight cache; a fresh server's first read shows cpu and network `warming`. An absent reading is a **200** with its section, never a zero; **503** only when the skill refused (`psutil_missing`, `switched_off`: code in `error.reason`, detail in the host log) or its door failed (`machine_door_failed`). No parameters; any is a 400 |
 | `GET /v1/machine/processes?limit=20` | read | @skills' `machine_processes(limit)`, **verbatim**. A real ~0.5 s CPU sample, uncached: ask on open, never poll. `limit` as sent (the skill clamps); not a number is a 400. Refusals as `/v1/machine` |
 | `GET /v1/lock` | read | @skills' `lock_state()`, **verbatim**: `ok`, `locked`, `method`, `session`, `reason`, `detail`. 1 s single-flight cache. Cannot tell (`ok: false`, `locked: null`) is a **200**, drawn unknown, never unlocked; **503** `lock_door_failed` only when the door raised or broke its shape. No parameters; any is a 400. Locking stays `POST /v1/verbs/lock`, operate scope |
@@ -247,6 +245,8 @@ credential, once, for five minutes.
   answering refuses with the two commands that fix it (`serve --detach`, then
   the same `pair`); an error status refuses and names `host-api status`. In the
   door, so the installer's mint has it too.
+
+**The browser extension** pairs by `host-api pair extension`: [host_agent_chat.md](host_agent_chat.md).
 
 The module door: `mint_pairing(label, scope="read", ttl_seconds=300) -> dict`,
 `render_qr(text) -> str` and `PairingError` (a `TokenError`), on

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_api.py
 # Description: Host API Module — server lifecycle and token administration
-# Version: 1.5.1
+# Version: 1.5.2
 # Created: 2026-08-14
-# Modified: 2026-10-22
+# Modified: 2026-11-05
 # =============================================
 
 """
@@ -104,6 +104,9 @@ def print_help() -> None:
     console.print("  [cyan]host-api list-tokens[/cyan]           [dim]List tokens — values are never shown[/dim]")
     console.print("  [cyan]host-api revoke-token <id>[/cyan]     [dim]Revoke, effective on the next request[/dim]")
     console.print("  [cyan]host-api pair <label>[/cyan]          [dim]A one-use QR the phone's camera redeems[/dim]")
+    console.print(
+        "  [cyan]host-api pair extension[/cyan]       [dim]A one-use code and URL as text, for the extension[/dim]"
+    )
     console.print("  [cyan]host-api config[/cyan]                [dim]Show the effective server config[/dim]")
     console.print(
         "  [cyan]host-api set-config[/cyan]            [dim]Set bind, face dir or baud binary (validated first)[/dim]"

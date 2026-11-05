@@ -108,6 +108,7 @@ Depth lives in [docs/](docs/README.md), one file per surface or handler group:
 | [docs/clients.md](docs/clients.md) | The in-process Python API other branches import, and the contract registry |
 | [docs/host_api.md](docs/host_api.md) | The Stage 0 host API: bind rule, tokens, scopes, routes, the read cache |
 | [docs/host_surfaces.md](docs/host_surfaces.md) | Scopes and verbs, the phone face, the fleet snapshot, the terminal socket, uploads, the backup door |
+| [docs/host_agent_chat.md](docs/host_agent_chat.md) | An agent's chat feed and live state, typing into its room, model switches, usage, and read-aloud |
 | [docs/host_autostart.md](docs/host_autostart.md) | The systemd user unit, what it installs, and what it deliberately does not |
 | [docs/git_surface.md](docs/git_surface.md) | The git reads the phone asks for: patch, changes, log, commit |
 | [docs/git_remote.md](docs/git_remote.md) | The remote lane, its two fields, and why credentials never travel |
