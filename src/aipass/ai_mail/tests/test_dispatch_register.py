@@ -3,7 +3,7 @@
 # Description: Tests for the dispatch register append-only log
 # Version: 1.2.0
 # Created: 2026-08-22
-# Modified: 2026-11-03
+# Modified: 2026-11-04
 # =============================================
 
 """Tests for apps/handlers/dispatch/register.py: the append-only dispatch register, and the grant its rows carry."""
@@ -27,6 +27,8 @@ import pytest
 from aipass.ai_mail.apps.handlers.dispatch import grant as grant_mod
 from aipass.ai_mail.apps.handlers.dispatch import register, report
 from aipass.ai_mail.apps.handlers.notify import jsonl_records
+from aipass.ai_mail.apps.modules import grants as grants_module
+from aipass.cli.apps.modules import display
 
 
 @pytest.fixture
@@ -823,3 +825,122 @@ class TestAGrantIsValidatedBeforeTheSend:
             grant_mod.parse_grant(str(seed), "src", seed / "src")
         with pytest.raises(grant_mod.GrantRefused, match="go together"):
             grant_mod.parse_grant(str(seed), None, seed.parent)
+
+
+class TestAGrantWidensWhileItRuns:
+    def test_a_file_and_a_dir_join_the_grant_and_the_next_write_is_allowed(self, repo, seed, admin):
+        (seed / "docs").mkdir()
+        dispatch_id = _live_grant(repo, seed, paths="src/loop.ts")
+
+        row = register.widen_grant(dispatch_id[:8], "package.json,docs", by="@devpulse", repo_root=repo)
+
+        [listed] = grant_mod.open_grants(repo_root=repo)
+        assert listed["grant"] == row["grant"]
+        widened = listed["grant"]
+        assert (widened["root"], widened["granted_by"]) == (str(seed.resolve()), "@devpulse")
+        assert (widened["files"], widened["dirs"]) == (["src/loop.ts", "package.json"], ["docs"])
+        assert widened["widened_by"] == ["@devpulse"]
+        datetime.fromisoformat(widened["widened_at"])
+        for target in (seed / "package.json", seed / "docs" / "new.md"):
+            decision = grant_mod.granted("hooks", dispatch_id, str(target.resolve()), repo_root=repo)
+            assert decision["allowed"] is True, decision
+
+    def test_widening_with_paths_it_already_holds_writes_nothing(self, repo, seed, admin):
+        dispatch_id = _live_grant(repo, seed)
+        before = len(_lines(repo))
+
+        row = register.widen_grant(dispatch_id, "src/loop.ts,src/hooks/", by="@devpulse", repo_root=repo)
+
+        assert len(_lines(repo)) == before
+        assert "widened_at" not in row["grant"]
+
+    def test_a_prefix_two_open_dispatches_share_is_refused_naming_both(self, repo, seed, admin, monkeypatch):
+        ids = iter(["abc1-row", "abc2-row"])
+        monkeypatch.setattr(register.uuid, "uuid4", lambda: next(ids))
+        _live_grant(repo, seed, paths="src/loop.ts")
+        _live_grant(repo, seed, paths="src/hooks")
+
+        with pytest.raises(grant_mod.GrantRefused, match="2 open dispatches match 'abc'") as refused:
+            register.widen_grant("abc", "package.json", by="@devpulse", repo_root=repo)
+        assert "abc1-row" in str(refused.value) and "abc2-row" in str(refused.value)
+
+    def test_a_dispatch_without_a_grant_and_a_closed_one_cannot_be_widened(self, repo, seed, admin):
+        plain = register.open_dispatch("@devpulse", "@hooks", "s", 600, repo_root=repo)
+        assert isinstance(plain, str)
+        with pytest.raises(grant_mod.GrantRefused, match="carries no grant"):
+            register.widen_grant(plain, "package.json", by="@devpulse", repo_root=repo)
+
+        closed = _live_grant(repo, seed)
+        register.close_dispatch(closed, "completed", repo_root=repo)
+        with pytest.raises(grant_mod.GrantRefused, match="0 open dispatches match"):
+            register.widen_grant(closed, "package.json", by="@devpulse", repo_root=repo)
+
+    @pytest.mark.parametrize(
+        "paths, said",
+        [("../x", "without .."), (".git/config", ".git"), (".", "root itself"), ("nope.ts", "does not exist")],
+    )
+    def test_each_path_refused_at_send_is_refused_and_nothing_is_written(self, repo, seed, admin, paths, said):
+        dispatch_id = _live_grant(repo, seed)
+        before = len(_lines(repo))
+
+        with pytest.raises(grant_mod.GrantRefused, match=re.escape(said)):
+            register.widen_grant(dispatch_id, paths, by="@devpulse", repo_root=repo)
+        assert len(_lines(repo)) == before
+
+    def test_a_path_another_open_grant_holds_is_refused(self, repo, seed, admin):
+        mine = _live_grant(repo, seed, paths="src/loop.ts")
+        theirs = _live_grant(repo, seed, paths="src/hooks")
+
+        with pytest.raises(grant_mod.GrantRefused, match=f"overlaps open dispatch {theirs}"):
+            register.widen_grant(mine, "src/hooks/a.ts", by="@devpulse", repo_root=repo)
+
+    def test_a_seat_the_admin_rail_does_not_verify_is_refused(self, repo, seed, admin, monkeypatch):
+        dispatch_id = _live_grant(repo, seed)
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "hooks")
+
+        with pytest.raises(grant_mod.GrantRefused, match="grant not widened: only the verified admin seat"):
+            register.widen_grant(dispatch_id, "package.json", by="@hooks", repo_root=repo)
+
+    def test_a_row_that_closes_between_the_read_and_the_lock_is_not_reopened(self, repo, seed, admin, monkeypatch):
+        dispatch_id = _live_grant(repo, seed)
+        real_parse = grant_mod.parse_grant
+
+        def parse_then_close(*args):
+            register.close_dispatch(dispatch_id, "stopped", repo_root=repo)
+            return real_parse(*args)
+
+        monkeypatch.setattr(grant_mod, "parse_grant", parse_then_close)
+
+        with pytest.raises(grant_mod.GrantRefused, match="closed or changed meanwhile"):
+            register.widen_grant(dispatch_id, "package.json", by="@devpulse", repo_root=repo)
+        assert grant_mod.open_grants(repo_root=repo) == []
+
+
+class TestTheGrantsWidenVerb:
+    """Through the command, on the register the suite's conftest points at."""
+
+    def _open_grant(self, seed):
+        return register.open_dispatch(
+            "@devpulse", "@hooks", "s", 600, grant={"root": str(seed), "files": ["src/loop.ts"], "dirs": []}
+        )
+
+    def test_grants_widen_prints_the_widened_grant_for_the_admin(self, seed, admin, capsys):
+        dispatch_id = self._open_grant(seed)
+
+        grants_module.handle_command("grants", ["widen", dispatch_id[:8], "src/hooks"])
+
+        out = capsys.readouterr().out
+        assert f"{seed}: src/loop.ts, src/hooks/" in out
+        assert "Mail @hooks the new paths" in out
+        assert not display.command_failed()
+
+    def test_grants_widen_from_a_seat_the_rail_does_not_verify_is_refused(self, seed, admin, monkeypatch, capsys):
+        dispatch_id = self._open_grant(seed)
+        monkeypatch.setattr(_VERIFY, lambda: (False, "leg 3 failed"))
+
+        grants_module.handle_command("grants", ["widen", dispatch_id, "src/hooks"])
+
+        assert "grant not widened: only the verified admin seat may grant" in capsys.readouterr().err
+        assert display.command_failed()
+        [row] = register.outstanding()
+        assert row["grant"]["dirs"] == []

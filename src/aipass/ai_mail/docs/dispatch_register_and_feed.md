@@ -233,6 +233,14 @@ the register lock is held, so a second dispatch sent in the same second, or a ro
 by importing the function, is refused there and nothing is spawned. A busy or refused wake
 opens no row, so issues no grant, and the dispatch says so.
 
+`grants widen <id or unique prefix> <p1,p2,...>` grows an open grant while its dispatch
+runs: admin seat only, the new paths validated under the row's root exactly as at send,
+overlap with every other open grant checked under the lock. It appends the row again with
+the merged `files` and `dirs`, `widened_at` and a `widened_by` list; the gate reads the
+register on every write, so the next write sees it. A row that closed or changed between
+the read and the lock is refused, never reopened; a widen that adds nothing writes nothing.
+It sends no mail: the admin tells the target. There is no narrowing and no change of root.
+
 The grant needs no revoke: it is open exactly while its row is, so the monitor's exit, a
 reply, a stop and a close each end it. `door_dispatch_grant.granted(caller_branch,
 dispatch_id, target_path)` answers `{allowed, dispatch_id, reason}` for one write, derived at

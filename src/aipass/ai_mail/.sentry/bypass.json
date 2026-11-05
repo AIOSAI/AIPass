@@ -342,9 +342,10 @@
       "file": "apps/modules/grants.py",
       "standard": "logged_fallback",
       "lines": [
-        70
+        77,
+        99
       ],
-      "reason": "Same CLI handler contract as dispatch.py: an unreadable register has already called error() (mark_command_failed) and logged; True tells the router the command was recognised."
+      "reason": "Same CLI handler contract as dispatch.py: an unreadable register or a refused widen has already called error() (mark_command_failed); True tells the router the command was recognised."
     }
   ],
   "notes": {

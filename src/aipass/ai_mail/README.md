@@ -85,7 +85,8 @@ discovers modules and routes to the first one claiming a command. `apps/modules/
 orchestration, one module per surface: `email` (inbox, view, reply, close, contacts),
 `email_send` (direct, interactive and broadcast sending), `dispatch` (send-plus-wake,
 register, manual wake, stop, close, and the `--grant-root`/`--grant` write grant) and
-`grants` (the open grants, listed). Four doors sit beside them, re-exports for other
+`grants` (the open grants, listed; `grants widen <id> <paths>` adds paths to a
+running dispatch's grant from the admin seat, validated as at send). Four doors sit beside them, re-exports for other
 branches and not commands: `door_wake`, `door_verified_caller`, `door_session_pointer` and
 `door_dispatch_grant` (the decision a write gate reads: is this write granted right now).
 `apps/handlers/` is fenced: another branch that imports it directly is refused at import
@@ -142,7 +143,7 @@ Depth lives in [docs/](docs/), one file per handler group, each small enough for
 
 ---
 
-**Last Updated:** 2026-11-03
+**Last Updated:** 2026-11-04
 
 ---
 [← Back to AIPass](../../../README.md)

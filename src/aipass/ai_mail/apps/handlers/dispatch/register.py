@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: register.py
 # Description: Dispatch Register
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-08-22
-# Modified: 2026-11-03
+# Modified: 2026-11-04
 # =============================================
 
 """The dispatch register — what was promised, written before anything spawns.
@@ -388,15 +388,8 @@ def _is_overdue(entry: Dict, moment: datetime) -> bool:
 def _grant_precheck(grant: Dict, repo_root: Optional[Path]) -> Callable[[], None]:
     """Verify the admin seat now, and return the overlap check the register lock runs before the write."""
     from aipass.ai_mail.apps.handlers.dispatch.grant import GrantRefused, overlapping
-    from aipass.ai_mail.apps.handlers.users.verified_caller import is_verified_admin_caller
 
-    # A row written by python -c importing this function must pass the same rail the CLI does.
-    try:
-        admin = is_verified_admin_caller()
-    except Exception as exc:
-        raise GrantRefused(f"grant not issued: admin verification failed ({exc})") from exc
-    if not admin:
-        raise GrantRefused("grant not issued: only the verified admin seat may grant")
+    _require_admin("grant not issued")
 
     def check() -> None:
         """Refuse a grant that shares a path with one already open (the same-second race)."""
@@ -409,6 +402,79 @@ def _grant_precheck(grant: Dict, repo_root: Optional[Path]) -> Callable[[], None
             raise GrantRefused(f"grant not issued: it overlaps open dispatch {clash}")
 
     return check
+
+
+def _require_admin(refusal: str) -> None:
+    """Raise grant.GrantRefused, prefixed *refusal*, unless the caller is the verified admin seat."""
+    from aipass.ai_mail.apps.handlers.dispatch.grant import GrantRefused
+    from aipass.ai_mail.apps.handlers.users.verified_caller import is_verified_admin_caller
+
+    # A row written by python -c importing this module must pass the same rail the CLI does.
+    try:
+        admin = is_verified_admin_caller()
+    except Exception as exc:
+        raise GrantRefused(f"{refusal}: admin verification failed ({exc})") from exc
+    if not admin:
+        raise GrantRefused(f"{refusal}: only the verified admin seat may grant")
+
+
+def widen_grant(wanted: str, paths_raw: Optional[str], by: str, repo_root: Optional[Path] = None) -> Dict:
+    """Add paths to the open grant of the one dispatch whose id is or starts with *wanted*; return its row.
+
+    The paths are validated as at send (parse_grant under the row's root) and overlap with every
+    other open grant is checked under the register lock, where a row that closed or changed since
+    it was read is refused rather than reopened. Raises grant.GrantRefused naming why; nothing is
+    written then. A widen that adds nothing writes nothing.
+    """
+    from aipass.ai_mail.apps.handlers.dispatch.grant import GrantRefused, overlapping, parse_grant
+
+    json_handler.log_operation("register_widen_grant", {"dispatch": str(wanted), "by": str(by)})
+    _require_admin("grant not widened")
+    try:
+        rows = outstanding(repo_root=repo_root)
+    except OSError as exc:
+        raise GrantRefused(f"grant not widened: the register is unreadable ({exc})") from exc
+    matches = [r for r in rows if wanted and str(r.get("dispatch_id", "")).startswith(wanted)]
+    if len(matches) != 1:
+        named = ", ".join(str(r.get("dispatch_id")) for r in matches) or "none"
+        raise GrantRefused(f"grant not widened: {len(matches)} open dispatches match {wanted!r} ({named})")
+    row = matches[0]
+    dispatch_id = str(row["dispatch_id"])
+    current = row.get(GRANT_KEY)
+    if not isinstance(current, dict) or not current.get("root"):
+        raise GrantRefused(f"grant not widened: dispatch {dispatch_id} carries no grant; a grant is issued at send")
+
+    added = parse_grant(str(current["root"]), paths_raw, find_repo_root())
+    files = list(dict.fromkeys([*current.get("files", []), *added["files"]]))
+    dirs = list(dict.fromkeys([*current.get("dirs", []), *added["dirs"]]))
+    if files == list(current.get("files", [])) and dirs == list(current.get("dirs", [])):
+        return row
+
+    base = {k: v for k, v in row.items() if k not in ("overdue", "monitor_alive")}
+    widened = {
+        **current,
+        "files": files,
+        "dirs": dirs,
+        "widened_at": datetime.now().astimezone().isoformat(),
+        "widened_by": [*current.get("widened_by", []), str(by)],
+    }
+
+    def check() -> None:
+        """Refuse when the row moved since it was read, or the wider grant meets another open one."""
+        try:
+            latest = _find_open_record(dispatch_id, repo_root)
+            others = [r for r in outstanding(repo_root=repo_root) if r.get("dispatch_id") != dispatch_id]
+        except OSError as exc:
+            raise GrantRefused(f"grant not widened: the register is unreadable ({exc})") from exc
+        if latest != base:
+            raise GrantRefused(f"grant not widened: dispatch {dispatch_id} closed or changed meanwhile")
+        clash = overlapping(widened, others)
+        if clash:
+            raise GrantRefused(f"grant not widened: it overlaps open dispatch {clash}")
+
+    if not _append({**base, GRANT_KEY: widened}, repo_root, check):
+        raise GrantRefused(f"grant not widened: the register could not be written for {dispatch_id}")
+    return {**row, GRANT_KEY: widened}
 
 
 def _append(record: Dict, repo_root: Optional[Path], precheck: Optional[Callable[[], None]] = None) -> bool:
