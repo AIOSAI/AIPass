@@ -35,6 +35,7 @@ SENTENCES = {
     "roster_misuse": "This server asked @baud for the roster in a way it refuses; the reason is in this host's log",
     "settings_refused": "This settings request was refused; the reason is in this host's log",
     "speech_unavailable": "Piper or its voice is not installed on this host; the reason is in this host's log",
+    "screenshot_unavailable": "The desktop's screenshot picker did not open or took no shot; see this host's log",
     "settings_unavailable": "The settings could not be read or written; the reason is in this host's log",
     "upload_unavailable": "The upload could not be stored; the reason is in this host's log",
     "verb_unavailable": "This action could not be carried out; the reason is in this host's log",

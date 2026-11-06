@@ -27,6 +27,7 @@ import pytest
 from aipass.api.apps.handlers.host import attach as host_attach
 from aipass.api.apps.handlers.host import pump as host_pump
 from aipass.api.apps.handlers.host import server as host_server
+from aipass.api.apps.handlers.host import screenshot
 from aipass.api.apps.handlers.host import speech
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.tests.support_host_attach import (
@@ -392,3 +393,69 @@ class TestAHungUpListenerKillsPiper:
 
         assert sent[0]["status"] == 200
         assert _gone(int((recorded / "pid").read_text(encoding="utf-8")))
+
+
+# =============================================
+# SCREENSHOT — handlers/host/screenshot.py, agent_extras_route.py
+# =============================================
+
+# A stand-in gdbus: the portal call answers at once; the desktop "saves" the shot a moment later.
+FAKE_GDBUS = """#!{python}
+import os, sys, time
+assert "org.freedesktop.portal.Screenshot.Screenshot" in sys.argv
+time.sleep(0.3)
+open({shot!r}, "wb").write(b"png")
+"""
+
+
+def _install_gdbus(home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A fake gdbus first on PATH, writing a PNG into Pictures/Screenshots under *home*; the PNG's path."""
+    shot = home / screenshot.SAVED / "shot.png"
+    shot.parent.mkdir(parents=True)
+    binary = home / "bin" / "gdbus"
+    binary.parent.mkdir()
+    binary.write_text(FAKE_GDBUS.format(python=sys.executable, shot=str(shot)), encoding="utf-8")
+    binary.chmod(0o755)
+    monkeypatch.setenv("PATH", str(binary.parent))
+    return shot
+
+
+@pytest.mark.skipif(os.name != "posix", reason="a script with a shebang stands in for gdbus")
+@fastapi_required
+class TestScreenshotAnswersTheSavedPath:
+    """POST /v1/screenshot: the picker's PNG as {path}; 503 with no gdbus; read scope is refused."""
+
+    def test_the_shot_the_desktop_saves_comes_back_as_its_path(
+        self, store: Any, host_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from fastapi.testclient import TestClient
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        shot = _install_gdbus(tmp_path, monkeypatch)
+        with patch(PATCH_SERVER_LOGGER):
+            _, raw = host_tokens.issue_token("extension", "operate")
+            api = TestClient(host_app, raise_server_exceptions=False)
+
+            response = api.post("/v1/screenshot", headers={"Authorization": f"Bearer {raw}"})
+
+        assert (response.status_code, response.json()) == (200, {"path": str(shot)})
+
+    def test_no_gdbus_is_a_503(
+        self, store: Any, host_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from fastapi.testclient import TestClient
+
+        monkeypatch.setenv("PATH", str(tmp_path))
+        with patch(PATCH_SERVER_LOGGER):
+            _, raw = host_tokens.issue_token("extension", "operate")
+            api = TestClient(host_app, raise_server_exceptions=False)
+
+            response = api.post("/v1/screenshot", headers={"Authorization": f"Bearer {raw}"})
+
+        assert (response.status_code, response.json()["error"]["code"]) == (503, "screenshot_unavailable")
+
+    def test_read_scope_is_refused(self, speaker: Any) -> None:
+        api, read = speaker
+
+        assert api.post("/v1/screenshot", headers=read).status_code == 403

@@ -10,7 +10,7 @@
 # without the [host] extra these names are None, and register() is only ever
 # called from create_app(), which refuses first when the extra is missing.
 
-"""Host API Agent Extras Route: GET /v1/models, POST /v1/speak. Reference: docs/host_agent_chat.md"""
+"""Host API Agent Extras Route: GET /v1/models, POST /v1/speak, POST /v1/screenshot. Ref: docs/host_agent_chat.md"""
 
 from typing import Any, Callable
 
@@ -18,6 +18,7 @@ from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.host import agent_chat
 from aipass.api.apps.handlers.host import agent_models
+from aipass.api.apps.handlers.host import screenshot
 from aipass.api.apps.handlers.host import speech
 from aipass.api.apps.handlers.host.agent_route import json_body
 
@@ -61,4 +62,15 @@ def register(
             raise logged_denial(e, 503, "speech_unavailable") from e
         return StreamingResponse(speech.stream(cleaned), media_type=PCM_MEDIA_TYPE, headers={RATE_HEADER: str(rate)})
 
-    json_handler.log_operation("host_api_agent_extras_route_registered", {"routes": ["/v1/models", "/v1/speak"]})
+    # operate scope: it opens a picker on the desktop and writes a file there. def: blocks while the shot is framed.
+    @app.post("/v1/screenshot")
+    def take_screenshot(record: dict = Depends(require_scope("operate"))) -> dict:
+        """Open the desktop's screenshot picker and answer {path} of the saved PNG, for an [Image #n] tag."""
+        try:
+            return {"path": str(screenshot.take())}
+        except screenshot.ScreenshotUnavailable as e:
+            raise logged_denial(e, 503, "screenshot_unavailable") from e
+
+    json_handler.log_operation(
+        "host_api_agent_extras_route_registered", {"routes": ["/v1/models", "/v1/speak", "/v1/screenshot"]}
+    )

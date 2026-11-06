@@ -32,9 +32,10 @@ before any lookup. The agent is looked up in @baud's roster (`baud-cli --roster`
 | `GET /v1/agent/{project}/{name}/usage` | read | none | `{provider, context: {used, total, percent} or null, limits: [{label, percent, severity, resets_at}], note}` | 400 `agent_refused`; 404 `agent_not_live`; 503 `fleet_unavailable` |
 | `GET /v1/models` | read | none | `{claude: {models}, codex: {models: [{name, label, efforts}]}, opencode: {models, inline, reason}, switch: {from: {to: takes_model}}}` | 401, 403 only |
 | `POST /v1/speak` | read | `{text}` | `audio/L16` stream, rate in `X-Sample-Rate` | 400 `agent_body_refused`, `speak_text_refused`; 503 `speech_unavailable` |
+| `POST /v1/screenshot` | operate | none | `{path}` of the saved PNG on the host | 503 `screenshot_unavailable` |
 
 Every route is a `def`: the roster execs @baud, the feed reads up to 4 MB of transcript, the catalog
-execs `opencode`, the usage read calls Anthropic, and speech runs Piper.
+execs `opencode`, the usage read calls Anthropic, speech runs Piper, and the screenshot waits for the picker.
 
 ## The feed
 
@@ -166,6 +167,17 @@ Closing the stream, or the client hanging up, kills Piper: no orphan process.
 
 It takes `read` scope: it types into no agent and changes nothing on the host, it only makes local
 audio for the caller.
+
+## Screenshot
+
+`POST /v1/screenshot` opens the desktop's own screenshot picker on the host, the one the keyboard's
+Print key opens, through the XDG portal (`gdbus call … org.freedesktop.portal.Screenshot.Screenshot`,
+interactive). The portal answers over D-Bus, which the host does not listen to, so the call waits up to
+120 s for a new PNG in `~/Pictures/Screenshots` or `~/Pictures` and answers `{path}`: a host path, which
+the client puts behind an `[Image #n]` tag as it does an upload's. No `gdbus`, a refused portal, or no
+shot within the wait is **503** `screenshot_unavailable` (Linux desktops only).
+
+It takes `operate` scope: it opens a window on the host's desktop and writes a file there.
 
 ## Calls from the browser extension
 
