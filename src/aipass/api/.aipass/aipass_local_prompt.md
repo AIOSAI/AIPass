@@ -9,7 +9,7 @@ API — the external API gateway, and the Stage 0 host API the BAUD phone talks 
 
  - Inventory: `drone @api` (self-map), `drone @api --help` (full surface), `drone @api host-api --help` (the host server).
  - Depth: `docs/` — one file per surface, indexed from `README.md`. Read one when something breaks, not at startup.
- - Credentials: the login keyring, service `aipass`, username `<provider>/<slug>` (`handlers/auth/secrets.py`). The old store directory is only `secrets migrate`'s import source plus `host_api/`'s lock and receipts.
+ - Credentials: the login keyring, service `aipass`, username `<provider>/<slug>` (`handlers/auth/secrets.py`). The old store directory is `secrets migrate`'s import source plus `host_api/`: the host's own 0600 files (tokens, pairings, config), lock and receipts, never in the keyring, so a locked keyring cannot stop the host.
 
 # Directory tree
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_config_cli.py
 # Description: Host API Config Module — showing and setting what the server binds, serves and execs
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-09-14
-# Modified: 2026-10-22
+# Modified: 2026-11-06
 # =============================================
 
 """
@@ -22,6 +22,9 @@ from aipass.prax import logger
 from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import face as host_face
 from aipass.api.apps.handlers.host import fleet as host_fleet
+from aipass.api.apps.handlers.host import store as host_store
+from aipass.api.apps.handlers.host import tokens as host_tokens
+from aipass.api.apps.handlers.auth import secrets as secrets_store
 from aipass.api.apps.modules import host_serve
 
 # set-config's spelling, for --face-dir and --baud-bin alike, of "clear it: back to automatic".
@@ -126,7 +129,7 @@ def _cmd_set_config(args: List[str]) -> None:
         json_handler.log_operation("host_api_config_saved", {"host": bind_host, "port": bind_port})
 
         success(f"Config saved: {bind_host}:{bind_port}")
-        console.print(f"  [dim]keyring entry {entry}[/dim]")
+        console.print(f"  [dim]stored in {entry}[/dim]")
     console.print()
 
 
@@ -196,7 +199,28 @@ def _set_face_dir(raw: str) -> bool:
     return True
 
 
-SUBCOMMANDS = {"config", "set-config"}
+def _cmd_store(args: List[str]) -> None:
+    """Copy the host's tokens, pairings and config from the login keyring into their files, once."""
+    if args != ["import"]:
+        error("Unknown store command", suggestion="drone @api host-api store import")
+        return
+
+    try:
+        # The token lock: a mint or revoke mid-import would be overwritten by the copy.
+        with host_tokens.store_lock():
+            outcome = host_store.import_from_keyring()
+    except (secrets_store.SecretsUnavailable, OSError) as e:
+        error(f"Store import refused: {e}")
+        return
+
+    header("Host API Store Import")
+    for name, state in outcome.items():
+        console.print(f"  [cyan]{name}:[/cyan] {state}")
+    success("The host store is on disk; the keyring's host entries are no longer read")
+    console.print()
+
+
+SUBCOMMANDS = {"config", "set-config", "store"}
 
 
 def handle_command(command: str, args: List[str]) -> bool:
@@ -204,7 +228,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command not in ("host-api", "host_api"):
         return False
 
-    # The help gate claims only config and set-config; `host-api --help` is host_api.py's.
+    # The help gate claims only config, set-config and store; `host-api --help` is host_api.py's.
     if not args:
         print_introspection()
         return True
@@ -218,6 +242,8 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     if args[0] == "config":
         _cmd_config()
+    elif args[0] == "store":
+        _cmd_store(args[1:])
     else:
         _cmd_set_config(args[1:])
 
@@ -231,4 +257,5 @@ def print_introspection() -> None:
     console.print()
     console.print("  [cyan]host-api config[/cyan]      [dim]The effective bind, face and baud binary[/dim]")
     console.print("  [cyan]host-api set-config[/cyan]  [dim]Bind, face dir or baud binary (validated first)[/dim]")
+    console.print("  [cyan]host-api store import[/cyan] [dim]Copy the host store out of the keyring, once[/dim]")
     console.print()

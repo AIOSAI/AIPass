@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_token_store.py
 # Description: Tests for token provenance, revocation time and live/dormant telemetry
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-08-14
-# Modified: 2026-11-02
+# Modified: 2026-11-06
 # =============================================
 
 """Tests for apps/handlers/host/tokens.py, the token store's accountability fields and its lock."""
@@ -27,6 +27,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from keyring.errors import KeyringLocked
 
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
@@ -295,24 +296,54 @@ class TestTelemetryNeverUndoesSecurity:
         assert record["id"] not in logged
 
 
-class TestTheRowsRestInTheKeyring:
-    """The token rows are one JSON entry, host_api/tokens; the directory keeps only the lock and receipts."""
+class TestTheRowsRestInAnOwnerOnlyFile:
+    """The token rows are host_api/tokens.json beside the lock; the login keyring is never touched."""
 
-    def test_the_rows_are_one_json_entry_after_a_write(self, store: Path, keyring_store: Any) -> None:
+    def test_the_rows_are_one_file_and_no_keyring_entry_after_a_write(self, store: Path, keyring_store: Any) -> None:
         host_tokens.issue_token("pixel-8", scope="read")
 
-        assert json.loads(keyring_store.entries[("aipass", "host_api/tokens")])["tokens"]
+        assert json.loads((store / "host_api" / "tokens.json").read_text(encoding="utf-8"))["tokens"]
+        assert keyring_store.entries == {}
+        assert [item.name for item in (store / "host_api").iterdir()] == ["tokens.json"]
 
-    def test_no_file_is_left_in_the_directory_by_a_write(self, store: Path) -> None:
+    # getattr: test_windows_import hides os.geteuid with os.name still "posix", and this evaluates at collection.
+    @pytest.mark.skipif(
+        sys.platform == "win32" or getattr(os, "geteuid", lambda: -1)() == 0,
+        reason="POSIX mode bits; root reads any mode",
+    )
+    def test_the_file_is_0600_in_a_0700_directory(self, store: Path) -> None:
         host_tokens.issue_token("pixel-8", scope="read")
 
-        assert [item.name for item in (store / "host_api").iterdir()] == []
+        assert (store / "host_api" / "tokens.json").stat().st_mode & 0o777 == 0o600
+        assert (store / "host_api").stat().st_mode & 0o777 == 0o700
 
-    def test_the_version_is_bumped_for_the_new_fields(self, store: Path, keyring_store: Any) -> None:
+    def test_a_locked_keyring_does_not_stop_issue_verify_or_revoke(self, store: Path, keyring_store: Any) -> None:
+        with patch.object(keyring_store, "get_password", side_effect=KeyringLocked("locked")):
+            record, raw = host_tokens.issue_token("pixel-8", scope="read")
+            assert (host_tokens.verify_token(raw) or {}).get("id") == record["id"]
+            assert host_tokens.revoke_token(record["id"]) is True
+
+    def test_a_revoke_written_by_another_process_lands_on_the_next_request(self, store: Path) -> None:
+        record, raw = host_tokens.issue_token("pixel-8", scope="read")
+        path = store / "host_api" / "tokens.json"
+        document = json.loads(path.read_text(encoding="utf-8"))
+        document["tokens"][0]["revoked"] = True
+        path.write_text(json.dumps(document), encoding="utf-8")
+
+        assert host_tokens.resolve_token(raw) == (document["tokens"][0], host_tokens.STATUS_REVOKED)
+
+    def test_an_unreadable_file_refuses_rather_than_reading_as_empty(self, store: Path) -> None:
+        (store / "host_api").mkdir()
+        (store / "host_api" / "tokens.json").write_text("{not json", encoding="utf-8")
+
+        with pytest.raises(host_tokens.secrets_store.SecretsUnavailable, match="tokens.json is not JSON"):
+            host_tokens.load_tokens()
+
+    def test_the_version_is_bumped_for_the_new_fields(self, store: Path) -> None:
         """A reader must be able to tell which shape it is holding."""
         host_tokens.issue_token("pixel-8", scope="read")
 
-        stored = json.loads(keyring_store.entries[("aipass", "host_api/tokens")])
+        stored = json.loads((store / "host_api" / "tokens.json").read_text(encoding="utf-8"))
         assert stored["version"] == host_tokens.STORE_VERSION
         assert host_tokens.STORE_VERSION >= 2
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_auth_audit.py
 # Description: Tests for failed-auth auditing with peer address (security C1)
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-08-14
-# Modified: 2026-11-05
+# Modified: 2026-11-06
 # =============================================
 
 """Tests for apps/handlers/host/server.py, its failed-auth audit with the peer address."""
@@ -22,6 +22,7 @@ from unittest.mock import patch
 import pytest
 
 from aipass.api.apps.handlers.host import server as host_server
+from aipass.api.apps.handlers.host import store as host_store
 from aipass.api.apps.handlers.host import tokens as host_tokens
 
 PATCH_SECRETS_BASE = "aipass.api.apps.handlers.auth.secrets.SECRETS_BASE"
@@ -161,17 +162,27 @@ class TestTheResponseStillTellsNothing:
 
         assert _refusals(audit)[0]["reason"] not in response.text
 
-    def test_a_keyring_outage_is_a_503_not_a_crash(self, audited: Any) -> None:
-        """An unreadable token store is the host's fault: 503 and the code's sentence, the backend's words logged."""
+    def test_an_unreadable_token_store_is_a_503_not_a_crash(self, audited: Any) -> None:
+        """The host's fault, not the caller's: 503 and the code's sentence, the store's words kept in the log."""
         client, _ = audited
-        outage = host_tokens.secrets_store.SecretsUnavailable("backend words, never sent")
+        # A directory where the file belongs: read_text raises an OSError on every OS.
+        host_store.store_path(host_store.TOKENS).mkdir(parents=True)
 
-        with patch.object(host_tokens.secrets_store, "get_secret", side_effect=outage):
-            response = client.get("/v1/whoami", headers={"Authorization": "Bearer nope"})
+        response = client.get("/v1/whoami", headers={"Authorization": "Bearer nope"})
 
         assert response.status_code == 503
         assert response.json()["error"]["code"] == "auth_unavailable"
-        assert "backend words" not in response.text
+        assert "tokens.json" not in response.text
+
+    def test_an_unreadable_token_store_is_logged_as_an_error(self, audited: Any) -> None:
+        """Every phone call is down until someone looks: ERROR is what @trigger mails the owner."""
+        client, _ = audited
+        host_store.store_path(host_store.TOKENS).mkdir(parents=True)
+
+        with patch.object(host_server, "logger") as log:
+            client.get("/v1/whoami", headers={"Authorization": "Bearer nope"})
+
+        assert "tokens.json cannot be read" in str(log.error.call_args)
 
 
 @fastapi_required

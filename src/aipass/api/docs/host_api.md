@@ -18,8 +18,7 @@ drone @api host-api status             # pid, bind, owner, and where to read it
 drone @api host-api set-config --host <ip>   # validated before it is stored
 drone @api host-api set-config --face-dir <dir>   # an installed phone face; 'default' clears it
 drone @api host-api set-config --baud-bin <path>  # the binary the fleet lanes exec; 'default' = automatic
-drone @api host-api revoke-token <id>  # effective next request, no restart
-```
+drone @api host-api revoke-token <id>  # effective next request, no restart```
 
 **Two auth layers** (neither trusted alone): the tailnet boundary, plus a bearer
 token stored as a sha256 hash under `~/.secrets/aipass/host_api/`. Revocation is

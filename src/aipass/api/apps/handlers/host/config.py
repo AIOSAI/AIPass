@@ -1,16 +1,16 @@
 # =================== AIPass ====================
 # Name: config.py
 # Description: Host API Config Handler — server config, bind-address and face-dir validation
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-08-14
-# Modified: 2026-10-22
+# Modified: 2026-11-06
 # =============================================
 
 """
 Host API Config Handler
 
 Reference: docs/host_api.md (the bind rule), docs/host_surfaces.md (face_dir, baud_bin).
-Lives in the secrets store's keyring (not a secret): one machine root, no repo discovery, never ships.
+Lives in host_api/config.json (not a secret): one machine root, no repo discovery, never ships.
 """
 
 import ipaddress
@@ -22,9 +22,10 @@ from typing import Any, Dict, Optional
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.auth import secrets as secrets_store
+from aipass.api.apps.handlers.host import store as host_store
 
-CONFIG_PROVIDER = "host_api"
-CONFIG_SLUG = "config"
+CONFIG_PROVIDER = secrets_store.HOST_STORE_DIR
+CONFIG_SLUG = host_store.CONFIG
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8787
@@ -63,7 +64,7 @@ def load_config() -> Dict[str, Any]:
     """Read the effective server config."""
     config = dict(DEFAULT_CONFIG)
 
-    stored = secrets_store.get_secret(CONFIG_PROVIDER, CONFIG_SLUG, as_json=True)
+    stored = host_store.read(CONFIG_SLUG)
     if isinstance(stored, dict):
         config.update(stored)
     elif stored is not None:
@@ -73,10 +74,10 @@ def load_config() -> Dict[str, Any]:
 
 
 def save_config(config: Dict[str, Any]) -> str:
-    """Persist server config to the keyring entry host_api/config; returns the entry's name."""
-    entry = secrets_store.set_secret(CONFIG_PROVIDER, CONFIG_SLUG, config, as_json=True)
+    """Persist server config to host_api/config.json; returns that name, never the full path."""
+    entry = f"{CONFIG_PROVIDER}/{host_store.write(CONFIG_SLUG, config).name}"
     # Named in words: CodeQL flags the secret-named call's result in a log as clear-text secret.
-    logger.info("[host_api] config saved to the host_api config in the secrets store")
+    logger.info("[host_api] config saved to the host_api config file")
     return entry
 
 

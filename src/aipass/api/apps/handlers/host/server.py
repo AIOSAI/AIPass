@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: server.py
 # Description: Host API Server Handler — FastAPI app factory, auth dependency
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-14
-# Modified: 2026-11-05
+# Modified: 2026-11-06
 # =============================================
 # pyright: reportMissingImports=false, reportInvalidTypeForm=false, reportOptionalCall=false
 # pyright: reportArgumentType=false
@@ -197,6 +197,7 @@ def require_scope(required: str = "read"):
         try:
             record, status = host_tokens.resolve_token(credentials.credentials)
         except host_tokens.secrets_store.SecretsUnavailable as e:
+            logger.error("[host_api] the token store cannot be read, every authenticated call answers 503: %s", e)
             raise _logged_denial(e, 503, "auth_unavailable") from e
         if record is None or status != host_tokens.STATUS_ACTIVE:
             # Unrecognised and revoked are byte-identical to the caller; only the audit tells them apart.

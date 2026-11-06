@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_api.py
 # Description: Host API Module — server lifecycle and token administration
-# Version: 1.5.2
+# Version: 1.5.3
 # Created: 2026-08-14
-# Modified: 2026-11-05
+# Modified: 2026-11-06
 # =============================================
 
 """
@@ -111,6 +111,7 @@ def print_help() -> None:
     console.print(
         "  [cyan]host-api set-config[/cyan]            [dim]Set bind, face dir or baud binary (validated first)[/dim]"
     )
+    console.print("  [cyan]host-api store import[/cyan]          [dim]Copy the host store off the keyring, once[/dim]")
     console.print()
     console.print("[yellow]OPTIONS:[/yellow]")
     console.print("  [cyan]--host <ip>[/cyan]      [dim]Bind address override (literal IP, never a hostname)[/dim]")

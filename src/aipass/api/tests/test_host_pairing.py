@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_pairing.py
 # Description: Tests for the pairing door — one-use QR codes a phone trades for its bearer
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-10-13
-# Modified: 2026-11-05
+# Modified: 2026-11-06
 # =============================================
 
 """Tests for apps/handlers/host/pairings.py, POST /v1/pair, the host-api pair verb and its extension mode."""
@@ -26,13 +26,13 @@ from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 
 import pytest
-from keyring import get_password, set_password
 from keyring.errors import KeyringLocked
 
 from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import pairings as host_pairings
 from aipass.api.apps.handlers.host import server as host_server
+from aipass.api.apps.handlers.host import store as host_store
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.apps.modules import host_api as host_api_module
 from aipass.api.apps.modules.host_api import handle_command
@@ -60,12 +60,20 @@ def paired(store: Path, listener: Any) -> Any:
         yield store
 
 
-ENTRY = "host_api/pairings"
+ENTRY = "host_api/pairings.json"
 
 
 def _entry() -> Any:
-    """The pairing rows' entry as stored, or None."""
-    return get_password("aipass", ENTRY)
+    """The pairing rows' file as written, or None."""
+    path = host_store.store_path(host_store.PAIRINGS)
+    return path.read_text(encoding="utf-8") if path.exists() else None
+
+
+def _write_entry(text: str) -> None:
+    """Put raw text where the pairing rows live."""
+    path = host_store.store_path(host_store.PAIRINGS)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
 def _stored_rows() -> list:
@@ -78,7 +86,7 @@ def _expire_every_row() -> None:
     past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
     for row in document["pairings"]:
         row["expires"] = past
-    set_password("aipass", ENTRY, json.dumps(document))
+    _write_entry(json.dumps(document))
 
 
 class TestMintPairing:
@@ -157,33 +165,34 @@ class TestMintPairing:
         assert issubclass(host_api_module.PairingError, host_api_module.TokenError)
 
     def test_an_unreadable_store_is_an_error_naming_the_store_never_an_empty_list(self, paired: Path) -> None:
-        set_password("aipass", ENTRY, "{not json")
+        _write_entry("{not json")
 
         with pytest.raises(host_pairings.PairingError) as raised:
             host_api_module.mint_pairing("phone")
         assert ENTRY in str(raised.value)
 
-    def test_a_locked_store_is_a_pairing_error_naming_the_entry(self, paired: Path, keyring_store: Any) -> None:
-        held = keyring_store.get_password
+    def test_a_store_file_that_cannot_be_read_is_a_pairing_error_naming_the_file(self, paired: Path) -> None:
+        # A directory where the file belongs: read_text raises an OSError on every OS.
+        host_store.store_path(host_store.PAIRINGS).mkdir(parents=True)
 
-        def locked_for_pairings(service: str, username: str) -> Any:
-            if username == ENTRY:
-                raise KeyringLocked("locked")
-            return held(service, username)
-
-        with patch.object(keyring_store, "get_password", side_effect=locked_for_pairings):
-            with pytest.raises(host_pairings.PairingError) as raised:
-                host_api_module.mint_pairing("phone")
+        with pytest.raises(host_pairings.PairingError) as raised:
+            host_api_module.mint_pairing("phone")
 
         assert ENTRY in str(raised.value)
         assert str(paired) not in str(raised.value)
 
-    def test_the_rows_rest_in_the_entry_and_no_store_file_is_named(self, paired: Path) -> None:
+    def test_a_locked_keyring_does_not_stop_a_mint(self, paired: Path, keyring_store: Any) -> None:
+        with patch.object(keyring_store, "get_password", side_effect=KeyringLocked("locked")):
+            minted = host_api_module.mint_pairing("phone")
+
+        assert [row["id"] for row in _stored_rows()] == [minted["id"]]
+        assert keyring_store.entries == {}
+
+    def test_the_rows_rest_in_their_own_file_beside_the_config(self, paired: Path) -> None:
         host_api_module.mint_pairing("phone")
 
         assert len(_stored_rows()) == 1
-        assert not hasattr(host_pairings, "store_path")
-        assert [item.name for item in (paired / "host_api").iterdir()] == []
+        assert sorted(item.name for item in (paired / "host_api").iterdir()) == ["config.json", "pairings.json"]
 
 
 class TestRedeemPairing:
@@ -305,7 +314,7 @@ class TestPairRoute:
         assert statuses == [401] * 10 + [429]
 
     def test_an_unreadable_store_is_503_with_the_fixed_sentence(self, client: Any) -> None:
-        set_password("aipass", ENTRY, "[]")
+        _write_entry("[]")
 
         with patch("aipass.api.apps.handlers.host.denials.logger") as log:
             response = client.post("/v1/pair", json={"code": "guess"})
