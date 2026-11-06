@@ -17,6 +17,7 @@ from aipass.api.apps.handlers.json import json_handler
 
 #: Every sentence ends by saying where the words went, so nobody reads it as the whole story.
 SENTENCES = {
+    "auth_unavailable": "The token store could not be read; the reason is in this host's log",
     "agent_send_failed": "@baud could not type into the agent's room; the reason is in this host's log",
     "face_unavailable": "The phone face could not be served; the reason is in this host's log",
     "feed_unavailable": "The notification feed could not be read; the reason is in this host's log",

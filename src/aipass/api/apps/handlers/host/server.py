@@ -194,7 +194,10 @@ def require_scope(required: str = "read"):
             _audit_refusal(request, "missing_credentials", required)
             raise _deny(401, "unauthorized", "Bearer token required")
 
-        record, status = host_tokens.resolve_token(credentials.credentials)
+        try:
+            record, status = host_tokens.resolve_token(credentials.credentials)
+        except host_tokens.secrets_store.SecretsUnavailable as e:
+            raise _logged_denial(e, 503, "auth_unavailable") from e
         if record is None or status != host_tokens.STATUS_ACTIVE:
             # Unrecognised and revoked are byte-identical to the caller; only the audit tells them apart.
             revoked = status == host_tokens.STATUS_REVOKED

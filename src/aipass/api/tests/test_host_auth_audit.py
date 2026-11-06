@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_auth_audit.py
 # Description: Tests for failed-auth auditing with peer address (security C1)
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-14
-# Modified: 2026-11-02
+# Modified: 2026-11-05
 # =============================================
 
 """Tests for apps/handlers/host/server.py, its failed-auth audit with the peer address."""
@@ -160,6 +160,18 @@ class TestTheResponseStillTellsNothing:
         response = client.get("/v1/whoami", headers={"Authorization": "Bearer nope"})
 
         assert _refusals(audit)[0]["reason"] not in response.text
+
+    def test_a_keyring_outage_is_a_503_not_a_crash(self, audited: Any) -> None:
+        """An unreadable token store is the host's fault: 503 and the code's sentence, the backend's words logged."""
+        client, _ = audited
+        outage = host_tokens.secrets_store.SecretsUnavailable("backend words, never sent")
+
+        with patch.object(host_tokens.secrets_store, "get_secret", side_effect=outage):
+            response = client.get("/v1/whoami", headers={"Authorization": "Bearer nope"})
+
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "auth_unavailable"
+        assert "backend words" not in response.text
 
 
 @fastapi_required
