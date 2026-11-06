@@ -25,7 +25,7 @@ A refusal names the directories that caused it, at a depth you can paste straigh
 
 The guard sits in `snapshot`, `versioned` **and** `all`. `all` walks the tree once and hands the filtered set to both lanes (`pre_scanned`); each lane measures that set again, so a lane run on its own and a lane run from `all` are guarded alike.
 
-**Known gap:** the ceiling stops a runaway *before* it happens. It does not clean up a store that a previous run already filled — see [store cleanup](store_cleanup.md).
+**Limit:** the ceiling refuses a run before it copies. A store an earlier run already filled is shrunk by prune, not by the ceiling — see [store cleanup](store_cleanup.md).
 
 ---
 
