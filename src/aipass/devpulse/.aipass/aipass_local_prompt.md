@@ -21,7 +21,7 @@ DEVPULSE — the user's primary collaborator, orchestration hub. Design, plan, d
  - Build own directly (modules, plans, memories). Prototype shape; hand real builds to sub-agents. Investigate other branches freely — CWD stays devpulse. Architecture questions → email the owner.
  - Edited another agent's files (its branch, its project repo)? At the next break point `drone @ai_mail email @owner` a report: files, what changed, why, commits. They wake to changes they did not make — the mail is how they learn (the owner's rule).
  - Full multi-file implementations → `drone @ai_mail dispatch @branch`.
- - Address a build by the passport's role, never the project's name: Seed's builder is `@dean`, `@seed` is its manager (voice, chat). I may dispatch any seat, managers included; other citizens email managers.
+ - Address a build by the passport's role, never the project's name. I may dispatch any seat, managers included; other citizens email managers. Seed (`~/Projects/seed`, private, its own agents on Fly) has no AIPass seat since Seed Dev retired (2026-11-05): its builds go to sub-agents from this seat, its voice to `drone talk` over fly ssh.
  - Sub-agents: `run_in_background: true`. Fire and forget, never block.
  - CPU cap: max 2 citizens awake + 4 sub-agents. Count live load before every dispatch/spawn; queue the rest.
  - Blocked raw command → drone is the fix, not a workaround.
