@@ -27,6 +27,12 @@ FEED_ROWS = 80
 TEXT_CAP = 20000  # a whole reply: 2000 cut long ones mid-sentence
 TOOL_CAP = 120
 PASTED = re.compile(r"<pasted_content[^>]*>(.*?)</pasted_content[^>]*>", re.S)
+# A teammate's report lands as a user row; Claude Code shows it as one line, so the feed does too.
+TEAMMATE = re.compile(
+    r'^Another Claude session sent a message:\s*<teammate-message teammate_id="([^"]*)"([^>]*)>\s*(\S*)'
+)
+TEAMMATE_SUMMARY = re.compile(r'summary="([^"]*)"')
+COMPACTED = "This session is being continued from a previous conversation"
 CODEX_SESSIONS = Path(".codex") / "sessions"
 CLAUDE_PROJECTS = Path(".claude") / "projects"
 # What Codex itself writes as user rows; a typed '#' or '<' prompt still shows.
@@ -206,6 +212,18 @@ def _claude_part(part: Any, kind: str, stamp: Any, model: Optional[str]) -> Opti
     if kind == "user":
         # A long prompt arrives wrapped as pasted content; a user row starting with '<' is a harness wrapper.
         text = PASTED.sub(r"\1", text).strip()
+        if text.startswith(COMPACTED):
+            return {"role": "tool", "text": "context compacted", "time": stamp}
+        mate = TEAMMATE.match(text)
+        if mate:
+            if mate.group(3).startswith("{"):
+                return None  # an idle notification: the report already came
+            summary = TEAMMATE_SUMMARY.search(mate.group(2))
+            return {
+                "role": "tool",
+                "text": f"teammate {mate.group(1)}: {summary.group(1) if summary else 'finished'}",
+                "time": stamp,
+            }
         return {"role": "user", "text": text[:TEXT_CAP], "time": stamp} if text and not text.startswith("<") else None
     return {"role": "agent", "text": text[:TEXT_CAP], "time": stamp, "model": model} if text else None
 

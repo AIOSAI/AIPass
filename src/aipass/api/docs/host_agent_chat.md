@@ -49,6 +49,9 @@ and Codex transcripts are read. A Codex rollout not yet written, or a session fi
 
 - `user`: a typed prompt. Pasted content is unwrapped to what was pasted; a prompt queued while the agent
   worked shows as its own line. Harness rows (a user row starting with `<`, Codex's own context rows) are left out.
+  Two harness rows that read as prose become one `tool` line instead of a wall of someone else's words: a
+  teammate's report (`teammate <id>: <summary>`, its idle notification left out) and a compaction's
+  carried summary (`context compacted`).
 - `agent`: the agent's text, cut at 20 000 characters, with `model`, the model's display name.
 - `tool`: one line per tool call, the verb and the key argument, a path by its file name only
   (`edited server.py`, `ran: pytest -q`). A Codex exec script gives one line per call in it (`ran:` for

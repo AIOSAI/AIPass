@@ -925,6 +925,22 @@ class TestTheFeedReadsAClaudeSession:
                 ),
                 {"type": "attachment", "timestamp": "t", "attachment": queued},
                 _claude("assistant", [{"type": "text", "text": "side"}], isSidechain=True),
+                _claude(
+                    "user",
+                    'Another Claude session sent a message:\n<teammate-message teammate_id="b1" color="blue" summary="Report done">\nwalls of words',
+                ),
+                _claude(
+                    "user",
+                    'Another Claude session sent a message:\n<teammate-message teammate_id="b1" color="blue">\n{"type":"idle_notification"}',
+                ),
+                _claude(
+                    "user",
+                    'Another Claude session sent a message:\n<teammate-message teammate_id="b2" color="red">\nmore words',
+                ),
+                _claude(
+                    "user",
+                    "This session is being continued from a previous conversation that ran out of context. The summary...",
+                ),
             ],
         )
 
@@ -937,6 +953,9 @@ class TestTheFeedReadsAClaudeSession:
             ("tool", "edited server.py"),
             ("tool", "ran: pytest -q"),
             ("user", "and the docs"),
+            ("tool", "teammate b1: Report done"),
+            ("tool", "teammate b2: finished"),
+            ("tool", "context compacted"),
         ]
         assert body["lines"][2]["model"] == "Claude Opus 5.5"
         assert body["session"] == "s-1"
