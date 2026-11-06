@@ -897,6 +897,9 @@ def _feed(agents: Any, path: str = "/v1/agent/AIPASS/devpulse/feed", **params: A
     return api.get(path, params=params, headers=read)
 
 
+MATE = "Another Claude session sent a message:\n"
+
+
 def _said(body: dict) -> list:
     """(role, text) for every feed line."""
     return [(line["role"], line["text"]) for line in body["lines"]]
@@ -913,6 +916,8 @@ class TestTheFeedReadsAClaudeSession:
             [
                 _claude("user", "fix the bug"),
                 _claude("user", "<command-name>/clear</command-name>"),
+                _claude("user", "<bash-input> ls -la</bash-input>"),
+                _claude("user", "<bash-stdout>total 0</bash-stdout><bash-stderr></bash-stderr>"),
                 _claude("user", [{"type": "text", "text": "<pasted_content>a long paste</pasted_content>"}]),
                 _claude(
                     "assistant",
@@ -927,19 +932,14 @@ class TestTheFeedReadsAClaudeSession:
                 _claude("assistant", [{"type": "text", "text": "side"}], isSidechain=True),
                 _claude(
                     "user",
-                    'Another Claude session sent a message:\n<teammate-message teammate_id="b1" color="blue" summary="Report done">\nwalls of words',
+                    f'{MATE}<teammate-message teammate_id="b1" color="blue" summary="Report done">\nwalls of words',
                 ),
                 _claude(
-                    "user",
-                    'Another Claude session sent a message:\n<teammate-message teammate_id="b1" color="blue">\n{"type":"idle_notification"}',
+                    "user", f'{MATE}<teammate-message teammate_id="b1" color="blue">\n{{"type":"idle_notification"}}'
                 ),
+                _claude("user", f'{MATE}<teammate-message teammate_id="b2" color="red">\nmore words'),
                 _claude(
-                    "user",
-                    'Another Claude session sent a message:\n<teammate-message teammate_id="b2" color="red">\nmore words',
-                ),
-                _claude(
-                    "user",
-                    "This session is being continued from a previous conversation that ran out of context. The summary...",
+                    "user", "This session is being continued from a previous conversation that ran out. The summary..."
                 ),
             ],
         )
@@ -948,6 +948,7 @@ class TestTheFeedReadsAClaudeSession:
 
         assert _said(body) == [
             ("user", "fix the bug"),
+            ("user", "! ls -la"),
             ("user", "a long paste"),
             ("agent", "on it"),
             ("tool", "edited server.py"),
@@ -957,7 +958,7 @@ class TestTheFeedReadsAClaudeSession:
             ("tool", "teammate b2: finished"),
             ("tool", "context compacted"),
         ]
-        assert body["lines"][2]["model"] == "Claude Opus 5.5"
+        assert body["lines"][3]["model"] == "Claude Opus 5.5"
         assert body["session"] == "s-1"
 
     def test_since_returns_only_the_lines_after_n(self, agents: Any, tmp_path: Path) -> None:

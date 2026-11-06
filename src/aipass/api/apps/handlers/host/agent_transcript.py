@@ -33,6 +33,7 @@ TEAMMATE = re.compile(
 )
 TEAMMATE_SUMMARY = re.compile(r'summary="([^"]*)"')
 COMPACTED = "This session is being continued from a previous conversation"
+BASH_INPUT = re.compile(r"^<bash-input>(.*?)</bash-input>", re.S)
 CODEX_SESSIONS = Path(".codex") / "sessions"
 CLAUDE_PROJECTS = Path(".claude") / "projects"
 # What Codex itself writes as user rows; a typed '#' or '<' prompt still shows.
@@ -212,6 +213,10 @@ def _claude_part(part: Any, kind: str, stamp: Any, model: Optional[str]) -> Opti
     if kind == "user":
         # A long prompt arrives wrapped as pasted content; a user row starting with '<' is a harness wrapper.
         text = PASTED.sub(r"\1", text).strip()
+        shell = BASH_INPUT.match(text)
+        if shell:
+            # A '!' command typed in the chat: the line the sender sees, so its pending mark can settle.
+            return {"role": "user", "text": f"! {shell.group(1).strip()}"[:TEXT_CAP], "time": stamp}
         if text.startswith(COMPACTED):
             return {"role": "tool", "text": "context compacted", "time": stamp}
         mate = TEAMMATE.match(text)
