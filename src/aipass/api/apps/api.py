@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: api.py
 # Description: Entry point CLI for drone @api — external clients, secrets, usage and the host API
-# Version: 1.2.0
+# Version: 1.2.2
 # Created: 2026-03-08
-# Modified: 2026-10-31
+# Modified: 2026-11-06
 # =============================================
 
 """api Branch - Main Orchestrator"""
@@ -30,6 +30,7 @@ from rich.table import Table
 from rich.columns import Columns
 
 from aipass.api.apps.handlers.json import json_handler
+from aipass.api.apps.modules.secrets import SecretsUnavailable
 
 MODULE_ROOT = Path(__file__).parent
 
@@ -148,7 +149,7 @@ def print_help():
     table.add_row(
         "host-api",
         "The phone's server: serve, status, stop, autostart, issue-token, list-tokens,"
-        " revoke-token, pair, config, set-config",
+        " revoke-token, pair, config, set-config, store",
     )
 
     console.print(table)
@@ -275,6 +276,11 @@ def main():
         # 1 unrecognised, 2 recognised-and-refused, 0 only when no error printed.
         try:
             handled = route_command(command, remaining_args, modules)
+        except SecretsUnavailable as e:
+            # A locked or absent keyring is the machine's state, not a defect: refused out loud, not paged.
+            logger.warning(f"Module refused: {e}")
+            error(f"{command} failed: {e}")
+            handled = True
         except Exception as e:
             # A module recognised the command and crashed in it: its failure (exit 2), not "Unknown command".
             logger.error(f"Module error: {e}")

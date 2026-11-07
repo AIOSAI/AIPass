@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_host_verbs.py
 # Description: Tests for the host API verb lane — wake, kill, lock (FPLAN-0411 Phase 3)
-# Version: 1.0.3
+# Version: 1.2.0
 # Created: 2026-08-14
-# Modified: 2026-11-02
+# Modified: 2026-11-05
 # =============================================
 
-"""Tests for apps/handlers/host/verbs.py and the server routes that reach it: wake, kill, lock."""
+"""Tests for apps/handlers/host/verbs.py and agent_route.py: wake, kill, lock, typing and model switches in a room."""
 
 # D0: every verb proxies the branch that owns the mechanism; the source-reading checks below are crude on purpose.
 
@@ -15,16 +15,19 @@
 # sentry: no-test-needed(external) — drone's real wake and baud's real end_room; both doors are patched
 # sentry: no-test-needed(covered_elsewhere) — resolve_branch_root itself, tests/test_host_read_lane.py
 
+import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.api.apps.handlers.host import agent_chat as host_agent_chat
 from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.apps.handlers.host import verbs as host_verbs
+from aipass.api.tests.support_host_api import FakeBaud, agent_row
 
 PATCH_SECRETS_BASE = "aipass.api.apps.handlers.auth.secrets.SECRETS_BASE"
 PATCH_SECRETS_JSON = "aipass.api.apps.handlers.auth.secrets.json_handler"
@@ -878,3 +881,299 @@ class TestOneTerminalReachesAnyAgent:
         source = Path(host_verbs.__file__).read_text(encoding="utf-8")
 
         assert "does not serve project" not in source
+
+
+# =============================================
+# AGENT KEYSTROKES — handlers/host/agent_route.py, agent_chat.py
+# =============================================
+
+SEND = "/v1/agent/AIPASS/devpulse/send"
+
+
+@pytest.fixture
+def room(client: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """The real app, an operate token, and the baud binary answered by a FakeBaud with one live seat."""
+    monkeypatch.setattr(host_fleet, "snapshot_binary", lambda: "baud")
+    monkeypatch.setattr(host_fleet, "repo_root", lambda: tmp_path)
+    fake = FakeBaud([agent_row()])
+    monkeypatch.setattr(host_fleet.subprocess, "run", fake)
+    _, raw = host_tokens.issue_token("extension", scope="operate")
+    return client, {"Authorization": f"Bearer {raw}"}, fake
+
+
+@fastapi_required
+class TestSendTypesOneBracketedPasteThenEnter:
+    """POST /v1/agent/<p>/<n>/send: 2000-character --text calls inside one paste frame, then one Enter."""
+
+    def test_a_4500_character_text_is_three_text_calls_then_one_enter(self, room: Any) -> None:
+        api, operate, fake = room
+        text = "x" * 4500
+
+        response = api.post(SEND, json={"text": text}, headers=operate)
+
+        assert (response.status_code, response.json()) == (200, {"ok": True})
+        payloads = fake.payloads()
+        assert [p[0] for p in payloads] == ["--text", "--text", "--text", "--key"]
+        assert payloads[-1] == ["--key", "Enter"]
+        assert [len(p[1]) for p in payloads[:3]] == [2000, 2000, 512]
+        typed = "".join(p[1] for p in payloads[:3])
+        assert typed == host_agent_chat.PASTE_START + text + host_agent_chat.PASTE_END
+        assert fake.sends[0][:3] == ["devpulse", "--project", "AIPASS"]
+
+    def test_control_characters_are_typed_as_spaces_and_the_text_trimmed(self, room: Any) -> None:
+        api, operate, fake = room
+
+        api.post(SEND, json={"text": "  one\rtwo\x1b[201~three  "}, headers=operate)
+
+        assert fake.payloads()[0][1] == host_agent_chat.PASTE_START + "one two [201~three" + host_agent_chat.PASTE_END
+
+
+@fastapi_required
+class TestAFailedSendNeverPressesEnter:
+    """A failure mid-way closes the paste frame and presses no Enter, so half a line never submits."""
+
+    def test_a_second_chunk_failure_closes_the_frame_and_sends_no_enter(self, room: Any) -> None:
+        api, operate, fake = room
+        fake.fail_at = 2
+
+        response = api.post(SEND, json={"text": "y" * 4500}, headers=operate)
+
+        assert (response.status_code, response.json()["error"]["code"]) == (503, "agent_send_failed")
+        assert fake.payloads()[2] == ["--text", host_agent_chat.PASTE_END]
+        assert ["--key", "Enter"] not in fake.payloads()
+        assert "refused the keys" not in response.text
+
+    def test_a_first_chunk_failure_types_nothing_more(self, room: Any) -> None:
+        api, operate, fake = room
+        fake.fail_at = 1
+
+        response = api.post(SEND, json={"text": "short"}, headers=operate)
+
+        assert (response.status_code, len(fake.sends)) == (503, 1)
+
+
+@fastapi_required
+class TestTheSendRefusals:
+    """409 with no room, 400 for an empty or unreadable body, 404 unknown, 503 with no binary; nothing typed."""
+
+    def test_an_agent_with_no_live_room_is_a_409(self, room: Any) -> None:
+        api, operate, fake = room
+        fake.rows[:] = [agent_row(own_room_live=False, dispatched=True)]
+
+        response = api.post(SEND, json={"text": "hi"}, headers=operate)
+
+        assert (response.status_code, response.json()["error"]["code"], fake.sends) == (409, "agent_no_room", [])
+
+    @pytest.mark.parametrize("body", [{"text": ""}, {"text": " \r\n "}, {"text": 5}, {}, ["text"]])
+    def test_an_empty_or_missing_text_is_a_400(self, room: Any, body: Any) -> None:
+        api, operate, fake = room
+
+        response = api.post(SEND, json=body, headers=operate)
+
+        assert (response.status_code, fake.sends) == (400, [])
+
+    def test_a_body_that_is_not_json_is_a_400_never_a_422(self, room: Any) -> None:
+        api, operate, fake = room
+
+        response = api.post(SEND, content=b"{not json", headers={**operate, "Content-Type": "application/json"})
+
+        assert (response.status_code, response.json()["error"]["code"]) == (400, "agent_body_refused")
+
+    def test_an_agent_the_roster_does_not_list_is_a_404(self, room: Any) -> None:
+        api, operate, fake = room
+
+        response = api.post("/v1/agent/AIPASS/nobody/send", json={"text": "hi"}, headers=operate)
+
+        assert (response.status_code, fake.sends) == (404, [])
+
+    def test_a_baud_binary_gone_after_the_roster_read_is_a_503_before_any_keystroke(
+        self, room: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        api, operate, fake = room
+        api.post("/v1/agent/AIPASS/devpulse/allow", json={}, headers=operate)
+
+        def _missing() -> str:
+            raise host_fleet.FleetUnavailable("The baud binary was not found")
+
+        monkeypatch.setattr(host_fleet, "snapshot_binary", _missing)
+
+        response = api.post(SEND, json={"text": "hi"}, headers=operate)
+
+        assert (response.status_code, response.json()["error"]["code"]) == (503, "fleet_unavailable")
+        assert fake.payloads() == [["--key", "Enter"]]
+
+
+@fastapi_required
+class TestTheKeyRoutesPressTheDecksKeys:
+    """interrupt is Escape (the stop button), allow is Enter, deny is Escape; the same 409 with no room."""
+
+    @pytest.mark.parametrize(("action", "key"), [("interrupt", "Escape"), ("allow", "Enter"), ("deny", "Escape")])
+    def test_each_action_presses_its_one_key(self, room: Any, action: str, key: str) -> None:
+        api, operate, fake = room
+
+        response = api.post(f"/v1/agent/AIPASS/devpulse/{action}", json={}, headers=operate)
+
+        assert (response.status_code, fake.payloads()) == (200, [["--key", key]])
+
+    @pytest.mark.parametrize("action", ["interrupt", "allow", "deny"])
+    def test_a_key_with_no_live_room_is_a_409(self, room: Any, action: str) -> None:
+        api, operate, fake = room
+        fake.rows[:] = [agent_row(own_room_live=False)]
+
+        response = api.post(f"/v1/agent/AIPASS/devpulse/{action}", json={}, headers=operate)
+
+        assert (response.status_code, fake.sends) == (409, [])
+
+
+@fastapi_required
+class TestAReadTokenCannotTypeIntoARoom:
+    """Every keystroke route is operate scope: a read token is a 403 and nothing reaches the room."""
+
+    @pytest.mark.parametrize("action", ["send", "interrupt", "allow", "deny"])
+    def test_a_read_token_is_refused_and_nothing_is_typed(self, room: Any, action: str) -> None:
+        api, _, fake = room
+        _, raw = host_tokens.issue_token("extension-read", scope="read")
+
+        response = api.post(
+            f"/v1/agent/AIPASS/devpulse/{action}", json={"text": "hi"}, headers={"Authorization": f"Bearer {raw}"}
+        )
+
+        assert (response.status_code, fake.sends) == (403, [])
+
+
+# =============================================
+# MODEL SWITCH — handlers/host/agent_route.py, agent_models.py
+# =============================================
+
+MODEL = "/v1/agent/AIPASS/devpulse/model"
+CODEX_MODELS = {
+    "models": [
+        {
+            "slug": "gpt-6-sol",
+            "display_name": "GPT-6 Sol",
+            "visibility": "list",
+            "supported_reasoning_levels": [{"effort": "low"}, {"effort": "high"}],
+        },
+        {"slug": "gpt-hidden", "visibility": "hide"},
+    ]
+}
+
+
+@pytest.fixture
+def seat(room: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """The room fixture with HOME in tmp_path, holding a Codex model cache; the agent idle (no hook rows)."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    cache = tmp_path / ".codex" / "models_cache.json"
+    cache.parent.mkdir(parents=True)
+    cache.write_text(json.dumps(CODEX_MODELS), encoding="utf-8")
+    return room
+
+
+def _typed(line: str) -> list:
+    """The payloads a model switch sends: the line as one paste, its Enter, and the slash menu's extra Enter."""
+    framed = host_agent_chat.PASTE_START + line + host_agent_chat.PASTE_END
+    return [["--text", framed], ["--key", "Enter"], ["--key", "Enter"]]
+
+
+@fastapi_required
+class TestTheModelSwitchTypesTheDecksLine:
+    """POST /v1/agent/<p>/<n>/model types the provider's own line, then a second Enter for the slash menu."""
+
+    @pytest.mark.parametrize(
+        ("provider", "body", "line"),
+        [
+            ("claude", {"model": "opus"}, "/model opus"),
+            ("codex", {"model": "gpt-6-sol"}, "/model gpt-6-sol"),
+            ("codex", {"model": "gpt-6-sol", "effort": "high"}, "/model gpt-6-sol --reasoning=high"),
+            ("claude", {"provider": "codex", "model": "gpt-6-sol"}, "/codex gpt-6-sol"),
+            ("codex", {"provider": "claude"}, "$claude"),
+        ],
+    )
+    def test_each_provider_gets_its_own_line_and_the_extra_enter(
+        self, seat: Any, provider: str, body: dict, line: str
+    ) -> None:
+        api, operate, fake = seat
+        fake.rows[:] = [agent_row(provider=provider)]
+
+        response = api.post(MODEL, json=body, headers=operate)
+
+        assert (response.status_code, response.json()) == (200, {"ok": True, "typed": line})
+        assert fake.payloads() == _typed(line)
+
+
+@fastapi_required
+class TestTheModelSwitchRefusals:
+    """400 for a model, effort, body or seat it does not take; 409 while the agent works or waits; nothing typed."""
+
+    @pytest.mark.parametrize(
+        ("provider", "body"),
+        [
+            ("claude", {"model": "gpt-6-sol"}),
+            ("codex", {"model": "gpt-hidden"}),
+            ("codex", {"model": "gpt-6-sol", "effort": "max"}),
+            ("opencode", {"model": "x/y"}),
+            ("codex", {"provider": "claude", "model": "opus"}),
+        ],
+    )
+    def test_an_unknown_model_or_effort_is_a_400(self, seat: Any, provider: str, body: dict) -> None:
+        api, operate, fake = seat
+        fake.rows[:] = [agent_row(provider=provider)]
+
+        response = api.post(MODEL, json=body, headers=operate)
+
+        assert (response.status_code, response.json()["error"]["code"], fake.sends) == (400, "agent_model_refused", [])
+
+    def test_a_handoff_whose_command_takes_no_model_says_so(self, seat: Any) -> None:
+        api, operate, fake = seat
+        fake.rows[:] = [agent_row(provider="codex")]
+
+        response = api.post(MODEL, json={"provider": "claude", "model": "opus"}, headers=operate)
+
+        assert (response.status_code, fake.sends) == (400, [])
+        assert (
+            response.json()["error"]["message"] == "$claude takes no model on a codex seat; it opens the claude default"
+        )
+
+    def test_a_dispatched_agent_keeps_its_model(self, seat: Any) -> None:
+        api, operate, fake = seat
+        fake.rows[:] = [agent_row(dispatched=True)]
+
+        response = api.post(MODEL, json={"model": "opus"}, headers=operate)
+
+        assert (response.status_code, fake.sends) == (400, [])
+        assert "dispatched" in response.json()["error"]["message"]
+
+    @pytest.mark.parametrize("body", [{}, {"effort": "low"}, {"model": 5}, {"model": "opus", "provider": ["x"]}, []])
+    def test_a_body_with_no_model_or_provider_string_is_a_400(self, seat: Any, body: Any) -> None:
+        api, operate, fake = seat
+
+        response = api.post(MODEL, json=body, headers=operate)
+
+        assert (response.status_code, fake.sends) == (400, [])
+
+    @pytest.mark.parametrize(("event", "state"), [("PreToolUse", "working"), ("PermissionRequest", "waiting")])
+    def test_a_working_or_waiting_agent_is_a_409(self, seat: Any, engine_log: Path, event: str, state: str) -> None:
+        api, operate, fake = seat
+        engine_log.write_text(json.dumps({"ts": 1.0, "event": event, "session_id": "s-1"}) + "\n", encoding="utf-8")
+
+        response = api.post(MODEL, json={"model": "opus"}, headers=operate)
+
+        assert (response.status_code, response.json()["error"]["code"], fake.sends) == (409, "agent_busy", [])
+        assert state in response.json()["error"]["message"]
+
+    def test_an_agent_with_no_room_is_a_409(self, seat: Any) -> None:
+        api, operate, fake = seat
+        fake.rows[:] = [agent_row(own_room_live=False)]
+
+        response = api.post(MODEL, json={"model": "opus"}, headers=operate)
+
+        assert (response.status_code, response.json()["error"]["code"], fake.sends) == (409, "agent_no_room", [])
+
+    def test_a_read_token_is_a_403_and_nothing_is_typed(self, seat: Any) -> None:
+        api, _, fake = seat
+        _, raw = host_tokens.issue_token("extension-read", scope="read")
+
+        response = api.post(MODEL, json={"model": "opus"}, headers={"Authorization": f"Bearer {raw}"})
+
+        assert (response.status_code, fake.sends) == (403, [])

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: secrets.py
 # Description: Secrets Module — cross-branch in-process door
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-06-15
-# Modified: 2026-11-02
+# Modified: 2026-11-06
 # =============================================
 
 """
@@ -27,6 +27,9 @@ from aipass.prax import logger  # noqa: F401 — sentry imports standard
 from aipass.cli.apps.modules import console, header, error, success, warning
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.auth import secrets as _handler
+
+# Every door call can raise it, so a caller must be able to name it without reaching the handler.
+SecretsUnavailable = _handler.SecretsUnavailable
 
 
 def print_introspection():

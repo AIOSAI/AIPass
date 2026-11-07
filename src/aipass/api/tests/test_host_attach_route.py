@@ -3,7 +3,7 @@
 # Description: Tests for the attach route and its seats — opening, socket auth, watches, outside rooms, the ping
 # Version: 1.0.3
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-03
 # =============================================
 
 """Tests for the WS /v1/room/attach route in apps/handlers/host/server.py and open_attach/open_monitor in attach.py."""
@@ -205,9 +205,12 @@ class TestOpeningAnAttach:
         with patch.object(host_attach, "attach_command", lambda branch, scope="": ["pwd"]):
             with patch.object(host_attach.subprocess, "Popen") as spawn:
                 spawn.return_value = MagicMock(pid=1234)
-                host_attach.open_attach("api")
+                with patch.dict(host_attach.os.environ, {"AIPASS_BRANCH_NAME": "api"}):
+                    host_attach.open_attach("api")
 
         assert spawn.call_args.kwargs["env"]["TERM"] == "xterm-256color"
+        # The host's identity leaking into a seat names every seat after the host; the seat's passport decides.
+        assert "AIPASS_BRANCH_NAME" not in spawn.call_args.kwargs["env"]
 
 
 @fastapi_required

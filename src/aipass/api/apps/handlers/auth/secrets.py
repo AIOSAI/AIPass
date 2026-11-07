@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: secrets.py
 # Description: Secrets Store Handler — values rest in the login keyring; files are only the import source
-# Version: 2.0.1
+# Version: 2.0.2
 # Created: 2026-06-15
-# Modified: 2026-10-24
+# Modified: 2026-11-06
 # =============================================
 
 """Secrets Store Handler"""
@@ -23,8 +23,11 @@ from aipass.api.apps.handlers.json import json_handler
 
 SERVICE = "aipass"
 
-# The import source for migrate, and the root of host_api/'s lock and receipts. Never read by get_secret.
+# The import source for migrate, and the root of host_api/'s file store, lock and receipts. Never read by get_secret.
 SECRETS_BASE = Path.home() / ".secrets" / "aipass"
+
+# The host's own file store: migrate importing it would shred the tokens every paired device presents.
+HOST_STORE_DIR = "host_api"
 
 _TOKEN_KEYS = ("bot_token", "api_key", "token", "secret", "password", "key")
 
@@ -187,6 +190,9 @@ def _survey(base: Path) -> Tuple[List[Tuple[Path, list, bool]], List[str]]:
         return plan, left
 
     for entry in sorted(base.iterdir()):
+        if entry.is_dir() and entry.name == HOST_STORE_DIR:
+            left.extend(item.relative_to(base).as_posix() for item in sorted(entry.rglob("*")) if item.is_file())
+            continue
         if entry.is_dir():
             for item in sorted(entry.rglob("*")):
                 if not item.is_file():

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_stale_header_date_check.py
 # Description: stale_header_date_check — a Modified: date older than the file's own history
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-25
-# Modified: 2026-11-02
+# Modified: 2026-11-07
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/stale_header_date_check.py."""
@@ -32,7 +32,8 @@ pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is not 
 def _git(repo: Path, *argv: str, date: str = "2026-09-23") -> None:
     """One git call in ``repo`` with a fixed identity and author date."""
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-    env.update(GIT_AUTHOR_DATE=f"{date}T12:00:00", GIT_COMMITTER_DATE=f"{date}T12:00:00")
+    stamp = date if "T" in date else f"{date}T12:00:00"
+    env.update(GIT_AUTHOR_DATE=stamp, GIT_COMMITTER_DATE=stamp)
     subprocess.run(
         ["git", "-c", "user.name=sentry", "-c", "user.email=sentry@example.invalid", *argv],
         cwd=str(repo),
@@ -75,11 +76,22 @@ class TestThePlantedSpecimen:
         path = _repo(tmp_path, modified="2026-09-22", committed="2026-09-23")
         result = checker.check_module(str(path))
         assert result["score"] == 0
-        assert "Modified: 2026-09-22 is older than its last commit (2026-09-23)" in result["checks"][0]["message"]
+        assert (
+            "Modified: 2026-09-22 is older than its last commit, the author date in the committer's own UTC offset (2026-09-23)"
+            in result["checks"][0]["message"]
+        )
 
     def test_a_header_on_the_commits_own_date_passes(self, tmp_path):
         path = _repo(tmp_path, modified="2026-09-23", committed="2026-09-23")
         assert checker.check_module(str(path))["score"] == 100
+
+    def test_the_commit_date_is_the_committers_own_offset_not_utc(self, tmp_path, monkeypatch):
+        """23:30 MST on 09-23 is 06:30 UTC on 09-24; the header dated 09-23 is current."""
+        monkeypatch.setenv("TZ", "UTC")
+        path = _repo(tmp_path, modified="2026-09-23", committed="2026-09-23T23:30:00-0700")
+        result = checker.check_module(str(path))
+        assert result["score"] == 100
+        assert "(2026-09-23)" in result["checks"][0]["message"]
 
     def test_a_header_ahead_of_its_commit_passes(self, tmp_path):
         path = _repo(tmp_path, modified="2026-09-24", committed="2026-09-23")
@@ -100,7 +112,10 @@ class TestTheWorkingTreeIsJudgedAsOfToday:
         checker.history.cache_clear()
         result = checker.check_module(str(path))
         assert result["score"] == 0
-        assert f"its uncommitted change, today ({frozen_today})" in result["checks"][0]["message"]
+        assert (
+            f"its uncommitted change, today on this host's local clock ({frozen_today})"
+            in result["checks"][0]["message"]
+        )
 
     def test_an_uncommitted_change_that_moved_the_date_passes_at_once(self, tmp_path, frozen_today):
         path = _repo(tmp_path, modified="2026-09-23", committed="2026-09-23")

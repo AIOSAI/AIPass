@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tokens.py
 # Description: Host API Token Handler — bearer token issue, verify, revoke
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-08-14
-# Modified: 2026-10-24
+# Modified: 2026-11-06
 # =============================================
 
 """
@@ -26,9 +26,10 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.auth import secrets as secrets_store
+from aipass.api.apps.handlers.host import store as host_store
 
-TOKEN_PROVIDER = "host_api"
-TOKEN_SLUG = "tokens"
+TOKEN_PROVIDER = secrets_store.HOST_STORE_DIR
+TOKEN_SLUG = host_store.TOKENS
 
 # Version 1 records (no minted_by) keep verifying, listing and revoking.
 STORE_VERSION = 2
@@ -67,7 +68,7 @@ class TokenError(Exception):
 
 def load_tokens() -> List[Dict[str, Any]]:
     """Read every token record from the store."""
-    stored = secrets_store.get_secret(TOKEN_PROVIDER, TOKEN_SLUG, as_json=True)
+    stored = host_store.read(TOKEN_SLUG)
 
     if stored is None:
         return []
@@ -125,9 +126,9 @@ def lock_path() -> Path:
 
 
 def save_tokens(records: List[Dict[str, Any]]) -> str:
-    """Persist token records as the keyring entry host_api/tokens; returns the entry's name."""
+    """Persist token records to host_api/tokens.json; returns that name, never the full path."""
     envelope: Dict[str, Any] = {"version": STORE_VERSION, "tokens": records}
-    return secrets_store.set_secret(TOKEN_PROVIDER, TOKEN_SLUG, envelope, as_json=True)
+    return f"{TOKEN_PROVIDER}/{host_store.write(TOKEN_SLUG, envelope).name}"
 
 
 @contextmanager

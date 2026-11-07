@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: bootstrap.py
 # Description: Init handler — bootstrap an AIPass project in any directory
-# Version: 2.6.1
+# Version: 2.6.2
 # Created: 2026-03-14
-# Modified: 2026-10-28
+# Modified: 2026-11-03
 # =============================================
 
 """
@@ -186,7 +186,7 @@ def repair_shared_skills(target: Path) -> list[str]:
 
 
 def write_switch_pair(target: Path) -> list[str]:
-    """Write each SWITCH_PAIR file absent under *target*; an existing one is never touched. Returns the paths written."""
+    """Write each SWITCH_PAIR file absent under *target*, never touching an existing one; returns the paths written."""
     written: list[str] = []
     for rel, content in SWITCH_PAIR:
         if not (target / rel).exists():
@@ -327,13 +327,17 @@ def _merge_hooks_json(existing: dict, template: dict) -> dict:
     elif "hooks_enabled" in template:
         merged["hooks_enabled"] = template["hooks_enabled"]
 
+    # A scalar top-level key (handler_namespace) is project config, not an event: the project's wins.
+    for source in (template, existing):
+        for key, value in source.items():
+            if key not in meta_keys and not isinstance(value, dict):
+                merged[key] = value
+
     all_events: set[str] = set()
-    for key in existing:
-        if key not in meta_keys:
-            all_events.add(key)
-    for key in template:
-        if key not in meta_keys:
-            all_events.add(key)
+    for source in (existing, template):
+        for key, value in source.items():
+            if key not in meta_keys and isinstance(value, dict):
+                all_events.add(key)
 
     for event in sorted(all_events):
         existing_hooks = existing.get(event, {})

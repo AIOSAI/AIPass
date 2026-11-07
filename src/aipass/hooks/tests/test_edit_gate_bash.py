@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.8.0
+# Version: 1.11.0
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-11-02
+# Modified: 2026-11-07
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's scripted lane and apps/modules/bash_writes.py."""
@@ -53,6 +53,12 @@ def sibling_projects(tmp_path: Path) -> dict:
     (vera / "VERA-STUDIO_REGISTRY.json").write_text("{}", encoding="utf-8")
     schedule = vera / ".daemon" / "schedule.json"
     schedule.write_text('{"jobs": []}', encoding="utf-8")
+
+    # FPLAN-0839: a git work tree with no registry (~/Projects/seed), one whose .git is empty, a plain folder.
+    (projects / "seed" / ".git").mkdir(parents=True)
+    (projects / "seed" / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (projects / "hollow" / ".git").mkdir(parents=True)
+    (projects / "plain").mkdir()
 
     return {
         "aipass": aipass,
@@ -220,6 +226,130 @@ class TestAdminExemptionStaysNarrow:
     ):
         command = f"tee {sibling_projects['foreign_file']}"
         assert _blocked(_run(sibling_projects["plain_seat"], command=command))
+
+
+class TestAGitWorkTreeWithNoRegistryIsAProject:
+    """FPLAN-0839: ~/Projects/seed has no registry, so an AIPass seat wrote into it on both lanes."""
+
+    def _both_lanes(self, sibling_projects: dict, folder: str) -> list[dict]:
+        target = sibling_projects["aipass"].parent / folder / "README.md"
+        seat = sibling_projects["plain_seat"]
+        return [_run(seat, file_path=str(target), tool="Write"), _run(seat, command=f"echo x > {target.as_posix()}")]
+
+    def test_both_lanes_refuse_it_and_name_its_root(self, sibling_projects: dict, grant_withheld):
+        seed = sibling_projects["aipass"].parent / "seed"
+        for result in self._both_lanes(sibling_projects, "seed"):
+            assert _blocked(result)
+            assert f"'seed' ({seed}, a git work tree with no AIPass registry)" in _reason(result)
+
+    @pytest.mark.parametrize("folder", ["hollow", "plain"])
+    def test_an_empty_git_folder_or_none_is_no_work_tree(self, sibling_projects: dict, grant_withheld, folder: str):
+        assert [r["exit_code"] for r in self._both_lanes(sibling_projects, folder)] == [0, 0]
+
+    def test_the_verified_admin_still_crosses_into_it(self, sibling_projects: dict, grant_granted):
+        target = sibling_projects["aipass"].parent / "seed" / "README.md"
+        seat = sibling_projects["admin_seat"]
+        assert _run(seat, file_path=str(target), tool="Write")["exit_code"] == 0
+        assert _run(seat, command=f"echo x > {target.as_posix()}")["exit_code"] == 0
+
+    def test_a_seat_inside_the_work_tree_writes_its_own_files(self, sibling_projects: dict):
+        seed = sibling_projects["aipass"].parent / "seed"
+        assert _run(str(seed), file_path=str(seed / "README.md"), tool="Write")["exit_code"] == 0
+
+    def test_a_repo_nested_in_the_seats_own_project_is_still_that_project(self, sibling_projects: dict):
+        """The registry is read first, so a vendored repo inside AIPass is AIPass's, as before."""
+        vendored = sibling_projects["aipass"] / "vendor" / "lib"
+        (vendored / ".git").mkdir(parents=True)
+        (vendored / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+        seat = str(sibling_projects["aipass"])
+        target = vendored / "README.md"
+        assert _run(seat, file_path=str(target), tool="Write")["exit_code"] == 0
+        assert _run(seat, command=f"echo x > {target.as_posix()}")["exit_code"] == 0
+
+
+class TestASessionInNoProjectCrossesIntoARegistryProject:
+    """A cwd in no project (a Seed workspace, /var/tmp) wrote into AIPass on both lanes; devpulse ruled it a crossing."""
+
+    @pytest.fixture
+    def outside(self, tmp_path: Path) -> str:
+        (tmp_path / "workspace").mkdir()
+        return str(tmp_path / "workspace")
+
+    def _both_lanes(self, cwd: str, target: Path) -> list[dict]:
+        return [_run(cwd, file_path=str(target), tool="Write"), _run(cwd, command=f"echo x > {target.as_posix()}")]
+
+    def test_a_tool_write_into_a_registry_project_is_refused_and_names_it(
+        self, sibling_projects, outside, grant_withheld
+    ):
+        result = _run(
+            outside, file_path=str(sibling_projects["aipass"] / "src" / "aipass" / "devpulse" / "p.txt"), tool="Write"
+        )
+        assert _blocked(result)
+        assert "a session outside every project cannot write into project 'AIPass'" in _reason(result)
+
+    def test_a_shell_write_into_a_registry_project_is_refused_and_names_it(
+        self, sibling_projects, outside, grant_withheld
+    ):
+        target = sibling_projects["aipass"] / "src" / "aipass" / "devpulse" / "p.txt"
+        result = _run(outside, command=f"echo x > {target.as_posix()}")
+        assert _blocked(result)
+        assert "a session outside every project cannot write into project 'AIPass'" in _reason(result)
+
+    def test_plain_folders_and_its_own_workspace_stay_open(self, sibling_projects, outside, grant_withheld):
+        plain = sibling_projects["aipass"].parent / "plain" / "a.txt"
+        own = Path(outside) / "a.txt"
+        assert [r["exit_code"] for r in self._both_lanes(outside, plain) + self._both_lanes(outside, own)] == [0] * 4
+
+    def test_a_bare_git_work_tree_stays_open_as_before(self, sibling_projects, outside, grant_withheld):
+        """The ruling names registry projects only: a no-project seat still writes a registry-less repo."""
+        target = sibling_projects["aipass"].parent / "seed" / "README.md"
+        assert [r["exit_code"] for r in self._both_lanes(outside, target)] == [0, 0]
+
+    def test_the_verified_admin_still_crosses_from_no_project(self, sibling_projects, outside, grant_granted):
+        target = sibling_projects["aipass"] / "src" / "aipass" / "devpulse" / "p.txt"
+        assert [r["exit_code"] for r in self._both_lanes(outside, target)] == [0, 0]
+
+
+class TestADispatchGrantOnTheScriptedLane:
+    """Every crossing target of a shell call must be granted on its own, or the whole call is refused."""
+
+    @pytest.mark.parametrize(
+        "shape",
+        ["echo x > {t}", "sed -i s/x/y/ {t}", "python3 -c \"open('{t}', 'w').write('y')\""],
+    )
+    def test_a_granted_target_passes_and_its_ungranted_twin_is_refused(self, dispatch_grant, shape: str):
+        seed = dispatch_grant.seed
+        granted = shape.format(t=(seed / "src" / "hooks" / "x.ts").as_posix())
+        assert _run(dispatch_grant.seat, command=granted)["exit_code"] == 0
+        refused = _run(dispatch_grant.seat, command=shape.format(t=(seed / "package.json").as_posix()))
+        assert _blocked(refused) and "is outside dispatch d1's grant" in _reason(refused)
+
+    def test_the_done_scenario_cp_onto_package_json_is_refused(self, dispatch_grant):
+        hooks, pkg = (dispatch_grant.seed / "src" / "hooks" / "x.ts").as_posix(), (dispatch_grant.seed / "package.json")
+        assert _blocked(_run(dispatch_grant.seat, command=f"cp a {hooks} {pkg.as_posix()}"))
+
+    def test_one_granted_target_never_carries_an_ungranted_one_after_it(self, dispatch_grant):
+        hooks, pkg = dispatch_grant.seed / "src" / "hooks" / "x.ts", dispatch_grant.seed / "package.json"
+        result = _run(dispatch_grant.seat, command=f"echo a > {hooks.as_posix()}; echo b > {pkg.as_posix()}")
+        assert _blocked(result) and f"Target: {pkg}" in _reason(result)
+
+    def test_a_mv_needs_both_ends_inside_the_grant(self, dispatch_grant):
+        inside = [(dispatch_grant.seed / "src" / "hooks" / n).as_posix() for n in ("x.ts", "y.ts")]
+        pkg = (dispatch_grant.seed / "package.json").as_posix()
+        assert _run(dispatch_grant.seat, command=f"mv {inside[0]} {inside[1]}")["exit_code"] == 0
+        assert _blocked(_run(dispatch_grant.seat, command=f"mv {inside[0]} {pkg}"))
+        assert _blocked(_run(dispatch_grant.seat, command=f"mv {pkg} {inside[1]}"))
+
+    def test_a_dot_dot_out_of_a_granted_dir_is_judged_where_it_lands(self, dispatch_grant):
+        climb = (dispatch_grant.seed / "src" / "hooks" / ".." / ".." / "package.json").as_posix()
+        assert _blocked(_run(dispatch_grant.seat, command=f"echo x > {climb}"))
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need a privilege on Windows")
+    def test_a_symlink_escaping_a_granted_dir_is_refused(self, dispatch_grant):
+        (dispatch_grant.seed / "private").mkdir()
+        (dispatch_grant.seed / "src" / "hooks" / "link").symlink_to(dispatch_grant.seed / "private")
+        through = (dispatch_grant.seed / "src" / "hooks" / "link" / "a.ts").as_posix()
+        assert _blocked(_run(dispatch_grant.seat, command=f"echo x > {through}"))
 
 
 class TestScriptedLaneCatches:
@@ -902,11 +1032,6 @@ class TestTargetSpellingIsNotPartOfTheContract:
         )
 
 
-def _read_as(monkeypatch, pure: type) -> None:
-    """The platform oracle: bash_writes builds every path in *pure*'s flavour; it calls no concrete method."""
-    monkeypatch.setattr("aipass.hooks.apps.modules.bash_writes.Path", pure)
-
-
 class TestTheGitBashDriveSpelling:
     """Git Bash's /c/... names drive C on Windows, not C:\\c\\... on the seat's drive."""
 
@@ -922,40 +1047,32 @@ class TestTheGitBashDriveSpelling:
             "sed -i s/a/b/ C:/Work/Vera-Studio/f.json",
         ],
     )
-    def test_a_drive_path_names_the_drive_on_windows(self, monkeypatch, command):
-        _read_as(monkeypatch, PureWindowsPath)
+    def test_a_drive_path_names_the_drive_on_windows(self, command):
+        assert [t for t, _ in write_targets(command, self.SEAT, PureWindowsPath)] == [self.VERA_FILE]
 
-        assert [t for t, _ in write_targets(command, self.SEAT)] == [self.VERA_FILE]
-
-    def test_the_bare_drive_is_its_root(self, monkeypatch):
+    def test_the_bare_drive_is_its_root(self):
         """/c alone is C:/, never the drive-relative C:, which pathlib joins as the seat itself."""
-        _read_as(monkeypatch, PureWindowsPath)
+        targets = [t for t, _ in write_targets("cd /c && touch x.json", self.SEAT, PureWindowsPath)]
+        assert targets == [PureWindowsPath(r"C:\x.json")], targets
 
-        assert [t for t, _ in write_targets("cd /c && touch x.json", self.SEAT)] == [PureWindowsPath(r"C:\x.json")]
-
-    def test_a_longer_first_component_is_not_a_drive(self, monkeypatch):
+    def test_a_longer_first_component_is_not_a_drive(self):
         """/cache is a directory on the seat's drive, not drive C with 'ache' under it."""
-        _read_as(monkeypatch, PureWindowsPath)
-
-        targets = [t for t, _ in write_targets("sed -i s/a/b/ /cache/f.json", self.SEAT)]
+        targets = [t for t, _ in write_targets("sed -i s/a/b/ /cache/f.json", self.SEAT, PureWindowsPath)]
         assert targets == [PureWindowsPath(r"C:\cache\f.json")], targets
 
-    def test_the_respelled_ci_pin_lands_on_the_existing_test(self, monkeypatch):
+    def test_the_respelled_ci_pin_lands_on_the_existing_test(self):
         """test_a_subshell_cd_resolves_its_own_edit, read the way windows-setup reads it.
 
         On Linux as_posix() changes nothing; this shows C:/... reaches the real file on Windows.
         """
-        _read_as(monkeypatch, PureWindowsPath)
         command = "(cd C:/Work/AIPass && sed -i s/a/b/ src/aipass/hooks/te" + "sts/test_existing.py)"
 
-        targets = [t for t, _ in write_targets(command, self.SEAT)]
+        targets = [t for t, _ in write_targets(command, self.SEAT, PureWindowsPath)]
         assert targets == [PureWindowsPath(self.SEAT) / "tests" / "test_existing.py"], targets
 
-    def test_on_posix_a_one_letter_directory_is_only_a_directory(self, monkeypatch, tmp_path: Path):
+    def test_on_posix_a_one_letter_directory_is_only_a_directory(self, tmp_path: Path):
         """The drive reading is Windows-only. On Linux /c is a real directory named c."""
-        _read_as(monkeypatch, PurePosixPath)
-
-        targets = [t for t, _ in write_targets("sed -i s/a/b/ /c/Work/f.json", tmp_path.as_posix())]
+        targets = [t for t, _ in write_targets("sed -i s/a/b/ /c/Work/f.json", tmp_path.as_posix(), PurePosixPath)]
         assert targets == [PurePosixPath("/c/Work/f.json")], targets
 
 
@@ -1027,6 +1144,31 @@ class TestTheBranchAndMemoryLanesAreDefaultDeny:
             ), "control: a listable directory in no project stays nobody's"
         finally:
             locked.chmod(0o700)
+
+    @pytest.mark.skipif(
+        sys.platform == "win32" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+        reason="0o300 leaves the directory listable on Windows and for root",
+    )
+    def test_an_unlistable_project_logs_a_refusal_at_warning_and_a_crash_stays_error(
+        self, registered_projects: dict, grant_withheld, tmp_path: Path, caplog
+    ):
+        locked = tmp_path / "Projects" / "Locked"
+        locked.mkdir(parents=True)
+        locked.chmod(0o300)
+        try:
+            refused = _run(registered_projects["hooks"], command=f"cp x {(locked / 'new.py').as_posix()}")
+        finally:
+            locked.chmod(0o700)
+        assert _blocked(refused) and "could not check this call" in _reason(refused)
+        logged = [(r.levelname, r.getMessage()) for r in caplog.records if "edit_gate: " in r.getMessage()]
+        assert [level for level, message in logged if "refused on Bash" in message] == ["WARNING"]
+        assert not [message for _level, message in logged if "crashed" in message]
+
+        caplog.clear()
+        with patch("aipass.hooks.apps.modules.bash_writes.write_targets", side_effect=ValueError("unreadable operand")):
+            crashed = _run(registered_projects["hooks"], command="echo x > ./local.txt")
+        assert _blocked(crashed)
+        assert [r.levelname for r in caplog.records if "edit_gate: crashed on Bash" in r.getMessage()] == ["ERROR"]
 
     def test_drone_and_own_branch_work_still_pass(self, registered_projects: dict):
         seat = registered_projects["hooks"]

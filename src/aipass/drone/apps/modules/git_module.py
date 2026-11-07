@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.15.0
+# Version: 1.16.0
 # Created: 2026-03-17
-# Modified: 2026-11-02
+# Modified: 2026-11-03
 # =============================================
 
 """
@@ -31,6 +31,7 @@ from aipass.drone.apps.handlers.git import (
     untrack_handler,
     release_handler,
     restore_handler,
+    uncommit_handler,
     label_handler,
     alerts_handler,
     ci_cure_handler,
@@ -80,6 +81,7 @@ _COMMANDS = (
     "commit",
     "untrack",
     "restore",
+    "uncommit",
     "checkout",
     "sync",
     "push",
@@ -288,6 +290,8 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
         return _handle_untrack(args)
     if command == "restore":
         return restore_handler.restore(lock_handler.find_repo_root(), caller_cwd(), args, caller)
+    if command == "uncommit":
+        return uncommit_handler.uncommit(lock_handler.find_repo_root(), args, caller)
     if command == "checkout":
         return _handle_checkout(args)
     if command == "sync":

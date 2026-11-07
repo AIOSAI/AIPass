@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_cadence.py
-# Version: 1.10.0
+# Version: 1.10.1
 # Description: Tests for cadence module (DPLAN-0200): the fire decision; regroup and counter in test_cadence_regroup.py
 # Branch: hooks
 # Created: 2026-06-08
-# Modified: 2026-11-02
+# Modified: 2026-11-04
 # =============================================
 
 """Tests for apps/modules/cadence.py: the fire decision."""
@@ -772,6 +772,16 @@ class TestTurnToken:
         assert cadence.turn_token({"transcript_path": str(empty)}) == 0
         assert cadence.turn_token({"transcript_path": str(tmp_path / "missing.jsonl")}) == -1
         assert cadence.turn_token({}) == -1
+
+    def test_a_seed_transcript_counts_by_its_size_never_its_lines(self, tmp_path):
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(json.dumps({"who": "you", "text": "hi", "time": "t"}) + "\n", encoding="utf-8")
+        hook_data = {"provider": "seed", "transcript_path": str(transcript)}
+        first = cadence.turn_token(hook_data)
+        assert first == transcript.stat().st_size > 0
+        with transcript.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"who": "a", "text": "hello", "time": "t"}) + "\n")
+        assert cadence.turn_token(hook_data) > first
 
     def test_a_missing_transcript_at_turn_zero_logs_no_info_line(self, tmp_path, caplog):
         caplog.set_level("DEBUG")

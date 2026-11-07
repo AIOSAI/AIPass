@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: conftest.py
-# Version: 2.7.0
+# Version: 2.8.1
 # Description: Shared pytest fixtures for hooks tests
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-11-02
+# Modified: 2026-11-04
 # =============================================
 
 """Shared pytest fixtures for hooks tests.
@@ -19,6 +19,7 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Generator
 from unittest.mock import patch
 
@@ -27,6 +28,7 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 
 import pytest
 
+from aipass.ai_mail.apps.modules import door_dispatch_grant, door_verified_caller
 from aipass.cli.apps.modules import display
 from aipass.hooks.apps import sound
 from aipass.hooks.apps.handlers.config import diagnostics, trust_registry
@@ -302,3 +304,69 @@ def registered_projects(tmp_path: Path) -> dict:
         "vera_sentry": str(vera_seat / "sentry"),
         "baud_seat": str(baud / "src" / "baud" / "baud"),
     }
+
+
+@pytest.fixture(autouse=True)
+def _no_inherited_dispatch_id(monkeypatch):
+    """A dispatched seat's pytest inherits its AIPASS_DISPATCH_ID; every crossing test would then ask the real door."""
+    monkeypatch.delenv("AIPASS_DISPATCH_ID", raising=False)
+
+
+@pytest.fixture
+def dispatch_grant(tmp_path: Path, monkeypatch) -> SimpleNamespace:
+    """Dispatch d1's @hooks seat in a daemon session, a registry-less git tree beside it, @ai_mail's door faked.
+
+    The fake answers as the door does and records each call; ``ended`` makes it refuse with that reason.
+    """
+    aipass = tmp_path / "Projects" / "AIPass"
+    seat = aipass / "src" / "aipass" / "hooks"
+    (seat / ".trinity").mkdir(parents=True)
+    (seat / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+    (aipass / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+    seed = tmp_path / "Projects" / "seed"
+    (seed / "src" / "hooks").mkdir(parents=True)
+    for repo in (aipass, seed):
+        (repo / ".git").mkdir()
+        (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    for name in (".git/config", "README.md", "package.json", "src/hooks/x.ts"):
+        (seed / name).write_text("x\n", encoding="utf-8")
+    grant = {"root": str(seed), "files": ["README.md"], "dirs": ["src/hooks"]}
+    state = SimpleNamespace(
+        aipass=aipass, seat=str(seat), seed=seed, grant=grant, calls=[], ended="", grantee="@hooks", admin=False
+    )
+
+    def granted(caller_branch, dispatch_id, target_path, repo_root=None, now=None):
+        state.calls.append({"caller": caller_branch, "target": target_path, "repo_root": repo_root})
+        root, target = Path(state.grant["root"]), Path(target_path)
+        if dispatch_id != "d1":
+            reason = f"dispatch {dispatch_id} is not open with a grant"
+        elif state.ended:
+            reason = state.ended
+        elif "@" + caller_branch.lstrip("@") != state.grantee:
+            reason = f"dispatch d1 was sent to {state.grantee}, not {caller_branch}"
+        elif target in [root / f for f in state.grant["files"]] or any(
+            target.is_relative_to(root / d) for d in state.grant["dirs"]
+        ):
+            return {"allowed": True, "dispatch_id": dispatch_id, "reason": f"{target} is granted"}
+        else:
+            reason = f"{target} is outside dispatch d1's grant"
+        return {"allowed": False, "dispatch_id": dispatch_id, "reason": reason}
+
+    def open_grants(repo_root=None, now=None):
+        return [
+            {
+                "dispatch_id": "d1",
+                "sender": "@grantor",
+                "target": state.grantee,
+                door_dispatch_grant.GRANT_KEY: state.grant,
+            }
+        ]
+
+    monkeypatch.setattr(door_dispatch_grant, "granted", granted)
+    monkeypatch.setattr(door_dispatch_grant, "open_grants", open_grants)
+    monkeypatch.setattr(door_verified_caller, "is_verified_admin_caller", lambda: state.admin)
+    for name in ("AIPASS_CALLER_BRANCH", "AIPASS_CALLER_CWD", "AIPASS_CALLER_IDENTITY_SOURCE"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AIPASS_DISPATCH_ID", "d1")
+    monkeypatch.setenv("AIPASS_SESSION_TYPE", "daemon")
+    return state

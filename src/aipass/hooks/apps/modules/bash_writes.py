@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-30
-# Modified: 2026-10-25
+# Modified: 2026-11-07
 # =============================================
 
 """Reads a Bash command and reports which paths it can be seen to WRITE.
@@ -17,7 +17,8 @@ Directed verbs (redirection, tee, sed -i, cp, mv, dd of=) report their target; i
 import os
 import re
 import shlex
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePath, PureWindowsPath
+from typing import cast
 
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.modules.shell_programs import named_operands, sed_actions, sed_scripts
@@ -371,7 +372,7 @@ def _resolve(word: str, cwd: Path) -> Path | None:
     # Separators normalise on every OS; a drive ROOT still names nothing on Linux (NOT_CAUGHT).
     word = word.replace("\\", "/")
     # os.path keeps an unknown user's word (~nosuchuser) literal, as bash does; pathlib raises on it.
-    candidate = Path(os.path.expanduser(word))
+    candidate = type(cwd)(os.path.expanduser(word))
     return candidate if candidate.is_absolute() else (cwd / candidate)
 
 
@@ -461,7 +462,7 @@ def _landings(segment: list[str], operands: list[str], cwd: Path) -> list[Path]:
         return []
     into_dir = target_dir is not None or dest.endswith(("/", "\\")) or os.path.isdir(target)
     if into_dir and "-T" not in words and "--no-target-directory" not in words:
-        return [target / Path(source.replace("\\", "/")).name for source in sources] or [target]
+        return [target / type(target)(source.replace("\\", "/")).name for source in sources] or [target]
     return [target]
 
 
@@ -492,7 +493,9 @@ def _interpreter_targets(segment: list[str], raw: str, cwd: Path) -> list[tuple[
     return hits
 
 
-def write_targets_by_segment(command: str, cwd: str) -> list[tuple[list[str], list[tuple[Path, str]]]]:
+def write_targets_by_segment(
+    command: str, cwd: str, path_type: type[PurePath] = Path
+) -> list[tuple[list[str], list[tuple[Path, str]]]]:
     """Same reading as :func:`write_targets`, but grouped by the segment that earned it.
 
     For narrower callers (testwrite_gate drops interpreter targets from runner segments only); a segment
@@ -502,7 +505,7 @@ def write_targets_by_segment(command: str, cwd: str) -> list[tuple[list[str], li
     if not command or not command.strip():
         return []
     try:
-        base = Path(cwd) if cwd else Path.cwd()
+        base = cast(Path, path_type(cwd)) if cwd else Path.cwd()  # a pure flavour: no concrete method is called
     except OSError as exc:
         logger.warning("[HOOKS] bash_writes: no usable cwd, the command cannot be read: %s", exc)
         raise
@@ -571,9 +574,9 @@ def _heredocs_by_segment(segments: list[list[str]], bodies: list[str]) -> dict[i
     return owned
 
 
-def write_targets(command: str, cwd: str) -> list[tuple[Path, str]]:
-    """Return every (path, why) this command can be seen to write."""
-    return [hit for _segment, hits in write_targets_by_segment(command, cwd) for hit in hits]
+def write_targets(command: str, cwd: str, path_type: type[PurePath] = Path) -> list[tuple[Path, str]]:
+    """Return every (path, why) this command can be seen to write, in *path_type*'s flavour (the local Path)."""
+    return [hit for _segment, hits in write_targets_by_segment(command, cwd, path_type) for hit in hits]
 
 
 def changed_paths(command: str, cwd: str) -> list[str]:

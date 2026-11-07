@@ -165,8 +165,9 @@ stale the instant it is written. A dead monitor is therefore visible on the next
 watchdog pass (five minutes) instead of at `expected_by`.
 
 `monitor_alive` is **three-valued and the third value matters**: `True` alive,
-`False` gone, `None` cannot be told. `None` covers rows with no `monitor_pid` and the
-systemd-scope spawn path, which never learns a pid. Readers treat `None` as "fall
+`False` gone, `None` cannot be told. `None` covers rows with no `monitor_pid`. The
+wake records the pid on the Popen path; the monitor also records its own pid on its row
+at start, so the systemd-scope path, where the wake never learns it, carries one too. Readers treat `None` as "fall
 back to `overdue`"; reading it as `False` would announce a death that nobody saw.
 
 ### A stop closes the row
@@ -214,6 +215,41 @@ resume, and a report-first plan is not a reply on it.
 A dispatch with an **empty subject** — a bare wake — has no thread and can never
 be matched. Its row keeps `expected_by` as its only signal, which is honest
 rather than a gap: there is nothing for the agent to reply *to*.
+
+### A grant rides the row
+
+`dispatch @x "S" "B" --grant-root <dir> --grant <p1,p2,...>` lets the dispatched session
+write into a project outside this repo: each listed file, and anything (new files too)
+under each listed directory. Only the verified admin seat may send one. Before any mail
+goes it is refused for a manager target, an absolute path, a `..`, a path that resolves
+outside the root (a symlink), the root itself, anything under `.git`, a missing path, or a
+path that shares ground with an open grant (either under the other); each refusal names
+the path. The grant is one key on the open row,
+`"grant": {"root": "<abs>", "files": [...], "dirs": [...], "granted_by": "@devpulse"}`,
+and the delivered body carries a `--- GRANT ---` block built from the same values.
+
+`open_dispatch` re-checks a granted row itself: the admin seat again, then overlap while
+the register lock is held, so a second dispatch sent in the same second, or a row written
+by importing the function, is refused there and nothing is spawned. A busy or refused wake
+opens no row, so issues no grant, and the dispatch says so.
+
+`grants widen <id or unique prefix> <p1,p2,...>` grows an open grant while its dispatch
+runs: admin seat only, the new paths validated under the row's root exactly as at send,
+overlap with every other open grant checked under the lock. It appends the row again with
+the merged `files` and `dirs`, `widened_at` and a `widened_by` list; the gate reads the
+register on every write, so the next write sees it. A row that closed or changed between
+the read and the lock is refused, never reopened; a widen that adds nothing writes nothing.
+It sends no mail: the admin tells the target. There is no narrowing and no change of root.
+
+The grant needs no revoke: it is open exactly while its row is, so the monitor's exit, a
+reply, a stop and a close each end it. `door_dispatch_grant.granted(caller_branch,
+dispatch_id, target_path)` answers `{allowed, dispatch_id, reason}` for one write, derived at
+that read: the row is outstanding, carries a grant, was sent to that caller, is before
+`expected_by`, and its `monitor_alive` is `True` (`None` refuses). `dispatch_id` is the
+writing session's `AIPASS_DISPATCH_ID`, which the wake stamps on the spawn, so the seat's
+other sessions hold nothing. `target_path` is taken as given, absolute and already
+resolved by the caller; nothing under the grant's root is read. `drone @ai_mail grants`
+lists the open grants.
 
 ### The report is durable; delivery is opportunistic
 

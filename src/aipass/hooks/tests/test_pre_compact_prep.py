@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_pre_compact_prep.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Tests for pre_compact_prep lifecycle handler
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-11-02
+# Modified: 2026-11-04
 # =============================================
 
 """Tests for apps/handlers/lifecycle/pre_compact_prep.py."""
@@ -379,3 +379,24 @@ def f(root):
             if isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value not in docstrings
         ]
         assert [v for v in code_literals if "memory_json" in v]
+
+
+def _seed_transcript(path):
+    """Seed's own transcript.jsonl (src/head/chat/history.ts): one line per published line, who and text."""
+    lines = [{"who": "you", "text": "hi", "time": "2026-11-04T10:00:00Z"}, {"who": "a", "text": "hello", "time": "t"}]
+    path.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+    return path
+
+
+class TestSeedTranscript:
+    def test_a_seed_snapshot_states_no_fill_and_never_parses_the_transcript(self, tmp_path, monkeypatch):
+        parsed: list[str] = []
+        monkeypatch.setattr(context_window, "_latest", lambda path, *_: parsed.append(path))
+        branch_dir = _make_branch(tmp_path)
+        transcript = _seed_transcript(tmp_path / "transcript.jsonl")
+        hook_data = {"cwd": str(branch_dir), "provider": "seed", "transcript_path": str(transcript)}
+        with patch(f"{MODULE}._find_repo_root", return_value=None):
+            result = handle(hook_data)
+        assert result["exit_code"] == 0
+        assert "AUTO-COMPACT SNAPSHOT" in result["stdout"] and "context ~" not in result["stdout"]
+        assert parsed == []

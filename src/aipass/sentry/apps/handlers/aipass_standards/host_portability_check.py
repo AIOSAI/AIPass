@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_portability_check.py
 # Description: Host Portability Standards Checker Handler
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-09-12
-# Modified: 2026-11-02
+# Modified: 2026-11-06
 # =============================================
 
 """Host Portability Standards Checker Handler.
@@ -1027,6 +1027,38 @@ def _empty_git_markers(tree: ast.Module) -> List[Tuple[int, str]]:
     return violations
 
 
+#: Arm I: a unit whose own source says case or fold is testing the folding on purpose.
+_CASE_WORDS = re.compile(r"case|fold")
+_CASE_TWIN_FIX = "a case-folding host (macOS, Windows) makes them one directory - give them distinct names"
+
+
+def _case_twin_rows(func: ast.AST) -> List[Tuple[int, str]]:
+    """``x / "aipass"`` and ``x / "AIPass"`` in one function body: the same parent, names equal under casefold."""
+    rows: List[Tuple[int, str]] = []
+    first: Dict[Tuple[str, str], str] = {}
+    for node in _own_nodes(func):
+        if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)):
+            continue
+        if not (isinstance(node.right, ast.Constant) and isinstance(node.right.value, str)):
+            continue
+        name = node.right.value
+        seen = first.setdefault((ast.unparse(node.left), name.casefold()), name)
+        if seen != name:
+            rows.append((node.lineno, f"`{ast.unparse(node)}` beside {seen!r} - {_CASE_TWIN_FIX}"))
+    return rows
+
+
+def _case_twins(tree: ast.Module) -> List[Tuple[int, str]]:
+    """Arm I: two sibling path literals that differ only by case, in a unit that never says it means it."""
+    violations: List[Tuple[int, str]] = []
+    for func in ast.walk(tree):
+        if isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            rows = _case_twin_rows(func)
+            if rows and not _CASE_WORDS.search(ast.unparse(func).lower()):
+                violations.extend(rows)
+    return violations
+
+
 def _declared_floor(branch_root: Path) -> Tuple[int, int] | None:
     """The nearest pyproject.toml's ``requires-python >=3.N``; None when none declares one.
 
@@ -1068,7 +1100,7 @@ def _relative(path: Path, branch_root: Path) -> str:
 
 
 def scan_file(file_path: str, floor: Tuple[int, int] | None = None) -> Tuple[List[Tuple[int, str]], int]:
-    """Every arm (A to H) over one file. Returns (violations, acquitted binary sites).
+    """Every arm (A to I) over one file. Returns (violations, acquitted binary sites).
 
     Arm G runs only with the branch's declared ``floor``; arm H only outside a test tree, whose fixtures plant .git.
 
@@ -1096,6 +1128,7 @@ def scan_file(file_path: str, floor: Tuple[int, int] | None = None) -> Tuple[Lis
     violations.extend(_mixed_spelling_comparisons(tree))
     violations.extend(_unanswered_git_identity(tree))
     violations.extend(_version_bound_imports(tree, floor))
+    violations.extend(_case_twins(tree))
     if not is_test_path(str(path)):
         violations.extend(_empty_git_markers(tree))
     violations.sort(key=lambda row: row[0])

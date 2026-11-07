@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.20.3
+# Version: 1.22.0
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-11-01
+# Modified: 2026-11-07
 # =============================================
 
 """Blocks unsafe edits: inbox, cross-project, cross-branch and shell-to-memory writes, daemon confinement, diagnostics
@@ -19,6 +19,7 @@ import importlib
 import json
 import os
 import re
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -106,40 +107,47 @@ def _is_admin_seat(cwd: str) -> bool:
     return bool(admin.is_admin_seat(cwd))
 
 
-def _check_project_boundary(cwd: str, caller: Any, landing: Any, target: Path) -> dict | None:
-    """Block a write that crosses out of the caller's project, in any direction.
+def _check_project_boundary(cwd: str, caller: Any, landing: Any, target: Path) -> tuple[dict | None, bool]:
+    """Block a write that crosses out of the caller's project, in any direction: (refusal, granted).
 
-    Only the verified admin seat crosses. *caller* and *landing* are write_ownership Projects."""
+    The verified admin seat crosses, then a dispatch's grant (modules/write_grant). *caller*, *landing*: Projects."""
     if not _ownership().is_crossing(caller, landing):
-        return None
+        return None, False
     if _is_admin_seat(cwd):
         logger.info(
             "[HOOKS] edit_gate: cross-project write ALLOWED for the admin seat (@%s): %s -> %s (%s)",
             ADMIN_SEAT,
-            caller.root.name,
+            _ownership().seat_label(caller),
             landing.root.name,
             target,
         )
-        return None
-
+        return None, False
+    if (grant := _write_grant(cwd, caller, landing, target)).allowed:
+        return None, True
     logger.warning(
-        "[HOOKS] edit_gate: cross-project write refused: caller root %s != target root %s (%s)",
-        caller.root,
+        "[HOOKS] edit_gate: cross-project write refused: caller %s != target root %s (%s)",
+        _ownership().seat_label(caller),
         landing.root,
         target,
     )
-    return _cross_project_block(caller.root, landing.root, target, "")
+    return _cross_project_block(caller, landing, target, "", grant.why), False
 
 
-def _cross_project_block(caller_root: Path, target_root: Path, target: Path, how: str) -> dict:
-    """Build the refusal both lanes print. *how* names the shell verb, or "" for a tool edit."""
+def _write_grant(cwd: str, caller: Any, landing: Any, target: Path) -> Any:
+    """modules/write_grant's ruling on one crossing; an unimportable module raises into the crash refusal."""
+    return _import_module("aipass.hooks.apps.modules.write_grant").granted(cwd, caller and caller.root, landing, target)
+
+
+def _cross_project_block(caller: Any, landing: Any, target: Path, how: str, why: str = "") -> dict:
+    """Build the refusal both lanes print. *how* names the shell verb, or "" for a tool edit; *why*, the grant's."""
     lane = f"Cross-project write blocked ({how})" if how else "Cross-project write blocked"
     reason = (
-        f"{lane}: project '{caller_root.name}' cannot write into project '{target_root.name}'.\n"
+        f"{lane}: {_ownership().seat_label(caller)} cannot write into project {landing.label}.\n"
         f"Target: {target}\n"
         "A project writes inside itself only — never into its host, a sibling or a project it holds. This is the "
         "file-layer twin of the mail fence that refuses cross-project sends.\n"
-        'To reach that project: drone @devpulse feedback send "Subject" "Body"'
+        + (f"{why}\n" if why else "")
+        + 'To reach that project: drone @devpulse feedback send "Subject" "Body"'
     )
     return _refuse(reason)
 
@@ -166,29 +174,30 @@ def _check_bash_project_boundary(cwd: str, caller: Any, targets: list[tuple[Path
     wo = _ownership()
     if unprobeable := wo.unprobeable(targets):
         return _refuse(unprobeable)
-    if caller is None:
-        return None
     for target, how in targets:
-        landing = wo.project_of(target)
+        landing = wo.landing_of(target)
         if not wo.is_crossing(caller, landing):
             continue
         if _is_admin_seat(cwd):
             logger.info(
                 "[HOOKS] edit_gate: scripted cross-project write ALLOWED for the admin seat (@%s): %s -> %s (%s)",
                 ADMIN_SEAT,
-                caller.root.name,
+                wo.seat_label(caller),
                 landing.root.name,
                 target,
             )
             return None
+        # Per target: one granted target never carries an ungranted one through.
+        if (grant := _write_grant(cwd, caller, landing, target)).allowed:
+            continue
         logger.warning(
             "[HOOKS] edit_gate: scripted cross-project write refused: %s -> %s via %s (%s)",
-            caller.root,
+            wo.seat_label(caller),
             landing.root,
             how,
             target,
         )
-        return _cross_project_block(caller.root, landing.root, target, how)
+        return _cross_project_block(caller, landing, target, how, grant.why)
     return None
 
 
@@ -955,8 +964,8 @@ def handle(hook_data: dict) -> dict:
 
         # Outermost boundary first, then daemon confinement, then whose file it is.
         wo = _ownership()
-        caller, landing = wo.project_of(Path(cwd)), wo.project_of(fp)
-        block = _check_project_boundary(cwd, caller, landing, fp)
+        caller, landing = wo.project_of(Path(cwd)), wo.landing_of(fp)
+        block, granted = _check_project_boundary(cwd, caller, landing, fp)
         if block:
             return block
 
@@ -964,7 +973,7 @@ def handle(hook_data: dict) -> dict:
         cwd_branch = _get_branch(cwd, package)
 
         session_type = os.environ.get("AIPASS_SESSION_TYPE", "interactive")
-        if session_type == "daemon" and cwd_branch:
+        if session_type == "daemon" and cwd_branch and not granted:
             target_branch = _get_branch(str(fp), package)
             if target_branch and target_branch != cwd_branch:
                 reason = (
@@ -1054,7 +1063,12 @@ def handle(hook_data: dict) -> dict:
         return _refuse(reason)
 
     except Exception as exc:  # fail closed on what this gate guards
-        logger.error("[HOOKS] edit_gate: crashed on %s, refusing it: %s", tool_name or "(no tool)", exc)
+        # sys.modules, not an import: a ProjectUnreadable can only come from an already-loaded write_ownership.
+        unreadable = getattr(sys.modules.get("aipass.hooks.apps.modules.write_ownership"), "ProjectUnreadable", ())
+        if isinstance(exc, unreadable):
+            logger.warning("[HOOKS] edit_gate: refused on %s: %s", tool_name or "(no tool)", exc)
+        else:
+            logger.error("[HOOKS] edit_gate: crashed on %s, refusing it: %s", tool_name or "(no tool)", exc)
         if tool_name == "Bash" or tool_name in EDIT_TOOLS:
             return _refuse(GATE_CRASHED.format(error=f"{type(exc).__name__}: {exc}"))
         return {"stdout": "", "exit_code": 0}

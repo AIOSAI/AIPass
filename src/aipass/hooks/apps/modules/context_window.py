@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: context_window.py
-# Version: 1.10.1
+# Version: 1.11.0
 # Description: Context fill per CLI (Claude transcript, Codex rollout, OpenCode store) and the compact window
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-20
-# Modified: 2026-11-01
+# Modified: 2026-11-04
 # =============================================
 
 """Live context fill and the model from a session transcript, and the window Claude Code runs.
@@ -18,7 +18,8 @@ of the most recent assistant turn (proven readable S326).
 Window, as Claude Code 2.1.304 picks it: the model's own window (`[1m]` suffix or a native-1M
 id -> 1M, else 200k), capped by an explicit window when one is set (env beats settings).
 Auto-compact fires at window - 33k. OpenCode keeps no transcript: opencode_fill reads its store, and
-opencode_window its models.dev catalog and compaction.buffer, the rule OpenCode 2.2 compacts by."""
+opencode_window its models.dev catalog and compaction.buffer, the rule OpenCode 2.2 compacts by.
+A Seed transcript (provider "seed") is Seed's own shape with no usage or model yet: it reads as none."""
 
 import json
 import os
@@ -48,6 +49,8 @@ _SETTINGS_KEY = "autoCompactWindow"
 _CODEX_USABLE_PCT = 95  # codex-rs default_effective_context_window_percent
 
 AUTOCOMPACT_BUFFER = 33_000
+
+SEED = "seed"
 
 NATIVE_1M_MODELS = frozenset(
     {
@@ -158,8 +161,8 @@ def _is_real_model(model: object) -> bool:
 def read_latest_usage(transcript_path: str, tail_bytes: int = _TAIL_BYTES, provider: str = "") -> dict | None:
     """The newest usage dict: Claude's assistant message.usage, or Codex's token_count last_token_usage.
 
-    *provider* is the caller's transcript_provider() reading; empty reads it here."""
-    if not transcript_path:
+    *provider* is the caller's transcript_provider() reading or the payload's; empty reads it here."""
+    if not transcript_path or provider == SEED:
         return None
     try:
         if (provider or transcript_provider(transcript_path)) == "codex":
@@ -181,7 +184,7 @@ def _is_dict(value: object) -> bool:
 
 def read_latest_model(transcript_path: str, tail_bytes: int = _TAIL_BYTES, provider: str = "") -> str:
     """The model id of the most recent turn (Codex: turn_context), or "" when the transcript names none."""
-    if not transcript_path:
+    if not transcript_path or provider == SEED:
         return ""
     try:
         if (provider or transcript_provider(transcript_path)) == "codex":

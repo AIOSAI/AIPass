@@ -503,8 +503,8 @@
     {
       "file": "apps/handlers/audit/incremental_cache.py",
       "standard": "logged_fallback",
-      "lines": [238, 269, 280],
-      "reason": "A cache, and the checker is wrong on these lines (fleet green leg 14). An unreadable legacy doc migrates 0 entries (388), and an unreadable or corrupt entry is a cache miss (419, 430). Every caller needs the same answer to both: run the full audit and write the entry fresh, which is the documented fail-open. The corrupt entry is renamed aside to .corrupt and each failure is logged, so nothing is lost and nothing is silent."
+      "lines": [249, 280, 291],
+      "reason": "A cache, and the checker is wrong on these lines (fleet green leg 14). An unreadable legacy doc migrates 0 entries (migrate_legacy_cache), and an unreadable or corrupt entry is a cache miss (load_branch_entry). Every caller needs the same answer to both: run the full audit and write the entry fresh, which is the documented fail-open. The corrupt entry is renamed aside to .corrupt and each failure is logged, so nothing is lost and nothing is silent."
     },
     {
       "file": "apps/handlers/audit_tests/artifact.py",

@@ -3,7 +3,7 @@
 # Description: Tests for dispatch monitor lifecycle handler
 # Version: 1.5.0
 # Created: 2026-04-02
-# Modified: 2026-11-02
+# Modified: 2026-11-03
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's main(): the attempts, the bounce, the completion fire."""
@@ -21,6 +21,7 @@
 # sentry: no-test-needed(shared) — the session-pointer retry loop: tests/test_dispatch_monitor_pointer.py
 
 import json
+import os
 import subprocess
 import time
 import pytest
@@ -29,6 +30,7 @@ from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as mod
 import aipass.ai_mail.apps.handlers.notify as notify_mod
+from aipass.ai_mail.apps.handlers.dispatch import register
 from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import BG_TASKS_MARKER, main
 from aipass.ai_mail.tests.support_dispatch_monitor import (
     _assert_sent_as_ai_mail,
@@ -106,6 +108,27 @@ def test_main_single_attempt_success(monkeypatch, main_argv, tmp_path, recorded_
             },
         )
     ]
+
+
+def test_the_monitor_records_its_own_pid_on_its_row_so_a_systemd_scope_death_shows(monkeypatch, main_argv, tmp_path):
+    """The systemd-scope lane never learns the monitor's pid at the wake; the monitor writes it itself."""
+    argv, _, _ = main_argv
+    dispatch_id = register.open_dispatch("@sender", "@test_branch", "s", 600)
+    pids_while_running: list = []
+
+    def _run(*args, **kwargs):
+        pids_while_running.extend(row.get("monitor_pid") for row in register.outstanding())
+        return 0, False
+
+    monkeypatch.setenv("AIPASS_DISPATCH_ID", dispatch_id)
+    monkeypatch.setattr("sys.argv", argv)
+    monkeypatch.setattr(mod, "run_with_startup_check", _run)
+    monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
+
+    with pytest.raises(SystemExit):
+        main()
+
+    assert pids_while_running == [os.getpid()]
 
 
 def test_main_second_attempt_success(monkeypatch, main_argv, tmp_path):

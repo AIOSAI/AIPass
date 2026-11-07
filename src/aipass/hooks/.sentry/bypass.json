@@ -1,8 +1,8 @@
 {
   "metadata": {
-    "version": "2.0.0",
+    "version": "2.0.1",
     "created": "2026-05-18",
-    "updated": "2026-09-18",
+    "updated": "2026-11-07",
     "description": "Standards bypass configuration for this branch",
     "audit_context": "DPLAN-0191: Full ownership hardening. All handler wiring verified against .aipass/hooks.json + engine.jsonl firing evidence. Dynamic dispatch via engine._run_handler (importlib.import_module + getattr) means handlers are never statically imported — sentry's dead_code/unused_function checks are false positives for this architecture."
   },
@@ -1376,16 +1376,34 @@
       "reason": "Not a drone command surface: the who-may-write-whose-files reader consumed by handlers/security/edit_gate.py inside a PreToolUse hook. print_introspection states the rule; a CLI verdict would read the operator's cwd as a seat."
     },
     {
+      "file": "apps/modules/write_grant.py",
+      "standard": "json_structure",
+      "reason": "Asks @ai_mail's dispatch-grant door one question per crossing write and stamps/unstamps one env var. Opens no JSON itself (the door reads the register and logs its own grant_decision); same profile as admin_seat.py."
+    },
+    {
+      "file": "apps/modules/write_grant.py",
+      "standard": "modules",
+      "reason": "Not a drone command surface: consumed by handlers/security/edit_gate.py inside a PreToolUse hook. A CLI verdict would stamp the operator's cwd and env as a dispatched seat. print_introspection() reports the contract. Same profile as admin_seat.py."
+    },
+    {
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "logged_fallback",
       "lines": [
-        493,
-        531,
-        583,
-        820,
-        876
+        502,
+        540,
+        592,
+        829,
+        885
       ],
-      "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 493 _allowed_fields: the refusal's wording only, the refusal stands. 531 _evaluate_file_budget: an older @memory publishes no check_file_budget, so there is no rule to apply (logged). 583: the todos advisory text, never a verdict. 820 _seat_trinity and 876 _read_pending: the tripwire, which reports after the call and decides nothing. The two that did let a write through were cured fail-closed in leg 5."
+      "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 502 _allowed_fields: the refusal's wording only, the refusal stands. 540 _evaluate_file_budget: an older @memory publishes no check_file_budget, so there is no rule to apply (logged). 592: the todos advisory text, never a verdict. 829 _seat_trinity and 885 _read_pending: the tripwire, which reports after the call and decides nothing. The two that did let a write through were cured fail-closed in leg 5."
+    },
+    {
+      "file": "apps/handlers/lifecycle/session_start.py",
+      "standard": "logged_fallback",
+      "lines": [
+        73
+      ],
+      "reason": "_interactive's False on an unreadable Codex rollout is the docstring's answer: the pointer is left as is, because a headless pointer would reopen an empty chat. A resume target, guards no write; logged at INFO."
     },
     {
       "file": "apps/handlers/security/subagent_gate.py",
@@ -1458,30 +1476,29 @@
       "file": "apps/modules/cadence.py",
       "standard": "logged_fallback",
       "lines": [
-        291,
-        443,
-        448,
-        535,
-        717,
-        802,
-        859,
-        943
+        445,
+        450,
+        537,
+        719,
+        804,
+        861,
+        945
       ],
-      "reason": "Fleet green leg 5: cadence decides which turn an injector fires on and guards no write. On doubt each answers its documented empty value (turn 0, 'never fired', not grounded, nothing pending), logged: the worst case is a grounding block early, late or twice, never a write let through."
+      "reason": "Fleet green leg 5: cadence decides which turn an injector fires on and guards no write. On doubt each answers its documented empty value ('never fired', not grounded, nothing pending), logged: the worst case is a grounding block early, late or twice, never a write let through."
     },
     {
       "file": "apps/modules/context_window.py",
       "standard": "logged_fallback",
       "lines": [
-        171,
         174,
-        193,
+        177,
         196,
-        317,
-        380,
-        399
+        199,
+        320,
+        383,
+        402
       ],
-      "reason": "Fleet green leg 5: the context gauge's reading; None shows no gauge. Display only, guards no write. 169-196: an unreadable transcript (Claude's or a Codex rollout) reads as no usage / no model. 317: an unreadable OpenCode store reads as no usage, logged at INFO. 380: an unreadable OpenCode catalog reads as no limit, so the documented 200k stands, logged at INFO. 399: an unreadable limit cache reads as empty, so the catalog is read, logged at INFO."
+      "reason": "Fleet green leg 5: the context gauge's reading; None shows no gauge. Display only, guards no write. 174-199: an unreadable transcript (Claude's or a Codex rollout) reads as no usage / no model. 320: an unreadable OpenCode store reads as no usage, logged at INFO. 383: an unreadable OpenCode catalog reads as no limit, so the documented 200k stands, logged at INFO. 402: an unreadable limit cache reads as empty, so the catalog is read, logged at INFO."
     },
     {
       "file": "apps/modules/cc_transcripts.py",
@@ -1714,7 +1731,7 @@
       "file": "tests/test_edit_gate_bash.py",
       "standard": "stdlib_patch",
       "lines": [
-        907
+        994
       ],
       "reason": "Fleet green row 0 (leg 8, landed leg 10): bash_writes.Path flavour oracle; threading flavour through every path builder is the cost; closes the leg 5 write_targets flavour HELD."
     },
@@ -1829,6 +1846,36 @@
     },
     {
       "file": "apps/handlers/bridges/opencode.py",
+      "standard": "imports",
+      "reason": "Bridge imports engine module by design — sole purpose."
+    },
+    {
+      "file": "apps/handlers/bridges/seed.py",
+      "standard": "dead_code",
+      "reason": "Bridge called externally by a Seed head's hooks.json command rows — no internal import. Written by drone @hooks seed install."
+    },
+    {
+      "file": "apps/handlers/bridges/seed.py",
+      "standard": "unused_function",
+      "reason": "main() called as subprocess entry point from a Seed head's hooks.json — never statically imported."
+    },
+    {
+      "file": "apps/handlers/bridges/seed.py",
+      "standard": "handlers",
+      "reason": "Bridges import engine module by design — that is their entire purpose."
+    },
+    {
+      "file": "apps/handlers/bridges/seed.py",
+      "standard": "json_structure",
+      "reason": "Thin entry point using stdlib json for Seed's answer document — no JSON file ops needing json_handler."
+    },
+    {
+      "file": "apps/handlers/bridges/seed.py",
+      "standard": "architecture",
+      "reason": "Bridge importing engine module is its architectural purpose."
+    },
+    {
+      "file": "apps/handlers/bridges/seed.py",
       "standard": "imports",
       "reason": "Bridge imports engine module by design — sole purpose."
     }

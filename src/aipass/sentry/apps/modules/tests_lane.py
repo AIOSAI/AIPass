@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests_lane.py
 # Description: Tests Lane Module — the retire lane and the test-template distribution
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-09-21
-# Modified: 2026-11-02
+# Modified: 2026-11-06
 # =============================================
 
 """Tests Lane Module
@@ -18,7 +18,8 @@ what is there with its log line; ``tests restore NAME`` moves one back.
 The TEMPLATE lane: sentry is the gold source of the fleet's test template, on @memory's trinity pattern.
 
 The PINNING lane: ``tests pinning PATH...`` prints, one per line on stdout, the test files
-whose source names each repo-relative PATH, for a commit to run before it lands.
+whose source names each repo-relative PATH, or that import a module walking every branch's copy
+of it, for a commit to run before it lands.
 """
 
 import json
@@ -53,7 +54,7 @@ _SUBCOMMANDS = {
     "restore": "Move one retired test file back into tests/",
     "template-status": "Every branch's template receipt against gold",
     "template": "template bump [@branch] [--confirm] — report, or write the receipts",
-    "pinning": "pinning <path>... — the test files that name each non-.py path, one per line",
+    "pinning": "pinning <path>... — the test files that name (or walk) each non-.py path, one per line",
 }
 
 

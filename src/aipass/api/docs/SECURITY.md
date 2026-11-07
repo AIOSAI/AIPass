@@ -16,7 +16,7 @@ Every secret value rests in the owner's login keyring, reached through the pytho
 
 - One entry per secret: service `aipass`, username `<provider>/<slug>`, the value as the password. A value written with `as_json` is stored as a JSON document.
 - `aipass` / `<provider>/` is the provider's index entry, a JSON list of its slugs, kept by `set_secret` so `list_secrets` needs no file on disk.
-- Examples: `openrouter/api_key`, `google/creds`, `google/client_secret`, `host_api/tokens`, `host_api/pairings`, `host_api/config`, `telegram/<bot>`.
+- Examples: `openrouter/api_key`, `google/creds`, `google/client_secret`, `telegram/<bot>`.
 - The owner inspects the keyring with `secret-tool search service aipass` (package `libsecret-tools`) or Seahorse. No seat runs either.
 
 A backend that cannot hold a secret raises `SecretsUnavailable`, naming the backend class and the reason, never a value and never a path: keyring's `fail` and `null` backends, any `keyrings.alt` plaintext backend, a chainer with no member or a plaintext member, and a locked or absent keyring. There is no fall back to a file or to `None`. A missing entry is `None`.
@@ -33,7 +33,7 @@ login keyring  →  handlers/auth/secrets.py (get_secret)  →  keys.py / google
 
 - `get_api_key()` reads the entry `<provider>/api_key` and checks its prefix and minimum length.
 - Google: `google/creds` feeds `Credentials.from_authorized_user_info`, `google/client_secret` feeds `InstalledAppFlow.from_client_config`, and a refresh or a consent writes `google/creds` back through `set_secret`.
-- Host API: token rows (`host_api/tokens`), pairing rows (`host_api/pairings`) and the server config (`host_api/config`) are JSON entries.
+- Host API: the token rows, pairing rows and server config are not keyring entries. They are owner-only files, so a locked or crashed keyring cannot stop the server starting or answering (What Stays on Disk).
 - `drone @api get-secret <provider/slug>` prints a masked summary (`set (N chars)`) and `--list` prints slugs. It writes no value to stdout and none to a file.
 - `drone @api run <provider> -- <command> [args...]` sets the key in the child's environment only: `openai` as `OPENAI_API_KEY`, `anthropic` as `ANTHROPIC_API_KEY`, `openrouter` as `OPENROUTER_API_KEY`. The rest of the environment, the working directory and stdin, stdout and stderr are inherited, so grandchildren see the key too, and the child's output is never read or filtered. The door exits with the child's code; an unknown provider, a missing key or a program that cannot start exits 2 and starts nothing. The log records the provider and the program word.
 - The operations log records the provider and slug of a read or write, never a value and never a path.
@@ -72,7 +72,8 @@ A driver whose entry is absent or empty raises naming the entry and `secrets mig
 
 `~/.secrets/aipass/` (directory `0o700`) keeps what is not a store shape, named as left by `secrets migrate`:
 
-- `host_api/tokens.lock`, the host API's write lock, and `host_api/<label>.token`, the pairing receipts. A receipt is the one value written to disk on purpose, for the owner to carry to the phone, and is the owner's to delete.
+- `host_api/tokens.json`, `host_api/pairings.json`, `host_api/config.json`: the host API's store (`handlers/host/store.py`), each `0o600` in the `0o700` directory, replaced by one rename per write and re-read on every request, so a revoke from the CLI lands on the next one. The token and pairing files hold sha256 hashes of random values, never a value a client could present; a writer could add a hash, which any process of this user can also do to the unlocked keyring. `secrets migrate` leaves `host_api/` whole. `drone @api host-api store import` copies the three documents from their old keyring entries once, byte for byte, so paired devices keep working; an existing file is kept, and no token document in either place refuses. @backup does not snapshot this directory: losing it means re-pairing the phone and the extension, nothing else.
+- `host_api/tokens.lock`, the host API's write lock, and `host_api/<label>.token`, the pairing receipts. A receipt is the one raw value written to disk on purpose, for the owner to carry to the phone, and is the owner's to delete.
 - Telethon `.session` files: SQLite owned by the library, `0o600`.
 - Anything else the owner keeps there by hand (`twitter_cookies.json`, `PyPI.md`, recovery codes): the owner's to move.
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: aggregate_ops.py
 # Description: Central Plans Aggregation Implementation Handler
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-03-08
-# Modified: 2026-10-24
+# Modified: 2026-11-02
 # =============================================
 
 """
@@ -19,29 +19,23 @@ from typing import Dict, Any, List, Tuple, Optional
 from aipass.prax import logger
 
 from aipass.flow.apps.handlers.json import json_handler
+from aipass.flow.apps.handlers.registry.load_registry import FLOW_JSON_DIR
 from aipass.flow.apps.handlers.registry.save_registry import registry_lock
 
 MODULE_NAME = "aggregate_central"
+REGISTRY_DIR = FLOW_JSON_DIR
 
 
-def find_branch_registry(branch_path: Path, branch_name: str) -> Optional[Path]:
-    """Find the registry file for a branch"""
-    if not branch_path.exists():
-        return None
+def central_registry_for(plan_id: str) -> Optional[Path]:
+    """The flow_json registry that numbers this plan's type; None when its type has none."""
+    prefix = plan_id.split("-", 1)[0] if "-" in plan_id else ""
+    candidate = REGISTRY_DIR / f"{prefix.lower()}_registry.json"
+    return candidate if prefix and candidate.is_file() else None
 
-    candidate = branch_path / "flow_json" / f"{branch_name}_registry.json"
-    if candidate.exists():
-        return candidate
 
-    candidate = branch_path / f"{branch_name}_json" / f"{branch_name}_registry.json"
-    if candidate.exists():
-        return candidate
-
-    candidate = branch_path / "registry.json"
-    if candidate.exists():
-        return candidate
-
-    return None
+def find_renamed_files(file_path: Path, plan_id: str) -> List[Path]:
+    """Files beside the missing one that carry its plan id: a renamed file is not a finished plan."""
+    return sorted(file_path.parent.glob(f"{plan_id}_*.md")) if plan_id else []
 
 
 def load_branch_registry(registry_path: Path) -> Dict[str, Any]:
@@ -84,23 +78,23 @@ def extract_plan_number(plan_id: str) -> Optional[str]:
     return plan_id.split("-", 1)[1]
 
 
-def auto_close_plan(registry_path: Path, plan_id: str, branch_name: str) -> bool:
-    """Auto-close a plan in its branch registry"""
+def _own_row(registry_path: Path, plan_id: str) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
+    """The registry and the row that is this plan, or None (logged) when no row is."""
     plan_num = extract_plan_number(plan_id)
     if not plan_num:
         logger.warning(f"[{MODULE_NAME}] Invalid plan_id format: {plan_id}")
-        return False
+        return None
 
     registry = load_branch_registry(registry_path)
     plans = registry.get("plans", {})
 
     if plan_num not in plans:
         logger.warning(f"[{MODULE_NAME}] {plan_id} not found in registry {registry_path}")
-        return False
+        return None
 
     plan_info = plans[plan_num]
 
-    # Every plan type numbers from 0001: close only a row whose file names the same prefix.
+    # Every plan type numbers from 0001: touch only a row whose file names the same prefix.
     prefix = plan_id.split("-", 1)[0]
     row_file = Path(str(plan_info.get("file_path") or "")).name
     if not row_file.startswith(f"{prefix}-"):
@@ -112,7 +106,32 @@ def auto_close_plan(registry_path: Path, plan_id: str, branch_name: str) -> bool
             registry_path,
             row_file or "a row with no file",
         )
+        return None
+
+    return registry, plan_info
+
+
+def repoint_plan(registry_path: Path, plan_id: str, new_file: Path) -> bool:
+    """Point this plan's row at the file that now carries its id"""
+    found = _own_row(registry_path, plan_id)
+    if not found:
         return False
+    registry, plan_info = found
+    plan_info["file_path"] = str(new_file)
+
+    if save_branch_registry(registry_path, registry):
+        logger.info(f"[{MODULE_NAME}] Re-pointed {plan_id} to renamed file {new_file.name}")
+        return True
+    logger.error(f"[{MODULE_NAME}] Failed to save registry after re-pointing {plan_id}")
+    return False
+
+
+def auto_close_plan(registry_path: Path, plan_id: str, branch_name: str) -> bool:
+    """Auto-close a plan in its type's registry"""
+    found = _own_row(registry_path, plan_id)
+    if not found:
+        return False
+    registry, plan_info = found
 
     if plan_info.get("status") == "closed":
         logger.info(f"[{MODULE_NAME}] {plan_id} already closed in {branch_name}")
@@ -134,16 +153,11 @@ def validate_and_heal_branch(
     branch_name: str, branch_data: Dict[str, Any], heal: bool = True
 ) -> Tuple[List[Dict], List[Dict]]:
     """Validate plans in a branch and heal missing files"""
-    branch_path = Path(branch_data.get("branch_path", ""))
     active_plans = branch_data.get("active_plans", [])
     recently_closed = branch_data.get("recently_closed", [])
 
     valid_active = []
     healed_plans = []
-
-    registry_path = None
-    if heal and branch_path.exists():
-        registry_path = find_branch_registry(branch_path, branch_name)
 
     for plan in active_plans:
         file_path = Path(plan.get("file_path", ""))
@@ -151,19 +165,30 @@ def validate_and_heal_branch(
 
         if file_path.exists():
             valid_active.append(plan)
-        else:
-            logger.info(f"[{MODULE_NAME}] Missing file for {plan_id} in {branch_name}: {file_path}")
+            continue
+        logger.info(f"[{MODULE_NAME}] Missing file for {plan_id} in {branch_name}: {file_path}")
+        if not heal:
+            continue
 
-            if heal and registry_path:
-                if auto_close_plan(registry_path, plan_id, branch_name):
-                    healed_plan = plan.copy()
-                    healed_plan["status"] = "closed"
-                    healed_plan["closed"] = datetime.now(timezone.utc).isoformat()
-                    healed_plan["closed_reason"] = "auto_closed_missing_file"
-                    healed_plans.append(healed_plan)
-            else:
-                if heal:
-                    logger.warning(f"[{MODULE_NAME}] Cannot heal {plan_id} - registry not found for {branch_name}")
+        registry_path = central_registry_for(plan_id)
+        if not registry_path:
+            logger.warning(f"[{MODULE_NAME}] Cannot heal {plan_id} in {branch_name} - no registry for its type")
+            continue
+
+        renamed = find_renamed_files(file_path, plan_id)
+        if len(renamed) > 1:
+            logger.warning(
+                f"[{MODULE_NAME}] {plan_id}: {len(renamed)} files carry its id in {file_path.parent}; left open"
+            )
+        elif renamed:
+            if repoint_plan(registry_path, plan_id, renamed[0]):
+                valid_active.append({**plan, "file_path": str(renamed[0])})
+        elif auto_close_plan(registry_path, plan_id, branch_name):
+            healed_plan = plan.copy()
+            healed_plan["status"] = "closed"
+            healed_plan["closed"] = datetime.now(timezone.utc).isoformat()
+            healed_plan["closed_reason"] = "auto_closed_missing_file"
+            healed_plans.append(healed_plan)
 
     all_closed = recently_closed + healed_plans
 

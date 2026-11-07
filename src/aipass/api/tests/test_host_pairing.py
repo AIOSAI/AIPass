@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_host_pairing.py
 # Description: Tests for the pairing door — one-use QR codes a phone trades for its bearer
-# Version: 1.2.0
+# Version: 1.4.0
 # Created: 2026-10-13
-# Modified: 2026-11-02
+# Modified: 2026-11-06
 # =============================================
 
-"""Tests for apps/handlers/host/pairings.py, POST /v1/pair and the host-api pair verb."""
+"""Tests for apps/handlers/host/pairings.py, POST /v1/pair, the host-api pair verb and its extension mode."""
 
 # A file of its own, permitted by @devpulse for DPLAN-0406's leg: the pairing
 # store, its route and its verb are one behaviour (the token's hop to the phone)
@@ -26,16 +26,17 @@ from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 
 import pytest
-from keyring import get_password, set_password
 from keyring.errors import KeyringLocked
 
 from aipass.api.apps.handlers.host import config as host_config
+from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import pairings as host_pairings
 from aipass.api.apps.handlers.host import server as host_server
+from aipass.api.apps.handlers.host import store as host_store
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.apps.modules import host_api as host_api_module
 from aipass.api.apps.modules.host_api import handle_command
-from aipass.api.tests.support_host_api import TAILNET_SHAPED
+from aipass.api.tests.support_host_api import TAILNET_SHAPED, FakeBaud, agent_row
 
 PATCH_CONFIG_LOGGER = "aipass.api.apps.handlers.host.config.logger"
 PATCH_PAIRINGS_LOGGER = "aipass.api.apps.handlers.host.pairings.logger"
@@ -59,12 +60,20 @@ def paired(store: Path, listener: Any) -> Any:
         yield store
 
 
-ENTRY = "host_api/pairings"
+ENTRY = "host_api/pairings.json"
 
 
 def _entry() -> Any:
-    """The pairing rows' entry as stored, or None."""
-    return get_password("aipass", ENTRY)
+    """The pairing rows' file as written, or None."""
+    path = host_store.store_path(host_store.PAIRINGS)
+    return path.read_text(encoding="utf-8") if path.exists() else None
+
+
+def _write_entry(text: str) -> None:
+    """Put raw text where the pairing rows live."""
+    path = host_store.store_path(host_store.PAIRINGS)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
 def _stored_rows() -> list:
@@ -77,7 +86,7 @@ def _expire_every_row() -> None:
     past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
     for row in document["pairings"]:
         row["expires"] = past
-    set_password("aipass", ENTRY, json.dumps(document))
+    _write_entry(json.dumps(document))
 
 
 class TestMintPairing:
@@ -156,33 +165,34 @@ class TestMintPairing:
         assert issubclass(host_api_module.PairingError, host_api_module.TokenError)
 
     def test_an_unreadable_store_is_an_error_naming_the_store_never_an_empty_list(self, paired: Path) -> None:
-        set_password("aipass", ENTRY, "{not json")
+        _write_entry("{not json")
 
         with pytest.raises(host_pairings.PairingError) as raised:
             host_api_module.mint_pairing("phone")
         assert ENTRY in str(raised.value)
 
-    def test_a_locked_store_is_a_pairing_error_naming_the_entry(self, paired: Path, keyring_store: Any) -> None:
-        held = keyring_store.get_password
+    def test_a_store_file_that_cannot_be_read_is_a_pairing_error_naming_the_file(self, paired: Path) -> None:
+        # A directory where the file belongs: read_text raises an OSError on every OS.
+        host_store.store_path(host_store.PAIRINGS).mkdir(parents=True)
 
-        def locked_for_pairings(service: str, username: str) -> Any:
-            if username == ENTRY:
-                raise KeyringLocked("locked")
-            return held(service, username)
-
-        with patch.object(keyring_store, "get_password", side_effect=locked_for_pairings):
-            with pytest.raises(host_pairings.PairingError) as raised:
-                host_api_module.mint_pairing("phone")
+        with pytest.raises(host_pairings.PairingError) as raised:
+            host_api_module.mint_pairing("phone")
 
         assert ENTRY in str(raised.value)
         assert str(paired) not in str(raised.value)
 
-    def test_the_rows_rest_in_the_entry_and_no_store_file_is_named(self, paired: Path) -> None:
+    def test_a_locked_keyring_does_not_stop_a_mint(self, paired: Path, keyring_store: Any) -> None:
+        with patch.object(keyring_store, "get_password", side_effect=KeyringLocked("locked")):
+            minted = host_api_module.mint_pairing("phone")
+
+        assert [row["id"] for row in _stored_rows()] == [minted["id"]]
+        assert keyring_store.entries == {}
+
+    def test_the_rows_rest_in_their_own_file_beside_the_config(self, paired: Path) -> None:
         host_api_module.mint_pairing("phone")
 
         assert len(_stored_rows()) == 1
-        assert not hasattr(host_pairings, "store_path")
-        assert [item.name for item in (paired / "host_api").iterdir()] == []
+        assert sorted(item.name for item in (paired / "host_api").iterdir()) == ["config.json", "pairings.json"]
 
 
 class TestRedeemPairing:
@@ -304,7 +314,7 @@ class TestPairRoute:
         assert statuses == [401] * 10 + [429]
 
     def test_an_unreadable_store_is_503_with_the_fixed_sentence(self, client: Any) -> None:
-        set_password("aipass", ENTRY, "[]")
+        _write_entry("[]")
 
         with patch("aipass.api.apps.handlers.host.denials.logger") as log:
             response = client.post("/v1/pair", json={"code": "guess"})
@@ -367,3 +377,73 @@ class TestPairCommand:
         _, err = capsys.readouterr()
         assert "soon" in err
         assert _entry() is None
+
+
+@fastapi_required
+class TestPairExtension:
+    """`pair extension`: a one-use code and the base URL as plain text, operate scope, loopback allowed, no QR."""
+
+    def test_it_prints_the_code_the_base_url_and_the_expiry_and_no_qr(
+        self, client: Any, capsys: pytest.CaptureFixture
+    ) -> None:
+        with patch(PATCH_CONFIG_LOGGER):
+            host_config.save_config({"host": "127.0.0.1", "port": 8787})
+
+        assert handle_command("host-api", ["pair", "extension"]) is True
+
+        out, _ = capsys.readouterr()
+        code_line, host_line, expiry_line = out.rstrip("\n").split("\n")
+        [row] = _stored_rows()
+        assert code_line.startswith("Pairing code: ") and host_line == "Host: http://127.0.0.1:8787"
+        assert expiry_line.startswith("Expires ") and "(5 minutes), one use." in expiry_line
+        assert "█" not in out
+        assert (row["label"], row["scope"]) == ("extension", "operate")
+        assert host_tokens.list_tokens() == []
+
+    def test_the_printed_code_redeems_from_an_extension_origin_to_a_working_bearer(
+        self, client: Any, capsys: pytest.CaptureFixture
+    ) -> None:
+        handle_command("host-api", ["pair", "extension", "--scope", "read", "--ttl", "60"])
+        out, _ = capsys.readouterr()
+        code = out.split("\n")[0].removeprefix("Pairing code: ")
+
+        response = client.post("/v1/pair", json={"code": code}, headers={"Origin": EXTENSION_ORIGIN})
+
+        body = response.json()
+        assert (response.status_code, body["label"], body["scope"]) == (200, "extension", "read")
+        assert body["token"] not in out
+        whoami = client.get("/v1/whoami", headers={"Authorization": f"Bearer {body['token']}"})
+        assert whoami.json()["id"] == body["id"]
+
+
+EXTENSION_ORIGIN = "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+
+
+@fastapi_required
+class TestAnExtensionOriginIsAnsweredAsAnyOther:
+    """No CORS, Origin or Sec-Fetch check stands in the way: an extension page's call answers as one without Origin."""
+
+    def test_a_feed_get_and_a_send_post_answer_alike_with_and_without_the_origin(
+        self, client: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setattr(host_fleet, "snapshot_binary", lambda: "baud")
+        monkeypatch.setattr(host_fleet, "repo_root", lambda: tmp_path)
+        fake = FakeBaud([agent_row()])
+        monkeypatch.setattr(host_fleet.subprocess, "run", fake)
+        transcript = tmp_path / ".claude" / "projects" / "-srv-aipass-devpulse" / "s-1.jsonl"
+        transcript.parent.mkdir(parents=True)
+        transcript.write_text(json.dumps({"type": "user", "message": {"content": "hi"}}) + "\n", encoding="utf-8")
+        _, raw = host_tokens.issue_token("extension", "operate")
+        bearer = {"Authorization": f"Bearer {raw}"}
+        extension = {**bearer, "Origin": EXTENSION_ORIGIN, "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors"}
+
+        answers = []
+        for headers in (bearer, extension):
+            feed = client.get("/v1/agent/AIPASS/devpulse/feed", headers=headers)
+            send = client.post("/v1/agent/AIPASS/devpulse/send", json={"text": "go"}, headers=headers)
+            answers.append((feed.status_code, feed.json()["lines"], send.status_code, send.json()))
+
+        assert answers[0] == answers[1] == (200, answers[0][1], 200, {"ok": True})
+        assert answers[0][1] and fake.payloads()[:2] == fake.payloads()[2:]
+        assert "access-control-allow-origin" not in send.headers

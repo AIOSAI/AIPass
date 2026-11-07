@@ -48,7 +48,7 @@ High-level approach -- how pieces fit together across branches
 
 ## Team Sections
 
-**Each branch owns their section. Edit freely within your section. Don't touch other sections.**
+**The coordinator's branch holds this file and is its only writer. Each participant writes its section and sends it in its reply to the dispatch; the coordinator pastes it verbatim under that participant's header, stamped 'delivered by mail <date>'. Your section is yours: the coordinator pastes it and never rewrites it.**
 
 ---
 

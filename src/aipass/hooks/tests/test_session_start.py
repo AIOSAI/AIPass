@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_session_start.py
-# Version: 1.4.0
+# Version: 1.5.0
 # Description: Tests for the SessionStart handlers: cadence reset, the culture file, the session pointer
 # Branch: hooks
 # Created: 2026-07-07
-# Modified: 2026-11-02
+# Modified: 2026-11-04
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_start.py."""
@@ -82,6 +82,17 @@ class TestSessionPointer:
         branch = _branch(tmp_path)
         hook_data = {"session_id": "s-codex", "cwd": str(branch), "provider": "codex"}
         handle_session_pointer({**hook_data, "transcript_path": str(tmp_path / "missing.jsonl")})
+        assert _pointer(branch) is None
+
+    def test_a_seed_head_writes_no_pointer_even_under_an_interactive_claude(self, tmp_path):
+        branch = _branch(tmp_path)
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text(json.dumps({"who": "you", "text": "hi", "time": "t"}) + "\n", encoding="utf-8")
+        hook_data = {"session_id": "s-seed", "source": "startup", "cwd": str(branch), "provider": "seed"}
+        assert handle_session_pointer({**hook_data, "transcript_path": str(transcript)}) == {
+            "stdout": "",
+            "exit_code": 0,
+        }
         assert _pointer(branch) is None
 
     def test_a_payload_naming_no_provider_records_claude(self, tmp_path):

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_context_gauge.py
-# Version: 1.9.0
+# Version: 1.10.0
 # Description: Tests for context_gauge (per-window guard, real window, Codex, OpenCode store) and the grounding receipt
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-11-02
+# Modified: 2026-11-04
 # =============================================
 
 """Tests for apps/handlers/prompt/context_gauge.py."""
@@ -621,3 +621,21 @@ class TestGroundingReceipt:
         _, doc = self._prompt(seat, provider="claude")
         assert len(doc["history"]) == grounding_receipt.HISTORY_CAP
         assert doc["history"][0]["generation"] == 25
+
+
+def _seed_transcript(path):
+    """Seed's own transcript.jsonl (src/head/chat/history.ts): one line per published line, who and text."""
+    lines = [{"who": "you", "text": "hi", "time": "2026-11-04T10:00:00Z"}, {"who": "a", "text": "hello", "time": "t"}]
+    path.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+    return path
+
+
+class TestSeedTranscript:
+    def test_a_seed_seat_gets_no_gauge_and_its_transcript_is_never_read(self, tmp_path, monkeypatch):
+        read: list[str] = []
+        monkeypatch.setattr(context_window, "transcript_provider", lambda path: read.append(path) or "claude")
+        transcript = _seed_transcript(tmp_path / "transcript.jsonl")
+        hook_data = {"session_id": "s-seed", "provider": "seed", "transcript_path": str(transcript)}
+        with patch(f"{MODULE}._GUARD_DIR", tmp_path), patch(f"{MODULE}._receipt_line", return_value=""):
+            assert handle({**hook_data, "cwd": str(tmp_path)}) == {"stdout": "", "exit_code": 0}
+        assert read == []

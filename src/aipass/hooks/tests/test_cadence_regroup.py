@@ -3,7 +3,7 @@
 # Description: Cadence's regroup and counter machinery: reset, the regroup token and part queue, config, fail-loud
 # Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-07
 # =============================================
 
 """Tests for apps/modules/cadence.py: the regroup and counter machinery."""
@@ -806,6 +806,23 @@ class TestFailOpenIsLoud:
         degraded = [r.getMessage() for r in caplog.records if "DEGRADED loader=tier0 fires" in r.getMessage()]
         assert len(degraded) == 1
         assert str(raised.value.strerror) in degraded[0]
+
+    def test_an_unreadable_state_file_is_no_turn_not_turn_zero(self, tmp_path, caplog):
+        """The failed read used to answer turn 0, a value a healthy first turn also answers."""
+        blocker = tmp_path / "blocker"
+        blocker.write_text("", encoding="utf-8")
+        with (
+            patch(f"{MODULE}._GUARD_DIR", blocker),
+            patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
+            patch(f"{MODULE}._CONFIG_PATH", self._config(tmp_path)),
+        ):
+            assert should_fire("tier0") is True
+            assert should_fire("navmap") is False
+
+        access = [r.getMessage() for r in caplog.records if "state access failed" in r.getMessage()]
+        assert len(access) == 1 and "the turn is unknown" in access[0]
+        assert "falls back to 0" not in caplog.text
+        assert "could not be read or written" in (degraded_reason() or "")
 
     def test_a_healthy_turn_says_nothing_at_warning(self, tmp_path, caplog):
         with (

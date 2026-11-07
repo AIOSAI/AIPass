@@ -1,17 +1,18 @@
 # =================== AIPass ====================
 # Name: context_gauge.py
-# Version: 1.7.0
+# Version: 1.8.0
 # Description: Heads-up to run /prep ($prep on Codex) before auto-compact, and the grounding receipt (UserPromptSubmit)
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-20
-# Modified: 2026-10-31
+# Modified: 2026-11-04
 # =============================================
 
 """Heads-up so the model banks memories via /prep before the compact ceiling.
 The guard is keyed per context window, not per session: a session id outlives every compaction.
 The window is the one Claude Code really runs for the transcript's model; the trigger is its
-auto-compact point (window - 33k), and the printed percent is fill over window, as the status line shows."""
+auto-compact point (window - 33k), and the printed percent is fill over window, as the status line shows.
+A Seed transcript is Seed's own shape and carries no usage yet, so a Seed seat gets no gauge."""
 
 import importlib
 import os
@@ -59,6 +60,8 @@ def _mark_fired(session_id: str, window: str, threshold: str) -> None:
 def _reading(hook_data: dict, session_id: str) -> tuple[int, int, int] | None:
     """(fill, window, compact point) for this session, or None when there is nothing to read."""
     context_window = importlib.import_module("aipass.hooks.apps.modules.context_window")
+    if hook_data.get("provider") == context_window.SEED:
+        return None
     if hook_data.get("provider") == "opencode":
         fill = context_window.opencode_fill(session_id)
         if fill is None:

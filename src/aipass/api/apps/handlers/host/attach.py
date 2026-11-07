@@ -3,7 +3,7 @@
 # Description: Host API Attach Handler — a real PTY running a tmux client, for the phone
 # Version: 1.0.3
 # Created: 2026-08-14
-# Modified: 2026-10-24
+# Modified: 2026-11-03
 # =============================================
 # pyright: reportOptionalMemberAccess=false
 # fcntl/pty/termios are None off POSIX; every use sits behind PTY_AVAILABLE, which the checker cannot narrow.
@@ -415,6 +415,8 @@ def _child_env() -> Dict[str, str]:
     TERM pinned to the phone's xterm.js: an inherited TERM renders the wrong capability set."""
     env = dict(os.environ)
     env["TERM"] = "xterm-256color"
+    # The host's own branch name must not reach a seat: drone reads it before the passport at cwd.
+    env.pop("AIPASS_BRANCH_NAME", None)
     return env
 
 

@@ -33,4 +33,6 @@ logs/
 # Inbound hand-offs between branches are relays, not records (the owner, 2026-10-21)
 dropbox/
 # Cloned third-party repos for research: re-fetchable, and 15k files breached the run ceiling
-projects/seed/docs.local/refs/
+**/docs.local/refs/
+# Things at rest, not records: the archive is out of the backup (the owner, 2026-11-06; replaces the 10-21 ruling)
+.archive/

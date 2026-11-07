@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_api.py
 # Description: Tests for the Stage 0 host API's commands — routing, tokens, serve/status/stop, config, the door
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-08-14
-# Modified: 2026-11-02
+# Modified: 2026-11-06
 # =============================================
 
 """Tests for the host-api commands in apps/modules/host_api.py, host_serve.py and host_config_cli.py."""
@@ -18,6 +18,7 @@
 # sentry: no-test-needed(duplicate_test) — the face lane in depth, covered by tests/test_host_face.py
 # sentry: no-test-needed(duplicate_test) — the lifetime and fleet lanes in depth, tests/test_host_lifetime.py
 
+import json
 import os
 import re
 import stat
@@ -28,6 +29,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from keyring.errors import KeyringLocked
 
 from aipass.api.apps.modules.host_api import handle_command
 from aipass.api.apps.handlers.host import config as host_config
@@ -42,6 +44,7 @@ from aipass.api.apps.modules import host_config_cli as host_config_cli_module
 from aipass.api.apps.modules import host_pair_cli as host_pair_cli_module
 from aipass.api.apps.modules import host_serve as host_serve_module
 from aipass.api.tests.support_host_api import TAILNET_SHAPED, UNHELD_ADDRESS, _baud_binary, _face_bundle
+from aipass.cli.apps.modules import display
 
 
 # Never opened; under the platform temp dir, not /tmp, so it reads the same on Windows.
@@ -208,6 +211,7 @@ class TestTheHelpsNameOnlyRealVerbs:
             (host_serve_module, "cmd_autostart"),
             (host_config_cli_module, "_cmd_config"),
             (host_config_cli_module, "_cmd_set_config"),
+            (host_config_cli_module, "_cmd_store"),
             (host_pair_cli_module, "_cmd_pair"),
             (host_api_module, "_cmd_issue_token"),
             (host_api_module, "_cmd_list_tokens"),
@@ -810,9 +814,9 @@ class TestSetConfigCommand:
         with patch(PATCH_CONFIG_LOGGER) as log:
             written = host_config.save_config({"host": UNHELD_ADDRESS, "port": 8787})
 
-        assert written == "host_api/config"
+        assert written == "host_api/config.json"
         logged = " ".join(str(arg) for arg in log.info.call_args.args)
-        assert "config saved to the host_api config in the secrets store" in logged
+        assert "config saved to the host_api config file" in logged
         assert written not in logged
         assert str(store) not in logged
 
@@ -1162,3 +1166,92 @@ class TestCrossBranchApi:
 
         with pytest.raises(host_api_module.TokenError):
             host_api_module.receipt_path("..")
+
+
+def _seed_keyring_from_files(store: Path, keyring_store: Any) -> dict:
+    """Move each host file the test wrote into its old keyring entry, as the store stood before the move."""
+    documents = {}
+    for path in sorted((store / "host_api").glob("*.json")):
+        documents[path.stem] = json.loads(path.read_text(encoding="utf-8"))
+        keyring_store.set_password("aipass", f"host_api/{path.stem}", path.read_text(encoding="utf-8"))
+        path.unlink()
+    return documents
+
+
+class TestStoreImportCommand:
+    """`host-api store import`: the keyring's host entries copied to their files, once, byte for byte."""
+
+    def test_a_device_paired_before_the_move_still_verifies_after_it(
+        self, store: Path, keyring_store: Any, capsys: pytest.CaptureFixture
+    ) -> None:
+        record, raw = host_tokens.issue_token("pixel-8", scope="operate")
+        with patch(PATCH_CONFIG_LOGGER):
+            host_config.save_config({"host": "127.0.0.1", "port": 9100})
+        documents = _seed_keyring_from_files(store, keyring_store)
+
+        assert handle_command("host-api", ["store", "import"]) is True
+
+        for name, document in documents.items():
+            assert json.loads((store / "host_api" / f"{name}.json").read_text(encoding="utf-8")) == document
+        assert (host_tokens.verify_token(raw) or {}).get("id") == record["id"]
+        assert host_config.load_config()["port"] == 9100
+        out = capsys.readouterr().out
+        assert "tokens: imported" in out and "config: imported" in out and "pairings: absent" in out
+        assert not display.command_failed()
+
+    def test_the_import_runs_under_the_token_lock(self, store: Path, keyring_store: Any) -> None:
+        # The lock file exists exactly while the lock is held: a mint mid-import would be overwritten by the copy.
+        held = []
+        with patch.object(
+            host_config_cli_module.host_store,
+            "import_from_keyring",
+            side_effect=lambda: held.append(host_tokens.lock_path().exists()) or {},
+        ):
+            handle_command("host-api", ["store", "import"])
+
+        assert held == [True]
+
+    def test_a_file_already_there_is_kept_never_overwritten(
+        self, store: Path, keyring_store: Any, capsys: pytest.CaptureFixture
+    ) -> None:
+        host_tokens.issue_token("from-the-keyring")
+        _seed_keyring_from_files(store, keyring_store)
+        _, raw = host_tokens.issue_token("already-on-disk")
+        before = (store / "host_api" / "tokens.json").read_text(encoding="utf-8")
+
+        handle_command("host-api", ["store", "import"])
+
+        assert (store / "host_api" / "tokens.json").read_text(encoding="utf-8") == before
+        assert "tokens: kept" in capsys.readouterr().out
+
+    def test_no_token_store_anywhere_refuses_and_writes_nothing(
+        self, store: Path, keyring_store: Any, capsys: pytest.CaptureFixture
+    ) -> None:
+        keyring_store.set_password("aipass", "host_api/config", json.dumps({"port": 9100}))
+
+        handle_command("host-api", ["store", "import"])
+
+        assert display.command_failed()
+        assert "issue-token" in capsys.readouterr().err
+        assert not (store / "host_api").exists() or not list((store / "host_api").glob("*.json"))
+
+    def test_a_locked_keyring_refuses_out_loud_and_writes_nothing(
+        self, store: Path, keyring_store: Any, capsys: pytest.CaptureFixture
+    ) -> None:
+        with patch.object(keyring_store, "get_password", side_effect=KeyringLocked("locked")):
+            handle_command("host-api", ["store", "import"])
+
+        assert display.command_failed()
+        assert "KeyringLocked" in capsys.readouterr().err
+        assert not (store / "host_api").exists() or not list((store / "host_api").glob("*.json"))
+
+    def test_any_other_store_word_is_refused_with_the_usage(
+        self, store: Path, keyring_store: Any, capsys: pytest.CaptureFixture
+    ) -> None:
+        keyring_store.set_password("aipass", "host_api/tokens", json.dumps({"version": 2, "tokens": []}))
+
+        handle_command("host-api", ["store", "export"])
+
+        assert display.command_failed()
+        assert "host-api store import" in capsys.readouterr().err
+        assert not (store / "host_api" / "tokens.json").exists()

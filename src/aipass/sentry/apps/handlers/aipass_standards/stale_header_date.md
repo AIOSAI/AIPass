@@ -1,6 +1,6 @@
 # Stale Header Date Standards
-**Status:** v1
-**Date:** 2026-09-25
+**Status:** v1.1
+**Date:** 2026-11-07
 
 ---
 
@@ -27,11 +27,16 @@ an uncommitted change, or one never committed, is judged as of **today**: its co
 newer than any commit. So a change that did not move the date is convicted at the edit, where
 the checklist hook already runs, and a change that moved it passes at once.
 
+Two clocks, both named in the row's message: a committed file's date is the author date in
+the committer's own UTC offset (`%as`), so CI on a UTC runner reads the same day the
+committer's seat does; an uncommitted file's date is today on the host's local clock.
+
 That choice also keeps a verdict stable across the commit that follows. The audit's
-incremental cache keys a file's result on `(mtime, size)`, and a commit changes neither. One
-edge remains and is stated rather than hidden: a change dated one evening and committed after
-midnight carries the next day's author date, so CI convicts it while a local cached audit
-still shows the pass until the file next changes.
+incremental cache keys a file's result on `(mtime, size)`, and a commit changes neither, so
+this checker's stamp also carries today's date (`incremental_cache.DATED_CHECKERS`): the
+first audit after midnight re-runs this row alone. One edge stays outside sentry: a change
+dated one evening and committed after midnight carries the next day's author date, and only
+a check run at commit time, after midnight, sees it before CI does.
 
 ## The first checker to read git
 
