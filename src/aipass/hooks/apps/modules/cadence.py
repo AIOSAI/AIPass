@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-08
-# Modified: 2026-11-04
+# Modified: 2026-11-07
 # =============================================
 
 """Turn counter for prompt injection cadence — fires loaders every Nth turn.
@@ -240,10 +240,10 @@ def _read_turn_uncounted(path: Path) -> int:
         return 0
 
 
-def _load_and_increment(hook_data: dict) -> int:
-    """Load turn counter, increment exactly once per real turn. Multi-process safe."""
+def _load_and_increment(hook_data: dict) -> int | None:
+    """Load turn counter, increment exactly once per real turn. Multi-process safe. None: unreadable state."""
     global _turn, _turn_degraded
-    if _turn is not None:
+    if _turn is not None or _turn_degraded is not None:
         return _turn
 
     path = _state_path()
@@ -286,11 +286,11 @@ def _load_and_increment(hook_data: dict) -> int:
 
     except (OSError, json.JSONDecodeError) as exc:
         _turn_degraded = f"cadence state file {path} could not be read or written: {exc}"
-        logger.warning("[HOOKS] cadence: state access failed, turn falls back to 0: %s", exc)
+        logger.warning("[HOOKS] cadence: state access failed, the turn is unknown: %s", exc)
         if fd is not None:
             _close_fd(fd)
-        _turn = 0
-        return 0
+        _turn = None
+        return None
 
 
 def degraded_reason() -> str | None:
@@ -390,7 +390,7 @@ def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
         return False
 
     turn = _load_and_increment(hook_data or {})
-    if _turn_degraded is not None:
+    if turn is None or _turn_degraded is not None:
         return _degraded_fire(loader_name)
 
     if turn == 0 and loader_name in GROUNDING_LOADERS and _grounded_by_regroup(hook_data or {}, config):
@@ -484,7 +484,7 @@ def should_fire_mail(new_count: int, hook_data: dict | None = None) -> bool:
 
     path = _mail_state_path()
     turn = _load_and_increment(hook_data or {})
-    if path is None or _turn_degraded is not None:
+    if path is None or turn is None or _turn_degraded is not None:
         return _degraded_fire(MAIL_LOADER)
     last_fired = _read_last_mail_turn(path)
 

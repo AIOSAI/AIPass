@@ -4,7 +4,7 @@
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-11-04
+# Modified: 2026-11-07
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's scripted lane and apps/modules/bash_writes.py."""
@@ -1032,11 +1032,6 @@ class TestTargetSpellingIsNotPartOfTheContract:
         )
 
 
-def _read_as(monkeypatch, pure: type) -> None:
-    """The platform oracle: bash_writes builds every path in *pure*'s flavour; it calls no concrete method."""
-    monkeypatch.setattr("aipass.hooks.apps.modules.bash_writes.Path", pure)
-
-
 class TestTheGitBashDriveSpelling:
     """Git Bash's /c/... names drive C on Windows, not C:\\c\\... on the seat's drive."""
 
@@ -1052,40 +1047,32 @@ class TestTheGitBashDriveSpelling:
             "sed -i s/a/b/ C:/Work/Vera-Studio/f.json",
         ],
     )
-    def test_a_drive_path_names_the_drive_on_windows(self, monkeypatch, command):
-        _read_as(monkeypatch, PureWindowsPath)
+    def test_a_drive_path_names_the_drive_on_windows(self, command):
+        assert [t for t, _ in write_targets(command, self.SEAT, PureWindowsPath)] == [self.VERA_FILE]
 
-        assert [t for t, _ in write_targets(command, self.SEAT)] == [self.VERA_FILE]
-
-    def test_the_bare_drive_is_its_root(self, monkeypatch):
+    def test_the_bare_drive_is_its_root(self):
         """/c alone is C:/, never the drive-relative C:, which pathlib joins as the seat itself."""
-        _read_as(monkeypatch, PureWindowsPath)
+        targets = [t for t, _ in write_targets("cd /c && touch x.json", self.SEAT, PureWindowsPath)]
+        assert targets == [PureWindowsPath(r"C:\x.json")], targets
 
-        assert [t for t, _ in write_targets("cd /c && touch x.json", self.SEAT)] == [PureWindowsPath(r"C:\x.json")]
-
-    def test_a_longer_first_component_is_not_a_drive(self, monkeypatch):
+    def test_a_longer_first_component_is_not_a_drive(self):
         """/cache is a directory on the seat's drive, not drive C with 'ache' under it."""
-        _read_as(monkeypatch, PureWindowsPath)
-
-        targets = [t for t, _ in write_targets("sed -i s/a/b/ /cache/f.json", self.SEAT)]
+        targets = [t for t, _ in write_targets("sed -i s/a/b/ /cache/f.json", self.SEAT, PureWindowsPath)]
         assert targets == [PureWindowsPath(r"C:\cache\f.json")], targets
 
-    def test_the_respelled_ci_pin_lands_on_the_existing_test(self, monkeypatch):
+    def test_the_respelled_ci_pin_lands_on_the_existing_test(self):
         """test_a_subshell_cd_resolves_its_own_edit, read the way windows-setup reads it.
 
         On Linux as_posix() changes nothing; this shows C:/... reaches the real file on Windows.
         """
-        _read_as(monkeypatch, PureWindowsPath)
         command = "(cd C:/Work/AIPass && sed -i s/a/b/ src/aipass/hooks/te" + "sts/test_existing.py)"
 
-        targets = [t for t, _ in write_targets(command, self.SEAT)]
+        targets = [t for t, _ in write_targets(command, self.SEAT, PureWindowsPath)]
         assert targets == [PureWindowsPath(self.SEAT) / "tests" / "test_existing.py"], targets
 
-    def test_on_posix_a_one_letter_directory_is_only_a_directory(self, monkeypatch, tmp_path: Path):
+    def test_on_posix_a_one_letter_directory_is_only_a_directory(self, tmp_path: Path):
         """The drive reading is Windows-only. On Linux /c is a real directory named c."""
-        _read_as(monkeypatch, PurePosixPath)
-
-        targets = [t for t, _ in write_targets("sed -i s/a/b/ /c/Work/f.json", tmp_path.as_posix())]
+        targets = [t for t, _ in write_targets("sed -i s/a/b/ /c/Work/f.json", tmp_path.as_posix(), PurePosixPath)]
         assert targets == [PurePosixPath("/c/Work/f.json")], targets
 
 
@@ -1157,6 +1144,31 @@ class TestTheBranchAndMemoryLanesAreDefaultDeny:
             ), "control: a listable directory in no project stays nobody's"
         finally:
             locked.chmod(0o700)
+
+    @pytest.mark.skipif(
+        sys.platform == "win32" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+        reason="0o300 leaves the directory listable on Windows and for root",
+    )
+    def test_an_unlistable_project_logs_a_refusal_at_warning_and_a_crash_stays_error(
+        self, registered_projects: dict, grant_withheld, tmp_path: Path, caplog
+    ):
+        locked = tmp_path / "Projects" / "Locked"
+        locked.mkdir(parents=True)
+        locked.chmod(0o300)
+        try:
+            refused = _run(registered_projects["hooks"], command=f"cp x {(locked / 'new.py').as_posix()}")
+        finally:
+            locked.chmod(0o700)
+        assert _blocked(refused) and "could not check this call" in _reason(refused)
+        logged = [(r.levelname, r.getMessage()) for r in caplog.records if "edit_gate: " in r.getMessage()]
+        assert [level for level, message in logged if "refused on Bash" in message] == ["WARNING"]
+        assert not [message for _level, message in logged if "crashed" in message]
+
+        caplog.clear()
+        with patch("aipass.hooks.apps.modules.bash_writes.write_targets", side_effect=ValueError("unreadable operand")):
+            crashed = _run(registered_projects["hooks"], command="echo x > ./local.txt")
+        assert _blocked(crashed)
+        assert [r.levelname for r in caplog.records if "edit_gate: crashed on Bash" in r.getMessage()] == ["ERROR"]
 
     def test_drone_and_own_branch_work_still_pass(self, registered_projects: dict):
         seat = registered_projects["hooks"]

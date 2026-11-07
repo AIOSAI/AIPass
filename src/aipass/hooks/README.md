@@ -97,7 +97,8 @@ command to the one that claims it. `apps/modules/` holds one business-logic modu
 check that keeps a NameError out of them), `door_trust_registry` (the one modules file aipass may
 import for the trust registry), `cadence` (which turn a loader fires on), `injection_ledger` (what a
 seat was told, per turn), `grounding_receipt` (whether the grounding reached the model), `grounding_content` (the
-injected blocks and their budgets), `write_ownership` (whose file a write lands in, read from the registries),
+injected blocks and their budgets), `write_ownership` (whose file a write lands in, read from the registries), `write_grant` (whether a dispatch's
+write grant covers a crossing write),
 `bash_writes`, `shell_reader`, `shell_programs` and `testwrite_targets` (what a shell command can be
 seen to write, the programs it runs, and which writes are new tests), `admin_seat` and `testgate_policy` (who is exempt,
 and what the policy says), `promote` (source to live code), `protected_paths` (the files that switch
@@ -125,6 +126,7 @@ Depth lives in [docs/](docs/), one file per gate or module group:
 | Doc | What it covers |
 |---|---|
 | [docs/wiring.md](docs/wiring.md) | The two-tier model, each event's wiring shape, entry names vs handler files |
+| [docs/opencode.md](docs/opencode.md) | The OpenCode plugin: hook-to-event map, compaction order, grounding receipt, context gauge |
 | [docs/engine.md](docs/engine.md) | Dispatch, promote, gates fail closed, injectors skip, the merged output, the cwd rule |
 | [docs/project_config.md](docs/project_config.md) | Which config runs, when trust matters, the project template, the release notice |
 | [docs/git_gate.md](docs/git_gate.md) | Raw git and gh refused for every seat, the drone twins, protected files, the rm gate |

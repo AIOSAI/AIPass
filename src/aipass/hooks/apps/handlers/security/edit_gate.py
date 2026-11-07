@@ -6,7 +6,7 @@
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-11-04
+# Modified: 2026-11-07
 # =============================================
 
 """Blocks unsafe edits: inbox, cross-project, cross-branch and shell-to-memory writes, daemon confinement, diagnostics
@@ -19,6 +19,7 @@ import importlib
 import json
 import os
 import re
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -1062,7 +1063,12 @@ def handle(hook_data: dict) -> dict:
         return _refuse(reason)
 
     except Exception as exc:  # fail closed on what this gate guards
-        logger.error("[HOOKS] edit_gate: crashed on %s, refusing it: %s", tool_name or "(no tool)", exc)
+        # sys.modules, not an import: a ProjectUnreadable can only come from an already-loaded write_ownership.
+        unreadable = getattr(sys.modules.get("aipass.hooks.apps.modules.write_ownership"), "ProjectUnreadable", ())
+        if isinstance(exc, unreadable):
+            logger.warning("[HOOKS] edit_gate: refused on %s: %s", tool_name or "(no tool)", exc)
+        else:
+            logger.error("[HOOKS] edit_gate: crashed on %s, refusing it: %s", tool_name or "(no tool)", exc)
         if tool_name == "Bash" or tool_name in EDIT_TOOLS:
             return _refuse(GATE_CRASHED.format(error=f"{type(exc).__name__}: {exc}"))
         return {"stdout": "", "exit_code": 0}
