@@ -9,11 +9,23 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-11-07] — v2.8.35: write grants on a dispatch, the host token store off the keyring, the Chrome extension's host routes
+
+### Added
+- **ai_mail / hooks**: a dispatch carries a scoped write grant on its register row; edit_gate honours it at its three sites, `grants widen` adds paths to a running dispatch's grant, and the widen hint is an email to the grantor. Foreign git work trees are fenced and the dispatch register sealed.
+- **hooks**: the Seed bridge (`seed.py`, `drone @hooks seed install`); a PostCompact section in the project hook config with the post-compact re-ground. The OpenCode plugin has its own page, `docs/opencode.md`.
+- **api**: host routes for the AIPass Chrome extension; `POST /v1/screenshot` opens the desktop's picker and answers the path.
+- **drone**: `drone @git uncommit`, the safe undo of unpushed commits.
+- **sentry**: `tests pinning` also lists tests that reach a file through a fleet walk (a test importing a module that spells the branch-relative tail); host_portability arm I flags two sibling path literals that differ only by case.
 
 ### Fixed
-
 - **drone's router test no longer plants two directories whose names differ only by case, so it passes on macOS's case-insensitive filesystem** (@drone; tests/test_router.py 1.2.1)
+- **drone**: git auth warn mode is gone; an authority refusal holds for every seat.
+- **hooks**: a session in no project cannot write into a registry project. A target nobody can list is still refused but logs WARNING, not a crash. cadence's state load answers None on failure, never a turn number.
+- **api**: a keyring outage during bearer auth answers 503, not a crashed request; a teammate's report and a compaction summary are one feed line; a `!` shell command typed in the chat is a user line; the host attach drops its own `AIPASS_BRANCH_NAME` before spawning a seat.
+- **flow**: heal re-points a renamed plan file instead of closing it.
+- **aipass**: `init update` merges a scalar hooks.json key as config, not an event.
+- **sentry**: the local audit reruns `stale_header_date` on the first audit after midnight (its cache stamp carries the date), and the row names the clock it reads.
 
 ### Changed
 - **api**: the host API's tokens, pairings and config leave the login keyring for 0600 JSON files in the 0700 `host_api/` dir under the secrets base (`apps/handlers/host/store.py`), so a keyring that crashes and respawns locked no longer answers 503 on every phone and extension call or stops the host from binding at start. The store holds only sha256 hashes of tokens, the same trust boundary as the unlocked keyring any process of the user reads; provider keys and Google credentials stay in the keyring. Each write is one rename; each read is per request, so a CLI revoke lands on the next call. `drone @api host-api store import` copies the keyring entries byte for byte under the token lock, keeps an existing file, refuses with nothing written when no token store exists anywhere or the keyring is locked. No lazy fallback: the host never reads the keyring. `secrets migrate` leaves `host_api/` whole (it imported and shredded every file under a provider dir). An unreadable store logs a prax ERROR, `[host_api] the token store cannot be read, every authenticated call answers 503`, where a WARNING went unmailed. Backup does not snapshot the secrets dir; losing the files costs one re-pair (SECURITY.md).
