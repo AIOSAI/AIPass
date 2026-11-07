@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_router.py
 # Description: Command routing - router module and router_handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-14
-# Modified: 2026-11-03
+# Modified: 2026-11-06
 # =============================================
 
 """Tests for apps/modules/router.py and apps/handlers/router_handler.py."""
@@ -844,7 +844,8 @@ class TestIdentityMessageSeverity:
     def test_agreement_and_project_root_print_nothing(self, temp_test_dir: Path, monkeypatch, capsys):
         """Only a passport disagreement is a conflict; a registry is location, not a second citizen."""
         home = _plant_passport(temp_test_dir / "aipass", "AIPASS")
-        root = self._plant_registry(temp_test_dir / "AIPass")
+        # Not "AIPass" beside "aipass": a case-folding filesystem (macOS) makes them one directory.
+        root = self._plant_registry(temp_test_dir / "project_root")
         monkeypatch.setenv("AIPASS_BRANCH_NAME", "aipass")
         resolve_caller_identity(home)
         monkeypatch.setenv("AIPASS_BRANCH_NAME", "prax")
