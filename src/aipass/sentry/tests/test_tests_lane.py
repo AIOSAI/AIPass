@@ -3,7 +3,7 @@
 # Description: Template v1 — tests_lane module, retire_ops and template_ops
 # Version: 1.0.7
 # Created: 2026-09-21
-# Modified: 2026-11-06
+# Modified: 2026-11-07
 # =============================================
 
 """Tests for apps/modules/tests_lane.py and the handlers it drives."""
@@ -457,7 +457,7 @@ class TestPinning:
         assert ".claude/commands/codex.md: 3 test files" in err
 
     def test_an_empty_git_dir_below_the_repo_is_a_sandbox_mount_point_not_a_root(self, capsys, pinned_repo):
-        """THE DEFECT: Codex's sandbox leaves an empty .git in its cwd; seed read itself as the repo and found nothing."""
+        """THE DEFECT: Codex's sandbox leaves an empty .git in its cwd; seed read itself as the repo, found nothing."""
         (pinned_repo / "src" / "aipass" / "alpha" / ".git").mkdir()
 
         tests_lane.handle_command("tests", ["pinning", ".claude/commands/codex.md"])

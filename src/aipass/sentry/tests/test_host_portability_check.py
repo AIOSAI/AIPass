@@ -3,7 +3,7 @@
 # Description: host_portability_check — arms A to H over minimised fleet sites, and its branch score
 # Version: 1.0.0
 # Created: 2026-11-01
-# Modified: 2026-11-06
+# Modified: 2026-11-07
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/host_portability_check.py."""
