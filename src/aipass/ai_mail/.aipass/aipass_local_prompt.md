@@ -28,7 +28,8 @@ apps/
   modules/
     email.py                  # inbox, view, reply, close, sent, contacts
     email_send.py             # Send orchestration: direct, interactive, broadcast
-    dispatch.py               # Dispatch send+wake, register, manual wake
+    dispatch.py               # Dispatch send+wake, register, manual wake, stop, close
+    grants.py                 # Lists the open write grants
   handlers/
     paths.py                  # find_repo_root() + the case-exact registry walk
     notify.py                 # Notification feed writer (JSONL; BAUD reads it)
@@ -40,6 +41,7 @@ apps/
       wake_dashboard.py       # Refreshes the RECIPIENT's dashboard before the spawn
       dispatch_monitor.py     # Wraps the claude process (bounce, lock cleanup, sandbox)
       register.py             # Append-only dispatch register — open/close/outstanding
+      grant.py                # Scoped write grant on the row: validation, overlap, granted()
       report.py               # Completion report: emails_sent, memories_edited, duration
       session_pointer.py      # Durable resume-session pointer
     email/

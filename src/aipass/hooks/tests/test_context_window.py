@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_context_window.py
-# Version: 1.5.0
+# Version: 1.6.0
 # Description: Tests for shared context_window module (model-aware window since 1.1.0)
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-11-02
+# Modified: 2026-11-04
 # =============================================
 
 """Tests for apps/modules/context_window.py."""
@@ -361,3 +361,20 @@ class TestCodexRollout:
         assert context_window.compact_threshold(475_000, "codex") == 450_000
         (tmp_path / "codex_config.toml").write_text("model_auto_compact_token_limit = 300000\n", encoding="utf-8")
         assert context_window.compact_threshold(475_000, "codex") == 300_000
+
+
+def _seed_transcript(path):
+    """Seed's own transcript.jsonl (src/head/chat/history.ts): one line per published line, who and text."""
+    lines = [{"who": "you", "text": "hi", "time": "2026-11-04T10:00:00Z"}, {"who": "a", "text": "hello", "time": "t"}]
+    path.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+    return path
+
+
+class TestSeedTranscript:
+    def test_a_seed_transcript_reads_as_no_usage_and_no_model_without_a_parse(self, tmp_path, monkeypatch):
+        parsed: list[str] = []
+        monkeypatch.setattr(context_window, "_latest", lambda path, *_: parsed.append(path))
+        transcript = str(_seed_transcript(tmp_path / "transcript.jsonl"))
+        assert read_latest_usage(transcript, provider="seed") is None
+        assert read_latest_model(transcript, provider="seed") == ""
+        assert parsed == [], "Seed's lines are not Claude's: nothing may parse them as such"

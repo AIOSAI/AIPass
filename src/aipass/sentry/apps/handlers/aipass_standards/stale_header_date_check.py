@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: stale_header_date_check.py
 # Description: Stale Header Date Standards Checker Handler
-# Version: 1.0.3
+# Version: 1.1.0
 # Created: 2026-09-25
-# Modified: 2026-11-02
+# Modified: 2026-11-07
 # =============================================
 
 """
@@ -116,9 +116,9 @@ def truth_date(path: Path) -> Tuple[str | None, str]:
         return None, known
     dates, changed = known
     if path.name in changed:
-        return _today(), "its uncommitted change, today"
+        return _today(), "its uncommitted change, today on this host's local clock"
     if path.name in dates:
-        return dates[path.name], "its last commit"
+        return dates[path.name], "its last commit, the author date in the committer's own UTC offset"
     return None, "git has no history for this file"
 
 

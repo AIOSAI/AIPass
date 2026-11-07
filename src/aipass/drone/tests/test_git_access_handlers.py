@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access_handlers.py
 # Description: Tests for the git door handlers — diff, log, show, commit, checkout, PR routing and help
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-03
 # =============================================
 
 """Tests for apps/handlers/git/commit_handler.py and the diff, log, show and checkout handlers beside it."""
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -286,8 +287,8 @@ def _assert_ordered_calls(mock_run: MagicMock, expected: list[tuple[tuple[str, .
 
 
 # fix and format name the changed file alone, never the src/ and tests/ trees.
-_RUFF_FIX = (("check", "--fix", "src/aipass/api/app.py"), ("src", "tests"))
-_RUFF_FORMAT = (("format", "src/aipass/api/app.py"), ("--fix", "src", "tests"))
+_RUFF_FIX = (("check", "--fix", "--force-exclude", "src/aipass/api/app.py"), ("src", "tests"))
+_RUFF_FORMAT = (("format", "--force-exclude", "src/aipass/api/app.py"), ("--fix", "src", "tests"))
 _RUFF_GATE = (("check", "src"), ("--fix", "tests"))
 _GIT_STATUS = (("status", "--porcelain"), ())
 _PYTEST = (("-m", "pytest"), ())
@@ -365,6 +366,27 @@ class TestCommitChanges:
                 _GIT_COMMIT,
             ],
         )
+
+    def test_test_gate_suites_never_inherit_the_caller_stamp(
+        self, repo_dir: Path, ruff_in_venv: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A suite run under drone's AIPASS_CALLER_* reads it as its own session (47 red on a rename)."""
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(repo_dir))
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
+        status = MagicMock(returncode=0, stdout=" M src/aipass/drone/x.py\n", stderr="")
+        (repo_dir / "src" / "aipass" / "drone" / ".trinity").mkdir(parents=True)
+        (repo_dir / "src" / "aipass" / "drone" / "tests").mkdir()
+        gate, red = MagicMock(returncode=0, stdout=""), MagicMock(returncode=1, stdout="1 failed")
+
+        with patch(
+            "aipass.drone.apps.handlers.git.commit_handler.subprocess.run",
+            side_effect=[gate, status, status, red],
+        ) as mock_run:
+            commit_changes("env commit", all_files=True)
+
+        suite_env = mock_run.call_args_list[-1].kwargs["env"]
+        assert not [key for key in suite_env if key.startswith("AIPASS_CALLER_")]
+        assert suite_env["PATH"] == os.environ["PATH"]
 
     def test_commit_all_blocks_on_test_failure(self, repo_dir: Path, ruff_in_venv: Path) -> None:
         mock_ruff_gate = MagicMock(returncode=0, stdout="", stderr="")

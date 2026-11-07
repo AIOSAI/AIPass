@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_portability_content.py
 # Description: Host Portability Standards Content Handler
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-09-12
-# Modified: 2026-11-02
+# Modified: 2026-11-06
 # =============================================
 
 """
@@ -90,6 +90,10 @@ def get_host_portability_standards() -> str:
         '     [dim](x / ".git").exists()[/dim] / [dim].is_dir()[/dim]: a sandbox mounts an empty .git',
         "     in each writable root. Acquitted when the function reads .git/HEAD or lists .git.",
         "     Cure: [dim]m.is_file() or (m.is_dir() and any(m.iterdir()))[/dim].",
+        "",
+        "  [red]ARM I -- two siblings that differ only by case, in one function[/red]",
+        '     [dim]x / "aipass"[/dim] beside [dim]x / "AIPass"[/dim]: one directory on macOS and Windows.',
+        "     Acquitted when the function's own source says case or fold. Cure: distinct names.",
         "",
         f"  Arm A also follows a name bound to a {_PROC} literal to where it is",
         "  READ; a bound [dim]Path()[/dim] is judged at its read, not its constructor.",

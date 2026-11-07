@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: incremental_cache.py
 # Description: Audit Fingerprint Cache Handler
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-07-31
-# Modified: 2026-11-02
+# Modified: 2026-11-07
 # =============================================
 
 """
@@ -13,6 +13,7 @@ One file per cache key so concurrent runs on different branches cannot clobber e
 Fail-open: any read/schema problem returns {} and the caller runs a full audit.
 """
 
+import datetime
 import hashlib
 import json
 import os
@@ -50,6 +51,15 @@ MACHINERY_FILES: Tuple[Path, ...] = (
 
 
 _PRESENCE_FINGERPRINT: List[int] = [0, 0]
+
+# Checkers that judge an uncommitted file as of today: unchanged files, a new verdict after midnight.
+# shortcut: named here, not declared by the checker; add a name when a second clock-bound checker lands.
+DATED_CHECKERS = frozenset({"stale_header_date"})
+
+
+def _today() -> str:
+    """Today's ISO date, read at call: the clock a dated checker's stamp carries."""
+    return datetime.date.today().isoformat()
 
 
 def fingerprint_file(path: Path) -> List[int]:
@@ -120,8 +130,9 @@ def compute_checker_stamps(pack_path: Path) -> Dict[str, str]:
         return stamps
     for cf in sorted(pack_path.glob("*_check.py")):
         fp = fingerprint_file(cf)
-        payload = json.dumps([cf.name, fp[0], fp[1]]).encode("utf-8")
-        stamps[cf.stem.removesuffix("_check")] = hashlib.sha1(payload).hexdigest()
+        name = cf.stem.removesuffix("_check")
+        parts = [cf.name, fp[0], fp[1]] + ([_today()] if name in DATED_CHECKERS else [])
+        stamps[name] = hashlib.sha1(json.dumps(parts).encode("utf-8")).hexdigest()
     return stamps
 
 

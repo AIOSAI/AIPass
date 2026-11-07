@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: pairings.py
 # Description: Host API Pairings — one-use, five-minute codes a phone trades for its bearer
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-10-13
-# Modified: 2026-10-22
+# Modified: 2026-11-06
 # =============================================
 
 """
@@ -32,10 +32,11 @@ from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.auth import secrets as secrets_store
 from aipass.api.apps.handlers.host import config as host_config
+from aipass.api.apps.handlers.host import store as host_store
 from aipass.api.apps.handlers.host import tokens as host_tokens
 
-PAIRING_SLUG = "pairings"
-_ENTRY = f"{host_tokens.TOKEN_PROVIDER}/{PAIRING_SLUG}"
+PAIRING_SLUG = host_store.PAIRINGS
+_ENTRY = f"{host_tokens.TOKEN_PROVIDER}/{PAIRING_SLUG}.json"
 STORE_VERSION = 1
 
 DEFAULT_TTL_SECONDS = 300
@@ -94,12 +95,12 @@ class AttemptWindow:
 
 def load_pairings() -> List[Dict[str, Any]]:
     """
-    Read every pairing row from the keyring entry host_api/pairings.
+    Read every pairing row from host_api/pairings.json.
 
     A broken store raises, never []: an empty list would refuse a live code as unknown and hide why.
     """
     try:
-        stored = secrets_store.get_secret(host_tokens.TOKEN_PROVIDER, PAIRING_SLUG, as_json=True)
+        stored = host_store.read(PAIRING_SLUG)
     except secrets_store.SecretsUnavailable as e:
         raise PairingError(f"The pairing store {_ENTRY} cannot be read ({e})") from None
     if stored is None:
@@ -112,10 +113,10 @@ def load_pairings() -> List[Dict[str, Any]]:
 
 
 def _save_pairings(rows: List[Dict[str, Any]]) -> None:
-    """Write the rows to the keyring entry host_api/pairings."""
+    """Write the rows to host_api/pairings.json."""
     document = {"version": STORE_VERSION, "pairings": rows}
     try:
-        secrets_store.set_secret(host_tokens.TOKEN_PROVIDER, PAIRING_SLUG, document, as_json=True)
+        host_store.write(PAIRING_SLUG, document)
     except secrets_store.SecretsUnavailable as e:
         raise PairingError(f"The pairing store {_ENTRY} cannot be written ({e})") from None
 

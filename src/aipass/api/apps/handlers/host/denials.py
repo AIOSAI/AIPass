@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: denials.py
 # Description: Host API Denials — the fixed sentence a client gets, the words the log keeps
-# Version: 1.0.2
+# Version: 1.0.4
 # Created: 2026-10-10
-# Modified: 2026-10-17
+# Modified: 2026-11-05
 # =============================================
 
 """Host API Denials
@@ -17,6 +17,8 @@ from aipass.api.apps.handlers.json import json_handler
 
 #: Every sentence ends by saying where the words went, so nobody reads it as the whole story.
 SENTENCES = {
+    "auth_unavailable": "The token store could not be read; the reason is in this host's log",
+    "agent_send_failed": "@baud could not type into the agent's room; the reason is in this host's log",
     "face_unavailable": "The phone face could not be served; the reason is in this host's log",
     "feed_unavailable": "The notification feed could not be read; the reason is in this host's log",
     "fleet_unavailable": "@baud could not answer this read; the reason is in this host's log",
@@ -32,6 +34,8 @@ SENTENCES = {
     "roots_unavailable": "The branch roots could not be listed; the reason is in this host's log",
     "roster_misuse": "This server asked @baud for the roster in a way it refuses; the reason is in this host's log",
     "settings_refused": "This settings request was refused; the reason is in this host's log",
+    "speech_unavailable": "Piper or its voice is not installed on this host; the reason is in this host's log",
+    "screenshot_unavailable": "The desktop's screenshot picker did not open or took no shot; see this host's log",
     "settings_unavailable": "The settings could not be read or written; the reason is in this host's log",
     "upload_unavailable": "The upload could not be stored; the reason is in this host's log",
     "verb_unavailable": "This action could not be carried out; the reason is in this host's log",

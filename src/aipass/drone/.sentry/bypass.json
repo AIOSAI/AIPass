@@ -134,7 +134,7 @@
       "file": "apps/plugins/devpulse_ops/auth.py",
       "standard": "encapsulation",
       "lines": [
-        23
+        22
       ],
       "reason": "Line 27 imports AIPASS_REGISTRY_NAME from handlers/git/repo_context.py — drone-internal, same branch, same subsystem (merge/sync/fix_plugin hold the identical rule for lock_handler). The alternative is a second literal of the registry filename: the auth gate and the tag handler must agree on which repo is AIPass's own, and two copies of that fact can drift. Line-scoped on purpose — auth.py is the git authority gate and any OTHER direct handler import in it must still be reported. ANCHORED 2026-08-31: the 'anchor' key states what line 27 must CONTAIN, and TestLineScopedBypassesAreOnTarget fails the day it does not. A line number is a pointer that edits invalidate silently — @trigger had four shift in round 5 and @sentry measured drone's other nine adrift — so a waiver that cannot say what it points at cannot be trusted to still point there.",
       "anchor": "from aipass.drone.apps.handlers.git.repo_context import AIPASS_REGISTRY_NAME"
@@ -143,9 +143,9 @@
       "file": "apps/plugins/devpulse_ops/auth.py",
       "standard": "encapsulation",
       "lines": [
-        24
+        23
       ],
-      "reason": "Line 24 imports release_handler, repo_door and session_home from handlers/git — drone-internal, same branch, same subsystem as line 23. The gate must read the upstream slug the release handler targets, ask the same admin rail the --repo door asks, and place the session the same way the handlers log it; git_module imports this plugin, so routing through the module would be a cycle. Line-scoped and anchored like line 23: any other direct handler import in the authority gate must still be reported.",
+      "reason": "Line 23 imports release_handler, repo_door and session_home from handlers/git — drone-internal, same branch, same subsystem as line 22. The gate must read the upstream slug the release handler targets, ask the same admin rail the --repo door asks, and place the session the same way the handlers log it; git_module imports this plugin, so routing through the module would be a cycle. Line-scoped and anchored like line 22: any other direct handler import in the authority gate must still be reported.",
       "anchor": "from aipass.drone.apps.handlers.git import release_handler, repo_door, session_home"
     },
     {
@@ -207,7 +207,7 @@
       "file": "apps/handlers/router_handler.py",
       "standard": "logged_fallback",
       "lines": [
-        89
+        90
       ],
       "reason": "_project_name_from_registry: None = this registry file yields no project name, whether unreadable (here, logged WARNING) or named exactly '_REGISTRY.json'. Its one caller (detect_caller_signal, line 271) does the same right thing for both: keeps walking up for another registry. The answer to the caller is the same fact either way. Fleet green leg 6, drone's decision.",
       "anchor": "return None"

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_fleet.py
 # Description: Tests for the host API fleet lane — baud --snapshot contract
-# Version: 1.1.5
+# Version: 1.1.6
 # Created: 2026-08-14
-# Modified: 2026-11-02
+# Modified: 2026-11-05
 # =============================================
 
 """Tests for apps/handlers/host/fleet.py, the baud --snapshot contract, and the host lane that serves it."""
@@ -718,12 +718,14 @@ class TestFleetRoutes:
 
         assert response.status_code == 200
 
-    def test_fleet_returns_the_envelope_verbatim(self, client, auth: dict, seated: Path) -> None:
-        """No adapter anywhere in the request path, not just in the handler."""
+    def test_fleet_keeps_every_snapshot_field_verbatim(self, client, auth: dict, seated: Path) -> None:
+        """Rows only gain live-state fields (test_host_api_routes.py); nothing @baud sent is changed."""
         with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(SNAPSHOT))):
-            response = client.get("/v1/fleet", headers=auth)
+            body = client.get("/v1/fleet", headers=auth).json()
 
-        assert response.json() == SNAPSHOT
+        assert [{key: row[key] for key in sent} for row, sent in zip(body["branches"], SNAPSHOT["branches"])] == (
+            SNAPSHOT["branches"]
+        )
 
     @pytest.mark.parametrize("path", ["/v1/fleet", "/v1/rooms"])
     def test_route_reports_503_when_the_read_fails(
@@ -911,12 +913,15 @@ class TestTheRosterRoute:
 
         assert response.status_code == 200
 
-    def test_the_envelope_arrives_verbatim(self, client, auth: dict, seated: Path) -> None:
-        """No adapter in the request path either — body.branches is their rows."""
+    def test_the_envelope_keeps_every_field_baud_sent(self, client, auth: dict, seated: Path) -> None:
+        """Rows only gain live-state fields (test_host_api_routes.py); nothing @baud sent is changed."""
         with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(ROSTER))):
-            response = client.get("/v1/roster", headers=auth)
+            body = client.get("/v1/roster", headers=auth).json()
 
-        assert response.json() == ROSTER
+        assert {key: body[key] for key in ROSTER} == {**ROSTER, "branches": body["branches"]}
+        assert [{key: row[key] for key in sent} for row, sent in zip(body["branches"], ROSTER["branches"])] == (
+            ROSTER["branches"]
+        )
 
     def test_an_empty_roster_is_200(self, client, auth: dict, seated: Path) -> None:
         """The quiet answer is still an answer. 200, branches [], no error."""

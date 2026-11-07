@@ -1,6 +1,6 @@
 # Host Portability
-**Status:** Draft v1.6 (arm H, an empty `.git` read as a repo; arm G, a stdlib import above the floor; arm F, an emptied git identity; arm E, a symlinked prefix — PR #774; arm D, the host's Python — PR #774; arm C, lib/ corpus — FPLAN-0554 round three)
-**Date:** 2026-10-29
+**Status:** Draft v1.7 (arm I, two siblings that differ only by case; arm H, an empty `.git` read as a repo; arm G, a stdlib import above the floor; arm F, an emptied git identity; arm E, a symlinked prefix — PR #774; arm D, the host's Python — PR #774; arm C, lib/ corpus — FPLAN-0554 round three)
+**Date:** 2026-11-06
 
 ---
 
@@ -222,6 +222,28 @@ sentry's `ignore_handler.is_git_marker` and `find_repo_root` are that test.
 
 **Fleet, 2026-11-01:** 22 rows across sentry (5, cured), hooks (8), aipass (4),
 prax (3), flow (1), api (1).
+
+### Arm I — two siblings that differ only by case, in one function
+
+`x / "aipass"` and `x / "AIPass"` in one function body: the same parent
+expression (compared as written) and a name that is equal under
+`casefold()` but spelled apart. A case-folding filesystem (macOS APFS by
+default, Windows NTFS) makes them one directory, so a file planted in one
+appears in the other and the test's isolation holds only on Linux.
+Specimen: drone `test_router.py` `test_agreement_and_project_root_print_nothing`
+planted a passport under `aipass/` and a registry under `AIPass/`; macOS
+read both from one directory and the identity check printed a conflict.
+
+**Acquitted:** a function whose own source (name, docstring, strings) says
+`case` or `fold` — it is testing the folding on purpose; different parents
+(`x / "AIPass" / "src" / "aipass"` is one chain, not two siblings); the two
+spellings in two functions (each test has its own tmp dir).
+**Not read:** a name built at runtime, or siblings planted through two helper
+calls that each add the name.
+**Cure:** give the two directories distinct names.
+
+**Fleet, 2026-11-06:** 0 rows (drone's specimen was cured before the arm
+shipped); the pre-cure `test_router.py` convicts at its one line.
 
 ### Valid guards (recognized by checker)
 - a platform test anywhere in the enclosing function: `sys.platform`, `os.name`,

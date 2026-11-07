@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: server.py
 # Description: Host API Server Handler — FastAPI app factory, auth dependency
-# Version: 1.1.9
+# Version: 1.2.1
 # Created: 2026-08-14
-# Modified: 2026-11-01
+# Modified: 2026-11-06
 # =============================================
 # pyright: reportMissingImports=false, reportInvalidTypeForm=false, reportOptionalCall=false
 # pyright: reportArgumentType=false
@@ -15,7 +15,7 @@
 """
 Host API Server Handler
 Reference: docs/host_api.md. Routes that would push this file past its 1500-line cap live in *_route.py.
-Reserved, not built: POST /v1/notify; quick-send must reuse @ai_mail's injection path, never a raw send-keys."""
+Reserved, not built: POST /v1/notify. Agent chat types through @baud's --send-room (agent_chat.py), never raw tmux."""
 
 import threading
 import time
@@ -24,6 +24,9 @@ from typing import Any, Dict, Optional
 
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
+from aipass.api.apps.handlers.host import agent_chat as host_agent_chat
+from aipass.api.apps.handlers.host import agent_extras_route as host_agent_extras_route
+from aipass.api.apps.handlers.host import agent_route as host_agent_route
 from aipass.api.apps.handlers.host import attach as host_attach
 from aipass.api.apps.handlers.host import backup_route as host_backup_route
 from aipass.api.apps.handlers.host import config as host_config
@@ -191,7 +194,11 @@ def require_scope(required: str = "read"):
             _audit_refusal(request, "missing_credentials", required)
             raise _deny(401, "unauthorized", "Bearer token required")
 
-        record, status = host_tokens.resolve_token(credentials.credentials)
+        try:
+            record, status = host_tokens.resolve_token(credentials.credentials)
+        except host_tokens.secrets_store.SecretsUnavailable as e:
+            logger.error("[host_api] the token store cannot be read, every authenticated call answers 503: %s", e)
+            raise _logged_denial(e, 503, "auth_unavailable") from e
         if record is None or status != host_tokens.STATUS_ACTIVE:
             # Unrecognised and revoked are byte-identical to the caller; only the audit tells them apart.
             revoked = status == host_tokens.STATUS_REVOKED
@@ -556,9 +563,9 @@ def create_app() -> Any:
         project: str = "",
         record: dict = Depends(require_scope("read")),
     ) -> dict:
-        """@baud's fleet snapshot, passed through without an adapter."""
+        """@baud's fleet snapshot; each branch row gains its live state (agent_chat.py), no field changed."""
         try:
-            return host_fleet.read_snapshot(project=project)
+            return host_agent_chat.add_live_state(host_fleet.read_snapshot(project=project))
         except host_fleet.FleetUnavailable as e:
             raise _logged_denial(e, 503, "fleet_unavailable") from e
 
@@ -578,7 +585,7 @@ def create_app() -> Any:
         record: dict = Depends(require_scope("read")),
     ) -> dict:
         """
-        Every working agent in every project — @baud's own sweep, passed through.
+        Every working agent in every project — @baud's sweep; each row gains its live state (agent_chat.py).
         Every parameter is refused: a dropped filter would render a wheel the phone believes is scoped.
         """
         if request.query_params:
@@ -591,7 +598,7 @@ def create_app() -> Any:
             )
 
         try:
-            return host_fleet.read_roster()
+            return host_agent_chat.add_live_state(host_fleet.read_roster())
         except host_fleet.FleetUnavailable as e:
             raise _logged_denial(e, 503, "fleet_unavailable") from e
         except host_fleet.FleetMisuse as e:
@@ -762,6 +769,8 @@ def create_app() -> Any:
     host_backup_route.register(app, _deny, require_scope)
     host_machine_route.register(app, _deny, _logged_denial, require_scope)
     host_new_project_route.register(app, _deny, _logged_denial, require_scope)
+    host_agent_route.register(app, _deny, _logged_denial, require_scope)
+    host_agent_extras_route.register(app, _deny, _logged_denial, require_scope)
     # settings.py mirrors @baud's settings.rs: both faces write the same files by the same rules.
 
     @app.get("/v1/agent-settings")

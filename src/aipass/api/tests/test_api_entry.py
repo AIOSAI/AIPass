@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_api_entry.py
 # Description: Tests for api.py entry point CLI
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-05-12
-# Modified: 2026-11-02
+# Modified: 2026-11-06
 # =============================================
 
 """Tests for apps/api.py, the entry point CLI for drone @api."""
@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.api.apps.api import discover_modules, main, print_help, print_introspection, route_command
+from aipass.api.apps.handlers.auth.secrets import SecretsUnavailable
 from aipass.cli.apps.modules import display
 
 PATCH_CONSOLE = "aipass.api.apps.api.console"
@@ -452,6 +453,29 @@ class TestTheExitSeamCarriesARefusal:
         err = capsys.readouterr().err
         assert "driver exploded" in err
         assert "Unknown command" not in err
+
+    @pytest.mark.parametrize(
+        ("raised", "level"),
+        [(SecretsUnavailable("refused the read (KeyringLocked)"), "warning"), (RuntimeError("boom"), "error")],
+    )
+    def test_a_keyring_refusal_logs_a_warning_a_crash_an_error(self, raised, level):
+        """A locked keyring is the machine's state, not a defect: ERROR would page medic on every call."""
+
+        def body(command, args):
+            raise raised
+
+        module = _make_fake_module("fake")
+        module.handle_command.side_effect = body
+        with (
+            patch(PATCH_DISCOVER, return_value=[module]),
+            patch(PATCH_JSON_HANDLER, autospec=True),
+            patch(PATCH_LOGGER) as log,
+            patch("sys.argv", ["api.py", "get-secret"]),
+        ):
+            assert main() == 2
+
+        assert str(raised) in getattr(log, level).call_args.args[0]
+        assert not getattr(log, "error" if level == "warning" else "warning").called
 
     def test_a_stale_failure_flag_from_an_earlier_command_is_not_ours(self):
         """The flag is process-level, so main() clears it before anything can set it.

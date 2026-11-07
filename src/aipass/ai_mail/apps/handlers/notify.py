@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: notify.py
 # Description: Notification Feed Writer
-# Version: 2.0.1
+# Version: 2.1.0
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-11-03
 # =============================================
 
 """
@@ -18,7 +18,7 @@ import sys
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
@@ -113,16 +113,27 @@ def _append_event(path: Path, event: Dict[str, str]) -> bool:
     )
 
 
-def append_jsonl(path: Path, record: Dict, *, lock_name: str, max_lines: int, keep_lines: int) -> bool:
+def append_jsonl(
+    path: Path,
+    record: Dict,
+    *,
+    lock_name: str,
+    max_lines: int,
+    keep_lines: int,
+    precheck: Optional[Callable[[], None]] = None,
+) -> bool:
     """Append *record* as one locked JSON line to a capped append-only log.
 
     One shared write discipline for the feed and the dispatch register, so the lock-then-trim ordering cannot drift.
+    precheck runs while the lock is held, before the write; whatever it raises propagates and nothing is written.
     """
     line = (json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8")
 
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with _jsonl_lock(path, lock_name):
+            if precheck is not None:
+                precheck()
             fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
             try:
                 os.write(fd, line)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.11.0
+# Version: 1.13.0
 # Created: 2026-03-30
-# Modified: 2026-10-30
+# Modified: 2026-11-03
 # =============================================
 
 """Passport-based authorization for git operations.
@@ -14,7 +14,6 @@ Reference: docs/git_access.md
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import NamedTuple
 
@@ -59,6 +58,7 @@ GIT_ACCESS_TIERS: dict[str, dict] = {
             "commit",
             "untrack",
             "restore",
+            "uncommit",
             "checkout",
             "sync",
             "push",
@@ -164,17 +164,14 @@ _CI_CURE_FACT = "ci_cure"
 # registry-recorded path, which a copied registry id alone cannot forge.
 _MANAGER_CLASS = "manager"
 
-# 'warn' logs authority refusals and allows; an env var because a rollback that needs an edit is not one.
-_AUTH_MODE_ENV = "AIPASS_GIT_AUTH_MODE"
-
 # These encode AIPass's own flow and would half-run in another project's repo.
 _AIPASS_FLOW_VERBS = frozenset({"pr", "close-pr", "smart-sync", "fix", "delete-branch", "ci-cure"})
 
 # AIPass's own branches reach main only through dev-pr; a plain push would skip the PR.
 _EXTERNAL_ONLY_VERBS = frozenset({"push"})
 
-# authority: not shown to be the owner, ERROR, warn-mode lifts it.
-# capability: proven owner, untranslated verb, WARNING, warn-mode must NOT lift it.
+# authority: not shown to be the owner, ERROR, "not authorized".
+# capability: proven owner, untranslated verb, WARNING, "cannot run here".
 _AUTHORITY = "authority"
 _CAPABILITY = "capability"
 
@@ -485,10 +482,8 @@ def _fact_holders(registry_data: dict, fact: str) -> list[str]:
     return [str(name) for name, entry in entries if isinstance(entry, dict) and entry.get(fact) is True]
 
 
-def _ci_cure_access(command: str) -> str:
-    """The ci-cure tier: the registry fact alone grants it; warn-mode never lifts it, it predates no migration."""
-    caller_info = _resolve_caller()
-    refusal = _registry_fact_refusal(command, caller_info, _CI_CURE_FACT)
+def _raise_refusal(command: str, caller_info: Caller, refusal: Refusal | None) -> None:
+    """Raise a refusal of either species; nothing lifts one, so a seat cannot wave its own gate open."""
     if refusal and refusal.kind == _CAPABILITY:
         msg = f"Branch '{caller_info.name}' cannot run '{command}' in this repo: {refusal.reason}."
         logger.warning(msg)
@@ -497,6 +492,12 @@ def _ci_cure_access(command: str) -> str:
         msg = f"Branch '{caller_info.name}' is not authorized for '{command}': {refusal.reason}."
         logger.error(msg)
         raise PermissionError(msg)
+
+
+def _ci_cure_access(command: str) -> str:
+    """The ci-cure tier: the registry fact alone grants it."""
+    caller_info = _resolve_caller()
+    _raise_refusal(command, caller_info, _registry_fact_refusal(command, caller_info, _CI_CURE_FACT))
     json_handler.log_operation(
         "git_access_verify",
         {"caller": caller_info.name, "command": command, "tier": "ci-cure", "session": session_home.stamp()},
@@ -522,32 +523,13 @@ def verify_git_access(command: str) -> str:
 
     if command in owner_tier["commands"]:
         caller_info = _resolve_caller()
-        refusal = _owner_tier_refusal(command, caller_info)
-        warn_only = os.environ.get(_AUTH_MODE_ENV, "").strip().lower() == "warn"
-        if refusal and refusal.kind == _CAPABILITY:
-            # warn_only is not consulted here; "cannot run", since this caller IS authorized.
-            msg = f"Branch '{caller_info.name}' cannot run '{command}' in this repo: {refusal.reason}."
-            logger.warning(msg)
-            raise PermissionError(msg)
-        if refusal and not warn_only:
-            msg = f"Branch '{caller_info.name}' is not authorized for '{command}': {refusal.reason}."
-            logger.error(msg)
-            raise PermissionError(msg)
-        if refusal:
-            logger.warning(
-                "git auth warn-mode: '%s' for '%s' would be denied under enforcement: %s",
-                command,
-                caller_info.name,
-                refusal.reason,
-            )
+        _raise_refusal(command, caller_info, _owner_tier_refusal(command, caller_info))
         json_handler.log_operation(
             "git_access_verify",
             {
                 "caller": caller_info.name,
                 "command": command,
                 "tier": "owner",
-                "mode": "warn" if warn_only else "enforce",
-                "would_refuse": refusal.reason if refusal else None,
                 "session": session_home.stamp(),
             },
         )

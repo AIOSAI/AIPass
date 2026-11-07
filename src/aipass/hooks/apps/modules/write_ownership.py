@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: write_ownership.py
-# Version: 2.5.0
+# Version: 2.7.0
 # Description: Who may write whose files: project roots and branch owners read from the registries
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-18
-# Modified: 2026-10-26
+# Modified: 2026-11-04
 # =============================================
 
 """Answers, for the edit gate's two lanes, whose file a write lands in and whether this seat may make it.
@@ -34,6 +34,8 @@ AIPASS_REGISTRY = "AIPASS_REGISTRY.json"
 # Same marker as @ai_mail's find_project_root, so file and mail fences agree. A non-empty
 # registry with no "branches" key (flow's plan registry) marks no project; an unreadable one still does.
 PROJECT_MARKER = "*_REGISTRY.json"
+# A landing with no registry is the git work tree it sits in; its .git stands in as the marker.
+GIT_MARKER = ".git"
 
 # Windows has no pathconf, so its long-path ceiling stands in.
 _WINDOWS_PATH_MAX = 32767
@@ -73,6 +75,13 @@ class Project:
     def manager(self) -> Branch | None:
         """The row flagged ``owner: true``, or None when the registry names no manager."""
         return next((b for b in self.branches or () if b.manager), None)
+
+    @property
+    def label(self) -> str:
+        """The name a refusal shows; a bare work tree says why it fences, or a sibling repo's refusal reads as arbitrary."""
+        if self.registry.name != GIT_MARKER:
+            return f"'{self.root.name}'"
+        return f"'{self.root.name}' ({self.root}, a git work tree with no AIPass registry)"
 
 
 def _resolved(path: Path) -> Path | None:
@@ -139,6 +148,29 @@ def project_of(start: Path) -> Project | None:
     return None
 
 
+def _work_tree(start: Path) -> Project | None:
+    """The git work tree *start* sits in (itself included), or None. An empty .git is no repo: Codex plants them."""
+    current = _resolved(start)
+    for candidate in [current, *current.parents] if current is not None else []:
+        if not candidate.is_dir():
+            continue
+        git = candidate / GIT_MARKER
+        try:
+            if git.is_file() or (git.is_dir() and any(git.iterdir())):
+                return Project(candidate, git, None)
+        except OSError as exc:
+            raise ProjectUnreadable(f"{git} cannot be listed, so whose tree it is cannot be read: {exc}") from exc
+    return None
+
+
+def landing_of(target: Path) -> Project | None:
+    """The project a write to *target* lands in: its registry project, else the git work tree holding it.
+
+    Target side only: a seat's cwd is still read by project_of, so the caller's project is never a bare work tree.
+    """
+    return project_of(target) or _work_tree(target)
+
+
 def _path_max() -> int:
     """The host's PATH_MAX; Windows publishes none, so its long-path ceiling. 0 when unknown: the probe alone judges."""
     pathconf = getattr(os, "pathconf", None)
@@ -176,8 +208,18 @@ def is_crossing(caller: Project | None, landing: Project | None) -> bool:
     """True when a write leaves the caller's project for another one, in ANY direction.
 
     Downward too: a nested project keeps its own registry; only the admin seat reaches it.
+    A seat in no project crosses into every registry project, never into a bare work tree (devpulse, 2026-11-04).
     """
-    return caller is not None and landing is not None and landing.root != caller.root
+    if landing is None:
+        return False
+    if caller is None:
+        return landing.registry.name != GIT_MARKER
+    return landing.root != caller.root
+
+
+def seat_label(caller: Project | None) -> str:
+    """Who a crossing refusal names as the writer: the caller's project, or a session that stands in none."""
+    return f"project '{caller.root.name}'" if caller is not None else "a session outside every project"
 
 
 def package_of(cwd: Path) -> str:

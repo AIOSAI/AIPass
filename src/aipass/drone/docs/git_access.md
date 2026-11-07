@@ -17,7 +17,7 @@ Auth is centralised in `verify_git_access()` and checked **once**, at the top of
 | Tier | Who | What it covers |
 |------|-----|----------------|
 | **Global** | All branches | the read doors and the passthroughs — status, diff, log, show, blame, tracked, export, remote, lock, branches, tag listing, release list, label list, alerts list, the `gh` reads, and `issue create` / `issue comment` aimed at AIOSAI/AIPass |
-| **Owner** | The project's registry-declared owner — **earned, never hardcoded** (devpulse in AIPass) | everything that writes: commit, untrack, checkout, push (outside AIPass), the PR verbs, branch deletion, prune-temp, sync, merge-main, merge, smart-sync, unlock, tag, fix, release edit, label create, alerts dismiss, remote set, and the `gh` writes |
+| **Owner** | The project's registry-declared owner — **earned, never hardcoded** (devpulse in AIPass) | everything that writes: commit, uncommit, untrack, restore, checkout, push (outside AIPass), the PR verbs, branch deletion, prune-temp, sync, merge-main, merge, smart-sync, unlock, tag, fix, release edit, label create, alerts dismiss, remote set, and the `gh` writes |
 | **CI cure** | The one citizen whose registry entry carries `ci_cure: true` (@trigger in AIPass) | `ci-cure` alone: commit a CI cure on dev and push dev |
 
 Owner tier is **earned per repo** from four facts in the caller's own project registry:
@@ -26,8 +26,8 @@ the passport to the recorded home. There is no caller allowlist anywhere in the 
 
 The ci-cure tier is earned the same way, minus the manager class: registry tenancy, an entry
 carrying `ci_cure: true` (the JSON boolean), and path-binding. The fact must sit on exactly one
-entry of the registry; two holders refuse both. `AIPASS_GIT_AUTH_MODE=warn` never lifts a ci-cure
-refusal. Outside AIPass's own registry the verb is a capability refusal: its fence is AIPass's tree.
+entry of the registry; two holders refuse both. Outside AIPass's own registry the verb is a
+capability refusal: its fence is AIPass's tree.
 
 **Issues are the contribution channel.** `issue create` and `issue comment` with
 `--repo AIOSAI/AIPass` (or `-R`) ask the gate for `issue-contribute`, a global key, so any citizen
@@ -83,12 +83,14 @@ Owner tier refuses for two reasons that are not interchangeable: conflating them
 | Where it is decided | any of the four owner checks | only **after** all four pass |
 | Log level | `ERROR` — fault-shaped, someone should look | `WARNING` — by design, nothing is broken |
 | Message | `Branch 'x' is not authorized for 'pr': <reason>` | `Branch 'x' cannot run 'pr' in this repo: <reason>` |
-| `AIPASS_GIT_AUTH_MODE=warn` | **lifts it** — rolling back the authority migration is exactly that switch's job | **does not lift it**, and cannot: the capability branch raises before `warn_only` is ever read |
 
 Why the wording differs: a proven owner sent to audit their passport is a false trail — they never
-had an authority problem. Why the rollback is scoped: a flag that lifted every refusal species would
-let `pr` run to completion inside an external repo. A rollback named for one migration has no
-business re-arming a half-run of our merge flow in someone else's repository.
+had an authority problem.
+
+**Nothing lifts either species.** No environment variable, flag or mode opens the gate: anything
+read from the caller's own environment is something every seat can set, so a switch there would
+let any seat prefix one variable and commit. The admin seat's way across projects is the session
+fence's `admin_verdict()` and the `--repo` door, both verified on the caller rail.
 
 **Which verbs refuse outside AIPass:** `pr`, `close-pr`, `smart-sync`, `fix`, `delete-branch` —
 they assume our PR conventions, our lock or our events, so against an arbitrary repo they would

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: fleet.py
 # Description: Host API Fleet Handler — reads @baud's headless fleet snapshot
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-08-14
-# Modified: 2026-10-24
+# Modified: 2026-11-05
 # =============================================
 
 """
@@ -64,6 +64,11 @@ _snapshots = ReadCache("fleet_snapshot", SNAPSHOT_TTL_SECONDS)
 # The file lane resolves a project root per request; the census changes far slower than one refresh.
 _census = ReadCache("project_census", SNAPSHOT_TTL_SECONDS)
 _CENSUS_KEY = "census"
+
+# The agent chat lane looks its agent up on every 2 s feed poll; one roster exec takes ~0.5 s. /v1/roster stays uncached.
+ROSTER_TTL_SECONDS = 5.0
+_roster = ReadCache("agent_roster", ROSTER_TTL_SECONDS)
+_ROSTER_KEY = "roster"
 
 _NOT_READY = (
     "The fleet snapshot is switched off on this host (fleet.SNAPSHOT_READY is False). "
@@ -166,9 +171,10 @@ def snapshot_binary() -> str:
 
 
 def reset_snapshot_cache() -> None:
-    """Forget every cached snapshot and census."""
+    """Forget every cached snapshot, census and roster."""
     _snapshots.clear()
     _census.clear()
+    _roster.clear()
 
 
 def read_snapshot(project: str = "") -> Dict[str, Any]:
@@ -370,6 +376,11 @@ def read_roster() -> Dict[str, Any]:
     return envelope
 
 
+def read_roster_cached() -> Dict[str, Any]:
+    """read_roster(), coalesced and cached ROSTER_TTL_SECONDS; a refusal is never cached."""
+    return _roster.get(_ROSTER_KEY, read_roster)
+
+
 def resolve_branch(project: str, branch: str) -> Optional[Dict[str, Any]]:
     """One branch's row from one project's snapshot — the attach lane's census."""
     wanted = branch.strip().lstrip("@")
@@ -463,4 +474,23 @@ def end_room(branch: str, project: str) -> Dict[str, Any]:
         },
     )
 
+    return envelope
+
+
+def send_room(branch: str, project: str, payload: list, timeout: int) -> Dict[str, Any]:
+    """
+    Put one payload (`--text <s>` or `--key <NAME>`) into one named room, through @baud's headless door.
+
+    The envelope comes back whole: `sent` true, or `error` with @baud's sentence. Never logs the payload.
+    """
+    envelope = _run_headless(["--send-room", branch, "--project", project, *payload], timeout, "room send")
+    json_handler.log_operation(
+        "host_api_room_send",
+        {
+            "branch": branch,
+            "project": project,
+            "kind": payload[0] if payload else "",
+            "sent": bool(envelope.get("sent")),
+        },
+    )
     return envelope

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_api_routes.py
 # Description: Tests for the host API's live app — the extra guard, ping, bearer auth, scopes, the declared routes
-# Version: 1.2.3
+# Version: 1.4.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-05
 # =============================================
 
 """Tests for create_app(), its auth and the declared routes in apps/handlers/host/server.py."""
@@ -18,7 +18,9 @@
 # sentry: no-test-needed(duplicate_test) — read_agent_settings() and list_projects(), test_host_{settings,fleet}.py
 
 import json
+import os
 import re
+import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -26,6 +28,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import aipass.drone as drone
+from aipass.api.apps.handlers.host import agent_models as host_agent_models
+from aipass.api.apps.handlers.host import agent_usage as host_agent_usage
 from aipass.api.apps.handlers.host import backup as host_backup
 from aipass.api.apps.handlers.host import denials as host_denials
 from aipass.api.apps.handlers.host import fleet as host_fleet
@@ -33,6 +37,7 @@ from aipass.api.apps.handlers.host import machine as host_machine
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import settings as host_settings
 from aipass.api.apps.handlers.host import tokens as host_tokens
+from aipass.api.tests.support_host_api import FakeBaud, agent_row
 
 # The patch target stays this file's own constant: sentry's discarded_patch
 # rule reads a target imported from this branch's package as one it judges,
@@ -847,3 +852,583 @@ class TestTheMachineProcessesRoute:
 
         assert door.call_count == 2
         assert (first["sampled_at"], second["sampled_at"]) == (_processes()["sampled_at"], "later")
+
+
+# =============================================
+# AGENT CHAT — handlers/host/agent_route.py, agent_chat.py, agent_transcript.py
+# =============================================
+
+CLAUDE_FILE = Path(".claude") / "projects" / "-srv-aipass-devpulse" / "s-1.jsonl"
+CODEX_FILE = Path(".codex") / "sessions" / "2026" / "11" / "04" / "rollout-2026-11-04T10-00-00-c-1.jsonl"
+
+
+def _jsonl(path: Path, rows: list) -> Path:
+    """Write transcript or engine-log rows, one JSON object a line."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    return path
+
+
+def _claude(kind: str, content: Any, **extra: Any) -> dict:
+    """One Claude Code session row."""
+    message = {"role": kind, "content": content, **({"model": extra.pop("model")} if "model" in extra else {})}
+    return {"type": kind, "timestamp": "2026-11-04T10:00:00Z", "message": message, **extra}
+
+
+@pytest.fixture
+def agents(store: Path, host_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """The real app, a read token, HOME in tmp_path, and the baud binary answered by a FakeBaud."""
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setattr(host_fleet, "snapshot_binary", lambda: "baud")
+    monkeypatch.setattr(host_fleet, "repo_root", lambda: tmp_path)
+    fake = FakeBaud([agent_row()])
+    monkeypatch.setattr(host_fleet.subprocess, "run", fake)
+    with patch(PATCH_SERVER_LOGGER):
+        _, raw = host_tokens.issue_token("extension", "read")
+        yield TestClient(host_app, raise_server_exceptions=False), {"Authorization": f"Bearer {raw}"}, fake
+
+
+def _feed(agents: Any, path: str = "/v1/agent/AIPASS/devpulse/feed", **params: Any) -> Any:
+    """GET one feed with the read token."""
+    api, read, _ = agents
+    return api.get(path, params=params, headers=read)
+
+
+MATE = "Another Claude session sent a message:\n"
+
+
+def _said(body: dict) -> list:
+    """(role, text) for every feed line."""
+    return [(line["role"], line["text"]) for line in body["lines"]]
+
+
+@fastapi_required
+class TestTheFeedReadsAClaudeSession:
+    """GET /v1/agent/<p>/<n>/feed over a Claude Code session file."""
+
+    def test_rows_become_user_agent_and_tool_lines(self, agents: Any, tmp_path: Path) -> None:
+        queued = {"type": "queued_command", "commandMode": "prompt", "prompt": "and the docs"}
+        _jsonl(
+            tmp_path / CLAUDE_FILE,
+            [
+                _claude("user", "fix the bug"),
+                _claude("user", "<command-name>/clear</command-name>"),
+                _claude("user", "<bash-input> ls -la</bash-input>"),
+                _claude("user", "<bash-stdout>total 0</bash-stdout><bash-stderr></bash-stderr>"),
+                _claude("user", [{"type": "text", "text": "<pasted_content>a long paste</pasted_content>"}]),
+                _claude(
+                    "assistant",
+                    [
+                        {"type": "text", "text": "on it"},
+                        {"type": "tool_use", "name": "Edit", "input": {"file_path": "/srv/x/server.py"}},
+                        {"type": "tool_use", "name": "Bash", "input": {"command": "pytest -q\nmore"}},
+                    ],
+                    model="claude-opus-5-5",
+                ),
+                {"type": "attachment", "timestamp": "t", "attachment": queued},
+                _claude("assistant", [{"type": "text", "text": "side"}], isSidechain=True),
+                _claude(
+                    "user",
+                    f'{MATE}<teammate-message teammate_id="b1" color="blue" summary="Report done">\nwalls of words',
+                ),
+                _claude(
+                    "user", f'{MATE}<teammate-message teammate_id="b1" color="blue">\n{{"type":"idle_notification"}}'
+                ),
+                _claude("user", f'{MATE}<teammate-message teammate_id="b2" color="red">\nmore words'),
+                _claude(
+                    "user", "This session is being continued from a previous conversation that ran out. The summary..."
+                ),
+            ],
+        )
+
+        body = _feed(agents).json()
+
+        assert _said(body) == [
+            ("user", "fix the bug"),
+            ("user", "! ls -la"),
+            ("user", "a long paste"),
+            ("agent", "on it"),
+            ("tool", "edited server.py"),
+            ("tool", "ran: pytest -q"),
+            ("user", "and the docs"),
+            ("tool", "teammate b1: Report done"),
+            ("tool", "teammate b2: finished"),
+            ("tool", "context compacted"),
+        ]
+        assert body["lines"][3]["model"] == "Claude Opus 5.5"
+        assert body["session"] == "s-1"
+
+    def test_since_returns_only_the_lines_after_n(self, agents: Any, tmp_path: Path) -> None:
+        _jsonl(tmp_path / CLAUDE_FILE, [_claude("user", f"line {i}") for i in range(4)])
+        first = _feed(agents).json()["lines"]
+
+        after = _feed(agents, since=first[1]["n"]).json()["lines"]
+
+        assert [line["text"] for line in after] == ["line 2", "line 3"]
+        assert [line["n"] for line in after] == [line["n"] for line in first[2:]]
+
+    def test_n_stays_put_as_the_file_grows(self, agents: Any, tmp_path: Path) -> None:
+        path = _jsonl(tmp_path / CLAUDE_FILE, [_claude("user", "one")])
+        before = _feed(agents).json()["lines"]
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(_claude("user", "two")) + "\n")
+
+        after = _feed(agents, since=before[-1]["n"]).json()["lines"]
+
+        assert [line["text"] for line in after] == ["two"]
+
+    def test_without_since_only_the_last_80_lines_come(self, agents: Any, tmp_path: Path) -> None:
+        _jsonl(tmp_path / CLAUDE_FILE, [_claude("user", f"line {i}") for i in range(100)])
+
+        lines = _feed(agents).json()["lines"]
+
+        assert (len(lines), lines[0]["text"], lines[-1]["text"]) == (80, "line 20", "line 99")
+
+
+def _item(**payload: Any) -> dict:
+    """One Codex rollout response_item row."""
+    return {"type": "response_item", "timestamp": "t", "payload": payload}
+
+
+@fastapi_required
+class TestTheFeedPollSharesOneRosterRead:
+    """The agent lookup is cached: a panel polling every 2 s does not exec @baud's roster each time."""
+
+    def test_two_polls_inside_the_ttl_exec_the_roster_once(self, agents: Any, tmp_path: Path) -> None:
+        _jsonl(tmp_path / CLAUDE_FILE, [_claude("user", "go")])
+
+        _feed(agents)
+        _feed(agents)
+
+        assert agents[2].verbs.count("--roster") == 1
+
+
+@fastapi_required
+class TestTheFeedReadsACodexRollout:
+    """The same route over a Codex rollout: messages, function calls and exec scripts."""
+
+    def test_rollout_rows_become_lines_with_the_turns_model(self, agents: Any, tmp_path: Path) -> None:
+        agents[2].rows[:] = [agent_row(provider="codex", session="c-1")]
+        script = 'tools.exec_command({cmd:"ls -la"}); tools.write_stdin({}); tools.apply_patch("*** Begin Patch\\n*** Update File: src/app.py")'
+        _jsonl(
+            tmp_path / CODEX_FILE,
+            [
+                {"type": "turn_context", "payload": {"model": "gpt-6-sol"}},
+                _item(
+                    type="message", role="user", content=[{"text": "<environment_context>cwd</environment_context>"}]
+                ),
+                _item(type="message", role="user", content=[{"text": "run the tests"}]),
+                _item(type="custom_tool_call", input=script),
+                _item(type="function_call", name="Read", arguments=json.dumps({"file_path": "/a/b/notes.md"})),
+                _item(type="message", role="assistant", content=[{"text": "all green"}]),
+            ],
+        )
+
+        body = _feed(agents).json()
+
+        assert _said(body) == [
+            ("user", "run the tests"),
+            ("tool", "ran: ls -la"),
+            ("tool", "edited app.py"),
+            ("tool", "read notes.md"),
+            ("agent", "all green"),
+        ]
+        assert body["lines"][-1]["model"] == "GPT-6 Sol"
+
+
+@fastapi_required
+class TestTheFeedCarriesBusyAndWaiting:
+    """busy and waiting come from the hooks engine log, else the transcript's age."""
+
+    def test_a_permission_request_is_waiting_on_its_tool(self, agents: Any, tmp_path: Path, engine_log: Path) -> None:
+        _jsonl(tmp_path / CLAUDE_FILE, [_claude("user", "go")])
+        _jsonl(
+            engine_log,
+            [
+                {"ts": 1.0, "event": "PreToolUse", "session_id": "s-1", "tool_name": "Bash"},
+                {"ts": 2.0, "event": "PermissionRequest", "session_id": "s-1"},
+            ],
+        )
+
+        body = _feed(agents).json()
+
+        assert (body["busy"], body["waiting"]) == (True, {"tool": "Bash"})
+
+    def test_a_stopped_turn_is_neither_busy_nor_waiting(self, agents: Any, tmp_path: Path, engine_log: Path) -> None:
+        _jsonl(tmp_path / CLAUDE_FILE, [_claude("user", "go")])
+        _jsonl(
+            engine_log,
+            [
+                {"ts": 1.0, "event": "PreToolUse", "session_id": "s-1"},
+                {"ts": 2.0, "event": "Stop", "session_id": "s-1"},
+            ],
+        )
+
+        body = _feed(agents).json()
+
+        assert (body["busy"], body["waiting"]) == (False, None)
+
+    def test_with_no_hook_rows_a_fresh_transcript_is_busy_and_an_old_one_is_not(
+        self, agents: Any, tmp_path: Path
+    ) -> None:
+        path = _jsonl(tmp_path / CLAUDE_FILE, [_claude("user", "go")])
+        fresh = _feed(agents).json()["busy"]
+        old = time.time() - 60
+        os.utime(path, (old, old))
+
+        assert (fresh, _feed(agents).json()["busy"]) == (True, False)
+
+
+@fastapi_required
+class TestTheFeedRefusesHonestly:
+    """404 for an agent or transcript it cannot read, 400 for a bad name or since, 401 with no token."""
+
+    def test_an_agent_the_roster_does_not_list_is_a_404(self, agents: Any) -> None:
+        response = _feed(agents, "/v1/agent/AIPASS/nobody/feed")
+
+        assert (response.status_code, response.json()["error"]["code"]) == (404, "agent_not_live")
+
+    def test_an_opencode_agent_is_a_404_naming_the_two_providers_read(self, agents: Any) -> None:
+        agents[2].rows[:] = [agent_row(provider="opencode")]
+
+        response = _feed(agents)
+
+        assert (response.status_code, response.json()["error"]["code"]) == (404, "transcript_unavailable")
+        assert "only Claude and Codex" in response.json()["error"]["message"]
+
+    def test_a_transcript_not_on_disk_is_a_404(self, agents: Any) -> None:
+        response = _feed(agents)
+
+        assert (response.status_code, response.json()["error"]["code"]) == (404, "transcript_unavailable")
+
+    @pytest.mark.parametrize("path", ["/v1/agent/AIPASS/-rf/feed", "/v1/agent/AI.PASS/devpulse/feed"])
+    def test_a_name_outside_the_fence_is_a_400_before_any_lookup(self, agents: Any, path: str) -> None:
+        response = _feed(agents, path)
+
+        assert (response.status_code, agents[2].sends) == (400, [])
+        assert response.json()["error"]["code"] == "agent_refused"
+
+    @pytest.mark.parametrize("params", [{"since": "soon"}, {"limit": "5"}])
+    def test_a_bad_since_or_another_parameter_is_a_400(self, agents: Any, params: dict) -> None:
+        assert _feed(agents, **params).status_code == 400
+
+    def test_no_token_is_a_401(self, agents: Any) -> None:
+        assert agents[0].get("/v1/agent/AIPASS/devpulse/feed").status_code == 401
+
+
+@fastapi_required
+class TestFleetRowsCarryLiveState:
+    """GET /v1/fleet: each row gains state, busy, tool, model and delegating; nothing @baud sent changes."""
+
+    def test_a_live_row_gains_its_state_and_an_asleep_row_gains_nulls(
+        self, agents: Any, tmp_path: Path, engine_log: Path
+    ) -> None:
+        api, read, fake = agents
+        asleep = agent_row(name="memory", session="s-2", interactive=False, own_room_live=False)
+        fake.rows[:] = [agent_row(dispatched=True, subagents=2), asleep]
+        reply = _claude("assistant", [{"type": "text", "text": "hi"}], model="claude-fable-5-1")
+        _jsonl(tmp_path / CLAUDE_FILE, [reply])
+        # A fresh transcript of its own: only the asleep gate keeps it from reading as working.
+        _jsonl(tmp_path / ".claude" / "projects" / "-srv-aipass-memory" / "s-2.jsonl", [reply])
+        _jsonl(
+            engine_log,
+            [
+                {"ts": 1.0, "event": "PreToolUse", "session_id": "s-1", "tool_name": "Agent"},
+                {"ts": 2.0, "event": "PermissionRequest", "session_id": "s-1"},
+            ],
+        )
+
+        live, sleeping = api.get("/v1/fleet", headers=read).json()["branches"]
+
+        added = ("state", "busy", "tool", "model", "delegating")
+        assert [live[key] for key in added] == ["waiting", True, "Agent", "Claude Fable 5.1", True]
+        assert [sleeping[key] for key in added] == [None, False, None, None, False]
+        assert (live["dispatched"], live["subagents"], live["provider"]) == (True, 2, "claude")
+
+    def test_the_live_fields_never_overwrite_a_field_baud_sent(self, agents: Any) -> None:
+        api, read, fake = agents
+        fake.rows[:] = [agent_row(model="as-baud-said")]
+
+        row = api.get("/v1/fleet", headers=read).json()["branches"][0]
+
+        assert (row["model"], row["state"]) == ("as-baud-said", None)
+
+    def test_the_roster_rows_of_every_project_gain_the_same_live_state(
+        self, agents: Any, tmp_path: Path, engine_log: Path
+    ) -> None:
+        api, read, fake = agents
+        fake.rows[:] = [agent_row(), agent_row(name="vera", session="s-9", project="VERA")]
+        _jsonl(engine_log, [{"ts": 1.0, "event": "UserPromptSubmit", "session_id": "s-9"}])
+
+        rows = api.get("/v1/roster", headers=read).json()["branches"]
+
+        assert [(r["project"], r["state"], r["busy"]) for r in rows] == [
+            ("AIPASS", None, False),
+            ("VERA", "working", True),
+        ]
+
+
+# =============================================
+# MODELS AND USAGE — handlers/host/agent_extras_route.py, agent_models.py, agent_usage.py
+# =============================================
+
+USAGE = "/v1/agent/AIPASS/devpulse/usage"
+SIGN_IN = "oat-test-sign-in-value"
+CODEX_CACHE_ROWS = {
+    "models": [
+        {
+            "slug": "gpt-6-sol",
+            "display_name": "GPT-6 Sol",
+            "visibility": "list",
+            "supported_reasoning_levels": [{"effort": "low"}],
+        },
+        {"slug": "gpt-hidden", "visibility": "hide"},
+    ]
+}
+
+
+@pytest.fixture(autouse=True)
+def _no_model_or_usage_cache_between_tests() -> Any:
+    """Forget the OpenCode listing and the plan-limits answer around each test: both outlive a request on purpose."""
+    host_agent_models.OPENCODE_LISTING.clear()
+    host_agent_usage.reset_cache()
+    yield
+    host_agent_models.OPENCODE_LISTING.clear()
+    host_agent_usage.reset_cache()
+
+
+@pytest.fixture
+def catalog(client: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """The real app, a read token, HOME in tmp_path; subprocess left real, so a script can stand in for opencode."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    _, raw = host_tokens.issue_token("extension", "read")
+    return client, {"Authorization": f"Bearer {raw}"}, None
+
+
+@pytest.mark.skipif(os.name != "posix", reason="a shell script stands in for the opencode binary")
+@fastapi_required
+class TestTheModelCatalog:
+    """GET /v1/models: the deck's {claude, codex, opencode, switch} catalog."""
+
+    def test_the_catalog_reads_the_codex_cache_and_a_fake_opencode(
+        self, catalog: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        api, read, _ = catalog
+        (tmp_path / ".codex").mkdir()
+        (tmp_path / ".codex" / "models_cache.json").write_text(json.dumps(CODEX_CACHE_ROWS), encoding="utf-8")
+        binary = tmp_path / "bin" / "opencode"
+        binary.parent.mkdir()
+        binary.write_text("#!/bin/sh\necho anthropic/claude-x\necho noise\necho openai/gpt-y\n", encoding="utf-8")
+        binary.chmod(0o755)
+        monkeypatch.setenv("PATH", str(binary.parent))
+
+        body = api.get("/v1/models", headers=read).json()
+
+        assert body["claude"] == {"models": [{"name": a} for a in ("opus", "fable", "sonnet", "haiku")]}
+        assert body["codex"] == {"models": [{"name": "gpt-6-sol", "label": "GPT-6 Sol", "efforts": ["low"]}]}
+        assert body["opencode"] == {
+            "models": [
+                {"name": "anthropic/claude-x", "group": "anthropic"},
+                {"name": "openai/gpt-y", "group": "openai"},
+            ],
+            "inline": False,
+            "reason": "picker only",
+        }
+        assert body["switch"]["claude"] == {"codex": True, "opencode": True}
+        assert body["switch"]["codex"] == {"claude": False, "opencode": True}
+
+    def test_a_missing_opencode_and_codex_cache_are_reasons_not_errors(
+        self, catalog: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        api, read, _ = catalog
+        monkeypatch.setenv("PATH", str(tmp_path / "nowhere"))
+
+        response = api.get("/v1/models", headers=read)
+
+        assert response.status_code == 200
+        assert response.json()["opencode"] == {"models": [], "inline": False, "reason": "opencode was not found"}
+        assert response.json()["codex"]["models"] == [] and "no Codex model cache" in response.json()["codex"]["reason"]
+
+    def test_the_opencode_listing_is_cached_for_a_minute(
+        self, catalog: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        api, read, _ = catalog
+        count = tmp_path / "runs"
+        binary = tmp_path / "bin" / "opencode"
+        binary.parent.mkdir()
+        binary.write_text(f"#!/bin/sh\necho run >> {count}\necho a/b\n", encoding="utf-8")
+        binary.chmod(0o755)
+        monkeypatch.setenv("PATH", str(binary.parent))
+
+        api.get("/v1/models", headers=read)
+        api.get("/v1/models", headers=read)
+
+        assert count.read_text(encoding="utf-8").count("run") == 1
+
+
+class _Usage:
+    """urllib.request.urlopen at the network edge: answers *body*, or raises *error*; every request recorded."""
+
+    def __init__(self, body: Any = None, error: Any = None) -> None:
+        self.body, self.error, self.requests = body, error, []
+
+    def __call__(self, request: Any, timeout: float = 0) -> Any:
+        self.requests.append(request)
+        if self.error is not None:
+            raise self.error
+        answer = MagicMock()
+        answer.__enter__.return_value.read.return_value = json.dumps(self.body).encode("utf-8")
+        return answer
+
+
+def _too_many(retry_after: Any = None) -> Any:
+    """A 429 as urllib raises it, Retry-After set when given."""
+    from email.message import Message
+    from urllib.error import HTTPError
+
+    headers = Message()
+    if retry_after is not None:
+        headers["Retry-After"] = str(retry_after)
+    return HTTPError(host_agent_usage.USAGE_URL, 429, "Too Many Requests", headers, None)
+
+
+@pytest.fixture
+def usage(agents: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """The agents fixture with a Claude sign-in in tmp_path's home, a fake usage endpoint and a hand-wound clock."""
+    credentials = tmp_path / ".claude" / ".credentials.json"
+    credentials.parent.mkdir(parents=True, exist_ok=True)
+    expires = (time.time() + 3600) * 1000
+    credentials.write_text(json.dumps({"claudeAiOauth": {"accessToken": SIGN_IN, "expiresAt": expires}}), "utf-8")
+    limits = [{"kind": "five_hour", "percent": 80, "resets_at": "2026-11-05T15:00:00Z"}, {"kind": "weekly_all"}]
+    endpoint = _Usage({"limits": limits})
+    monkeypatch.setattr(host_agent_usage.urllib.request, "urlopen", endpoint)
+    clock = [1000.0]
+    monkeypatch.setattr(host_agent_usage, "time", MagicMock(time=time.time, monotonic=lambda: clock[0]))
+    return agents, endpoint, clock, credentials
+
+
+def _usage(usage: Any, path: str = USAGE) -> Any:
+    """GET one usage read with the read token."""
+    (api, read, _), *_ = usage
+    return api.get(path, headers=read)
+
+
+@fastapi_required
+class TestTheUsageRing:
+    """GET /v1/agent/<p>/<n>/usage: context from the transcript, plan limits from the usage endpoint."""
+
+    def test_context_comes_from_the_last_reply_and_limits_from_the_endpoint(self, usage: Any, tmp_path: Path) -> None:
+        reply = _claude("assistant", "hi", model="claude-opus-5-5")
+        reply["message"]["usage"] = {
+            "input_tokens": 1000,
+            "cache_creation_input_tokens": 2000,
+            "cache_read_input_tokens": 32000,
+        }
+        _jsonl(tmp_path / CLAUDE_FILE, [reply, _claude("user", "next")])
+
+        body = _usage(usage).json()
+
+        assert body["provider"] == "claude"
+        assert body["context"] == {"used": 35000, "total": host_agent_usage.CLAUDE_WINDOW, "percent": 10.0}
+        assert body["limits"] == [
+            {"label": "5 hour", "percent": 80.0, "severity": "warning", "resets_at": "2026-11-05T15:00:00Z"},
+            {"label": "All models", "percent": 0.0, "severity": "normal", "resets_at": None},
+        ]
+        [request] = usage[1].requests
+        assert request.get_header("Authorization") == f"Bearer {SIGN_IN}"
+        assert request.get_header("Anthropic-beta") == "oauth-2025-04-20"
+
+    def test_the_sign_in_never_reaches_the_answer_or_any_log(self, usage: Any) -> None:
+        usage[1].error = _too_many()
+        with patch.object(host_agent_usage, "logger") as log, patch.object(host_agent_usage, "json_handler") as ops:
+            first = _usage(usage)
+            usage[1].error = None
+            usage[2][0] += 10_000
+            second = _usage(usage)
+
+        assert SIGN_IN not in first.text + second.text
+        assert SIGN_IN not in str(log.mock_calls) + str(ops.mock_calls)
+
+    @pytest.mark.parametrize(
+        ("signed_in", "note"),
+        [(None, "not signed in"), ({"accessToken": SIGN_IN, "expiresAt": 1000}, "has expired")],
+    )
+    def test_no_or_an_expired_sign_in_is_a_note_and_no_call(self, usage: Any, signed_in: Any, note: str) -> None:
+        if signed_in is None:
+            usage[3].unlink()
+        else:
+            usage[3].write_text(json.dumps({"claudeAiOauth": signed_in}), encoding="utf-8")
+
+        response = _usage(usage)
+
+        assert (response.status_code, response.json()["limits"], usage[1].requests) == (200, [], [])
+        assert note in response.json()["note"]
+
+    def test_the_limits_are_read_once_a_minute(self, usage: Any) -> None:
+        _usage(usage)
+        usage[2][0] += 59
+        _usage(usage)
+        assert len(usage[1].requests) == 1
+
+        usage[2][0] += 2
+        _usage(usage)
+
+        assert len(usage[1].requests) == 2
+
+    def test_a_429_holds_for_its_retry_after_and_shows_the_last_good_limits(self, usage: Any) -> None:
+        good = _usage(usage).json()["limits"]
+        usage[2][0] += 61
+        usage[1].error = _too_many(retry_after=120)
+
+        held = _usage(usage).json()
+        usage[2][0] += 119
+        _usage(usage)
+        calls_inside_the_hold = len(usage[1].requests)
+        usage[2][0] += 2
+        _usage(usage)
+
+        assert (held["limits"], "rate limited" in held["note"]) == (good, True)
+        assert (calls_inside_the_hold, len(usage[1].requests)) == (2, 3)
+
+    def test_a_429_without_retry_after_holds_five_minutes_then_doubles(self, usage: Any) -> None:
+        usage[1].error = _too_many()
+        _usage(usage)
+        usage[2][0] += 299
+        _usage(usage)
+        assert len(usage[1].requests) == 1
+
+        usage[2][0] += 2
+        _usage(usage)
+        usage[2][0] += 599
+        _usage(usage)
+
+        assert len(usage[1].requests) == 2
+
+    def test_a_codex_agent_reads_its_newest_token_count_rows(self, usage: Any, tmp_path: Path) -> None:
+        usage[0][2].rows[:] = [agent_row(provider="codex", session="c-1")]
+        info = {"last_token_usage": {"total_tokens": 50000}, "model_context_window": 200000}
+        rates = {"primary": {"window_minutes": 300, "used_percent": 95, "resets_at": 0}}
+        counted = {"type": "event_msg", "payload": {"type": "token_count", "info": info, "rate_limits": rates}}
+        _jsonl(tmp_path / CODEX_FILE, [counted])
+
+        body = _usage(usage).json()
+
+        assert body["context"] == {"used": 50000, "total": 200000, "percent": 25.0}
+        assert body["limits"] == [
+            {"label": "5 hour", "percent": 95.0, "severity": "critical", "resets_at": "1970-01-01T00:00:00+00:00"}
+        ]
+        assert usage[1].requests == []
+
+    def test_an_opencode_agent_says_it_is_not_wired(self, usage: Any) -> None:
+        usage[0][2].rows[:] = [agent_row(provider="opencode")]
+
+        assert _usage(usage).json()["note"] == "OpenCode usage is not wired yet"
+
+    def test_an_agent_that_is_not_live_is_a_404(self, usage: Any) -> None:
+        response = _usage(usage, "/v1/agent/AIPASS/nobody/usage")
+
+        assert (response.status_code, response.json()["error"]["code"]) == (404, "agent_not_live")

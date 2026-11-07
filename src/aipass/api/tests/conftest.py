@@ -1,17 +1,17 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for api tests
-# Version: 2.3.1
+# Version: 2.5.0
 # Created: 2026-03-05
-# Modified: 2026-11-01
+# Modified: 2026-11-06
 # Category: api/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v2.5.0 (2026-11-06): SECRETS_BASE redirected for every test: the host store is files there now
+#   - v2.4.0 (2026-11-05): agent chat: the hooks engine log redirected into tmp_path (autouse)
 #   - v2.3.1 (2026-11-01): remote_repo plants a .git with a HEAD; an empty one is no repository
 #   - v2.3.0 (2026-10-25): no_fsync for the session; host_app shared by request-only fixtures
 #   - v2.2.0 (2026-10-22): dict-backed keyring for every test (autouse); no test reaches the login keyring
-#   - v2.1.0 (2026-09-27): Console width pin + command-state reset (C1, C2); host imports hoisted
-#   - v2.0.0 (2026-03-27): mock_infrastructure and mock_logger fixtures
 #
 # CODE STANDARDS:
 #   - Error handling: Use error handler system (apps/handlers/error/)
@@ -54,9 +54,11 @@ importlib.import_module(_HANDLER_PKG)
 _json_mod = importlib.import_module(_JSON_MOD_PATH)
 
 # Plain imports: none needs the [host] extra, and a catch-all would silently switch off its reset fixture.
+from aipass.api.apps.handlers.host import agent_chat as _agent_chat
 from aipass.api.apps.handlers.host import attach as _attach
 from aipass.api.apps.handlers.host import fleet as _fleet
 from aipass.api.apps.handlers.host import refusals as _refusals
+from aipass.api.apps.handlers.auth import secrets as _secrets_handler
 
 from aipass.api.apps.handlers.host import attach as host_attach
 from aipass.api.tests.support_host_attach import _forced_tmux_which
@@ -108,12 +110,14 @@ class DictKeyring(KeyringBackend):
 
 
 @pytest.fixture(autouse=True)
-def keyring_store(monkeypatch: pytest.MonkeyPatch) -> DictKeyring:
+def keyring_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> DictKeyring:
     """A fresh dict keyring per test; the backend in place before is put back after."""
     # The private slot, not get_keyring(): reading the backend that way would probe D-Bus to build one.
     monkeypatch.setattr(keyring.core, "_keyring_backend", keyring.core._keyring_backend)
     # A child process a test spawns gets keyring's fail backend, never the real one.
     monkeypatch.setenv("PYTHON_KEYRING_BACKEND", "keyring.backends.fail.Keyring")
+    # The host store is files under SECRETS_BASE: a test without `store` must never write the owner's tokens.
+    monkeypatch.setattr(_secrets_handler, "SECRETS_BASE", tmp_path / "_secrets")
     backend = DictKeyring()
     keyring.set_keyring(backend)
     return backend
@@ -121,7 +125,7 @@ def keyring_store(monkeypatch: pytest.MonkeyPatch) -> DictKeyring:
 
 @pytest.fixture
 def store(tmp_path: Path):
-    """Redirect the lock and receipt directory to a temp dir; the rows sit in the dict keyring."""
+    """Redirect the store directory to a temp dir: the host's files, the lock and the receipts land there."""
     with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_SECRETS_JSON), patch(PATCH_SECRETS_LOGGER):
         with patch(PATCH_TOKENS_JSON), patch(PATCH_TOKENS_LOGGER):
             yield tmp_path
@@ -363,6 +367,14 @@ def _no_fleet_cache_between_tests() -> Generator[None, None, None]:
     _fleet.reset_snapshot_cache()
     yield
     _fleet.reset_snapshot_cache()
+
+
+@pytest.fixture(autouse=True)
+def engine_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The hooks engine log agent_chat reads, moved into tmp_path: the live one is the whole fleet's."""
+    path = tmp_path / "engine.jsonl"
+    monkeypatch.setattr(_agent_chat, "engine_log", lambda: path)
+    return path
 
 
 @pytest.fixture(autouse=True)

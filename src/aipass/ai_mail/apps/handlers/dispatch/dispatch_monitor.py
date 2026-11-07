@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.14.1
+# Version: 2.15.0
 # Created: 2026-03-02
-# Modified: 2026-10-28
+# Modified: 2026-11-03
 # =============================================
 
 """
@@ -980,6 +980,11 @@ def main():
             lock_path_obj.write_text(json.dumps(ld, indent=2), encoding="utf-8")
     except (json.JSONDecodeError, OSError):
         logger.info("[monitor] Could not self-register PID in lock file %s", lock_file)
+
+    # The systemd-scope lane never learns this pid at the wake; without it a dead monitor's row reads alive.
+    own_dispatch_id = report_mod.current_dispatch_id()
+    if own_dispatch_id:
+        register.record_monitor_pid(own_dispatch_id, os.getpid())
 
     stderr_fh = None
     try:

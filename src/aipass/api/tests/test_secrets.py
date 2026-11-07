@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_secrets.py
 # Description: Tests for the keyring-backed secrets handler, its module door, migrate and get_secret_cmd
-# Version: 2.0.1
+# Version: 2.0.2
 # Created: 2026-06-15
-# Modified: 2026-11-02
+# Modified: 2026-11-06
 # =============================================
 
 """Tests for apps/handlers/auth/secrets.py, apps/modules/secrets.py, and api_key.get_secret_cmd."""
@@ -440,8 +440,12 @@ class TestSecretsHandleCommand:
         assert "secrets migrate [--dry-run]" in capsys.readouterr().out
 
 
+# The host's own file store shares the directory and is never the keyring's to take.
+HOST_TOKENS_DOC = {"version": 2, "tokens": []}
+
+
 def _seed_store(base: Path) -> None:
-    """A store of the three shapes, plus a Telethon session and a pairing receipt that stay."""
+    """A store of the three shapes, plus a Telethon session, a pairing receipt and the host's file store that stay."""
     (base / "telegram").mkdir()
     (base / "telegram" / "bot.json").write_text(json.dumps(TG_DOC), encoding="utf-8")
     (base / "telegram" / "mirror.session").write_text("sqlite-fixture", encoding="utf-8")
@@ -449,6 +453,7 @@ def _seed_store(base: Path) -> None:
     (base / "generic" / "api_token").write_text(f"  {RAW_VALUE}\n", encoding="utf-8")
     (base / "host_api").mkdir()
     (base / "host_api" / "pixel.token").write_text("receipt-fixture", encoding="utf-8")
+    (base / "host_api" / "tokens.json").write_text(json.dumps(HOST_TOKENS_DOC), encoding="utf-8")
     (base / ".env").write_text(f"# AIPass API Keys\n\nOPENROUTER_API_KEY={ENV_KEY}\n", encoding="utf-8")
     (base / "google_client_secret.json").write_text(json.dumps(CLIENT_DOC), encoding="utf-8")
     (base / "google_creds.json").write_text(json.dumps(CREDS_DOC), encoding="utf-8")
@@ -476,8 +481,11 @@ class TestSecretsMigrate:
             assert get_secret(provider, slug, as_json=isinstance(value, dict)) == value
         assert sorted(p.relative_to(store).as_posix() for p in store.rglob("*") if p.is_file()) == [
             "host_api/pixel.token",
+            "host_api/tokens.json",
             "telegram/mirror.session",
         ]
+        assert json.loads((store / "host_api" / "tokens.json").read_text(encoding="utf-8")) == HOST_TOKENS_DOC
+        assert get_secret("host_api", "tokens", as_json=True) is None
         out = capsys.readouterr().out
         assert "telegram/mirror.session" in out and "host_api/pixel.token" in out
         assert not any(value in out for value in FIXTURE_VALUES)

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate.py
-# Version: 1.8.1
+# Version: 1.10.0
 # Description: Tests for edit_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-11-02
+# Modified: 2026-11-04
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py and its PreToolUse sibling settings_backup.py."""
@@ -23,13 +23,14 @@ import json
 import re
 import subprocess
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
+from aipass.ai_mail.apps.modules import door_dispatch_grant
 from aipass.hooks.apps.handlers.lifecycle import auto_fix
 from aipass.hooks.apps.handlers.security.edit_gate import handle
-from aipass.hooks.apps.handlers.security import settings_backup
+from aipass.hooks.apps.handlers.security import git_gate, settings_backup
 from aipass.hooks.apps.modules import diagnostics_state as ds
 from aipass.hooks.apps.modules import engine_closure
 
@@ -455,6 +456,109 @@ class TestEditGateProjectBoundary:
         )
         assert result["exit_code"] == 2
         assert "inbox.json" in json.loads(result["stdout"])["reason"]
+
+
+def _refusal(result: dict) -> str:
+    assert result["exit_code"] == 2, result
+    return json.loads(result["stdout"])["reason"]
+
+
+class TestADispatchGrantOpensOnlyItsPaths:
+    """A dispatched seat writes what its dispatch grants in a foreign project; every other crossing is refused."""
+
+    def test_the_done_scenario_new_file_passes_every_site_and_package_json_is_refused(self, dispatch_grant, caplog):
+        assert _write(dispatch_grant.seat, dispatch_grant.seed / "src" / "hooks" / "new.ts")["exit_code"] == 0
+        assert caplog.text.count("ALLOWED by a dispatch grant") == 1
+        assert "seat @hooks, project 'seed'" in caplog.text and "dispatch d1" in caplog.text
+        refused = _refusal(_write(dispatch_grant.seat, dispatch_grant.seed / "package.json"))
+        assert "files README.md; directories (new files allowed under these) src/hooks" in refused
+        # The sender is read off the row, and never a reply: replying closes the dispatch and its grant.
+        widen = f"drone @ai_mail email @grantor 'Widen grant d1' 'need {dispatch_grant.seed / 'package.json'}'"
+        assert widen in refused
+        assert "ai_mail reply" not in refused
+
+    def test_a_granted_file_passes_and_an_unlisted_one_beside_it_does_not(self, dispatch_grant):
+        assert _write(dispatch_grant.seat, dispatch_grant.seed / "README.md")["exit_code"] == 0
+        for outside in (dispatch_grant.seed / "src" / "other.ts", dispatch_grant.seed / "NEW.md"):
+            assert "is outside dispatch d1's grant" in _refusal(_write(dispatch_grant.seat, outside))
+
+    @pytest.mark.parametrize(
+        "ended",
+        [
+            "dispatch d1 is not open with a grant",
+            "dispatch d1 is past its expected_by",
+            "dispatch d1 has no monitor known to be alive",
+        ],
+    )
+    def test_a_grant_that_ended_refuses_with_the_doors_reason(self, dispatch_grant, ended: str):
+        dispatch_grant.ended = ended
+        refused = _refusal(_write(dispatch_grant.seat, dispatch_grant.seed / "README.md"))
+        assert f"Dispatch d1 grants nothing here: {ended}." in refused
+        assert "To widen it" not in refused
+
+    def test_a_seat_the_dispatch_was_not_sent_to_is_refused(self, dispatch_grant):
+        dispatch_grant.grantee = "@flow"
+        assert "was sent to @flow, not @hooks" in _refusal(
+            _write(dispatch_grant.seat, dispatch_grant.seed / "README.md")
+        )
+        assert dispatch_grant.calls[0]["caller"] == "@hooks"
+
+    def test_with_no_dispatch_id_the_plain_refusal_stands_and_the_door_is_not_asked(self, dispatch_grant, monkeypatch):
+        monkeypatch.delenv("AIPASS_DISPATCH_ID")
+        refused = _refusal(_write(dispatch_grant.seat, dispatch_grant.seed / "src" / "hooks" / "new.ts"))
+        assert refused.startswith("Cross-project write blocked: project 'AIPass'")
+        assert "grants nothing" not in refused
+        assert dispatch_grant.calls == []
+
+    def test_a_grant_check_with_no_caller_project_refuses_cleanly_and_asks_no_door(self, dispatch_grant, tmp_path):
+        outside = tmp_path / "workspace"
+        outside.mkdir()
+        refused = _refusal(_write(str(outside), dispatch_grant.aipass / "src" / "aipass" / "hooks" / "x.py", "Write"))
+        assert refused.startswith("Cross-project write blocked: a session outside every project cannot write")
+        assert "Dispatch d1's grant was not read: this session stands in no project, so it has no register." in refused
+        assert dispatch_grant.calls == []
+
+    def test_a_door_that_raises_refuses_with_a_warning(self, dispatch_grant, monkeypatch, caplog):
+        monkeypatch.setattr(door_dispatch_grant, "granted", Mock(side_effect=OSError("register gone")))
+        refused = _refusal(_write(dispatch_grant.seat, dispatch_grant.seed / "README.md"))
+        assert "edit_gate could not read the dispatch register (register gone), so this crossing is refused." in refused
+        assert "write_grant: grant check for dispatch d1 raised (refusing): register gone" in caplog.text
+
+    def test_a_malformed_decision_is_no_grant(self, dispatch_grant, monkeypatch):
+        monkeypatch.setattr(door_dispatch_grant, "granted", Mock(return_value={"allowed": "yes"}))
+        assert "the door gave no reason" in _refusal(_write(dispatch_grant.seat, dispatch_grant.seed / "README.md"))
+
+    def test_the_register_read_is_the_callers_never_one_planted_under_the_target_root(self, dispatch_grant):
+        _write(dispatch_grant.seat, dispatch_grant.seed / "README.md")
+        assert [Path(c["repo_root"]).resolve() for c in dispatch_grant.calls] == [dispatch_grant.aipass.resolve()]
+
+    def test_nothing_under_git_is_granted_even_when_the_grant_names_it(self, dispatch_grant):
+        dispatch_grant.grant["dirs"].append(".git")
+        assert "Nothing under .git is ever granted" in _refusal(
+            _write(dispatch_grant.seat, dispatch_grant.seed / ".git" / "config")
+        )
+        assert dispatch_grant.calls == []
+
+    def test_the_admin_seat_is_asked_before_the_grant(self, dispatch_grant, monkeypatch, caplog):
+        monkeypatch.delenv("AIPASS_SESSION_TYPE")
+        dispatch_grant.admin = True
+        assert _write(dispatch_grant.seat, dispatch_grant.seed / "package.json")["exit_code"] == 0
+        assert "ALLOWED for the admin seat" in caplog.text
+        assert dispatch_grant.calls == []
+
+    def test_daemon_confinement_still_holds_for_an_admin_crossing_and_an_ungranted_branch(self, dispatch_grant):
+        dispatch_grant.admin = True
+        assert "Dispatched agent restricted" in _refusal(_write(dispatch_grant.seat, dispatch_grant.seed / "README.md"))
+        flow = dispatch_grant.aipass / "src" / "aipass" / "flow" / "x.py"
+        assert "daemon mode" in _refusal(_write(dispatch_grant.seat, flow))
+
+    @pytest.mark.parametrize("protected", [(".claude", "settings.json"), (".aipass", "dispatch_register.jsonl")])
+    def test_a_grant_never_opens_what_git_gate_protects(self, dispatch_grant, protected: tuple):
+        dispatch_grant.grant["dirs"].append(protected[0])
+        target = dispatch_grant.seed.joinpath(*protected)
+        assert _write(dispatch_grant.seat, target)["exit_code"] == 0
+        edit = {"tool_name": "Edit", "tool_input": {"file_path": str(target)}, "cwd": dispatch_grant.seat}
+        assert git_gate.handle(edit)["exit_code"] == 2
 
 
 @pytest.fixture

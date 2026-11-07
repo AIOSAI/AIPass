@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access.py
 # Description: Tests for tier-based git access — the tiers, the owner gate and its log severity
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-05-12
-# Modified: 2026-11-02
+# Modified: 2026-11-03
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/auth.py: the git tiers and how owner tier is earned per repo."""
@@ -349,26 +349,20 @@ class TestOwnerTierIsEarnedPerRepo:
         assert f"{failure.__name__}: simulated resolve failure" in str(refused.value)
         assert "AIPASS_REGISTRY.json" in str(refused.value)
 
-    @pytest.mark.parametrize("mode", ["enforce", "warn"])
     def test_an_unresolvable_registry_directory_is_an_authority_refusal(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, mode: str
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """The refusal is of the species authority: it stands under enforcement, and the
-        warn-mode rollback lifts it; the warning names the directory.
+        """The refusal is of the species authority ("not authorized"); the warning names the directory.
 
-        Mutants: species changed to capability (warn raises "cannot run"); the warning removed."""
+        Mutants: species changed to capability (raises "cannot run"); the warning removed."""
         make_owner_project(tmp_path)
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("AIPASS_REGISTRY", str(tmp_path / "AIPASS_REGISTRY.json"))
-        monkeypatch.setenv("AIPASS_GIT_AUTH_MODE", mode)
         monkeypatch.setattr(
             "aipass.drone.apps.plugins.devpulse_ops.auth._resolve_location", _failing_resolve(tmp_path, OSError)
         )
-        if mode == "warn":
-            assert verify_git_access("commit") == "devpulse"
-        else:
-            with pytest.raises(PermissionError, match="is not authorized for 'commit'"):
-                verify_git_access("commit")
+        with pytest.raises(PermissionError, match="is not authorized for 'commit'"):
+            verify_git_access("commit")
         assert f"Registry directory {tmp_path} could not be resolved: OSError" in caplog.text
 
     def test_subdirectory_of_recorded_home_allowed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -501,15 +495,6 @@ class TestExternalRepoVerbTranslation:
         monkeypatch.chdir(tmp_path)
         assert verify_git_access(command) == "devpulse"
 
-    @pytest.mark.parametrize("command", ["pr", "close-pr", "fix"])
-    def test_warn_mode_does_not_lift_an_untranslated_verb(
-        self, vera_home: Path, monkeypatch: pytest.MonkeyPatch, command: str
-    ) -> None:
-        """Warn-mode rolls back the AUTHORITY migration, never this refusal."""
-        monkeypatch.setenv("AIPASS_GIT_AUTH_MODE", "warn")
-        with pytest.raises(PermissionError, match="not translated for external repos"):
-            verify_git_access(command)
-
     def test_untranslated_refusal_does_not_call_a_proven_owner_unauthorized(self, vera_home: Path) -> None:
         """VERA cleared all four authority checks — 'not authorized' would be a false trail."""
         with pytest.raises(PermissionError) as exc_info:
@@ -518,42 +503,18 @@ class TestExternalRepoVerbTranslation:
         assert "cannot run 'pr'" in str(exc_info.value)
 
 
-class TestGitAuthWarnMode:
-    """One env var is the rollback: warn logs the refusal and allows."""
+class TestNoSeatLiftsItsOwnGate:
+    """The retired AIPASS_GIT_AUTH_MODE=warn switch was a seat-settable bypass; no env opens the gate now."""
 
-    def test_warn_mode_allows_and_logs(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        make_owner_project(tmp_path, citizen_class="builder")
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setenv("AIPASS_GIT_AUTH_MODE", "warn")
-        with patch("aipass.drone.apps.plugins.devpulse_ops.auth.logger") as mock_logger:
-            assert verify_git_access("commit") == "devpulse"
-        mock_logger.warning.assert_called_once()
-        assert "would be denied" in mock_logger.warning.call_args[0][0]
-
-    @pytest.mark.parametrize("value", ["enforce", "", "yes", "warn-only", "1"])
-    def test_only_the_exact_word_warn_opens_the_gate(
+    @pytest.mark.parametrize("value", ["warn", "enforce", ""])
+    def test_the_retired_warn_switch_lifts_no_refusal(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str
     ) -> None:
-        """Anything that isn't exactly 'warn' enforces — no near-miss opens the gate."""
+        """Mutant: restore the env read, and a builder commits by prefixing one variable."""
         make_owner_project(tmp_path, citizen_class="builder")
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("AIPASS_GIT_AUTH_MODE", value)
-        with pytest.raises(PermissionError):
-            verify_git_access("commit")
-
-    def test_unset_env_enforces(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The DEFAULT is enforce; the parametrized test above only covers set values."""
-        make_owner_project(tmp_path, citizen_class="builder")
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.delenv("AIPASS_GIT_AUTH_MODE", raising=False)
-        with pytest.raises(PermissionError):
-            verify_git_access("commit")
-
-    def test_warn_mode_does_not_weaken_identification(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Warn mode relaxes authorization, never identification — no passport is still no entry."""
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setenv("AIPASS_GIT_AUTH_MODE", "warn")
-        with pytest.raises(PermissionError, match="No .trinity/passport.json"):
+        with pytest.raises(PermissionError, match="is not authorized for 'commit'"):
             verify_git_access("commit")
 
 
@@ -690,6 +651,17 @@ class TestTheFenceIsTheSession:
             assert "-wren-src-wren" in str(exc_info.value)
         assert verify_git_access("status") == "VERA"
 
+    def test_the_retired_warn_switch_does_not_open_the_fence(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, start_session: Callable[[Path], None]
+    ) -> None:
+        """A seat standing in a foreign tree cannot commit there by prefixing AIPASS_GIT_AUTH_MODE=warn."""
+        _vera_seat(tmp_path, monkeypatch)
+        start_session(tmp_path / "wren" / "src" / "wren")
+        monkeypatch.setenv("AIPASS_GIT_AUTH_MODE", "warn")
+
+        with pytest.raises(PermissionError, match="not in project 'Vera-Studio'"):
+            verify_git_access("commit")
+
     @pytest.mark.parametrize(("started", "allowed"), [("seat", True), ("root", True), ("above", False)])
     def test_a_session_started_at_the_seat_or_above_it_inside_the_project_writes(
         self,
@@ -772,11 +744,8 @@ class TestManagerPush:
         assert "push takes no arguments" in result["stderr"]
         assert pushed == []
 
-    def test_a_plain_push_in_aipass_refuses_and_names_dev_pr_even_in_warn_mode(
-        self, devpulse_dir: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_a_plain_push_in_aipass_refuses_and_names_dev_pr(self, devpulse_dir: Path) -> None:
         """Mutant: _EXTERNAL_ONLY_VERBS emptied — devpulse pushes dev straight past the PR."""
-        monkeypatch.setenv("AIPASS_GIT_AUTH_MODE", "warn")
         with pytest.raises(PermissionError) as exc_info:
             verify_git_access("push")
         assert "cannot run 'push'" in str(exc_info.value)

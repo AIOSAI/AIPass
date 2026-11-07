@@ -186,7 +186,7 @@ def detect_cpu() -> Dict[str, Any]:
 
 
 def detect_install_method() -> str:
-    """Return how aipass was installed: 'pip', 'dev', 'clone', or 'fork'."""
+    """Return how aipass was installed: 'pip', 'dev', 'clone', or 'unknown'."""
     this_file = Path(__file__).resolve()
 
     if "site-packages" in str(this_file):

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: protected_paths.py
-# Version: 2.2.1
+# Version: 2.3.0
 # Description: The files that switch the gates themselves — written by the admin seat alone (git_gate)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-30
-# Modified: 2026-10-24
+# Modified: 2026-11-03
 # =============================================
 
 """Which files decide whether the gates run, and so must never be an agent's to write (DPLAN-0356 item 1).
@@ -34,6 +34,8 @@ _ANYWHERE = (
     (re.compile(r"/\.git/hooks/", re.IGNORECASE), "git's own hooks (.git/hooks/)"),
 )
 _CONFIG_TAIL = re.compile(r"/\.aipass/hooks\.json$", re.IGNORECASE)
+# Every project's, not only AIPASS_HOME's: a forged row in any project's register misleads its monitor.
+_REGISTER_TAIL = re.compile(r"/\.aipass/dispatch_register\.jsonl$", re.IGNORECASE)
 # registry_gate's sealed set, matched only under AIPASS_HOME.
 _REGISTRY_TAIL = re.compile(r"/\w+_REGISTRY\.json$", re.IGNORECASE)
 
@@ -42,6 +44,7 @@ CONFIG = "the AIPass hook config (.aipass/hooks.json)"
 LIVE = "the promoted hook code (.live-*; drone @hooks promote writes it)"
 GIT_DATA = "the repository's git data (.git/; drone @git is the interface)"
 REGISTRY = "a sealed registry (*_REGISTRY.json; its owner's drone verbs write it)"
+REGISTER = "the dispatch register (.aipass/dispatch_register.jsonl; @ai_mail's dispatch verbs write it)"
 SECRETS = "the secrets store (~/.secrets; no seat writes it, the admin seat included)"
 # Named to be refused, never opened: no seat writes under it (R7).
 _STORE = ".secrets"
@@ -78,6 +81,8 @@ def _by_name(spelled: str) -> str | None:
     for pattern, what in _ANYWHERE:
         if pattern.search(spelled):
             return what
+    if _REGISTER_TAIL.search(spelled):
+        return REGISTER
     if _under(spelled, Path.home() / _STORE):
         return SECRETS
     if spelled.casefold() == _spelled(Path.home() / ".aipass" / "trusted_projects.json").casefold():
@@ -111,6 +116,7 @@ def anchors() -> list[Path]:
     if home is not None:
         for pattern in (
             ".aipass/hooks.json",
+            ".aipass/dispatch_register.jsonl",
             "src/aipass/*/.aipass/hooks.json",
             "projects/*/.aipass/hooks.json",
             ".claude/settings*.json",

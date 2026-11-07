@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: stale_header_date_content.py
 # Description: Stale Header Date Standards Content Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-25
-# Modified: 2026-11-02
+# Modified: 2026-11-07
 # =============================================
 
 """
@@ -22,9 +22,11 @@ def get_stale_header_date_standards() -> str:
         "  read [red]2026-09-22[/red] after b92e0361 rewrote every file on 2026-09-23.",
         "",
         "[bold cyan]THE DATE OF TRUTH:[/bold cyan]",
-        "  The author date of the file's last commit. A file with an uncommitted change,",
-        "  or one never committed, is judged as of TODAY -- so a change that did not move",
-        "  the date is convicted at the edit, and one that moved it passes at once.",
+        "  The author date of the file's last commit, in the committer's own UTC offset.",
+        "  A file with an uncommitted change, or one never committed, is judged as of TODAY",
+        "  on the host's local clock -- so a change that did not move the date is convicted",
+        "  at the edit, and one that moved it passes at once. The audit re-runs this row",
+        "  after midnight; a commit after midnight still needs the check at commit time.",
         "",
         "[bold cyan]THE FIRST CHECKER TO READ GIT -- AND WHEN IT DECLINES:[/bold cyan]",
         "  Read-only: rev-parse, log, diff --name-only, ls-files, one batch per directory.",

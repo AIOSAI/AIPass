@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_git_module_handlers.py
-# Description: Tests for the handlers @git drives — lock, repo root, status, sync, PR and remote set
-# Version: 1.1.0
+# Description: Tests for the handlers @git drives — lock, repo root, status, sync, PR, remote set and uncommit
+# Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-03
 # =============================================
 
-"""Tests for the lock, status, sync, PR and remote handlers that apps/modules/git_module.py drives."""
+"""Tests for the lock, status, sync, PR, remote and uncommit handlers that apps/modules/git_module.py drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(stdlib) — subprocess.run, which every git and gh call here reaches as a recorded stub
@@ -699,3 +699,125 @@ class TestRemoteSet:
         assert _git(ext, "remote", "get-url", "origin").stdout.strip() == _SEED
         assert _git(seed_repo, "remote").stdout.strip() == ""
         assert _remote_ledger(tmp_path)[0]["caller"] == "devpulse"
+
+
+def _head(repo: Path) -> str:
+    return _git(repo, "log", "-1", "--format=%s").stdout.strip()
+
+
+@pytest.fixture()
+def unpushed(seed_repo: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """dev tracking origin/dev at 'base' (a.txt, c.txt), then two unpushed commits: 'test' edits a.txt, 'real' adds b.txt."""
+    for name in ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"):
+        monkeypatch.setenv(name, "Uncommit Test")
+    for name, text in (("a.txt", "a one\n"), ("c.txt", "c one\n")):
+        (seed_repo / name).write_text(text, encoding="utf-8")
+    _git(seed_repo, "add", "a.txt", "c.txt")
+    _git(seed_repo, "commit", "-q", "-m", "base")
+    _git(seed_repo, "checkout", "-q", "-b", "dev")
+    _git(seed_repo, "remote", "add", "origin", _SEED)
+    _git(seed_repo, "update-ref", "refs/remotes/origin/dev", "HEAD")
+    _git(seed_repo, "branch", "-q", "--set-upstream-to=origin/dev")
+    (seed_repo / "a.txt").write_text("a two\n", encoding="utf-8")
+    _git(seed_repo, "commit", "-q", "-am", "test")
+    (seed_repo / "b.txt").write_text("b one\n", encoding="utf-8")
+    _git(seed_repo, "add", "b.txt")
+    _git(seed_repo, "commit", "-q", "-m", "real")
+    return seed_repo
+
+
+class TestUncommit:
+    """uncommit un-records unpushed commits with a soft reset, and refuses every case a reset would hurt."""
+
+    def test_two_commits_are_un_recorded_and_their_changes_stay_staged(self, unpushed: Path) -> None:
+        """Mutant: --mixed instead of --soft — HEAD moves, but nothing is staged for the one re-commit."""
+        result = handle_command("uncommit", ["2"])
+
+        assert result["exit_code"] == 0, result["stderr"]
+        assert _head(unpushed) == "base"
+        assert _git(unpushed, "diff", "--cached", "--name-status").stdout.split() == ["M", "a.txt", "A", "b.txt"]
+        assert "real" in result["stdout"].splitlines()[0] and "test" in result["stdout"].splitlines()[1]
+        assert "2 commit(s) un-recorded; HEAD is now" in result["stdout"]
+
+    def test_no_count_un_records_one(self, unpushed: Path) -> None:
+        assert handle_command("uncommit", [])["exit_code"] == 0
+        assert _head(unpushed) == "test"
+
+    def test_a_pushed_commit_is_never_un_recorded(self, unpushed: Path) -> None:
+        """Mutant: the upstream check dropped — the refusal is no longer the pushed commit's."""
+        result = handle_command("uncommit", ["3"])
+
+        assert result["exit_code"] == 1
+        assert "base is already on origin/dev" in result["stderr"]
+        assert _head(unpushed) == "real"
+
+    def test_more_than_the_branch_holds_is_refused(self, unpushed: Path) -> None:
+        """Mutant: the count check dropped — the reset itself fails past the root commit."""
+        _git(
+            unpushed,
+            "update-ref",
+            "refs/remotes/origin/dev",
+            _git(unpushed, "commit-tree", "-m", "orphan", _git(unpushed, "write-tree").stdout.strip()).stdout.strip(),
+        )
+
+        result = handle_command("uncommit", ["4"])
+
+        assert result["exit_code"] == 1
+        assert "4 asked, but dev is 3 commit(s) ahead of origin/dev" in result["stderr"]
+        assert _head(unpushed) == "real"
+
+    def test_a_merge_commit_is_refused(self, unpushed: Path) -> None:
+        """Mutant: the parent count unread — the merge is un-recorded and its side branch flattened."""
+        _git(unpushed, "checkout", "-q", "-b", "side", "HEAD~1")
+        (unpushed / "d.txt").write_text("d\n", encoding="utf-8")
+        _git(unpushed, "add", "d.txt")
+        _git(unpushed, "commit", "-q", "-m", "side work")
+        _git(unpushed, "checkout", "-q", "dev")
+        _git(unpushed, "merge", "-q", "--no-ff", "-m", "merge side", "side")
+
+        result = handle_command("uncommit", ["1"])
+
+        assert result["exit_code"] == 1
+        assert "merge side is a merge commit" in result["stderr"]
+        assert _head(unpushed) == "merge side"
+
+    def test_unstaged_edits_to_a_touched_file_refuse_and_unrelated_ones_do_not(self, unpushed: Path) -> None:
+        """Mutants: the check dropped (a.txt mixes in); every unstaged file refused (c.txt blocks)."""
+        (unpushed / "c.txt").write_text("c mine\n", encoding="utf-8")
+        (unpushed / "a.txt").write_text("a mine\n", encoding="utf-8")
+
+        refused = handle_command("uncommit", ["2"])
+        (unpushed / "a.txt").write_text("a two\n", encoding="utf-8")
+        allowed = handle_command("uncommit", ["2"])
+
+        assert refused["exit_code"] == 1
+        assert "unstaged edits to a.txt, which the commits touch" in refused["stderr"]
+        assert allowed["exit_code"] == 0, allowed["stderr"]
+        assert (unpushed / "c.txt").read_text(encoding="utf-8") == "c mine\n"
+
+    def test_a_branch_with_no_upstream_is_refused(self, unpushed: Path) -> None:
+        _git(unpushed, "branch", "-q", "--unset-upstream")
+
+        result = handle_command("uncommit", [])
+
+        assert result["exit_code"] == 1
+        assert "dev tracks no remote branch" in result["stderr"]
+        assert _head(unpushed) == "real"
+
+    @pytest.mark.parametrize("args", [["0"], ["two"], ["1", "2"], ["--hard"]])
+    def test_anything_but_one_whole_count_is_refused(self, unpushed: Path, args: list[str]) -> None:
+        result = handle_command("uncommit", args)
+
+        assert result["exit_code"] == 1
+        assert "There is no force or hard flag" in result["stderr"]
+        assert _head(unpushed) == "real"
+
+    def test_a_seat_without_owner_tier_is_refused(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Mutant: uncommit on the global tier — any citizen rewrites the branch tip."""
+        root = make_owner_project(tmp_path / "seed", branch="scout", citizen_class="specialist")
+        monkeypatch.chdir(root)
+
+        result = handle_command("uncommit", [])
+
+        assert result["exit_code"] == 1
+        assert "not authorized for 'uncommit'" in result["stderr"]

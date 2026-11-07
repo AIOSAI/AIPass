@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: router_handler.py
 # Description: Handler for command routing implementation; the caller stamp for routed children and in-process modules
-# Version: 1.4.1
+# Version: 1.5.0
 # Created: 2026-03-09
-# Modified: 2026-10-24
+# Modified: 2026-11-03
 # =============================================
 
 """
@@ -12,6 +12,7 @@ Handler for command routing implementation.
 
 import json
 import os
+import sys
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, List, NamedTuple, Optional
@@ -199,7 +200,7 @@ def resolve_caller_identity_signal(cwd: Path | None) -> CallerIdentity:
     if assigned and standing and assigned.lower() != standing.lower():
         if source == "passport":
             # Only place both claims coexist; downstream sees just the winner, so it stays loud.
-            _log_identity_once(
+            emitted = _log_identity_once(
                 f"conflict:{cwd}:{assigned}:{standing}",
                 "warning",
                 "Caller identity conflict: AIPASS_BRANCH_NAME=%r but the passport at cwd %s "
@@ -209,6 +210,12 @@ def resolve_caller_identity_signal(cwd: Path | None) -> CallerIdentity:
                 standing,
                 assigned,
             )
+            # The log alone reached nobody: the seat learned it was someone else only when its doors answered.
+            if emitted:
+                sys.stderr.write(
+                    f"drone: identity conflict: AIPASS_BRANCH_NAME={assigned!r}, passport here says "
+                    f"{standing!r}; using {assigned!r}\n"
+                )
         else:
             _log_identity_once(
                 f"in-project:{cwd}:{assigned}:{standing}",
