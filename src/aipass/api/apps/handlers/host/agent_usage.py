@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: agent_usage.py
 # Description: Host API Agent Usage — one live agent's context window and its provider's plan limits
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-11-05
-# Modified: 2026-11-05
+# Modified: 2026-11-07
 # =============================================
 
 """
@@ -12,10 +12,10 @@ Reference: docs/host_agent_chat.md. Ported as it is from Seed Dev's deck (ui/usa
 Claude: context from the transcript's last assistant usage row; plan limits from Anthropic's oauth/usage endpoint,
 read with this machine's Claude Code sign-in (~/.claude/.credentials.json) and cached 60 s per token; a 429 backs
 off (Retry-After, else 5 minutes doubling to 30). The token stays in this process: never answered, never logged,
-the cache keyed by its sha256. Codex: both from the rollout's newest token_count rows, no network. OpenCode: not wired.
+the cache keyed by the token itself. Codex: both from the rollout's newest token_count rows, no network.
+OpenCode: not wired.
 """
 
-import hashlib
 import json
 import time
 import urllib.error
@@ -144,7 +144,8 @@ def claude_limits() -> Tuple[List[dict], Optional[str]]:
     token, why = _token()
     if token is None:
         return [], why
-    key = hashlib.sha256(token.encode()).hexdigest()
+    # the process already holds the token; a fast hash of it adds no protection and reads to CodeQL as password hashing
+    key = token
     if _cache["key"] == key and time.monotonic() - _cache["at"] < _cache["ttl"]:
         return _cache["answer"]
     request = urllib.request.Request(
