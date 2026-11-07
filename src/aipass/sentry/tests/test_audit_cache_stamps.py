@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_audit_cache_stamps.py
 # Description: The audit cache's invalidation stamps and what its branch line reports
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-09-21
-# Modified: 2026-11-02
+# Modified: 2026-11-07
 # =============================================
 
 """Tests for apps/handlers/audit/incremental_cache.py's stamp functions."""
@@ -156,6 +156,21 @@ class TestCheckerStamps:
         after = incremental_cache.compute_checker_stamps(pack_dir)
 
         assert incremental_cache.stale_checkers(before, after) == {"naming"}
+
+    def test_a_checker_that_judges_as_of_today_goes_stale_at_midnight_and_no_other(self, tmp_path, monkeypatch):
+        """CI 42350294936: three headers dated 11-06, committed 11-07; a cached audit kept the 11-06 pass."""
+        pack_dir = tmp_path / "pack"
+        pack_dir.mkdir()
+        (pack_dir / "stale_header_date_check.py").write_text("def check_module(p): return {}\n", encoding="utf-8")
+        (pack_dir / "naming_check.py").write_text("def check_module(p): return {}\n", encoding="utf-8")
+        monkeypatch.setattr(incremental_cache, "_today", lambda: "2026-11-06")
+        before = incremental_cache.compute_checker_stamps(pack_dir)
+        same_day = incremental_cache.compute_checker_stamps(pack_dir)
+        monkeypatch.setattr(incremental_cache, "_today", lambda: "2026-11-07")
+        after = incremental_cache.compute_checker_stamps(pack_dir)
+
+        assert incremental_cache.stale_checkers(before, same_day) == set()
+        assert incremental_cache.stale_checkers(before, after) == {"stale_header_date"}
 
     def test_a_missing_pack_stamps_nothing(self, tmp_path):
         assert incremental_cache.compute_checker_stamps(tmp_path / "gone") == {}

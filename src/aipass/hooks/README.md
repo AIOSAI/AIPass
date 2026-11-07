@@ -93,14 +93,13 @@ is always current; depth is in the docs below. A verb `--help` does not name is 
 
 Three layers. `apps/hooks.py` is a thin router: it discovers the modules beside it and dispatches each
 command to the one that claims it. `apps/modules/` holds one business-logic module per concern —
-`engine` (the dispatcher itself), `engine_closure` (the files the engine imports, and the edit
-check that keeps a NameError out of them), `door_trust_registry` (the one modules file aipass may
-import for the trust registry), `cadence` (which turn a loader fires on), `injection_ledger` (what a
-seat was told, per turn), `grounding_receipt` (whether the grounding reached the model), `grounding_content` (the
-injected blocks and their budgets), `write_ownership` (whose file a write lands in, read from the registries), `write_grant` (whether a dispatch's
-write grant covers a crossing write),
-`bash_writes`, `shell_reader`, `shell_programs` and `testwrite_targets` (what a shell command can be
-seen to write, the programs it runs, and which writes are new tests), `admin_seat` and `testgate_policy` (who is exempt,
+`engine` (the dispatcher), `engine_closure` (the engine's imports, kept free of NameErrors),
+`door_trust_registry` (the trust registry aipass imports), `cadence` (which turn a loader fires on),
+`injection_ledger` (what a seat was told, per turn), `grounding_receipt` (whether the grounding
+reached the model), `grounding_content` (the injected blocks and their budgets), `write_ownership`
+(whose file a write lands in), `write_grant` (whether a dispatch's grant covers a crossing write),
+`bash_writes`, `shell_reader`, `shell_programs` and `testwrite_targets` (a shell command's visible
+writes, its programs, its new tests), `admin_seat` and `testgate_policy` (who is exempt,
 and what the policy says), `promote` (source to live code), `protected_paths` (the files that switch
 the gates), `comment_scan` and `comments` (the comment budget), `hookstatus`, `hooksound`, `alert_dismiss`, `feedback`, `context_window`,
 `cc_sessions`, `cc_transcripts`, `diagnostics_state`, `hook_test`, `release_notice`, `sandbox` and
@@ -126,22 +125,22 @@ Depth lives in [docs/](docs/), one file per gate or module group:
 | Doc | What it covers |
 |---|---|
 | [docs/wiring.md](docs/wiring.md) | The two-tier model, each event's wiring shape, entry names vs handler files |
-| [docs/opencode.md](docs/opencode.md) | The OpenCode plugin: hook-to-event map, compaction order, grounding receipt, context gauge |
+| [docs/opencode.md](docs/opencode.md) | The OpenCode plugin and how its events map to the hooks |
 | [docs/engine.md](docs/engine.md) | Dispatch, promote, gates fail closed, injectors skip, the merged output, the cwd rule |
 | [docs/project_config.md](docs/project_config.md) | Which config runs, when trust matters, the project template, the release notice |
 | [docs/git_gate.md](docs/git_gate.md) | Raw git and gh refused for every seat, the drone twins, protected files, the rm gate |
-| [docs/settings_gate.md](docs/settings_gate.md) | No AI changes a provider's settings alone: Claude asks the owner, Codex and headless are denied |
+| [docs/settings_gate.md](docs/settings_gate.md) | No AI changes provider settings alone: Claude asks the owner, Codex and headless are denied |
 | [docs/edit_gate.md](docs/edit_gate.md) | Who may write whose files, the project fence, the admin seat, what the gate cannot see |
 | [docs/bash_writes.md](docs/bash_writes.md) | What a shell command can be seen to write, and what it misses |
-| [docs/trinity_memory_gate.md](docs/trinity_memory_gate.md) | Memory writes: the shell refusal, the tripwire, and judging a write on what it authors |
+| [docs/trinity_memory_gate.md](docs/trinity_memory_gate.md) | Memory writes: the shell refusal, the tripwire, judging what a write authors |
 | [docs/testwrite_gate.md](docs/testwrite_gate.md) | Agents do not create tests: the policy file, the fail-closed reasoning |
-| [docs/prompt_injection.md](docs/prompt_injection.md) | The injection caps and where each is read from, the loud fail-open, the alert banners |
+| [docs/prompt_injection.md](docs/prompt_injection.md) | Injection caps and their sources, the loud fail-open, the alert banners |
 | [docs/diagnostics.md](docs/diagnostics.md) | The two log streams and the post-edit diagnostics block |
 | [docs/comments.md](docs/comments.md) | The comment budget: the metric, the over-budget answer, the `comments` verb |
 | [docs/sandbox.md](docs/sandbox.md) | The kernel filesystem boundary: policy per role, what is writable, launch seam |
 | [docs/boot_shim.md](docs/boot_shim.md) | The one script here that writes outside the repo |
-| [docs/cadence_investigation.md](docs/cadence_investigation.md) | The per-turn injection counter and why it is keyed per session |
-| [docs/provider_parity.md](docs/provider_parity.md) | `parity`: the same prompts headless on both CLIs, compared hook by hook; `smoke`: one live turn per provider |
+| [docs/cadence_investigation.md](docs/cadence_investigation.md) | The per-turn injection counter, keyed per session |
+| [docs/provider_parity.md](docs/provider_parity.md) | `parity` compares both CLIs hook by hook; `smoke` runs one live turn per provider |
 
 ---
 
