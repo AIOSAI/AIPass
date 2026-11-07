@@ -3,7 +3,7 @@
 # Description: host_portability_check — arms A to H over minimised fleet sites, and its branch score
 # Version: 1.0.0
 # Created: 2026-11-01
-# Modified: 2026-11-02
+# Modified: 2026-11-06
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/host_portability_check.py."""
@@ -991,3 +991,40 @@ def test_a_git_existence_test_in_a_test_file_is_not_judged(tmp_path):
     (tmp_path / "tests").mkdir()
     source = _GIT_WALK.replace("PROBE", '(parent / ".git").exists()')
     assert _scan_source(tmp_path, source, name="tests/test_walk.py")[0] == []
+
+
+# Arm I: on a case-folding host (macOS, Windows) two siblings spelled apart only by case are one directory.
+_TWINS = (
+    "def test_agreement_prints_nothing(temp_test_dir):\n"
+    "    home = plant(temp_test_dir / FIRST)\n"
+    "    root = plant(temp_test_dir / SECOND)\n"
+)
+
+
+def test_two_siblings_differing_only_by_case_are_convicted_at_the_second(tmp_path):
+    """drone test_router 42346874257: aipass/ and AIPass/ were one dir on macOS, the registry beside the passport."""
+    violations, _acquitted = _scan_source(tmp_path, _TWINS.replace("FIRST", '"aipass"').replace("SECOND", '"AIPass"'))
+    assert _lines(violations) == [3]
+    assert "'aipass'" in violations[0][1] and "fold" in violations[0][1]
+
+
+@pytest.mark.parametrize(
+    "first, second",
+    [('"aipass"', '"aipass"'), ('"aipass"', '"project_root"'), ('"AIPass" / "src" / "aipass"', '"other"')],
+)
+def test_one_spelling_distinct_names_or_different_parents_are_acquitted(tmp_path, first, second):
+    """AIPass/src/aipass is the repo's own layout: the two spellings never share a parent."""
+    assert _scan_source(tmp_path, _TWINS.replace("FIRST", first).replace("SECOND", second))[0] == []
+
+
+def test_a_unit_that_names_case_or_folding_is_testing_it_on_purpose(tmp_path):
+    """memory test_declared_roots: test_two_names_differing_only_by_case_may_be_one_file."""
+    source = _TWINS.replace("FIRST", '"aipass"').replace("SECOND", '"AIPass"')
+    renamed = source.replace("test_agreement_prints_nothing", "test_a_folded_name_is_one_dir")
+    assert _scan_source(tmp_path, renamed)[0] == []
+
+
+def test_two_spellings_in_two_functions_are_two_trees(tmp_path):
+    """Each test gets its own tmp dir, so only one function's paths can collide."""
+    source = 'def test_a(tmp):\n    plant(tmp / "aipass")\n\n\ndef test_b(tmp):\n    plant(tmp / "AIPass")\n'
+    assert _scan_source(tmp_path, source)[0] == []

@@ -81,7 +81,14 @@ in test files under pyproject's testpaths, spelled as one string (`".claude/comm
 or as trailing literal Path parts (`root / ".claude" / "commands" / "codex.md"`,
 `Path(".claude", "commands", "codex.md")`). stdout carries only test paths, one per line,
 deduplicated, so it feeds pytest directly; the count per path, a skipped `.py` path and
-"no test names it" go to stderr. Exit 0 whether or not anything matched. A path built from a
+"no test names it" go to stderr. Exit 0 whether or not anything matched.
+
+A fleet walk names no branch: `startup_ratchet` reads every branch's
+`.aipass/aipass_local_prompt.md` from a constant in a product module. So a path under
+`src/<package>/<branch>/` also lists every test that imports (by absolute name) a source file
+under `src/` spelling the branch-relative tail (`.aipass/aipass_local_prompt.md`) in either
+spelling. Only direct imports are followed, and over-selection is the cost: a README edit lists
+about 45 test files. A path built from a
 variable is not seen; a bare name such as `README.md` matches every test that spells it,
 so it over-selects, never under-selects.
 

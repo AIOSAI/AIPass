@@ -3,7 +3,7 @@
 # Description: Template v1 — tests_lane module, retire_ops and template_ops
 # Version: 1.0.7
 # Created: 2026-09-21
-# Modified: 2026-11-02
+# Modified: 2026-11-06
 # =============================================
 
 """Tests for apps/modules/tests_lane.py and the handlers it drives."""
@@ -485,3 +485,28 @@ class TestPinning:
         assert len(out.splitlines()) == 3
         assert "apps/x.py: a Python file, skipped" in err
         assert "README.md: no test names it" in err
+
+    def test_a_fleet_walk_pins_every_branch_copy_through_the_module_that_spells_the_tail(self, capsys, pinned_repo):
+        """THE DEFECT: CI 42346874257, devpulse's prompt over cap; the fleet walk naming it was not listed."""
+        src = pinned_repo / "src"
+        (src / "aipass" / "beta" / "apps").mkdir(parents=True)
+        (src / "aipass" / "beta" / "apps" / "ratchet.py").write_text(
+            'PROMPT_REL = ".aipass/aipass_local_prompt.md"\n', encoding="utf-8"
+        )
+        (src / "aipass" / "beta" / "apps" / "other.py").write_text('README = "README.md"\n', encoding="utf-8")
+        tests_dir = src / "aipass" / "alpha" / "tests"
+        (tests_dir / "test_walk.py").write_text("from aipass.beta.apps import other, ratchet\n", encoding="utf-8")
+        (tests_dir / "test_unrelated.py").write_text("from aipass.beta.apps import other\n", encoding="utf-8")
+
+        rels = [
+            "src/aipass/delta/.aipass/aipass_local_prompt.md",
+            ".aipass/aipass_local_prompt.md",
+            "tools/a/b/README.md",
+        ]
+        tests_lane.handle_command("tests", ["pinning", *rels])
+
+        out, err = capsys.readouterr()
+        assert out.splitlines() == ["src/aipass/alpha/tests/test_walk.py"]
+        assert "src/aipass/delta/.aipass/aipass_local_prompt.md: 1 test file" in err
+        assert ".aipass/aipass_local_prompt.md: no test names it" in err
+        assert "tools/a/b/README.md: no test names it" in err, "only a path under src/<package>/<branch>/ has a tail"
