@@ -9,6 +9,12 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **api**: a slash command typed in the BAUD chat (`/prep`, `/clear`) shows in the agent feed as typed, so the sender's pending mark settles instead of reading "not delivered" after a turn that ran (`handlers/host/agent_transcript.py` 1.1.0). Same cure the `!` shell line got.
+- **docs**: the Linux-only notice asks for `transition` in the issue title, not a label an outsider cannot apply, and says the Docker image is to come; the merge playbook names the lint-only gate and the three required checks.
+
 ## [2026-11-08] — v2.8.36: AIPass is Linux only, the transition notice, lint-only CI
 
 ### Changed
