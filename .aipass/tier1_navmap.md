@@ -25,7 +25,7 @@ Every branch is built the same: `src/aipass/<name>/`, mail `@<name>` — `.trini
 
  - @drone — command router; tier-based access; the only git interface (`drone @git`).
  - @devpulse — orchestration hub, the user's primary collaborator; dispatches work; the only git writer.
- - @aipass — the user's front door, its own CLI: `aipass`, never `drone @aipass`. Onboarding, `doctor`, help chat; reads, never writes.
+ - @aipass — the user's handyman: host/OS help, onboarding, `doctor`; builds, takes dispatches. CLI `aipass`, not `drone @aipass`.
  - @ai_mail — inter-agent email. `dispatch` = send + wake (default for handing work), `email` = no wake, plus inbox/view/reply/close.
  - @flow — plan lifecycle: create, list, close, templates, registry. See Plans below.
  - @sentry — code standards: `audit` and `checklist` before and after building; `audit tests @branch`, the advisory test-quality lane.
