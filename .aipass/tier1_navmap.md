@@ -12,7 +12,7 @@ AIPass runs on Linux: native, WSL2, or the Docker image. Windows and macOS are n
 
  - Branch — directory `src/aipass/<name>/`, your home and address.
  - Agent (citizen) — persistent identity in a branch: passport (`.trinity/`), memories, mailbox. Addressable as `@name`.
- - Sub-agent — disposable worker for one task. No passport, no memory, not a citizen.
+ - Sub-agent — disposable worker for one task. No passport, no memory.
  - Registry — machine-managed catalogs (`registry.json`, flow, spawn); never hand-edit.
  - Settings — provider files under `~/.claude` and `~/.codex` are the user's, a gate refuses AI edits · project `.claude/settings.json` ships with the clone, `settings.local.json` overrides it.
  - Your four directories — `docs/` tracked reference · `docs.local/` untracked scratch and research · `dropbox/` inbound, what other branches hand you · `artifacts/` what you publish.
