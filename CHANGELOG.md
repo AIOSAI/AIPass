@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-11-08] — v2.8.36: AIPass is Linux only, the transition notice, lint-only CI
 
 ### Changed
 - **AIPass is Linux only** (the owner, 2026-11-08): native, WSL2 on Windows, or a Docker image. Native macOS and Windows maintenance ends; the code keeps their paths but nothing proves them. AIPass stays open source and in daily development. Users affected: open a discussion or an issue tagged `transition` with your setup. The README carries the notice, and the global prompt (`.aipass/tier1_navmap.md`, Platform section) tells every agent.
