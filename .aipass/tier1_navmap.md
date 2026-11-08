@@ -6,7 +6,7 @@ AIPass: autonomous agents (citizens) with identity, memory, and a mailbox, servi
 
 # Platform — Linux only
 
-AIPass runs on Linux: native or WSL2, a Docker image to come. Windows and macOS are not maintained; a port is the community's. Not abandonment: the owner's lifetime project and daily driver, open source forever. A user this affects: open a GitHub discussion or issue with `transition` in the title and their setup; we help them find their path (WSL2, Docker later, a fork).
+AIPass runs on Linux: native or WSL2, a Docker image to come. Windows and macOS are not maintained; a port is the community's. Not abandonment: the owner's lifetime project and daily driver, open source forever. A user this affects: open a GitHub discussion or issue with `transition` in the title and their setup; we help them find a path (WSL2, Docker later, a fork).
 
 # Terminology
 
