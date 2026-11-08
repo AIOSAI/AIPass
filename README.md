@@ -31,6 +31,8 @@
   <a href="https://aipass.ai">aipass.ai</a>
 </p>
 
+> **AIPass is simplifying.** It is moving to Linux only: native, WSL2 on Windows, or a Docker image. Native macOS and Windows maintenance ends; a port is the community's to carry. AIPass stays open source and in daily development, the developer's lifetime project. If this changes how you use it, open a [discussion](https://github.com/AIOSAI/AIPass/discussions) or an [issue](https://github.com/AIOSAI/AIPass/issues) tagged `transition` and tell us your setup. We will help you find your path: Docker, WSL2, or a fork.
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/AIOSAI/AIPass/main/assets/demo.gif" alt="Terminal demo: the fleet listed, a memory an agent kept a month ago found by meaning, and an agent audited at 100%" width="760">
 </p>
@@ -38,7 +40,7 @@
 
 ## Install
 
-**You need:** Python 3.10+, [Claude Code](https://code.claude.com/docs) on a Claude plan that includes it, and Linux or macOS (Windows through WSL2). [Codex](https://github.com/openai/codex) and [OpenCode](https://opencode.ai) if you want them: with a binary on your PATH, install sets it up as another CLI for the same agents, and each agent runs on any of them, your choice per task.
+**You need:** Python 3.10+, [Claude Code](https://code.claude.com/docs) on a Claude plan that includes it, and Linux (Windows through WSL2). [Codex](https://github.com/openai/codex) and [OpenCode](https://opencode.ai) if you want them: with a binary on your PATH, install sets it up as another CLI for the same agents, and each agent runs on any of them, your choice per task.
 
 ```bash
 pipx install aipass
@@ -229,7 +231,7 @@ curl -fsSL https://github.com/AIOSAI/baud/releases/latest/download/install.sh | 
 
 **Stable.** Built by one human and the AIPass agents, with a handful of outside contributions. From here the work is fine-tuning.
 
-Linux is the daily platform. macOS runs the full suite in CI on Python 3.12 and is expected to work, but is not yet in daily use. On Windows, AIPass runs inside WSL2. Native Windows is not supported.
+Linux is the platform: the daily driver, the one CI proves. On Windows, AIPass runs inside WSL2. macOS ran the suite in CI until 2026-11 and is no longer maintained; the code keeps its macOS and Windows paths but nothing proves them.
 
 **Version:** <a href="https://pypi.org/project/aipass/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/aipass?color=007ec6"></a> **Python:** <a href="https://pypi.org/project/aipass/"><img alt="Python versions" src="https://img.shields.io/pypi/pyversions/aipass?color=007ec6"></a> **Agents:** 18 core + user-created.
 
@@ -250,7 +252,7 @@ Linux is the daily platform. macOS runs the full suite in CI on Python 3.12 and 
 - [Claude Code](https://code.claude.com/docs) on a Claude plan that includes it (Pro, Max, Team or Enterprise)
 - [Codex](https://github.com/openai/codex) optional: with its binary on PATH, install wires it as a second CLI for the same agents (`/codex` and `$claude` switch a seat between the two)
 - [OpenCode](https://opencode.ai) optional: with its binary on PATH, install adds the AIPass plugin so the same agents run on it (`/opencode` from Claude Code, `$opencode` from Codex, `/claude` and `/codex` back); signed out, it runs on OpenCode's free models
-- Linux or macOS (both tested in CI). On Windows, use [WSL2](https://learn.microsoft.com/windows/wsl/install) and install inside it: AIPass then runs as the Linux program CI tests. Native Windows and Git Bash are not tested in CI; the code keeps its Windows paths but nothing proves them.
+- Linux (the only platform CI tests). On Windows, use [WSL2](https://learn.microsoft.com/windows/wsl/install) and install inside it: AIPass then runs as the Linux program CI tests. macOS, native Windows and Git Bash are not tested; the code keeps their paths but nothing proves them.
 - `sudo` access optional (Linux uses it for `/usr/local/bin` symlinks — falls back to `~/.local/bin` without it; macOS never asks)
 - Node.js + npm optional (on Linux, install uses them to add the `@anthropic-ai/sandbox-runtime` kernel sandbox; without them the sandbox is reported as optional and not set up, AIPass runs without it, and `aipass doctor` says how to add it later; macOS skips the sandbox)
 - API keys / OAuth optional (OpenRouter, Google — only for optional add-on integrations)
