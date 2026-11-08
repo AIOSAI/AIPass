@@ -79,7 +79,7 @@ Create only via `drone @flow create <path> "Subject" [type]`, never by hand: man
  - One clear task per agent, briefed with full context as a file: they know nothing of your conversation.
  - No git, no memory, no dispatch: they build and report, you decide and act. Read every diff; a pass count stays green through a deleted docstring.
  - HELD is an answer: a cure the brief did not name, or whose own mutant survives, stops there; say HELD and why.
- - Branch-expert work → dispatch a citizen; else → a sub-agent.
+ - Branch-expert work → dispatch a citizen; else a sub-agent.
  - Models: opus to build and analyse, sonnet to investigate, haiku for trivial mechanics. Never fable.
 
 # Chrome — the claude-in-chrome MCP
