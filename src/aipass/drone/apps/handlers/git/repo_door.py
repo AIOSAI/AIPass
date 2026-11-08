@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repo_door.py
 # Description: The external-repo door — git verbs in another repo, admin seat only, every use recorded
-# Version: 1.11.0
+# Version: 1.12.0
 # Created: 2026-09-13
-# Modified: 2026-10-30
+# Modified: 2026-11-08
 # =============================================
 
 """The external-repo door: ``drone @git <verb> --repo <path>``.
@@ -53,6 +53,7 @@ DOOR_VERBS = (
     "label",
     "alerts",
     "remote",
+    "init",
 )
 
 # gh's run, read side only; rerun, cancel, delete and download stay home-only.
@@ -169,6 +170,7 @@ def help_block() -> str:
         "  fetch | sync  --repo <path>\n"
         "  merge-upstream  --repo <path> [--theirs <path> ...]\n"
         "  tracked <path ...> | untrack [--recursive] <path ...>  --repo <path>  (paths repo-relative)\n"
+        "  init --repo <path>  a new directory outside AIPass becomes a repo on main (init --help)\n"
         "  Runs the verb in another git repo (projects/baud, a clone outside the tree).\n"
         "  fetch fetches origin and prints ahead/behind against the branch's upstream, with\n"
         "  the commits on each side; nothing local moves. With no upstream configured it\n"

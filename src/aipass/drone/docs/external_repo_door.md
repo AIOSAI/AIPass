@@ -23,7 +23,7 @@ tag, fetch, sync, merge-upstream, the read side of gh's `run`, and the GitHub ch
    the repo you stand in. A project manager standing in its own repo is refused by name.
 2. **The flag** — a bare `--repo`, or two of them, is refused rather than falling through to the
    standing repo.
-3. **Which verb** — anything outside the sixteen is refused. `issue`, `workflow` and `release list`
+3. **Which verb** — anything outside the eighteen in `DOOR_VERBS` is refused. `issue`, `workflow` and `release list`
    never reach the door: their `--repo OWNER/NAME` names a GitHub repo, not a path. `run` reaches it
    only when the value names a directory (see below); `release edit` always does.
 4. **Which repo** — absolute, or relative to the AIPass root (never the cwd). It must exist, be a
@@ -88,6 +88,14 @@ repo is refused before anything is fetched. Nothing is forced and nothing is pus
 **`tracked` and `untrack` take a file back out of the index**, such as one a catch-all commit swept
 in and a soft reset left staged. Through the door both verbs run the handler they run at home, rooted at the named repo: paths are repo-relative, a tracked file leaves
 the index and stays on disk, every other class is refused by name, and nothing is committed.
+
+**`init` is the one verb with no repository yet.** `drone @git init --repo <path>` runs
+`git init -b main` in an existing directory and does nothing else: no remote, no first commit
+(`remote set --repo` and `commit --repo` do those). It answers the same WHO question first, then
+resolves its own target instead of question 4: the directory must exist, sit outside the AIPass
+tree, hold no `.git`, and sit in no other repository's work tree, since a repo nested in another is
+tracked by neither. Every exit, refusals included, is one ledger line like any door use. Without
+`--repo` the verb is unknown, and the refusal points at the door.
 
 **The door's git never hangs and never prompts.** Every call the door's own runner makes carries a
 timeout: 120 s for `fetch` and `merge`, which talk to the remote or run merge drivers, 60 s for the

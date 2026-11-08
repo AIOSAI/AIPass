@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_git_module_handlers.py
-# Description: Tests for the handlers @git drives — lock, repo root, status, sync, PR, remote set and uncommit
-# Version: 1.2.0
+# Description: Tests for the handlers @git drives — lock, repo root, status, sync, PR, remote set, uncommit and init
+# Version: 1.3.0
 # Created: 2026-10-08
-# Modified: 2026-11-03
+# Modified: 2026-11-08
 # =============================================
 
-"""Tests for the lock, status, sync, PR, remote and uncommit handlers that apps/modules/git_module.py drives."""
+"""Tests for the lock, status, sync, PR, remote, uncommit and init handlers that apps/modules/git_module.py drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(stdlib) — subprocess.run, which every git and gh call here reaches as a recorded stub
@@ -30,7 +30,7 @@ from aipass.drone.apps.handlers.git.lock_handler import (
 )
 from aipass.drone.apps.handlers.git.status_handler import get_branch_status
 from aipass.drone.apps.handlers.git.sync_handler import sync_main, sync_main_ref
-from aipass.drone.apps.handlers.git import remote_handler, repo_door
+from aipass.drone.apps.handlers.git import init_handler, remote_handler, repo_door
 from aipass.drone.apps.modules.git_module import handle_command
 
 from .conftest import make_owner_project
@@ -821,3 +821,95 @@ class TestUncommit:
 
         assert result["exit_code"] == 1
         assert "not authorized for 'uncommit'" in result["stderr"]
+
+
+def _door_ledger(tmp_path: Path) -> list[dict]:
+    path = tmp_path / repo_door.LEDGER_NAME
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+
+
+@pytest.fixture()
+def admin_door(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(repo_door, "admin_verdict", lambda: repo_door.AdminVerdict(True, "devpulse", ""))
+
+
+class TestInitDoor:
+    """init --repo makes a brand-new directory outside AIPass a repo on main, and nothing else."""
+
+    def test_a_new_directory_becomes_an_empty_repo_on_main(self, seed_repo: Path, tmp_path: Path, admin_door) -> None:
+        """Mutant: -b main dropped — git's own default (master here, no host config) names the branch."""
+        seton = tmp_path / "seton"
+        seton.mkdir()
+
+        result = handle_command("init", ["--repo", str(seton)])
+
+        assert result["exit_code"] == 0, result["stderr"]
+        assert result["stdout"] == init_handler.INITIALIZED.format(path=seton.resolve())
+        assert _git(seton, "symbolic-ref", "HEAD").stdout.strip() == "refs/heads/main"
+        assert _git(seton, "remote").stdout.strip() == ""
+        assert _git(seton, "rev-parse", "--verify", "-q", "HEAD").returncode != 0
+        [record] = _door_ledger(tmp_path)
+        assert (record["verb"], record["outcome"], record["caller"]) == ("init", "ran", "devpulse")
+
+    def test_a_directory_that_already_holds_a_git_is_refused(self, seed_repo: Path, tmp_path: Path, admin_door) -> None:
+        """Mutant: the .git check dropped — git re-initializes the repo and reports success."""
+        seton = tmp_path / "seton"
+        seton.mkdir()
+        _git(seton, "init", "-q", "-b", "dev")
+
+        result = handle_command("init", ["--repo", str(seton)])
+
+        assert result["stderr"] == init_handler.REFUSE_HAS_GIT.format(path=str(seton))
+        assert _door_ledger(tmp_path)[0]["outcome"] == "refused"
+
+    def test_a_directory_inside_the_aipass_tree_is_refused(self, seed_repo: Path, admin_door) -> None:
+        """Mutant: the AIPass check dropped — the refusal is the nested-repo one, not AIPass's."""
+        inner = seed_repo / "newproj"
+        inner.mkdir()
+
+        result = handle_command("init", ["--repo", str(inner)])
+
+        assert result["stderr"] == init_handler.REFUSE_IN_AIPASS.format(path=str(inner))
+        assert not (inner / ".git").exists()
+
+    def test_a_directory_inside_another_repo_is_refused(self, seed_repo: Path, tmp_path: Path, admin_door) -> None:
+        """Mutant: the work-tree check dropped — a repo nests inside another."""
+        other = tmp_path / "other"
+        (other / "pkg").mkdir(parents=True)
+        _git(other, "init", "-q", "-b", "main")
+
+        result = handle_command("init", ["--repo", str(other / "pkg")])
+
+        assert result["exit_code"] == 1
+        assert "sits inside the git repository at" in result["stderr"]
+        assert not (other / "pkg" / ".git").exists()
+
+    @pytest.mark.parametrize(
+        ("extra", "expected"),
+        [(["main"], init_handler.REFUSE_ARGS), ([], repo_door.REFUSE_MISSING.format(path="{missing}"))],
+    )
+    def test_arguments_and_a_missing_directory_are_refused(
+        self, seed_repo: Path, tmp_path: Path, admin_door, extra: list[str], expected: str
+    ) -> None:
+        missing = str(tmp_path / "nowhere")
+        seton = tmp_path / "seton"
+        seton.mkdir()
+        target = missing if not extra else str(seton)
+
+        result = handle_command("init", ["--repo", target, *extra])
+
+        assert result["stderr"] == expected.replace("{missing}", missing)
+        assert not (seton / ".git").exists()
+
+    def test_a_seat_without_the_admin_grant_is_refused_before_the_path_is_read(
+        self, seed_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Mutant: init dispatched before the WHO check — any seat creates repos."""
+        monkeypatch.setattr(repo_door, "admin_verdict", lambda: repo_door.AdminVerdict(False, "scout", "not admin"))
+        seton = tmp_path / "seton"
+        seton.mkdir()
+
+        result = handle_command("init", ["--repo", str(seton)])
+
+        assert (result["exit_code"], result["stderr"]) == (1, "not admin")
+        assert not (seton / ".git").exists()
