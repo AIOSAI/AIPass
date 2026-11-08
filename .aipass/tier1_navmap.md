@@ -4,6 +4,10 @@
 
 AIPass: autonomous agents (citizens) with identity, memory, and a mailbox, serving each other and external projects. Each lives in a branch, its home and address. Everything routes through `drone`. Open source, public repo: strangers read this code; treat their findings as contributions.
 
+# Platform — Linux only
+
+AIPass runs on Linux: native, WSL2, or the Docker image. Windows and macOS are not maintained and will not be; a port is the community's. Not abandonment: the owner's lifetime project and daily driver, fully operational, developed as needs arise, open source forever. Users with questions, issues or feedback: GitHub Discussions and Issues on the repo.
+
 # Terminology
 
  - Branch — directory `src/aipass/<name>/`, your home and address.
@@ -54,7 +58,7 @@ Citizens dispatch each other directly. One question: does the recipient need to 
 
  - Need an answer or work: `dispatch` (send + wake); a sleeping agent never reads plain email.
  - FYI only (status, steering an agent already awake): `email`.
- - Replies never wake; wake-back does: when an agent you dispatched completes, you are woken to verify and hand off.
+ - Replies never wake; wake-back does: when your dispatch completes, you are woken to verify and hand off.
  - Managers (`citizen_class: manager`, e.g. @devpulse) are never dispatched; `email` them, they see it live.
 
 Always reply to dispatches — reply auto-closes. No silent completions.
@@ -66,25 +70,21 @@ Create only via `drone @flow create <path> "Subject" [type]`, never by hand: man
  - DPLAN — dev plan: thinking, architecture, before building.
  - FPLAN — flow plan, the default: building. `master` = multi-phase, spawns sub-FPLANs.
  - PPLAN — playbook: a throwaway run of a reusable SOP. Operating the system, not changing it.
- - RPLAN — research: a trace, a study of an external repo, a measurement. Brief, report path and verdict live in it.
+ - RPLAN — research: a trace, a study, a measurement. Brief, report path and verdict live in it.
  - APLAN — autonomous work, an audit or a night shift. CPLAN capture, TDPLAN team dev. `drone @flow templates` lists all seven.
 
 # Sub-agents
 
  - Default to sub-agents for reading, searching, building, testing, research; yourself only for tiny edits, your own memories and plans.
- - One clear task per agent, briefed with full context as a file: they know nothing of your conversation; a paraphrase loses the clause.
- - No git, no memory, no dispatch: they build and report, you decide and act. Read every diff; a pass count stays green through a deleted docstring and an oracle that cannot fail.
+ - One clear task per agent, briefed with full context as a file: they know nothing of your conversation.
+ - No git, no memory, no dispatch: they build and report, you decide and act. Read every diff; a pass count stays green through a deleted docstring.
  - HELD is an answer: a cure the brief did not name, or whose own mutant survives, stops there; say HELD and why.
  - Branch-expert work → dispatch a citizen; else → a sub-agent.
- - Models: opus to build and analyse, sonnet for routine investigation, haiku for trivial mechanics. Never fable.
+ - Models: opus to build and analyse, sonnet to investigate, haiku for trivial mechanics. Never fable.
 
 # Chrome — the claude-in-chrome MCP
 
-Built into Claude Code; drives the desktop's default-profile Chrome with the owner's live sign-ins. Never `--user-data-dir`, never a hand-written DISPLAY.
-
- - Chrome down: `python3 tools/open_chrome.py` in `Projects/Vera-Studio/src/vera_studio/vera`.
- - Connect: `list_connected_browsers`, `select_browser <deviceId>`, `tabs_context_mcp {createIfEmpty:true}`.
- - `[]` or "extension is not connected" with Chrome up: the extension is signed out or asleep; no shell step cures it, the owner clicks the Claude icon once. CAPTCHAs and credentials are the owner's.
+Drives the desktop's default-profile Chrome with the owner's sign-ins; never `--user-data-dir` or a hand-written DISPLAY. Connect: `list_connected_browsers`, `select_browser`, `tabs_context_mcp`. `[]` with Chrome up: the extension is asleep, the owner clicks the Claude icon. CAPTCHAs and credentials are the owner's.
 
 # Memory — .trinity/
 
@@ -99,7 +99,7 @@ Save proactively — after milestones, decisions, topic switches.
 
 # House rules
 
- - Public repo — write as if it ships, because it does. No secrets in the tree, no hardcoded paths (`pathlib`, never `/home/...`), cross-platform.
+ - Public repo — write as if it ships, because it does. No secrets in the tree, no hardcoded paths (`pathlib`, never `/home/...`), Linux only.
  - No bare imports — always `from aipass.<agent>.apps...`.
  - State lives in `.trinity/` and dashboards, never in prompts. Prompts are signposts; memories record; registries catalog.
  - New test files need permission: a hook gate refuses them by policy (`.aipass/test_write_policy.json`); editing an existing test is fine. Need one? Mail @devpulse the defect it pins.
