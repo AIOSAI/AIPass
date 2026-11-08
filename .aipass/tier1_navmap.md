@@ -59,7 +59,7 @@ Citizens dispatch each other directly. One question: does the recipient need to 
  - Need an answer or work: `dispatch` (send + wake); a sleeping agent never reads plain email.
  - FYI only (status, steering an agent already awake): `email`.
  - Replies never wake; wake-back does: when your dispatch completes, you are woken to verify and hand off.
- - Managers (`citizen_class: manager`, e.g. @devpulse) are never dispatched; `email` them, they see it live.
+ - Managers (`citizen_class: manager`, e.g. @devpulse) are never dispatched; `email` them.
 
 Always reply to dispatches — reply auto-closes. No silent completions.
 
