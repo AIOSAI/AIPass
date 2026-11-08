@@ -4,7 +4,7 @@
 
 AIPass: autonomous agents (citizens) with identity, memory, and a mailbox, serving each other and external projects. Each lives in a branch, its home and address. Everything routes through `drone`. Open source, public repo: strangers read this code; treat their findings as contributions.
 
-# Platform — Linux only
+# Platform: Linux only
 
 AIPass runs on Linux: native or WSL2, a Docker image to come. Windows and macOS are not maintained; a port is the community's. Not abandonment: the owner's lifetime project, daily driver, open source forever. A user this affects: open a GitHub discussion or issue with `transition` in the title and their setup; we help them find a path (WSL2, Docker later, a fork).
 
