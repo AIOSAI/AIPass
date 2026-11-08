@@ -9,6 +9,12 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-11-08] — v2.8.36: AIPass is Linux only, the transition notice, lint-only CI
+
+### Changed
+- **AIPass is Linux only** (the owner, 2026-11-08): native, WSL2 on Windows, or a Docker image. Native macOS and Windows maintenance ends; the code keeps their paths but nothing proves them. AIPass stays open source and in daily development. Users affected: open a discussion or an issue tagged `transition` with your setup. The README carries the notice, and the global prompt (`.aipass/tier1_navmap.md`, Platform section) tells every agent.
+- **CI runs lint alone during the transition** (`ci.yml`): the pytest matrix, sentry-audit and coverage jobs are kept as `ci.yml(full_disabled)`, unread by Actions, for the day the Linux-only structure settles. macOS Test is retired by rename to `macos-test.yml(macos_disabled)`; e2e-wheel runs on Ubuntu only. A PR lands in minutes.
+
 ## [2026-11-07] — v2.8.35: write grants on a dispatch, the host token store off the keyring, the Chrome extension's host routes
 
 ### Added

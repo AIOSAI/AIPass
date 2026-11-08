@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.16.0
+# Version: 1.17.0
 # Created: 2026-03-17
-# Modified: 2026-11-03
+# Modified: 2026-11-08
 # =============================================
 
 """
@@ -49,6 +49,7 @@ from aipass.drone.apps.handlers.git import (
     repo_door,
     issue_signing,
     help_pages,
+    init_handler,
 )
 from aipass.drone.apps.handlers.deletion_log import UNKNOWN_CALLER
 from aipass.drone.apps.handlers.help_flags import help_topic, wants_help
@@ -367,6 +368,8 @@ def _handle_repo_door(command: str, flag: repo_door.RepoFlag) -> dict:
         return _refuse_repo_door(verdict, flag, verb, verdict.refusal)
     if flag.error:
         return _refuse_repo_door(verdict, flag, verb, flag.error)
+    if command == "init":
+        return init_handler.init_repo(verdict.caller, flag, lock_handler.find_repo_root())
     if command not in repo_door.DOOR_VERBS:
         return _refuse_repo_door(verdict, flag, verb, repo_door.REFUSE_VERB.format(verb=command))
     target = repo_door.resolve_repo(flag.path, lock_handler.find_repo_root())

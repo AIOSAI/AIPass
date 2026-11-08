@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: help_pages.py
 # Description: The @git help pages, one per verb and the whole page
-# Version: 1.10.0
+# Version: 1.11.0
 # Created: 2026-10-04
-# Modified: 2026-11-03
+# Modified: 2026-11-08
 # =============================================
 
 """The @git help pages: one per verb, and the whole page.
@@ -21,6 +21,7 @@ from aipass.drone.apps.handlers.git import (
     ci_cure_handler,
     commit_handler,
     gh_chores,
+    init_handler,
     label_handler,
     merge_main_handler,
     release_handler,
@@ -143,6 +144,23 @@ def page(command: str | None = None) -> str:
                 restore_handler.REFUSE_NOT_AT_SOURCE.format(path="<path>", source="<ref>"),
             )
             + "  Example: drone @git restore --source 9fc0e3b5^ apps/handlers/git/show_handler.py\n"
+        )
+    if command == "init":
+        return (
+            "git init --repo <path> — A new directory becomes a git repository on main [admin door]\n"
+            "  The twin of git init -b main, for a brand-new project outside AIPass. The\n"
+            "  directory must exist. No remote and no first commit: remote set --repo and\n"
+            "  commit --repo do those. Checked against the verified admin rail like every\n"
+            "  --repo use, and recorded in .ai_central/git_repo_door.jsonl. Refused, exactly\n"
+            "  as printed, nothing changed:\n"
+            + _printed(
+                init_handler.REFUSE_ARGS,
+                init_handler.REFUSE_IN_AIPASS.format(path="<path>"),
+                init_handler.REFUSE_HAS_GIT.format(path="<path>"),
+                init_handler.REFUSE_IN_REPO.format(path="<path>", toplevel="<toplevel>"),
+                repo_door.REFUSE_MISSING.format(path="<path>"),
+                repo_door.REFUSE_NOT_DIR.format(path="<path>"),
+            )
         )
     if command == "uncommit":
         return (

@@ -4,9 +4,10 @@ name: e2e-wheel
 # Builds the wheel, installs it into a clean venv (handled by the pytest
 # fixtures in tests/e2e/conftest.py), and runs the 4-tier wiring ladder.
 #
-# No Windows leg: CI runs Linux and macOS, Windows users run AIPass inside WSL2,
-# and no runner proves the Windows paths. The retired Windows lane sits beside
-# this file as windows-test.yml(windows_disabled), unread by Actions.
+# Linux only (the owner, 2026-11-08): Windows users run AIPass inside WSL2 or
+# Docker, macOS is not maintained. The retired lanes sit beside this file as
+# windows-test.yml(windows_disabled) and macos-test.yml(macos_disabled),
+# unread by Actions.
 
 on:
   push:
@@ -37,7 +38,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]
         python-version: ["3.12"]
     steps:
       - name: Checkout
@@ -50,8 +51,8 @@ jobs:
 
       - name: Install build tooling
         # Hash-pinned (Scorecard: Pinned-Dependencies). e2e.txt carries colorama
-        # explicitly, a Windows-only need (os_name == "nt"): harmless on Linux
-        # and macOS, not worth regenerating the lock over. See .github/requirements/e2e.in.
+        # explicitly, a Windows-only need (os_name == "nt"): harmless on Linux,
+        # not worth regenerating the lock over. See .github/requirements/e2e.in.
         run: |
           python -m pip install --require-hashes -r .github/requirements/pip.txt
           python -m pip install --require-hashes -r .github/requirements/e2e.txt
