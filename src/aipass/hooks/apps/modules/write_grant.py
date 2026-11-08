@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: write_grant.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Whether a dispatch's write grant covers one cross-project write, read through @ai_mail's door
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-11-03
-# Modified: 2026-11-04
+# Modified: 2026-11-08
 # =============================================
 
 """Whether this session's dispatch grant covers one crossing write: @ai_mail's door decides, any doubt refuses."""
@@ -14,9 +14,11 @@ import importlib
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 
 from aipass.cli.apps.modules import err_console
-from aipass.hooks.apps.modules.write_ownership import Project
+from aipass.hooks.apps.handlers.module_root import module_file
+from aipass.hooks.apps.modules.write_ownership import AIPASS_REGISTRY, Project
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
@@ -63,8 +65,8 @@ def _ask(cwd: str, caller_root: Path, landing: Project, target: Path, dispatch_i
     if ".git" in resolved.parts:
         return Grant(False, f"Nothing under .git is ever granted ({resolved}); git stays with @devpulse.")
     door = importlib.import_module(_DOOR)
-    # The caller's own register, never one planted under the landing root.
-    decision = door.granted(seat, dispatch_id, str(resolved), repo_root=caller_root)
+    register_root = _register_root(door, caller_root, landing, dispatch_id)
+    decision = door.granted(seat, dispatch_id, str(resolved), repo_root=register_root)
     reason = str(decision.get("reason") or "the door gave no reason")
     if decision.get("allowed") is True:
         logger.info(
@@ -79,7 +81,7 @@ def _ask(cwd: str, caller_root: Path, landing: Project, target: Path, dispatch_i
     # The door's words for an open grant that misses this path; any other reason means the grant cannot be used.
     if " is outside " not in reason:
         return Grant(False, ended)
-    row = next((r for r in door.open_grants(repo_root=caller_root) if r.get("dispatch_id") == dispatch_id), {})
+    row = next((r for r in door.open_grants(repo_root=register_root) if r.get("dispatch_id") == dispatch_id), {})
     grant = row.get(door.GRANT_KEY) or {}
     return Grant(
         False,
@@ -89,6 +91,25 @@ def _ask(cwd: str, caller_root: Path, landing: Project, target: Path, dispatch_i
         f"To widen it: drone @ai_mail email {row.get('sender') or '@devpulse'} "
         f"'Widen grant {dispatch_id[:8]}' 'need {resolved}'",
     )
+
+
+def _register_root(door: ModuleType, caller_root: Path, landing: Project, dispatch_id: str) -> Path:
+    """The register *dispatch_id* was written to: the caller project's, else the AIPass root's, where root seats send.
+
+    Never one planted under the landing root: when the AIPass root sits there, the caller's own register alone answers.
+    An unreadable caller register raises here, so it refuses rather than falls through.
+    """
+    if any(row.get("dispatch_id") == dispatch_id for row in door.open_grants(repo_root=caller_root)):
+        return caller_root
+    home = aipass_root()
+    if home is None or home.is_relative_to(landing.root):
+        return caller_root
+    return home
+
+
+def aipass_root() -> Path | None:
+    """The AIPass checkout this code runs from, by its registry above this file: never the target, the cwd or an env."""
+    return next((p for p in module_file(__file__).parents if (p / AIPASS_REGISTRY).is_file()), None)
 
 
 def _verified_caller(cwd: str) -> str:
@@ -108,6 +129,9 @@ def print_introspection() -> None:
     """Print module structure for drone routing: the contract, never a live verdict."""
     CONSOLE.print("[bold cyan]write_grant[/bold cyan] — does this dispatch's grant cover one cross-project write?")
     CONSOLE.print(f"[dim]Consumes {_DOOR}.granted and {_RAIL}.resolve_verified_caller.[/dim]")
+    CONSOLE.print(
+        "[dim]Reads the caller project's register, else the AIPass root's; never one under the landing root.[/dim]"
+    )
     CONSOLE.print(
         "[dim]Consumed by handlers/security/edit_gate.py: tool lane, scripted lane, daemon confinement.[/dim]"
     )
