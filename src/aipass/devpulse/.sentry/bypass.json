@@ -79,7 +79,7 @@
     {
       "standard": "logged_fallback",
       "file": "apps/handlers/release_notify/managers.py",
-      "lines": [133],
+      "lines": [107],
       "reason": "None is 'cannot read this passport', and its one caller (discover_managers) lists that path in skipped with reason 'passport unreadable - see the log', which the run reports. Never counted as a non-manager."
     },
     {

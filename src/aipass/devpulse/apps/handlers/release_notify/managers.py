@@ -1,14 +1,14 @@
 # =================== AIPass ====================
 # Name: managers.py
 # Description: Manager discovery — passports on this machine that own a project
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-09
-# Modified: 2026-10-17
+# Modified: 2026-11-09
 # =============================================
 
 """Manager discovery for release-notify (DPLAN-0335 leg 1).
 
-Roots are declared, never guessed: active AIPASS_ROOTS.json rows plus <aipass root>/projects/.
+Roots are declared, never guessed: memory's door (``fleet.declared_roots``) plus <aipass root>/projects/.
 The source repo is skipped: ``aipass init update`` updates FROM it, so it has no scaffold of its own.
 """
 
@@ -17,18 +17,17 @@ import os
 from pathlib import Path
 
 from aipass.prax import logger
+from aipass.memory.apps.modules import fleet
 from aipass.devpulse.apps.handlers.json import json_handler
 from aipass.devpulse.apps.handlers.module_root import module_file
 
 MODULE_NAME = "release_notify"
 
-ROOTS_FILE = "AIPASS_ROOTS.json"
 PROJECTS_DIRNAME = "projects"
 
 # .archive/.backup hold retired copies of live passports; mailing a retired manager is mailing nobody.
 SKIP_DIR_NAMES = frozenset({".archive", ".backup", "node_modules", ".venv", "__pycache__", ".git"})
 
-_ACTIVE = "active"
 _MANAGER = "manager"
 
 
@@ -50,37 +49,12 @@ def devpulse_root() -> Path:
 
 
 def declared_roots(root: Path) -> tuple[list[Path], list[dict]]:
-    """Read ``AIPASS_ROOTS.json``: (existing active roots, skipped {path, reason}); relative rows resolve on root."""
-    roots_file = root / ROOTS_FILE
-    if not roots_file.exists():
-        logger.warning(f"[{MODULE_NAME}] {ROOTS_FILE} not found at {roots_file} — external roots skipped")
-        return [], [{"path": str(roots_file), "reason": f"{ROOTS_FILE} not found"}]
+    """``AIPASS_ROOTS.json`` through memory's door: (declared active roots, skipped).
 
-    try:
-        declared = json.loads(roots_file.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        logger.error(f"[{MODULE_NAME}] {ROOTS_FILE} unreadable: {type(exc).__name__}: {exc}")
-        return [], [{"path": str(roots_file), "reason": f"unreadable: {type(exc).__name__}: {exc}"}]
-
-    found: list[Path] = []
-    skipped: list[dict] = []
-    for row in declared.get("roots", []):
-        raw = str(row.get("path", "")).strip()
-        status = str(row.get("status", "")).strip()
-        if not raw:
-            skipped.append({"path": "(blank)", "reason": "row carries no path"})
-            continue
-        if status != _ACTIVE:
-            skipped.append({"path": raw, "reason": f"status is {status or '(none)'}, not {_ACTIVE}"})
-            continue
-        candidate = Path(raw)
-        resolved = candidate if candidate.is_absolute() else (root / candidate)
-        if not resolved.is_dir():
-            skipped.append({"path": str(resolved), "reason": "declared root does not exist on this machine"})
-            continue
-        found.append(resolved.resolve())
-
-    return found, skipped
+    The door answers the roots alone and logs each row it refuses (inactive, missing, overlapping home)
+    itself, so skipped is always empty: the reasons live in the door's log, not in this list.
+    """
+    return fleet.declared_roots(root), []
 
 
 def project_roots(root: Path) -> tuple[list[Path], list[dict]]:

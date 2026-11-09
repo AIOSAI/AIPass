@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_agent.py
 # Description: Tests for the watchdog agent handler
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-04-14
-# Modified: 2026-11-02
+# Modified: 2026-11-09
 # =============================================
 
 """Tests for apps/handlers/watchdog/agent.py: watch_agent, TranscriptScanner and StallTracker."""
@@ -64,13 +64,20 @@ def _write_lock(branch_path: Path, pid: int) -> Path:
 
 
 def _pin_home(monkeypatch, home: Path, caller_cwd: str = "") -> None:
-    """Point the resolver's external roots (caller cwd, ~/Projects) at test-owned places.
+    """Pin the caller cwd and point HOME at a test-owned place, so no ~/Projects census can answer.
 
+    External roots are the caller cwd and the repo's declared roots (``_declare_roots``).
     Through the environment Path.home() reads (HOME on POSIX, USERPROFILE on Windows).
     """
     monkeypatch.setenv("AIPASS_CALLER_CWD", caller_cwd)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
+
+
+def _declare_roots(repo: Path, *roots: Path) -> None:
+    """Write ``repo``'s AIPASS_ROOTS.json declaring ``roots`` active: the resolver's only external roots."""
+    rows = [{"path": str(root), "status": "active"} for root in roots]
+    (repo / "AIPASS_ROOTS.json").write_text(json.dumps({"roots": rows}), encoding="utf-8")
 
 
 def _mark_resolved(branch_dir: Path) -> None:
@@ -143,6 +150,29 @@ def test_resolve_branch_path_local_wins_over_projects(monkeypatch, tmp_path):
     _mark_resolved(local_dir)
 
     result = agent_handler.watch_agent("@twin", timeout_seconds=5)
+    assert (result["agent_state"], result["exit_code"]) == ("crashed", 7)
+
+
+def test_resolve_branch_path_finds_a_declared_root_citizen_without_a_home_walk(monkeypatch, tmp_path):
+    """A citizen in a root declared in AIPASS_ROOTS.json resolves through memory's door; HOME is empty."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": []}), encoding="utf-8")
+    ext = tmp_path / "elsewhere" / "vera"
+    branch_dir = ext / "src" / "vera"
+    branch_dir.mkdir(parents=True)
+    (ext / "VERA_REGISTRY.json").write_text(
+        json.dumps({"branches": [{"name": "VERA", "email": "@vera", "path": "src/vera"}]}),
+        encoding="utf-8",
+    )
+    _declare_roots(repo, ext)
+    empty_home = tmp_path / "nohome"
+    empty_home.mkdir()
+    monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: repo)
+    _pin_home(monkeypatch, empty_home)
+    _mark_resolved(branch_dir)
+
+    result = agent_handler.watch_agent("@vera", timeout_seconds=5)
     assert (result["agent_state"], result["exit_code"]) == ("crashed", 7)
 
 

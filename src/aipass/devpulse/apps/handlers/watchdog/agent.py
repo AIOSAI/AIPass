@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: agent.py
 # Description: Watchdog Agent Handler — block until dispatched agent exits
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2026-04-14
-# Modified: 2026-10-28
+# Modified: 2026-11-09
 # =============================================
 
 # Liveness is ai_mail's dispatch lock: dispatch_monitor deletes it on any exit.
@@ -22,6 +22,7 @@ from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
+from aipass.memory.apps.modules import fleet
 from aipass.devpulse.apps.handlers.watchdog import registry as _registry
 from aipass.devpulse.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.modules.door_session_pointer import (
@@ -114,13 +115,14 @@ def _resolve_branch_path(agent_id: str) -> Path | None:
             if result is not None:
                 return result
 
+    # The caller's own registry wins for its own project; then the roots declared in AIPASS_ROOTS.json, read
+    # through memory's door. No repo root, no declared roots: never the real repo's roots by default.
     caller_cwd = os.environ.get("AIPASS_CALLER_CWD", "")
     search_roots = []
     if caller_cwd:
         search_roots.append(Path(caller_cwd))
-    projects_dir = Path.home() / "Projects"
-    if projects_dir.is_dir():
-        search_roots.extend(sorted(projects_dir.iterdir()))
+    if repo_root is not None:
+        search_roots.extend(fleet.declared_roots(repo_root))
 
     seen = set()
     if repo_root:
