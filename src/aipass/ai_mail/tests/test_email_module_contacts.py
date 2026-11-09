@@ -3,7 +3,7 @@
 # Description: Tests for email.py's address book commands - contacts and register
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """Tests for apps/modules/email.py's address book: handle_contacts and handle_register."""
@@ -12,6 +12,8 @@
 # sentry: no-test-needed(shared) — register_contact()'s own write: tests/test_contacts.py
 
 import pytest
+
+import aipass.ai_mail.apps.handlers.registry.read as read_mod
 from unittest.mock import patch
 
 from aipass.ai_mail.apps.modules.email import (
@@ -33,7 +35,7 @@ class TestHandleContacts:
             {"email": "@beta", "name": "BETA", "path": "/src/beta"},
         ]
         monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email.get_all_branches",
+            "aipass.ai_mail.apps.modules.email.get_fleet_branches",
             lambda: branches,
         )
         printed = _StdoutLines(capsys)
@@ -47,7 +49,7 @@ class TestHandleContacts:
     def test_contacts_empty(self, monkeypatch):
         """No contacts found prints error."""
         monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email.get_all_branches",
+            "aipass.ai_mail.apps.modules.email.get_fleet_branches",
             lambda: [],
         )
         errors: list[str] = []
@@ -63,7 +65,7 @@ class TestHandleContacts:
     def test_contacts_exception_handled(self, monkeypatch):
         """Exception in get_all_branches is caught and error is shown."""
         monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email.get_all_branches",
+            "aipass.ai_mail.apps.modules.email.get_fleet_branches",
             lambda: (_ for _ in ()).throw(RuntimeError("Registry unavailable")),
         )
         errors: list[str] = []
@@ -138,3 +140,19 @@ class TestHandleRegister:
             result = handle_register(["@vera", "/path/to/inbox", "VeraStudio"])
         assert result is True
         assert registered_args[0] == ("vera", "VeraStudio", "/path/to/inbox")
+
+
+def test_contacts_lists_a_citizen_of_a_declared_root(tmp_path, monkeypatch, capsys):
+    """Through the command, with the door at the edge answering one external citizen."""
+    grow = tmp_path / "seed" / "grow"
+    monkeypatch.setattr(
+        read_mod,
+        "fleet_branches",
+        lambda **kw: [{"name": "GROW", "path": grow, "email": "@grow", "residency": "external"}],
+    )
+
+    handle_contacts([])
+
+    out = capsys.readouterr().out
+    assert "Total: 1 branches" in out
+    assert "@grow" in out and str(grow) in out

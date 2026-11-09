@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: read.py
 # Description: Registry Read Handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2025-11-15
-# Modified: 2026-10-17
+# Modified: 2026-11-08
 # =============================================
 
 """
@@ -15,10 +15,12 @@ Reference: docs/identity_and_boundaries.md
 import json
 import os
 import sys
+import time
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.memory.apps.modules.door_registry_scope import fleet_branches
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root, registries_in
 
@@ -72,6 +74,40 @@ def get_all_branches() -> List[Dict]:
     except Exception as e:
         logger.warning("[registry] get_all_branches failed: %s", e)
         return []
+
+
+FLEET_CACHE_SECONDS = 60.0
+_fleet_cache: Dict[str, Tuple[float, List[Dict]]] = {}
+
+
+def get_fleet_branches() -> List[Dict]:
+    """Every citizen the declared fleet makes real: core, then residents, then externals, from memory's door.
+
+    For listings only (contacts, the recipient pick, @all, central stats); delivery and wake keep
+    their own tier order. Rows are {name, path (absolute), email, residency}. A later row reusing
+    an earlier email is dropped and logged, so a namesake never shadows a core citizen. Cached for
+    FLEET_CACHE_SECONDS: the door logs every refused row at ERROR on each read.
+    """
+    now = time.monotonic()
+    cached = _fleet_cache.get("rows")
+    if cached is not None and now - cached[0] < FLEET_CACHE_SECONDS:
+        return [dict(row) for row in cached[1]]
+
+    json_handler.log_operation("get_fleet_branches", {})
+    rows: List[Dict] = []
+    seen = set()
+    for item in fleet_branches(name_from="registry"):
+        name = str(item.get("name", ""))
+        email = str(item.get("email") or _derive_email_from_branch_name(name))
+        if email.lower() in seen:
+            logger.warning(
+                "[registry] %s at %s reuses an address already in the fleet; not listed", email, item.get("path")
+            )
+            continue
+        seen.add(email.lower())
+        rows.append({"name": name, "path": str(item["path"]), "email": email, "residency": item.get("residency", "")})
+    _fleet_cache["rows"] = (now, rows)
+    return [dict(row) for row in rows]
 
 
 def _derive_email_from_branch_name(branch_name: str) -> str:

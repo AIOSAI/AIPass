@@ -73,6 +73,13 @@
       "reason": "Imports trigger.apps.modules.core.trigger inside fire_completed() — the same cross-branch module import already bypassed for apps/handlers/email/send.py, for the same reason: @trigger's pub/sub bus IS its modules/ entry point and there is no handler-level door to it. FPLAN-0452 P1 explicitly forbids inventing a second push mechanism ('trigger.fire() already exists and your lane already speaks it — DO NOT invent a mechanism'), so consuming the existing one is the instruction, not a shortcut. Lazy, inside the one function that needs it, and its failure is caught and warned so a dead bus cannot take a completed dispatch down with it."
     },
     {
+      "file": "apps/handlers/registry/read.py",
+      "standard": "unused_function",
+      "pattern": "get_resident_branches",
+      "reason": "No ai_mail caller since @all reads the fleet through memory's door (get_fleet_branches). Its production reader is @sentry's fresh-clone pack template (sentry/apps/handlers/pytest_quality_standards/templates/fresh_clone_test.py:37), outside this branch's scan; removing it would break that pack. REMOVE THIS ENTRY with the function once @sentry's template reads the door instead.",
+      "measured": "2026-11-08, grep across src/aipass"
+    },
+    {
       "file": "__init__.py",
       "standard": "unused_function",
       "pattern": "register_path, outstanding_dispatches",
@@ -208,7 +215,7 @@
       "file": "apps/handlers/registry/read.py",
       "standard": "logged_fallback",
       "lines": [
-        74
+        76
       ],
       "reason": "Traced, the namesake is not reachable through this [] (ai_mail, fleet green leg 12, the commons-namesake re-read of the leg 11 HELD). get_all_branches answers [] for an unreadable AIPASS_REGISTRY.json. Its one resolver, deliver_email_to_branch, no longer trusts that: before the map widens to the caller's project, the admin sweep or the external tier, delivery asks check_registry_readable and refuses, naming the registry (pinned: test_an_unreadable_aipass_registry_refuses_rather_than_serving_a_hosted_namesake). The other callers list or match names, and every send they make goes through that delivery: email_send 181 (interactive list) and 306 (broadcast targets), email.handle_contacts 432 (display), reply.send_reply 151 (sender lookup), get_branch_by_email 146, delivery 632 (a path argument; a miss refuses). wake reads the registry itself and refuses since leg 12. A raise here would turn those CLI commands into 'not handled' through route_command."
     },
@@ -216,9 +223,9 @@
       "file": "apps/handlers/registry/read.py",
       "standard": "logged_fallback",
       "lines": [
-        243
+        279
       ],
-      "reason": "Traced, the namesake is not reachable through this {} (ai_mail, fleet green leg 12). _residents_from_registry feeds get_resident_branches only, whose callers are email_send 315 (the @all broadcast target list) and @sentry's fresh_clone_check 13/40. An unreadable resident registry drops that project's residents from the broadcast; it adds no address and resolves no name, so no mail can reach another project's citizen through it. The failure is logged at error and names the registry. A raise would stop the whole broadcast to every other project and reach @sentry's check."
+      "reason": "Traced, the namesake is not reachable through this {} (ai_mail, fleet green leg 12). _residents_from_registry feeds get_resident_branches only, whose caller is @sentry's fresh_clone_check 13/40 (@all reads the fleet through memory's door instead). An unreadable resident registry drops that project's residents from the list; it adds no address and resolves no name, so no mail can reach another project's citizen through it. The failure is logged at error and names the registry. A raise would stop the whole broadcast to every other project and reach @sentry's check."
     },
     {
       "file": "apps/handlers/dispatch/register.py",

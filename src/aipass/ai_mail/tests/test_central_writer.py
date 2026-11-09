@@ -3,7 +3,7 @@
 # Description: Tests for central_writer -- branch inbox aggregation and central file writing
 # Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """Tests for apps/handlers/central_writer.py."""
@@ -179,18 +179,12 @@ def test_find_all_inbox_files_refuses_an_unreadable_registry():
         mod.find_all_inbox_files()
 
 
-def test_get_valid_branch_names_reads_the_registry_rows_uppercased(tmp_path):
-    """Every registry row's name comes back, uppercased, from the registry it is pointed at.
-    The autouse sandboxed_central fixture points BRANCH_REGISTRY under tmp_path.
-    """
-    registry = tmp_path / "central_sandbox" / "AIPASS_REGISTRY.json"
-    registry.parent.mkdir(parents=True)
-    registry.write_text(
-        json.dumps({"branches": [{"name": "sentry"}, {"name": "Drone"}, {"name": "AI_MAIL"}]}),
-        encoding="utf-8",
-    )
+def test_get_valid_branch_names_reads_the_fleet_rows_uppercased(monkeypatch):
+    """Every fleet citizen's name comes back uppercased, a declared-root external's included."""
+    rows = [{"name": "sentry"}, {"name": "Drone"}, {"name": "GROW", "residency": "external"}]
+    monkeypatch.setattr(mod, "get_fleet_branches", lambda: rows)
 
-    assert mod.get_valid_branch_names() == {"SENTRY", "DRONE", "AI_MAIL"}
+    assert mod.get_valid_branch_names() == {"SENTRY", "DRONE", "GROW"}
 
 
 def test_aggregate_branch_stats_multiple_branches(tmp_path, monkeypatch):
@@ -340,3 +334,17 @@ def test_write_central_file_overwrites_existing(tmp_path, monkeypatch):
     written = json.loads(central_file.read_text(encoding="utf-8"))
     assert written == new_data
     assert "old" not in written
+
+
+def test_find_all_inbox_files_includes_an_external_citizens_inbox(tmp_path, monkeypatch):
+    """A declared-root citizen's inbox is counted like a core one."""
+    core = _inbox(mod.BRANCH_REGISTRY.parent / "flow")
+    grow = _inbox(tmp_path / "seed" / "grow")
+    _registry([{"name": "FLOW", "path": "flow"}])
+    monkeypatch.setattr(
+        mod,
+        "get_fleet_branches",
+        lambda: [{"name": "FLOW", "path": "flow"}, {"name": "GROW", "path": str(grow.parent.parent)}],
+    )
+
+    assert mod.find_all_inbox_files() == [core, grow]

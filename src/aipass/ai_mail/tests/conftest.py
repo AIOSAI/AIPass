@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for ai_mail tests - sandbox redirects, console pin, state reset
 # Version: 1.9.0
 # Created: 2026-03-05
-# Modified: 2026-10-23
+# Modified: 2026-11-08
 # Category: ai_mail/tests
 # CHANGELOG (Max 5 entries):
 #   - v1.9.0 (2026-10-23): sandboxed_central answers get_all_branches from the sandbox registry; daemon_* fixtures go
@@ -168,7 +168,9 @@ def sandboxed_central(tmp_path, monkeypatch) -> None:
     registry = central / "AIPASS_REGISTRY.json"
     monkeypatch.setattr(central_writer, "_REPO_ROOT", central)
     monkeypatch.setattr(central_writer, "BRANCH_REGISTRY", registry)
-    monkeypatch.setattr(central_writer, "get_all_branches", lambda: _branches_of(registry))
+    monkeypatch.setattr(central_writer, "get_fleet_branches", lambda: _branches_of(registry))
+    monkeypatch.setattr(registry_read, "_fleet_cache", {})
+    monkeypatch.setattr(registry_read, "fleet_branches", lambda **_: [])
     monkeypatch.setattr(central_writer, "AI_CENTRAL_DIR", central / ".ai_central")
     monkeypatch.setattr(central_writer, "CENTRAL_FILE", central / ".ai_central" / "AI_MAIL.central.json")
 

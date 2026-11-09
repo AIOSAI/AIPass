@@ -3,7 +3,7 @@
 # Description: Tests for registry read handler
 # Version: 1.0.2
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """Tests for apps/handlers/registry/read.py."""
@@ -217,3 +217,52 @@ class TestGetCallerProjectBranches:
         (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
         result = get_caller_project_branches(str(tmp_path))
         assert "@test" in result
+
+
+# --- get_fleet_branches(): every citizen through memory's door -------
+
+
+def _door_rows(tmp_path):
+    """A fleet as the door answers it: one core citizen, one resident, one external at a declared root."""
+    return [
+        {"name": "FLOW", "path": tmp_path / "aipass" / "flow", "email": "@flow", "residency": "core"},
+        {"name": "BAUD", "path": tmp_path / "aipass" / "projects" / "baud", "email": "@baud", "residency": "resident"},
+        {"name": "GROW", "path": tmp_path / "seed" / "grow", "email": "@grow", "residency": "external"},
+    ]
+
+
+def test_the_fleet_lists_core_residents_and_externals_with_absolute_string_paths(tmp_path, monkeypatch):
+    monkeypatch.setattr(read_mod, "fleet_branches", lambda **kw: _door_rows(tmp_path))
+
+    rows = read_mod.get_fleet_branches()
+
+    assert [(r["email"], r["residency"]) for r in rows] == [
+        ("@flow", "core"),
+        ("@baud", "resident"),
+        ("@grow", "external"),
+    ]
+    assert rows[2]["path"] == str(tmp_path / "seed" / "grow")
+
+
+def test_a_namesake_of_an_earlier_address_is_dropped_so_core_keeps_it(tmp_path, monkeypatch):
+    rows = _door_rows(tmp_path) + [
+        {"name": "FLOW", "path": tmp_path / "seed" / "flow", "email": "@Flow", "residency": "external"}
+    ]
+    monkeypatch.setattr(read_mod, "fleet_branches", lambda **kw: rows)
+
+    flows = [r for r in read_mod.get_fleet_branches() if r["email"].lower() == "@flow"]
+
+    assert [r["path"] for r in flows] == [str(tmp_path / "aipass" / "flow")]
+
+
+def test_the_door_is_read_once_per_cache_window(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(read_mod, "fleet_branches", lambda **kw: calls.append(kw) or _door_rows(tmp_path))
+
+    read_mod.get_fleet_branches()
+    read_mod.get_fleet_branches()
+    assert calls == [{"name_from": "registry"}]
+
+    monkeypatch.setattr(read_mod, "FLEET_CACHE_SECONDS", 0.0)
+    read_mod.get_fleet_branches()
+    assert len(calls) == 2

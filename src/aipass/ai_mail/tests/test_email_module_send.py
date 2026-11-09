@@ -3,7 +3,7 @@
 # Description: Tests for email_send.py's send lane and email.py's command routing
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """Tests for apps/modules/email_send.py's handle_send and the routing of apps/modules/email.py."""
@@ -140,7 +140,7 @@ class TestHandleSend:
             lambda args: {"mode": "interactive"},
         )
         monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.get_all_branches",
+            "aipass.ai_mail.apps.modules.email_send.get_fleet_branches",
             lambda: [{"name": "A", "email": "@a"}],
         )
         # The prompt reads the real stdin; the stub answers as a cancelling user and is asserted

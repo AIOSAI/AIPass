@@ -3,7 +3,7 @@
 # Description: Tests for absolute mailbox_path resolution in user functions
 # Version: 1.0.3
 # Created: 2026-03-17
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """Tests for apps/handlers/users/user.py and apps/handlers/paths.py's find_repo_root()."""
@@ -392,3 +392,23 @@ class TestTheFreshCheckoutFindsTheRightRoot:
             assert paths.find_repo_root() == tmp_path
 
         assert any("falling back to the current directory" in r.getMessage() for r in caplog.records)
+
+
+class TestASenderAtADeclaredRoot:
+    """A citizen standing in its own project's tree is named by that project's registry."""
+
+    def test_the_caller_cwd_resolves_to_the_external_citizen(self, tmp_path, monkeypatch):
+        seed = tmp_path / "seed"
+        (seed / "grow" / ".trinity").mkdir(parents=True)
+        (seed / "grow" / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+        (seed / "SEED_REGISTRY.json").write_text(
+            json.dumps({"branches": [{"name": "GROW", "path": "grow", "email": "@grow"}]}), encoding="utf-8"
+        )
+        monkeypatch.delenv("AIPASS_CALLER_BRANCH", raising=False)
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(seed / "grow" / "src"))
+        (seed / "grow" / "src").mkdir()
+
+        user = get_current_user()
+
+        assert user["email_address"] == "@grow"
+        assert Path(user["mailbox_path"]) == seed / "grow" / ".ai_mail.local"
