@@ -141,6 +141,29 @@ class TestTheFleetComesFromMemorysDoor:
         assert "  grow: 1 new (1 total)" in result["output"]
         assert fleet == [()]
 
+    def test_branch_health_finds_an_external_citizen_by_name_in_any_case(self, fleet):
+        result = run_skill("branch_health", action="GROW")
+        assert result["success"] is True
+        assert result["output"].startswith("Branch Health -- grow\n  Source files (apps/): 1\n")
+        assert fleet == [()]
+
+    def test_inbox_check_finds_an_external_citizens_inbox_by_name(self, fleet):
+        result = run_skill("inbox_check", action="grow")
+        assert result["success"] is True
+        assert result["output"].startswith("Inbox Check -- grow (1 new / 1 total):")
+        assert fleet == [()]
+
+    @pytest.mark.parametrize(
+        ("skill", "expected"),
+        [
+            ("branch_health", "Branch Health -- skills\n  Branch 'skills' not found."),
+            ("inbox_check", "Inbox Check -- skills\n  No inbox found for branch 'skills'."),
+        ],
+    )
+    def test_a_directory_under_src_aipass_the_door_does_not_answer_is_not_found(self, skill, expected, fleet):
+        result = run_skill(skill, action="skills")
+        assert result == {"success": True, "output": expected, "error": None}
+
 
 class TestRunSkillMarkdown:
     def test_run_github_returns_body(self):

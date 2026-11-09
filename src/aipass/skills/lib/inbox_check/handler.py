@@ -2,7 +2,7 @@
 # META DATA HEADER
 # Name: handler.py - Inbox Check skill handler
 # Date: 2026-03-29
-# Version: 1.2.0
+# Version: 1.3.0
 # Modified: 2026-11-09
 # Category: skills/lib/inbox_check
 # =============================================
@@ -39,12 +39,6 @@ def run(action, args=None, config=None):
 def get_actions():
     """List available actions for this skill."""
     return ["summary", "all", "<branch_name>"]
-
-
-def _src_root():
-    """Return the src/ directory by navigating up from this handler."""
-    # handler.py -> inbox_check/ -> lib/ -> skills/ -> aipass/ -> src/
-    return Path(__file__).resolve().parents[4]
 
 
 def _find_inboxes():
@@ -127,12 +121,16 @@ def _message_lines(messages):
 
 def _scan_branch(branch_name):
     """Show inbox for a specific branch."""
-    # A branch is one directory name; anything path-shaped would read outside src/aipass.
+    # A branch is one name, never a path: refused before the door is read.
     if not branch_name or Path(branch_name).name != branch_name or branch_name in (".", ".."):
         return {"success": False, "output": "", "error": f"Not a branch name: {branch_name!r}"}
 
-    inbox_path = _src_root() / "aipass" / branch_name / ".ai_mail.local" / "inbox.json"
-    if not inbox_path.is_file():
+    inbox_path = None
+    for row in door_registry_scope.fleet_branches():
+        if row["name"].lower() == branch_name.lower():
+            branch_name, inbox_path = row["name"], Path(row["path"]) / ".ai_mail.local" / "inbox.json"
+            break
+    if inbox_path is None or not inbox_path.is_file():
         return {
             "success": True,
             "output": f"Inbox Check -- {branch_name}\n  No inbox found for branch '{branch_name}'.",

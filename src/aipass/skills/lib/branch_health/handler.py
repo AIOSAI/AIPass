@@ -2,7 +2,7 @@
 # META DATA HEADER
 # Name: handler.py - Branch Health skill handler
 # Date: 2026-03-29
-# Version: 1.2.0
+# Version: 1.3.0
 # Modified: 2026-11-09
 # Category: skills/lib/branch_health
 # =============================================
@@ -42,16 +42,18 @@ def get_actions():
     return ["summary", "tests", "<branch_name>"]
 
 
-def _src_root():
-    """Return the src/ directory by navigating up from this handler."""
-    # handler.py -> branch_health/ -> lib/ -> skills/ -> aipass/ -> src/
-    return Path(__file__).resolve().parents[4]
-
-
 def _find_branches():
     """Yield (branch_name, branch_path) for every citizen memory's door reports."""
     for row in door_registry_scope.fleet_branches():
         yield (row["name"], Path(row["path"]))
+
+
+def _door_lookup(name):
+    """Return (door_name, path) for the citizen the door answers to name, any case; (name, None) when none."""
+    for row in door_registry_scope.fleet_branches():
+        if row["name"].lower() == name.lower():
+            return row["name"], Path(row["path"])
+    return name, None
 
 
 def _count_py_files(directory):
@@ -161,12 +163,12 @@ def _tests_only():
 
 def _single_branch(branch_name):
     """Stats for a single branch."""
-    # A branch is one directory name; "../.." would walk every file above src/aipass.
+    # A branch is one name, never a path: refused before the door is read.
     if not branch_name or Path(branch_name).name != branch_name or branch_name in (".", ".."):
         return {"success": False, "output": "", "error": f"Not a branch name: {branch_name!r}"}
 
-    branch_path = _src_root() / "aipass" / branch_name
-    if not branch_path.is_dir():
+    branch_name, branch_path = _door_lookup(branch_name)
+    if branch_path is None:
         return {
             "success": True,
             "output": f"Branch Health -- {branch_name}\n  Branch '{branch_name}' not found.",
