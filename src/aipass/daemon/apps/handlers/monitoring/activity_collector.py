@@ -1,17 +1,15 @@
 # =================== AIPass ====================
 # Name: activity_collector.py
 # Description: Branch Activity Data Collector
-# Version: 0.3.0
+# Version: 0.4.0
 # Created: 2026-01-30
-# Modified: 2026-10-17
+# Modified: 2026-11-09
 # =============================================
 
 """
 Branch Activity Data Collector Handler
 """
 
-import os
-import json
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
@@ -20,50 +18,17 @@ from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.module_root import module_file
 
+# @memory's PUBLIC fleet gateway: who counts as a citizen is @memory's answer, one registry reader fleet-wide.
+from aipass.memory.apps.modules import fleet
 
-# Registry lookup order: env var > repo root > ~/.aipass/
 _REPO_ROOT = module_file(__file__).parents[6]  # src/aipass/daemon/apps/handlers/monitoring -> repo root
-_REGISTRY_CANDIDATES = [
-    Path(os.environ.get("AIPASS_REGISTRY", "")),
-    _REPO_ROOT / "AIPASS_REGISTRY.json",
-    Path.home() / ".aipass" / "AIPASS_REGISTRY.json",
-]
-REGISTRY_PATH = next((p for p in _REGISTRY_CANDIDATES if p.name and p.exists()), _REGISTRY_CANDIDATES[-1])
 MEMORY_FILE_PATTERNS = ["local.json", "observations.json", "passport.json", "README.md", "DASHBOARD.local.json"]
 CODE_FILE_EXTENSION = ".py"
 
 
-def load_branch_registry() -> Dict[str, Any]:
-    """Load the AIPASS_REGISTRY.json file.
-    Missing or unreadable answers {"metadata": {}, "branches": []}."""
-    if not REGISTRY_PATH.exists():
-        return {"metadata": {}, "branches": []}
-
-    try:
-        with open(REGISTRY_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        logger.warning("Failed to load AIPASS_REGISTRY %s: %s", REGISTRY_PATH, e)
-        return {"metadata": {}, "branches": []}
-
-
 def get_branch_paths() -> List[Dict[str, str]]:
-    """Get all branch names and absolute paths from the registry.
-    Registry paths are repo-relative; they are resolved against the repo root."""
-    registry = load_branch_registry()
-    branches = registry.get("branches", [])
-
-    result = []
-    for b in branches:
-        name = b.get("name", "")
-        raw_path = b.get("path", "")
-        if not name or not raw_path:
-            continue
-        resolved = Path(raw_path)
-        if not resolved.is_absolute():
-            resolved = _REPO_ROOT / raw_path
-        result.append({"name": name, "path": str(resolved)})
-    return result
+    """Every citizen in @memory's fleet (core, residents, externals): registry name and absolute path."""
+    return [{"name": b["name"], "path": str(b["path"])} for b in fleet.fleet_branches(_REPO_ROOT, name_from="registry")]
 
 
 def _get_file_mtime(file_path: Path) -> Optional[datetime]:
@@ -181,15 +146,18 @@ def scan_branch_activity(branch_name: str, branch_path: str, since: Optional[dat
     }
 
 
-def get_all_branch_activity(since: Optional[datetime] = None) -> Dict[str, Any]:
-    """Collect activity data for ALL branches in the system."""
+def get_all_branch_activity(
+    since: Optional[datetime] = None, branch_paths: Optional[List[Dict[str, str]]] = None
+) -> Dict[str, Any]:
+    """Collect activity data for ALL branches; ``branch_paths`` spares a second fleet read."""
     if since is None:
         since = datetime.now() - timedelta(hours=24)
 
     json_handler.log_operation("activity_scan")
     time_window_hours = (datetime.now() - since).total_seconds() / 3600
 
-    branch_paths = get_branch_paths()
+    if branch_paths is None:
+        branch_paths = get_branch_paths()
     results: Dict[str, Any] = {}
     total_files = 0
     active_count = 0
@@ -217,8 +185,6 @@ def get_all_branch_activity(since: Optional[datetime] = None) -> Dict[str, Any]:
 
 if __name__ == "__main__":
     print("Testing activity_collector...")
-    print(f"Registry path: {REGISTRY_PATH}")
-    print(f"Registry exists: {REGISTRY_PATH.exists()}")
 
     branches = get_branch_paths()
     print(f"Found {len(branches)} branches")

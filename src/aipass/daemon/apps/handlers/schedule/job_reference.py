@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: job_reference.py
 # Description: The job-authoring reference printed by drone @daemon run --help
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-11
-# Modified: 2026-11-02
+# Modified: 2026-11-09
 # =============================================
 
 """The job-authoring reference that ``drone @daemon run --help`` prints: schema, schedule
@@ -61,8 +61,9 @@ _REFERENCE_LINES = [
     "              [dim]roster instead of the owner. See drone @daemon rotation.[/dim]",
     "",
     "  [bold]wake options:[/bold]  fresh (bool), model (haiku/sonnet — use light models),",
-    "    provider (claude|codex; absent = claude, any other value refuses the job).",
+    "    provider: claude|codex|opencode, absent = claude, others refuse the job.",
     "    [dim]On codex, model is a Codex slug (gpt-6-sol) or absent = Codex's default.[/dim]",
+    "    [dim]On opencode, model is provider/model (opencode/glm-5.3-flash-free).[/dim]",
     "",
     '  [bold]Command jobs:[/bold] "command" instead of "prompt" — run as a subprocess, nobody woken',
     '    "command": "drone rm --stale 10d ..", "timeout_seconds": 120,',

@@ -2,7 +2,7 @@
 # META DATA HEADER
 # Name: __init__.py - Monitoring Handlers Package
 # Date: 2026-01-30
-# Version: 0.1.0
+# Version: 0.2.0
 # Category: daemon/handlers/monitoring
 #
 # CHANGELOG (Max 5 entries):
@@ -16,7 +16,6 @@
 """Monitoring handlers for daemon branch."""
 
 from aipass.daemon.apps.handlers.monitoring.activity_collector import (
-    load_branch_registry,
     get_branch_paths,
     scan_branch_activity,
     get_all_branch_activity,
@@ -35,7 +34,6 @@ from aipass.daemon.apps.handlers.monitoring.red_flag_detector import (
 )
 
 __all__ = [
-    "load_branch_registry",
     "get_branch_paths",
     "scan_branch_activity",
     "get_all_branch_activity",

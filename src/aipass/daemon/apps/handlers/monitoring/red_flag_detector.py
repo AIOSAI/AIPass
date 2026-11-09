@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: red_flag_detector.py
 # Description: Branch Red Flag Detection Engine
-# Version: 0.1.0
+# Version: 0.2.0
 # Created: 2026-01-30
-# Modified: 2026-10-17
+# Modified: 2026-11-09
 # =============================================
 
 """
@@ -136,14 +136,19 @@ def get_branch_status(
     return result
 
 
-def detect_red_flags(since_timestamp: Optional[datetime] = None, threshold_hours: float = 2.0) -> List[Dict[str, Any]]:
+def detect_red_flags(
+    since_timestamp: Optional[datetime] = None,
+    threshold_hours: float = 2.0,
+    branches: Optional[List[Dict[str, str]]] = None,
+) -> List[Dict[str, Any]]:
     """Detect red flag violations across ALL branches, RED_FLAG first then by name."""
     if since_timestamp is None:
         since_timestamp = datetime.now() - timedelta(hours=24)
 
     json_handler.log_operation("red_flag_scan")
 
-    branches = activity_collector.get_branch_paths()
+    if branches is None:
+        branches = activity_collector.get_branch_paths()
     results: List[Dict[str, Any]] = []
 
     for branch_info in branches:
@@ -171,14 +176,18 @@ def detect_red_flags(since_timestamp: Optional[datetime] = None, threshold_hours
     return results
 
 
-def get_red_flag_summary(since_timestamp: Optional[datetime] = None, threshold_hours: float = 2.0) -> Dict[str, Any]:
+def get_red_flag_summary(
+    since_timestamp: Optional[datetime] = None,
+    threshold_hours: float = 2.0,
+    branches: Optional[List[Dict[str, str]]] = None,
+) -> Dict[str, Any]:
     """Get a summary of red flag detection across all branches."""
     if since_timestamp is None:
         since_timestamp = datetime.now() - timedelta(hours=24)
 
     time_window = (datetime.now() - since_timestamp).total_seconds() / 3600
 
-    all_results = detect_red_flags(since_timestamp, threshold_hours)
+    all_results = detect_red_flags(since_timestamp, threshold_hours, branches)
 
     counts = {
         STATUS_RED_FLAG: 0,

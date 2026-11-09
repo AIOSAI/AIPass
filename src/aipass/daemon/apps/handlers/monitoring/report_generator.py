@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: report_generator.py
 # Description: Activity Report Generator Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-11-09
 # =============================================
 
 """
@@ -130,11 +130,12 @@ def _aggregate_data(since_hours: float = 24) -> Dict[str, Any]:
     """Aggregate data from all monitoring handlers."""
     since_timestamp = datetime.now() - timedelta(hours=since_hours)
 
-    red_flag_summary = red_flag_detector.get_red_flag_summary(since_timestamp)
-
-    activity_data = activity_collector.get_all_branch_activity(since_timestamp)
-
+    # One fleet read per report: red flags, activity and memory health all walk the same roster.
     branch_paths = activity_collector.get_branch_paths()
+
+    red_flag_summary = red_flag_detector.get_red_flag_summary(since_timestamp, branches=branch_paths)
+
+    activity_data = activity_collector.get_all_branch_activity(since_timestamp, branch_paths=branch_paths)
     memory_health_data = {}
 
     for branch_info in branch_paths:
