@@ -3,7 +3,7 @@
 # Description: The Commons lifecycle integration tests — full social platform flow
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-11-02
+# Modified: 2026-11-09
 # =============================================
 
 """Tests for apps/handlers/database/db.py and the full posts/comments/votes lifecycle it drives."""
@@ -11,16 +11,20 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that db.py parses and imports
 
+import functools
+import json
 from pathlib import Path
 
 import pytest
 
 from aipass.commons.apps.handlers.database import db as db_module
 from aipass.commons.apps.handlers.database.db import init_db, close_db
+from aipass.commons.apps.handlers.identity.identity_ops import extract_mentions
 from aipass.commons.apps.handlers.search.search_queries import (
     search_posts,
     sync_post_to_fts,
 )
+from aipass.memory.apps.modules.door_registry_scope import fleet_branches
 
 
 @pytest.fixture
@@ -371,3 +375,28 @@ class TestBranchRootResolution:
         assert ".trinity" in message
         assert ".aipass" in message
         assert "AIPASS_ROOT" in message
+
+
+class TestAgentSeeding:
+    """init_db seeds the agents table from memory's door, not the core registry alone."""
+
+    def test_an_external_citizen_at_a_declared_root_gets_an_agent_row_and_can_be_mentioned(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        seed = tmp_path / "seed"
+        grow = seed / "grow"
+        (grow / ".trinity").mkdir(parents=True)
+        (grow / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+        home.mkdir()
+        (home / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": []}), encoding="utf-8")
+        roots = {"roots": [{"path": str(seed), "status": "active"}]}
+        (home / "AIPASS_ROOTS.json").write_text(json.dumps(roots), encoding="utf-8")
+        registry = {"branches": [{"name": "GROW", "path": str(grow), "status": "active"}]}
+        (seed / "SEED_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
+        # The real door, pointed at the fixture fleet instead of the live repo.
+        monkeypatch.setattr(db_module, "fleet_branches", functools.partial(fleet_branches, repo_root=home))
+        db_path = tmp_path / "seeded.db"
+
+        close_db(init_db(db_path))
+        monkeypatch.setattr(db_module, "DB_PATH", db_path)
+
+        assert extract_mentions("hello @GROW") == ["grow"]

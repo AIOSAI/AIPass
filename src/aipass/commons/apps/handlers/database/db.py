@@ -1,15 +1,14 @@
 # =================== AIPass ====================
 # Name: db.py
 # Description: The Commons SQLite connection manager
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-11-09
 # =============================================
 
 """The Commons - SQLite Connection Manager"""
 
 import os
-import json
 import sqlite3
 import time
 from pathlib import Path
@@ -18,6 +17,7 @@ from typing import Optional, TypeVar, Callable
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.commons.apps.handlers.json import json_handler
 from aipass.commons.apps.handlers.module_root import module_file
+from aipass.memory.apps.modules.door_registry_scope import fleet_branches
 
 
 def find_branch_root(start_path: Optional[Path] = None) -> Optional[Path]:
@@ -227,31 +227,19 @@ def _seed_secret_rooms(conn: sqlite3.Connection) -> None:
 
 
 def _register_branches(conn: sqlite3.Connection) -> None:
-    """Auto-register missing branches from AIPASS_REGISTRY.json as agents."""
-    from aipass.commons.apps.handlers.identity.identity_ops import BRANCH_REGISTRY_PATH as registry_path
-
-    if not registry_path.exists():
-        return
-
-    try:
-        registry = json.loads(registry_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        logger.warning("[db] Failed to read branch registry JSON")
-        return
-
-    branches = registry.get("branches", [])
-    for branch in branches:
+    """Auto-register missing citizens (core, resident, external) from memory's door as agents."""
+    # One read per seeding: the door logs every refused row at ERROR on each read.
+    for branch in fleet_branches(name_from="registry"):
         # Registry casing is mixed; lowercase to match identity_ops.get_caller_branch().
-        name = branch.get("name", "").lower()
+        name = branch["name"].lower()
         if not name:
             continue
 
-        description = branch.get("description", "")
         display_name = name.replace("_", " ").title()
 
         conn.execute(
             "INSERT OR IGNORE INTO agents (branch_name, display_name, description) VALUES (?, ?, ?)",
-            (name, display_name, description),
+            (name, display_name, ""),
         )
 
     conn.commit()
