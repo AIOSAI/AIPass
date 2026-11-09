@@ -34,6 +34,7 @@ drone @flow unregister <dir>                    # Remove plan type
 # Registry
 drone @flow registry scan                       # Scan filesystem, detect mismatches
 drone @flow registry status                     # Show registry health
+drone @flow registry move <old> <new> [--apply]  # Re-point a moved citizen's rows (preview by default)
 
 # Other
 drone @flow restore FPLAN-0042                  # Reopen a closed plan

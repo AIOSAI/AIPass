@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_monitor_registry.py
 # Description: Tests for monitor_ops handler and registry_monitor module
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-03-08
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """Tests for apps/handlers/registry/monitor_ops.py and apps/modules/registry_monitor.py."""
@@ -12,6 +12,7 @@
 # sentry: no-test-needed(ruff) — that monitor_ops.py and registry_monitor.py parse and import
 
 import os
+from contextlib import nullcontext
 from pathlib import Path
 from typing import List, Tuple
 from unittest.mock import MagicMock, patch
@@ -441,6 +442,47 @@ class TestAnUnreadableRegistryIsRefusedByName:
         assert handled is True
         error_stand_in.assert_called_once_with(f"Registry scan refused: {refusal}")
         assert "Scan complete" not in capsys.readouterr().out
+
+
+class TestRegistryMove:
+    def _run(self, args, actions=()):
+        with (
+            patch.object(registry_monitor, "move_location_rows", return_value=list(actions)) as recorder,
+            patch.object(registry_monitor, "registry_lock", nullcontext),
+        ):
+            handled = registry_monitor.handle_command("registry", ["move", *args])
+        return handled, recorder
+
+    @pytest.mark.parametrize("flag, applied, said", [([], False, "Nothing written"), (["--apply"], True, "Moved 1")])
+    def test_move_previews_unless_told_to_apply(self, tmp_path, capsys, flag, applied, said):
+        action = {"plan_id": "RPLAN-0020", "action": "moved_and_reopened", "to": str(tmp_path / "RPLAN-0020_x.md")}
+        handled, recorder = self._run([str(tmp_path / "old"), str(tmp_path), *flag], [action])
+
+        assert handled is True
+        recorder.assert_called_once_with(tmp_path / "old", tmp_path, apply=applied)
+        out = capsys.readouterr().out
+        assert "RPLAN-0020: moved_and_reopened" in out and said in out
+
+    @pytest.mark.parametrize("args", [[], ["/only/one"], ["relative/old", "/abs/new"]], ids=["none", "one", "relative"])
+    def test_move_without_two_absolute_locations_exits_1_and_moves_nothing(self, capsys, args):
+        with pytest.raises(SystemExit) as stopped:
+            self._run(args)
+
+        assert stopped.value.code == 1
+        assert "two absolute locations" in capsys.readouterr().err
+
+    def test_a_refused_move_exits_1_and_says_why(self, tmp_path, capsys):
+        with (
+            patch.object(
+                registry_monitor, "move_location_rows", side_effect=ValueError("new location is not a directory")
+            ),
+            patch.object(registry_monitor, "registry_lock", nullcontext),
+            pytest.raises(SystemExit) as stopped,
+        ):
+            registry_monitor.handle_command("registry", ["move", str(tmp_path / "a"), str(tmp_path / "b")])
+
+        assert stopped.value.code == 1
+        assert "Registry move refused: new location is not a directory" in capsys.readouterr().err
 
 
 class TestFireEvent:
