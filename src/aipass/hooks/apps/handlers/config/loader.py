@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: loader.py
-# Version: 2.2.0
+# Version: 2.3.0
 # Description: Hook config loader — the AIPass config from AIPASS_HOME, a project's own behind trust, gates always
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-05-19
-# Modified: 2026-10-28
+# Modified: 2026-11-09
 # =============================================
 
 """Which hook config a session runs. Security never depends on trust (DPLAN-0356 item 1).
@@ -34,6 +34,8 @@ NAMESPACE_KEY = "handler_namespace"
 NAMESPACE_STAMP, SRC_STAMP = "_handler_namespace", "_project_src"
 EXTERNAL = "external"
 NONE = "none"
+
+_fleet_cache: dict[str, list[dict]] = {}
 
 
 def _search_bounds() -> tuple[Path, Path]:
@@ -67,6 +69,20 @@ def aipass_home() -> Path | None:
         if (root / _CONFIG).is_file() and (root / "src" / "aipass").is_dir():
             return root
     return None
+
+
+def fleet_rows(repo_root: Path) -> list[dict]:
+    """Every citizen under *repo_root* (core, resident, declared-root), each with an absolute path.
+
+    Read through memory's door once per process; an unreadable core registry raises, never an empty fleet.
+    """
+    key = str(repo_root)
+    if key not in _fleet_cache:
+        # Lazy: only the commands that enumerate citizens pay for the door's import.
+        from aipass.memory.apps.modules.door_registry_scope import fleet_branches
+
+        _fleet_cache[key] = fleet_branches(repo_root=Path(repo_root), name_from="registry", strict=True)
+    return _fleet_cache[key]
 
 
 def _inside(path: Path, root: Path) -> bool:

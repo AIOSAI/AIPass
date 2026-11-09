@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_cc_sessions.py
-# Version: 1.2.2
+# Version: 1.3.0
 # Description: Tests for the CC-native session file reader
 # Branch: hooks
 # Created: 2026-07-01
-# Modified: 2026-11-02
+# Modified: 2026-11-09
 # =============================================
 
 """Tests for apps/modules/cc_sessions.py, the CC-native session file reader."""
@@ -573,7 +573,7 @@ class TestIntrospection:
         assert "No live sessions to reclaim" in err
 
     def test_handle_command_sessions_reclaim_branch(self, tmp_path, capsys, monkeypatch):
-        registry = {"branches": [{"name": "HOOKS", "path": "src/aipass/hooks"}]}
+        registry = {"branches": [{"name": "HOOKS", "path": "src/aipass/hooks", "status": "active"}]}
         (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
         monkeypatch.setenv("AIPASS_HOME", str(tmp_path))
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
@@ -588,6 +588,18 @@ class TestIntrospection:
         with patch.object(cc_sessions, "_stop_session") as mock_stop:
             assert cc_sessions.handle_command("sessions", ["reclaim", "@ghost"]) is True
         assert "@ghost is not a registered branch" in capsys.readouterr().err
+        mock_stop.assert_not_called()
+
+    def test_reclaim_by_name_finds_an_external_citizen_at_a_declared_root(self, external_fleet, monkeypatch):
+        monkeypatch.setenv("AIPASS_HOME", str(external_fleet.home))
+        assert cc_sessions.registered_branch_dir("grow") == str(external_fleet.grow.resolve())
+        assert cc_sessions.registered_branch_dir("hooks") == str(external_fleet.hooks)
+
+    def test_an_unreadable_core_registry_fails_the_reclaim_loudly_and_stops_nothing(self, external_fleet, monkeypatch):
+        (external_fleet.home / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")
+        monkeypatch.setenv("AIPASS_HOME", str(external_fleet.home))
+        with patch.object(cc_sessions, "_stop_session") as mock_stop, pytest.raises(RuntimeError, match="Unreadable"):
+            cc_sessions.handle_command("sessions", ["reclaim", "@grow"])
         mock_stop.assert_not_called()
 
     def test_handle_command_help(self, capsys):

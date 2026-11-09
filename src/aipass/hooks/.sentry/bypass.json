@@ -1198,7 +1198,7 @@
     {
       "file": "apps/handlers/lifecycle/pre_compact_prep.py",
       "standard": "json_structure",
-      "reason": "Uses stdlib json for .trinity/local.json read+stamp (own branch's memory file, DPLAN-0253) plus AIPASS_REGISTRY.json/inbox.json/memory.config.json reads (external system + other branches' state) — not this branch's own hooks_json/ triplet storage. Matches compact.py precedent (same local.json access)."
+      "reason": "Uses stdlib json for .trinity/local.json read+stamp (own branch's memory file, DPLAN-0253) plus inbox.json/memory.config.json reads (external system + other branches' state) — not this branch's own hooks_json/ triplet storage. Matches compact.py precedent (same local.json access)."
     },
     {
       "file": "apps/handlers/prompt/context_gauge.py",
@@ -1549,12 +1549,12 @@
       "standard": "logged_fallback",
       "lines": [
         65,
-        135,
-        204,
-        218,
-        251
+        128,
+        197,
+        211,
+        244
       ],
-      "reason": "Fleet green leg 5: 65 and 135 are counts for the compact snapshot, None renders as unknown, never zero. 204 (the .trinity lock will not open), 218 and 251: the session stamp is skipped and logged at WARNING; the agent's own memory is untouched."
+      "reason": "Fleet green leg 5: 65 (the fleet door cannot be read) and 128 are counts for the compact snapshot, None renders as unknown, never zero. 197 (the .trinity lock will not open), 211 and 244: the session stamp is skipped and logged at WARNING; the agent's own memory is untouched."
     },
     {
       "file": "apps/handlers/lifecycle/session_boot.py",

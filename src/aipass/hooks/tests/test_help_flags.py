@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_help_flags.py
-# Version: 1.2.0
+# Version: 1.2.1
 # Description: Help-flag safety — a help flag anywhere means explain, never execute
 # Branch: hooks
 # Created: 2026-08-13
-# Modified: 2026-11-02
+# Modified: 2026-11-09
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py and the modules that route through it."""
@@ -158,7 +158,7 @@ class TestSessionsReclaimNeverStopsSessionsOnHelp:
 
     def test_real_reclaim_still_runs(self, tmp_path, monkeypatch):
         # Its own registry: AIPASS_REGISTRY.json is gitignored, so a clean clone has none.
-        registry = {"branches": [{"name": "HOOKS", "path": "src/aipass/hooks"}]}
+        registry = {"branches": [{"name": "HOOKS", "path": "src/aipass/hooks", "status": "active"}]}
         (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
         monkeypatch.setenv("AIPASS_HOME", str(tmp_path))
         with patch.object(cc_sessions, "reclaim", return_value=[]) as target:

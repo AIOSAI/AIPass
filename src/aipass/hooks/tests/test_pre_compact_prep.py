@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_pre_compact_prep.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Description: Tests for pre_compact_prep lifecycle handler
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-11-04
+# Modified: 2026-11-09
 # =============================================
 
 """Tests for apps/handlers/lifecycle/pre_compact_prep.py."""
@@ -31,6 +31,7 @@ from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import (
 )
 from aipass.hooks.apps.handlers.json import files as json_files
 from aipass.hooks.apps.modules import context_window
+from aipass.memory.apps.modules import door_registry_scope
 
 MODULE = "aipass.hooks.apps.handlers.lifecycle.pre_compact_prep"
 
@@ -241,13 +242,37 @@ class TestCountActiveDispatchLocks:
 
         registry = {
             "branches": [
-                {"name": "A", "path": "src/aipass/a"},
-                {"name": "B", "path": "src/aipass/b"},
+                {"name": "A", "path": "src/aipass/a", "status": "active"},
+                {"name": "B", "path": "src/aipass/b", "status": "active"},
             ]
         }
         (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
 
         assert "1 active dispatch(es)" in _snapshot(_make_branch(tmp_path), repo_root=tmp_path)
+
+    def test_counts_the_lock_of_an_external_citizen_at_a_declared_root(self, external_fleet):
+        (external_fleet.grow / ".ai_mail.local").mkdir()
+        (external_fleet.grow / ".ai_mail.local" / ".dispatch.lock").write_text("{}", encoding="utf-8")
+
+        assert "1 active dispatch(es)" in _snapshot(external_fleet.hooks, repo_root=external_fleet.home)
+
+    def test_reads_the_door_once_per_run_not_per_branch(self, external_fleet, monkeypatch):
+        real = door_registry_scope.fleet_branches
+        calls = []
+        monkeypatch.setattr(door_registry_scope, "fleet_branches", lambda **kw: calls.append(kw) or real(**kw))
+
+        _snapshot(external_fleet.hooks, repo_root=external_fleet.home)
+        _snapshot(external_fleet.hooks, repo_root=external_fleet.home)
+
+        assert len(calls) == 1
+
+    def test_an_unreadable_core_registry_leaves_the_count_out(self, external_fleet):
+        (external_fleet.home / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")
+
+        snapshot = _snapshot(external_fleet.hooks, repo_root=external_fleet.home)
+
+        assert "active dispatch" not in snapshot
+        assert "open plan(s)" in snapshot
 
     def test_returns_none_without_repo_root(self, tmp_path):
 
