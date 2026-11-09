@@ -193,8 +193,8 @@
       "file": "apps/handlers/escalation.py",
       "standard": "logged_fallback",
       "lines": [
-        498,
-        597
+        500,
+        599
       ],
       "pattern": "digest and aged-notice send raised -> send_failed",
       "reason": "send_failed comes only from failure arms (fleet green leg 5, kept leg 10): no callback wired, the send raised, the send refused. A success returns another outcome and stamps the cooldown. A raise would reach the record path's state write and drop the occurrence; send_failed leaves no cooldown, so the next occurrence retries.",
@@ -204,7 +204,7 @@
       "file": "apps/handlers/escalation.py",
       "standard": "logged_fallback",
       "lines": [
-        658
+        660
       ],
       "pattern": "_rollup_is_due sends anyway on an unreadable stamp",
       "reason": "An unreadable stamp must not mute the manager forever (fleet green leg 5, kept leg 10). True is the decision to send, taken on purpose, and the warning names the stamp.",
@@ -214,7 +214,7 @@
       "file": "apps/handlers/events/error_detected.py",
       "standard": "logged_fallback",
       "lines": [
-        155
+        167
       ],
       "pattern": "_read_log_context returns empty text on a read failure",
       "reason": "Fleet green leg 5, kept leg 10. Its caller runs right before the dispatch mail. A raise would drop a dispatch over an unreadable context, while empty text drops only the context section.",

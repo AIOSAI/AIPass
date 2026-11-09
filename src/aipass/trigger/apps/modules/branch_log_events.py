@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_log_events.py
 # Description: Branch log events module for log watcher public API
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-02-02
-# Modified: 2026-10-24
+# Modified: 2026-11-08
 # =============================================
 
 """
@@ -26,7 +26,7 @@ from aipass.trigger.apps.handlers.log_watcher import (
     get_watcher_status,
     clear_seen_hashes,
 )
-from aipass.trigger.apps.config import AIPASS_PKG_ROOT
+from rich.markup import escape
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -72,7 +72,9 @@ def start() -> bool:
 
     observer = start_branch_log_watcher()
     if observer:
-        logger.info(f"[TRIGGER] Branch log watcher started, monitoring: {AIPASS_PKG_ROOT}/*/logs/*.log")
+        logger.info(
+            "[TRIGGER] Branch log watcher started, monitoring: every declared citizen's logs/*.log (memory's door, re-read every 300s)"
+        )
         return True
     logger.error("[TRIGGER] Failed to start branch log watcher")
     return False
@@ -119,7 +121,7 @@ def print_help() -> None:
     console.print()
     console.rule("MONITORING")
     console.print()
-    console.print(f"  [dim]Path:[/dim]   {AIPASS_PKG_ROOT}/*/logs/*.log")
+    console.print("  [dim]Path:[/dim]   every declared citizen's logs/*.log (memory's door, re-read every 300s)")
     console.print("  [dim]Format:[/dim] Prax log format (timestamp | module | LEVEL | message)")
     console.print()
     console.rule("EVENTS FIRED")
@@ -162,7 +164,7 @@ def handle_command(command: str, args: list) -> bool:
     if command == "start":
         if start():
             success("Branch log watcher started")
-            console.print(f"   Monitoring: {AIPASS_PKG_ROOT}/*/logs/*.log")
+            console.print("   Monitoring: every declared citizen's logs/*.log (memory's door, re-read every 300s)")
             console.print("   Events: error_detected → AI_Mail error_handler")
         else:
             error("Failed to start branch log watcher")
@@ -180,6 +182,9 @@ def handle_command(command: str, args: list) -> bool:
         console.print(f"  Seen error hashes: {info['seen_hashes_count']}")
         console.print(f"  Pending flush: {info['pending_flush']}")
         console.print(f"  AIPASS root: {info['aipass_root']}")
+        console.print(f"  Fleet logs dirs: {len(info['watched_logs'])}")
+        for branch, logs_dir in info["watched_logs"]:
+            console.print(f"    {branch}  {escape(logs_dir)}")
     elif command == "reset":
         reset_hashes()
         success("Error deduplication hashes cleared")

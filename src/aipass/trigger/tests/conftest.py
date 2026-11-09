@@ -3,17 +3,17 @@
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for trigger tests
 # Created: 2025-11-08
-# Modified: 2026-11-02
-# Version: 1.6.2
+# Modified: 2026-11-08
+# Version: 1.7.0
 # Category: trigger/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.7.0 (2026-11-08): fleet fixture - a core citizen plus a declared external root, read through memory's door
 #   - v1.6.0 (2026-10-23): ci_lane fixture - the CI red lane on tmp_path with drone, mail, wake and feed faked
 #   - v1.5.1 (2026-10-10): Spawn-template temp_test_dir and sample_test_data removed; no live test requested them
 #   - v1.5.0 (2026-10-08): Escalation lane fixtures moved from test_escalation.py; log_watcher_infrastructure
 #     moved from test_log_watcher.py (its _mock_infrastructure); both at the oversize_test_file splits
 #   - v1.4.0 (2026-09-27): Template C1/C2 fixtures - pinned console width, command state reset
-#   - v1.3.0 (2026-09-12): Autouse catch-up state isolation (DPLAN-0339 step 2c)
 #
 # CODE STANDARDS:
 #   - Error handling: Use error handler system (apps/handlers/error/)
@@ -223,8 +223,7 @@ def medic(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
     monkeypatch.setattr(medic_state, "is_enabled", lambda: switches["medic_enabled"])
     monkeypatch.setattr(medic_state, "get_muted_branches", lambda: [])
     branch_registry = tmp_path / "AIPASS_REGISTRY.json"
-    branches = [{"email": "@flow"}, {"email": "@memory"}]
-    branch_registry.write_text(json.dumps({"branches": branches}), encoding="utf-8")
+    _write_registry(branch_registry, [{"email": "@flow"}, {"email": "@memory"}])
     monkeypatch.setattr(error_detected, "BRANCH_REGISTRY_FILE", branch_registry)
 
     return SimpleNamespace(
@@ -235,6 +234,54 @@ def medic(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
         suppressed=suppressed,
         switches=switches,
     )
+
+
+def _write_registry(path: Path, rows: List[Dict[str, str]]) -> None:
+    # The door keeps active rows with a path; a core path need not exist.
+    branches = [
+        {"path": f"src/aipass/{row.get('email', row.get('name', '')).lstrip('@').lower()}", **row} for row in rows
+    ]
+    path.write_text(json.dumps({"branches": [dict(row, status="active") for row in branches]}), encoding="utf-8")
+
+
+@pytest.fixture
+def fleet(tmp_path: Path) -> SimpleNamespace:
+    """A repo with core @flow and a declared external root holding @grow (logs/) and @sprout (none yet)."""
+    root = tmp_path / "home"
+    (root / "src" / "aipass" / "flow" / "logs").mkdir(parents=True)
+    _write_registry(root / "AIPASS_REGISTRY.json", [{"name": "FLOW", "email": "@flow", "path": "src/aipass/flow"}])
+    outside = tmp_path / "seed"
+    for name in ("grow", "sprout"):
+        (outside / name / ".trinity").mkdir(parents=True)
+        (outside / name / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+    (outside / "grow" / "logs").mkdir()
+    _write_registry(
+        outside / "SEED_REGISTRY.json",
+        [{"name": "GROW", "email": "@grow", "path": "grow"}, {"name": "SPROUT", "email": "@sprout", "path": "sprout"}],
+    )
+    roots = {"roots": [{"path": str(outside), "status": "active"}]}
+    (root / "AIPASS_ROOTS.json").write_text(json.dumps(roots), encoding="utf-8")
+    return SimpleNamespace(
+        root=root,
+        pkg_root=root / "src" / "aipass",
+        registry=root / "AIPASS_REGISTRY.json",
+        grow_logs=outside / "grow" / "logs",
+        sprout=outside / "sprout",
+    )
+
+
+def _tree_census(repo_root: Any = None, name_from: str = "path", strict: bool = False) -> List[Dict[str, Any]]:
+    """Memory's door stood in by the fake tree: every dir under lw.AIPASS_PKG_ROOT is a core citizen."""
+    root = lw.AIPASS_PKG_ROOT
+    if not root.is_dir():
+        return []
+    return [{"name": d.name, "path": d, "email": f"@{d.name}"} for d in root.iterdir() if d.is_dir()]
+
+
+@pytest.fixture(autouse=True)
+def _fresh_census_caches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The registered-email cache is per process; a test never inherits another test's fleet."""
+    monkeypatch.setattr(error_detected, "_registered_cache", (0.0, None))
 
 
 # Not autouse: the log watcher test files opt in through pytestmark.
@@ -270,6 +317,10 @@ def log_watcher_infrastructure(monkeypatch, tmp_path):
     monkeypatch.setattr(lw, "_data_dirty", False)
     monkeypatch.setattr(lw, "_last_flush_time", 0.0)
     monkeypatch.setattr(lw, "_branch_names_cache", (0.0, ()))
+    monkeypatch.setattr(lw, "_fleet_cache", (0.0, {}))
+    monkeypatch.setattr(lw, "_named_without_logs", set())
+    monkeypatch.setattr(lw, "_fleet_names", set())
+    monkeypatch.setattr(lw, "fleet_branches", _tree_census)
     monkeypatch.setattr(lw, "_fire_event", None)
     monkeypatch.setattr(lw, "_warning_capture_cache", (0.0, True))
 
@@ -317,7 +368,7 @@ def ci_lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
 
     registry = tmp_path / "AIPASS_REGISTRY.json"
     emails = ["@hooks", "@spawn", "@sentry", "@devpulse", "@trigger"]
-    registry.write_text(json.dumps({"branches": [{"email": e} for e in emails]}), encoding="utf-8")
+    _write_registry(registry, [{"email": e} for e in emails])
     monkeypatch.setattr(error_detected, "BRANCH_REGISTRY_FILE", registry)
     monkeypatch.setattr(medic_state, "MEDIC_STATE_FILE", tmp_path / "medic_state.json")
     monkeypatch.setattr(medic_state, "LEGACY_MEDIC_STATE_FILE", tmp_path / "trigger_config.json")

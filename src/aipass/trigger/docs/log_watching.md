@@ -4,8 +4,17 @@
 
 **Branch** trigger · **Code** `apps/handlers/log_watcher.py`, `apps/handlers/watchers/log_watcher.py`, `apps/modules/branch_log_events.py`, `apps/modules/log_events.py`
 
-The branch watcher reads `src/aipass/*/logs/*.log` and `system_logs/*.log`, parses the prax
-line format, and fires `error_detected` and `warning_logged`. The centralized watcher module
+The branch watcher reads `system_logs/*.log` and the `logs/*.log` of every declared citizen:
+core, resident and external, the rows of `fleet_branches()` from memory's door
+(`aipass.memory.apps.modules.door_registry_scope`). A project takes part by being declared in
+`AIPASS_ROOTS.json`; its registry makes its citizens real. A citizen with no `logs/` yet is
+skipped and named once at INFO. Each log dir's branch is its address (`@my_agent` is MY_AGENT,
+whatever the directory is called). The census is re-read at most every `FLEET_TTL_SECONDS`
+(300 s), checked on each log event: a newly declared root joins within five minutes of the
+next fleet write, with no restart, and its files start at EOF. The door logs each refused
+registry row at ERROR into memory's logs, which this watcher reads, so no census reader here
+calls it per event. `branch_log_events status` lists the dirs (`Fleet logs dirs:`). The watcher
+parses the prax line format and fires `error_detected` and `warning_logged`. The centralized watcher module
 still exists and deliberately declines to observe. Verbs:
 `drone @trigger branch_log_events --help` and `drone @trigger log_events --help`.
 

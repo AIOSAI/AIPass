@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_branch_log_events.py
 # Description: Unit tests for branch_log_events module
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """Tests for the branch_log_events module (apps/modules/branch_log_events.py)."""
@@ -48,6 +48,7 @@ def _mock_infrastructure(monkeypatch, tmp_path):
             "seen_hashes_count": 0,
             "pending_flush": False,
             "aipass_root": "/fake/path",
+            "watched_logs": [("GROW", "/seed/grow/logs")],
         }
     )
     mock_log_watcher.clear_seen_hashes = MagicMock()
@@ -59,7 +60,6 @@ def _mock_infrastructure(monkeypatch, tmp_path):
         "clear_seen_hashes",
     ):
         monkeypatch.setattr(mod, name, getattr(mock_log_watcher, name))
-    monkeypatch.setattr(mod, "AIPASS_PKG_ROOT", tmp_path)
     monkeypatch.setattr(mod, "service_state", lambda: "unknown")
 
     _MOCKS.clear()
@@ -310,7 +310,7 @@ def test_print_help_outputs_commands(capsys):
 
 
 def test_handle_command_status_prints_all_fields(capsys):
-    """handle_command('status', []) prints service, process, watchdog, hashes, pending flush, root."""
+    """handle_command('status', []) prints service, process, watchdog, hashes, pending flush, root, fleet dirs."""
     mod = _import_module()
     mod.handle_command("status", [])
     output = capsys.readouterr().out
@@ -320,6 +320,8 @@ def test_handle_command_status_prints_all_fields(capsys):
     assert "Seen error hashes:" in output
     assert "Pending flush: False" in output
     assert "AIPASS root:" in output
+    assert "Fleet logs dirs: 1" in output
+    assert "GROW  /seed/grow/logs" in output
 
 
 def test_help_flag_past_position_zero_does_not_run_the_verb(monkeypatch):

@@ -1,16 +1,15 @@
 # =================== AIPass ====================
 # Name: error_detected.py
 # Description: Error detected event handler with Medic v2 dispatch gating
-# Version: 2.10.0
+# Version: 2.11.0
 # Created: 2026-02-10
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """
 Error Detected Event Consumer
 """
 
-import json
 import time
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +18,7 @@ from aipass.trigger.apps.config import TRIGGER_ROOT, append_trail, trail_logger
 from aipass.trigger.apps.handlers.repo_root import find_repo_root
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers import escalation, medic_state
+from aipass.memory.apps.modules.door_registry_scope import fleet_branches
 
 # Not prax: this runs on the watched event path, so a prax line would fire straight back at it.
 logger = trail_logger(TRIGGER_ROOT / "logs" / "error_detected_handler.jsonl")
@@ -100,16 +100,28 @@ def set_send_email_callback(callback: Callable[..., bool]) -> None:
     _send_email = callback
 
 
+# TTL-bound: the door logs each refused row at ERROR into a log this lane watches, so a per-event read loops.
+REGISTERED_TTL_SECONDS = 60.0
+_registered_cache: tuple = (0.0, None)
+
+
 def _get_registered_emails() -> set:
-    """Read registered branch emails from AIPASS_REGISTRY.json."""
+    """Emails of every declared citizen (core, resident, external), read through memory's door."""
     # Unreadable raises, never answers empty: an empty set reads every branch as unregistered.
+    global _registered_cache
+    checked_at, cached = _registered_cache
+    now = time.monotonic()
+    if cached is not None and now - checked_at < REGISTERED_TTL_SECONDS:
+        return cached
     if not BRANCH_REGISTRY_FILE.exists():
         return set()
     try:
-        data = json.loads(BRANCH_REGISTRY_FILE.read_text(encoding="utf-8"))
-        return {b["email"] for b in data.get("branches", [])}
+        rows = fleet_branches(repo_root=BRANCH_REGISTRY_FILE.parent, name_from="registry", strict=True)
     except Exception as exc:
         raise RuntimeError(f"branch registry unreadable ({BRANCH_REGISTRY_FILE.name}): {exc}") from exc
+    emails = {row["email"] for row in rows if row.get("email")}
+    _registered_cache = (now, emails)
+    return emails
 
 
 def _is_rate_limited(branch_email: str) -> bool:

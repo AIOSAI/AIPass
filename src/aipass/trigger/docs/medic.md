@@ -17,7 +17,7 @@ Error monitoring subsystem. Watches branch and system logs for errors, fingerpri
 2. **Branch not muted** — per-branch suppression
 3. **Count >= 2** — first occurrence suppressed, dispatch on recurrence
 4. **Recipient is not `@devpulse`** — the manager is protected from self-dispatch. The code gates on the literal recipient string `@devpulse` in `error_detected.py`
-5. **Branch in registry** — target must be a registered citizen
+5. **Branch in the declared fleet** — the target's email is in `fleet_branches()` from memory's door: core, resident and external citizens, re-read at most every 60 s (`REGISTERED_TTL_SECONDS`)
 6. **Not suppressed + backoff elapsed** — `should_dispatch()` checks registry status first, then exponential backoff
 7. **Circuit breaker closed** — trips after 10 errors in 60s, 300s cooldown. It runs after the backoff check, so a half-open breaker's one probe goes to a fingerprint that would be sent. Every error past gate 3 still counts toward tripping, including one gate 6 refuses
 

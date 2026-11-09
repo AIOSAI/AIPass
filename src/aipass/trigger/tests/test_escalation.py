@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_escalation.py
 # Description: Tests for the escalation lane's signature, counting, windows, gates and state file
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-08
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """Tests for apps/handlers/escalation.py — the repeat signature, counting, windows, gates and state file."""
@@ -143,7 +143,12 @@ class TestSignatureFragmentation:
         """
         registry = tmp_path / "AIPASS_REGISTRY.json"
         names = ("SENTRY", "PRAX", "DRONE", "DEVPULSE", "DAEMON", "HOOKS", "AIPASS", "FLOW")
-        registry.write_text(json.dumps({"branches": [{"name": n} for n in names]}), encoding="utf-8")
+        registry.write_text(
+            json.dumps(
+                {"branches": [{"name": n, "status": "active", "path": f"src/aipass/{n.lower()}"} for n in names]}
+            ),
+            encoding="utf-8",
+        )
         monkeypatch.setattr(lane, "BRANCH_REGISTRY_FILE", registry)
         lane._branch_names_cache = (0.0, None)
 
@@ -235,12 +240,17 @@ class TestSignatureFragmentation:
         Freshness is TTL-bound, not mtime-bound: two quick writes can share st_mtime_ns.
         """
         registry = tmp_path / "AIPASS_REGISTRY.json"
-        registry.write_text(json.dumps({"branches": [{"name": "FLOW"}]}), encoding="utf-8")
+        registry.write_text(json.dumps({"branches": [_ACTIVE_FLOW]}), encoding="utf-8")
         monkeypatch.setattr(lane, "BRANCH_REGISTRY_FILE", registry)
         lane._branch_names_cache = (0.0, None)
 
         before = lane.compute_signature("WARNING", "prax", "q", "saw NEWBIE")
-        registry.write_text(json.dumps({"branches": [{"name": "FLOW"}, {"name": "NEWBIE"}]}), encoding="utf-8")
+        registry.write_text(
+            json.dumps(
+                {"branches": [_ACTIVE_FLOW, {"name": "NEWBIE", "status": "active", "path": "src/aipass/newbie"}]}
+            ),
+            encoding="utf-8",
+        )
         lane._branch_names_cache = (0.0, None)  # TTL elapsed
         after = lane.compute_signature("WARNING", "prax", "q", "saw NEWBIE")
 
@@ -252,7 +262,7 @@ class TestSignatureFragmentation:
         Mutant: the TTL early return in _branch_name_pattern made unconditional-false.
         """
         registry = tmp_path / "AIPASS_REGISTRY.json"
-        registry.write_text(json.dumps({"branches": [{"name": "FLOW"}]}), encoding="utf-8")
+        registry.write_text(json.dumps({"branches": [_ACTIVE_FLOW]}), encoding="utf-8")
         monkeypatch.setattr(lane, "BRANCH_REGISTRY_FILE", registry)
         lane._branch_names_cache = (0.0, None)
         warm = lane.compute_signature("WARNING", "prax", "q", "saw FLOW")
@@ -718,3 +728,20 @@ class TestConfigReadThrough:
 
         escalation._config_cache = (0.0, None)
         assert escalation.get_config()["warning_threshold"] == 7
+
+
+class TestNamesCollapseAcrossTheDeclaredFleet:
+    """The name collapse knows every citizen in the declared fleet, not only the core registry's."""
+
+    def test_an_external_citizens_name_collapses_like_a_core_one(self, lane, fleet, monkeypatch) -> None:
+        monkeypatch.setattr(lane, "BRANCH_REGISTRY_FILE", fleet.registry)
+        monkeypatch.setattr(lane, "_branch_names_cache", (0.0, None))
+
+        external = lane.compute_signature("WARNING", "prax", "q", "queue full (latest: log from GROW)")
+        core = lane.compute_signature("WARNING", "prax", "q", "queue full (latest: log from FLOW)")
+
+        assert external == core
+
+
+# Below every line-scoped bypass row: a constant inserted above one would unmoor it.
+_ACTIVE_FLOW = {"name": "FLOW", "status": "active", "path": "src/aipass/flow"}
