@@ -152,7 +152,7 @@
     {
       "file": "apps/aipass.py",
       "standard": "logged_fallback",
-      "lines": [290, 315],
+      "lines": [289, 314],
       "reason": "main() returns a process exit code. 1 is the failure code at every return that carries it (crash, unknown command, @target, import failure); success is 0 through resolve_exit, and a refusal is 2. The caller is the shell, and it tells failure from success. The crash also goes to stderr through error() and its traceback to the log (_log_crash, which never raises from the log). Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-13."
     },
     {

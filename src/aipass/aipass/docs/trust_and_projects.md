@@ -49,10 +49,32 @@ template, scaffold and repo init.
 
 ## Adopting one that already exists — `adopt`
 
-`aipass adopt <name>` turns an existing `projects/<name>` directory into a full
-project. It is **additive only**: it writes the scaffold a project is missing
-and never rewrites your files. `--no-agent` skips the resident agent,
-`--dry-run` prints what adoption would do and writes nothing.
+`aipass adopt <path>` turns an existing directory anywhere on disk into a
+project; a bare `<name>` means `<host>/projects/<name>`. It is **additive
+only**: it never rewrites a file that is already there. `--mode` picks the shape:
+
+| Mode | Writes | Tracked files | `.gitignore` |
+|------|--------|---------------|--------------|
+| `framework` (default) | registry, `.aipass/` and `.claude/` scaffold, switch files, a fresh resident agent | adds missing scaffold files | the AIPass local-state block is added first |
+| `contractor` | registry, `.aipass/hooks.json`, `tier0_kernel.md`, `tier1_navmap.md`, `.claude/settings.local.json` | none | untouched; every path it writes is listed in `.git/info/exclude` |
+
+Contractor mode needs the target's own git repo, and a project whose stack is
+not AIPass's. A tracked AIPass file (anything under `.aipass/`, a registry,
+`.updateignore`) is a **clash**: named in the plan, never overwritten, and a
+real run refuses until it is untracked. A fresh resident would sit in the
+project's `src/`, so contractor mode takes `--citizen @name` or `--no-agent`.
+
+`--citizen @name` brings an existing citizen instead of minting one: adopt runs
+`drone @spawn adopt-citizen @name <path>` and embeds its preview. @spawn seats
+the registry, the citizen's branch and their exclude lines. A refusal from
+@spawn stops adopt before its first write.
+
+Trust: either mode enrols the project when adopt writes `.aipass/hooks.json`.
+An existing `hooks.json` keeps the enrolment it has; after it changes,
+`aipass trust <path>` re-enrols it.
+
+`--dry-run` writes nothing and prints every path as `create`, `append`, `skip`
+or `clash`, each with its reason.
 
 Code: [`apps/modules/adopt.py`](../apps/modules/adopt.py) and
 [`apps/handlers/new_project/adopt.py`](../apps/handlers/new_project/adopt.py).

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: spawn.py
 # Description: Entry point CLI for drone @spawn
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """
@@ -79,6 +79,9 @@ def print_help():
     console.print("  [green]grant-admin[/green]                    Ceremony: write admin:true onto the devpulse entry")
     console.print("  [green]grant-ci-cure[/green]                  Ceremony: write ci_cure:true onto the trigger entry")
     console.print("  [green]owner[/green] @citizen                 Move a project's owner seat (preview; add --apply)")
+    console.print(
+        "  [green]adopt-citizen[/green] @name <root>      Move a citizen whole into another project (preview; add --apply)"
+    )
     console.print()
     console.print("[bold cyan]CITIZEN CLASSES:[/bold cyan]")
     console.print()
@@ -354,6 +357,9 @@ def print_introspection():
         "    [dim]- grant-admin, grant-ci-cure: grant_admin.py (handle_grant_admin, handle_grant_ci_cure — registry seat flag ceremonies)[/dim]"
     )
     console.print("    [dim]- owner: grant_admin.py (handle_owner — moves a project's owner seat)[/dim]")
+    console.print(
+        "    [dim]- adopt-citizen: adopt_citizen.py (handle_adopt_citizen — move a citizen across projects)[/dim]"
+    )
     console.print()
     console.print("[dim]Run 'drone @spawn --help' for usage information[/dim]")
     console.print()
@@ -447,6 +453,11 @@ def main():
         from aipass.spawn.apps.modules.grant_admin import handle_owner
 
         return _resolved(handle_owner(remaining))
+
+    if command == "adopt-citizen":
+        from aipass.spawn.apps.modules.adopt_citizen import handle_adopt_citizen
+
+        return _resolved(handle_adopt_citizen(remaining))
 
     error(f"Unknown command: {command}", suggestion="Run 'drone @spawn --help' for available commands")
     return 1

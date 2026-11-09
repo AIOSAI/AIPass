@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_repair.py
-# Description: Tests for repair handler — move, registry path update, pollution cleanup
-# Version: 1.0.4
+# Description: Tests for repair and adopt-citizen — move, rename, pollution, cross-project adoption
+# Version: 1.1.0
 # Created: 2026-05-15
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
-"""Tests for apps/handlers/repair_ops.py — move_branch, update_registry_path, pollution cleanup."""
+"""Tests for apps/handlers/repair_ops.py and adopt_citizen_ops.py — move, rename, pollution, adopt-citizen."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that every file in apps/handlers/ and apps/modules/ parses and imports
@@ -14,12 +14,14 @@
 
 import json
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from aipass.spawn.apps.handlers import repair_ops
+from aipass.spawn.apps.handlers import adopt_citizen_ops, repair_ops
 from aipass.spawn.apps.handlers.class_registry import get_template_dir
 from aipass.spawn.apps.handlers.delete_ops import ARCHIVE_EXCLUDE as delete_ops_archive_exclude
 from aipass.spawn.apps.handlers.delete_ops import delete_branch
@@ -36,7 +38,7 @@ from aipass.spawn.apps.handlers.repair_ops import (
 from aipass.spawn.apps.modules.repair import handle_repair
 from aipass.spawn.apps.spawn import main
 
-# Also exercises apps/spawn.py's CLI routing into the repair module, and the shared
+# Also exercises apps/spawn.py's CLI routing into the repair and adopt-citizen modules, and the shared
 # ARCHIVE_EXCLUDE / is_protected helpers repair_ops and delete_ops both draw on.
 
 
@@ -1240,3 +1242,217 @@ class TestRegistryLookupIsCaseSensitive:
             "an unfiltered registry glob is back at line(s) "
             f"{inline} — route it through _registry_in, which case-checks the name"
         )
+
+
+def _git(repo, *args):
+    """Run git in a fixture repo; the product's own git calls are read-only."""
+    ident = ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"]
+    subprocess.run(["git", "-C", str(repo), *ident, *args], check=True, capture_output=True)
+
+
+def _adopt_pair(tmp_path, monkeypatch, tracked=(), messages=()):
+    """AIPass home with a core citizen, project SRC holding @grow, and a git target 'seed'."""
+    home = tmp_path / "home"
+    (home / "src" / "aipass" / "core").mkdir(parents=True)
+    core_row = {"name": "CORE", "path": "src/aipass/core", "registry_id": "cid-core"}
+    (home / "AIPASS_REGISTRY.json").write_text(
+        json.dumps({"metadata": {"id": "pid-aipass"}, "branches": [core_row]}), encoding="utf-8"
+    )
+    source_root = home / "projects" / "src"
+    branch = source_root / "src" / "grow" / "grow"
+    (branch / ".trinity").mkdir(parents=True)
+    (branch / ".ai_mail.local").mkdir()
+    passport = {
+        "branch_info": {"branch_name": "grow", "path": "src/grow/grow"},
+        "citizenship": {"citizen_id": "cid-grow", "registry_id": "pid-src", "registry_path": "SRC_REGISTRY.json"},
+        "identity": {"citizen_class": "specialist"},
+    }
+    (branch / ".trinity" / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+    (branch / ".trinity" / "local.json").write_text('{"sessions": ["kept"]}', encoding="utf-8")
+    inbox = {"mailbox": "grow", "messages": list(messages)}
+    (branch / ".ai_mail.local" / "inbox.json").write_text(json.dumps(inbox), encoding="utf-8")
+    row = {"name": "GROW", "path": "src/grow/grow", "email": "@grow", "registry_id": "cid-grow", "custom": "kept"}
+    (source_root / "SRC_REGISTRY.json").write_text(
+        json.dumps({"metadata": {"id": "pid-src"}, "branches": [row]}), encoding="utf-8"
+    )
+    target = tmp_path / "seed"
+    target.mkdir()
+    (target / "README.md").write_text("client file", encoding="utf-8")
+    for rel in tracked:
+        (target / rel).parent.mkdir(parents=True, exist_ok=True)
+        (target / rel).write_text("tracked", encoding="utf-8")
+    _git(target, "init", "-q")
+    _git(target, "add", "-A")
+    _git(target, "commit", "-q", "-m", "client")
+    monkeypatch.setattr(adopt_citizen_ops, "repo_root", lambda: home)
+    monkeypatch.setenv("HOME", str(tmp_path / "user"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "user"))
+    return source_root, branch, target
+
+
+def _adopt(monkeypatch, capsys, *argv):
+    """Run `drone @spawn adopt-citizen ...` through spawn's entry point; (exit, stdout, stderr)."""
+    monkeypatch.setattr(sys, "argv", ["spawn", "adopt-citizen", *argv])
+    code = main()
+    out, err = capsys.readouterr()
+    return code, out, err
+
+
+def _tree(*roots):
+    """Every path and file's bytes under the given roots."""
+    return {p: (p.read_bytes() if p.is_file() else None) for root in roots for p in sorted(root.rglob("*"))}
+
+
+def _rows(out):
+    """(action, path) pairs of a --json preview."""
+    return {(r["action"], r["path"]) for r in json.loads(out)["paths"]}
+
+
+class TestAdoptCitizen:
+    """adopt-citizen @name <root> — move a citizen whole into another project, preview first."""
+
+    def test_a_preview_writes_nothing_in_either_project(self, tmp_path, monkeypatch, capsys):
+        source_root, _branch, target = _adopt_pair(tmp_path, monkeypatch)
+        before = _tree(source_root, target)
+
+        code, _out, _err = _adopt(monkeypatch, capsys, "@grow", str(target))
+
+        assert code == 0
+        assert _tree(source_root, target) == before
+
+    def test_a_preview_lists_every_write_and_the_follow_ups_and_is_ready(self, tmp_path, monkeypatch, capsys):
+        source_root, branch, target = _adopt_pair(tmp_path, monkeypatch)
+
+        code, out, _err = _adopt(monkeypatch, capsys, "@grow", str(target))
+        jcode, jout, _jerr = _adopt(monkeypatch, capsys, "@grow", str(target), "--json")
+
+        assert (code, jcode) == (0, 0)
+        assert "(preview, nothing written)" in out and "result    ready" in out
+        assert {
+            ("create", "SEED_REGISTRY.json"),
+            ("create", ".SEED_REGISTRY.lock"),
+            ("move", "grow/"),
+            ("edit", "grow/.trinity/passport.json"),
+            ("append", ".git/info/exclude"),
+            ("edit", str(source_root / "SRC_REGISTRY.json")),
+        } <= _rows(jout)
+        plan = json.loads(jout)
+        assert (plan["source_dir"], plan["dest_dir"]) == (str(branch), str(target / "grow"))
+        assert plan["class"] == {"from": "specialist", "to": "manager"}
+        owners = {f["owner"] for f in plan["follow_ups"]}
+        assert {"@memory", "@hooks", "@devpulse"} <= owners
+        assert plan["blocked"] == [] and plan["applied"] is False
+
+    def test_apply_moves_the_citizen_whole_and_proves_its_identity(self, tmp_path, monkeypatch, capsys):
+        source_root, branch, target = _adopt_pair(tmp_path, monkeypatch)
+        local_before = (branch / ".trinity" / "local.json").read_bytes()
+        inbox_before = (branch / ".ai_mail.local" / "inbox.json").read_bytes()
+
+        code, out, _err = _adopt(monkeypatch, capsys, "@grow", str(target), "--apply", "--json")
+
+        dest = target / "grow"
+        assert code == 0 and not branch.exists()
+        assert (dest / ".trinity" / "local.json").read_bytes() == local_before
+        assert (dest / ".ai_mail.local" / "inbox.json").read_bytes() == inbox_before
+        registry = json.loads((target / "SEED_REGISTRY.json").read_text(encoding="utf-8"))
+        passport = json.loads((dest / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+        assert passport["branch_info"]["path"] == "grow"
+        assert passport["citizenship"] == {
+            "citizen_id": "cid-grow",
+            "registry_id": registry["metadata"]["id"],
+            "registry_path": "SEED_REGISTRY.json",
+            "residency": "external",
+        }
+        assert registry["metadata"]["id"] not in ("", "pid-src")
+        assert passport["identity"]["citizen_class"] == "manager"
+        row = registry["branches"][0]
+        assert (row["name"], row["path"], row["registry_id"], row["owner"], row["custom"]) == (
+            "GROW",
+            "grow",
+            "cid-grow",
+            True,
+            "kept",
+        )
+        assert json.loads((source_root / "SRC_REGISTRY.json").read_text(encoding="utf-8"))["branches"] == []
+        exclude = (target / ".git" / "info" / "exclude").read_text(encoding="utf-8").splitlines()
+        assert {"/SEED_REGISTRY.json", "/.SEED_REGISTRY.lock", "/grow/"} <= set(exclude)
+        result = json.loads(out)
+        assert result["applied"] is True
+        assert result["proof"]["citizen_id_matches_row"] is True
+        assert result["proof"]["registry_resolves_dest"] is True
+
+    def test_a_tracked_path_spawn_would_write_is_a_clash_and_nothing_is_written(self, tmp_path, monkeypatch, capsys):
+        source_root, _branch, target = _adopt_pair(tmp_path, monkeypatch, tracked=[".SEED_REGISTRY.lock"])
+        before = _tree(source_root, target)
+
+        code, out, _err = _adopt(monkeypatch, capsys, "@grow", str(target), "--apply", "--json")
+
+        assert code == 1
+        assert ("clash", ".SEED_REGISTRY.lock") in _rows(out)
+        assert json.loads(out)["applied"] is False
+        assert _tree(source_root, target) == before
+
+    def test_a_tracked_aipass_leftover_is_one_clash_and_blocks(self, tmp_path, monkeypatch, capsys):
+        _source_root, _branch, target = _adopt_pair(
+            tmp_path, monkeypatch, tracked=[".aipass/hooks.json", ".aipass/tier0.md"]
+        )
+
+        code, out, _err = _adopt(monkeypatch, capsys, "@grow", str(target), "--json")
+
+        assert code == 1
+        assert [r for r in json.loads(out)["paths"] if r["path"].startswith(".aipass")] == [
+            {"action": "clash", "path": ".aipass/", "reason": "tracked AIPass leftover; untrack before --apply"}
+        ]
+        assert json.loads(out)["blocked"]
+
+    def test_a_tracked_agents_md_is_a_skip_row_and_never_blocks(self, tmp_path, monkeypatch, capsys):
+        _source_root, _branch, target = _adopt_pair(tmp_path, monkeypatch, tracked=["AGENTS.md"])
+
+        code, out, _err = _adopt(monkeypatch, capsys, "@grow", str(target), "--json")
+
+        assert code == 0
+        assert [r["action"] for r in json.loads(out)["paths"] if r["path"] == "AGENTS.md"] == ["skip"]
+        assert json.loads(out)["blocked"] == []
+
+    def test_a_missing_target_is_refused(self, tmp_path, monkeypatch, capsys):
+        source_root, _branch, _target = _adopt_pair(tmp_path, monkeypatch)
+        before = _tree(source_root)
+
+        code, out, err = _adopt(monkeypatch, capsys, "@grow", str(tmp_path / "nowhere"), "--apply")
+
+        assert code == 1
+        assert "does not exist" in out and "blocked" in err
+        assert _tree(source_root) == before
+
+    def test_an_open_dispatch_is_refused_by_its_id(self, tmp_path, monkeypatch, capsys):
+        messages = [
+            {"id": "aaaa1111", "auto_execute": True, "status": "opened"},
+            {"id": "bbbb2222", "auto_execute": True, "status": "closed"},
+            {"id": "cccc3333", "auto_execute": False, "status": "new"},
+        ]
+        _source_root, _branch, target = _adopt_pair(tmp_path, monkeypatch, messages=messages)
+
+        code, out, _err = _adopt(monkeypatch, capsys, "@grow", str(target), "--json")
+
+        blocked = " ".join(json.loads(out)["blocked"])
+        assert code == 1
+        assert "aaaa1111" in blocked
+        assert "bbbb2222" not in blocked and "cccc3333" not in blocked
+
+    def test_a_core_citizen_never_leaves_aipass(self, tmp_path, monkeypatch, capsys):
+        _source_root, _branch, target = _adopt_pair(tmp_path, monkeypatch)
+
+        code, out, _err = _adopt(monkeypatch, capsys, "@core", str(target), "--json")
+
+        assert code == 1
+        assert "AIPASS_REGISTRY.json" in " ".join(json.loads(out)["blocked"])
+
+    def test_an_apply_whose_proof_fails_exits_1(self, tmp_path, monkeypatch, capsys):
+        _source_root, _branch, target = _adopt_pair(tmp_path, monkeypatch)
+        broken = {"citizen_id_matches_row": False, "registry_resolves_dest": True, "drone_resolution": "n/a"}
+        monkeypatch.setattr(adopt_citizen_ops, "_prove", lambda *_a: broken)
+
+        code, out, _err = _adopt(monkeypatch, capsys, "@grow", str(target), "--apply", "--json")
+
+        assert code == 1
+        assert "proof failed: citizen_id_matches_row" in json.loads(out)["blocked"]

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_adopt.py
 # Description: Tests for aipass adopt — project adoption handler
-# Version: 1.3.2
+# Version: 1.4.0
 # Created: 2026-07-20
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """Tests for apps/handlers/new_project/adopt.py and apps/modules/adopt.py."""
@@ -22,6 +22,7 @@ from unittest.mock import patch
 import pytest  # pyright: ignore[reportMissingImports]
 
 from aipass.aipass.apps.aipass import print_introspection
+from aipass.aipass.apps.handlers.new_project import adopt as adopt_handler
 from aipass.aipass.apps.handlers.new_project.adopt import (
     GITIGNORE_MARKER,
     adopt_project,
@@ -54,6 +55,68 @@ def _no_home():
     )
 
 
+def _fake_home(tmp_path: Path) -> Path:
+    """An AIPASS_HOME carrying the two templates adopt copies."""
+    home = tmp_path / "aipass_home"
+    (home / ".aipass").mkdir(parents=True)
+    (home / ".aipass" / "project_hooks.json").write_text('{"hooks_enabled": true}\n', encoding="utf-8")
+    (home / ".aipass" / "tier0_kernel.md").write_text("# kernel\n", encoding="utf-8")
+    return home
+
+
+def _git(cwd: Path, *args: str) -> str:
+    cmd = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", *args]
+    return subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True, encoding="utf-8").stdout
+
+
+@pytest.fixture()
+def client_repo(tmp_path):
+    """A client repo on its own stack: tracked code, .gitignore and AGENTS.md, one commit."""
+    repo = tmp_path / "Projects" / "seed"
+    (repo / "src").mkdir(parents=True)
+    (repo / "src" / "app.ts").write_text("export {};\n", encoding="utf-8")
+    (repo / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
+    (repo / "AGENTS.md").write_text("# Seed contributors\n", encoding="utf-8")
+    _git(repo, "init", "-q")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "client")
+    return repo
+
+
+def _tree(root: Path) -> dict:
+    """Every file under *root*, .git/info/exclude included, mapped to its bytes."""
+    return {
+        p.relative_to(root).as_posix(): p.read_bytes()
+        for p in root.rglob("*")
+        if p.is_file() and (".git" not in p.relative_to(root).parts or p.name == "exclude")
+    }
+
+
+def _contractor(repo: Path, home: Path, **kwargs):
+    with (
+        patch("aipass.aipass.apps.handlers.new_project.adopt._detect_aipass_home", return_value=str(home)),
+        patch("aipass.aipass.apps.handlers.new_project.adopt.is_throwaway_path", return_value=False),
+        patch("aipass.aipass.apps.handlers.new_project.adopt._enroll_project") as enroll,
+    ):
+        return adopt_project(repo, **{"mode": "contractor", **kwargs}), enroll
+
+
+def _actions(result: dict) -> dict:
+    return {row["path"]: row["action"] for row in result["rows"]}
+
+
+class _Drone:
+    """Stands in for @spawn's door: records each call, answers with a fixed CompletedProcess."""
+
+    def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = ""):
+        self.calls: list = []
+        self.answer = subprocess.CompletedProcess([], returncode, stdout, stderr)
+
+    def __call__(self, args, **_kwargs):
+        self.calls.append(list(args))
+        return self.answer
+
+
 # ---------------------------------------------------------------------------
 # adopt_project — guards / refusals
 # ---------------------------------------------------------------------------
@@ -64,12 +127,21 @@ def test_adopt_rejects_missing_target(tmp_path):
         adopt_project(tmp_path / "nope")
 
 
-def test_adopt_rejects_non_projects_child(tmp_path):
-    (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+def test_framework_adopts_a_directory_outside_projects_with_no_host_fence(tmp_path):
     outside = tmp_path / "elsewhere" / "myapp"
     outside.mkdir(parents=True)
-    with pytest.raises(RuntimeError, match="not <host>/projects/<name>"):
-        adopt_project(outside)
+    home = _fake_home(tmp_path)
+    with (
+        patch("aipass.aipass.apps.handlers.new_project.adopt._detect_aipass_home", return_value=str(home)),
+        patch("aipass.aipass.apps.handlers.new_project.adopt.is_throwaway_path", return_value=False),
+        patch("aipass.aipass.apps.handlers.new_project.adopt._enroll_project"),
+    ):
+        result = adopt_project(outside, no_agent=True)
+    assert (outside / "MYAPP_REGISTRY.json").is_file()
+    assert result["mode"] == "framework"
+    local = json.loads((outside / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
+    assert local["env"]["AIPASS_HOME"] == str(home)
+    assert "claudeMdExcludes" not in local
 
 
 def test_adopt_rejects_already_adopted(host_env):
@@ -536,7 +608,7 @@ def test_aipass_public_commands_includes_adopt(capsys: pytest.CaptureFixture[str
     """
     print_introspection([adopt_module])
     out = capsys.readouterr().out
-    assert "Turn an existing projects/ directory into a full project" in out
+    assert "Turn an existing directory anywhere into a project" in out
 
 
 def test_adopt_writes_the_prep_skill_the_switch_pair_and_links_claude_skills_to_it(host_env):
@@ -563,3 +635,136 @@ def test_an_adopt_dry_run_plans_the_skill_link_and_makes_neither(host_env):
     assert str(target / ".claude" / "skills") in result["files"]
     assert not (target / ".claude" / "skills").exists()
     assert not (target / ".agents").exists()
+
+
+def test_a_framework_dry_run_names_a_present_file_as_skip_rather_than_omitting_it(host_env):
+    _, target = host_env
+    (target / "AGENTS.md").write_text("# mine\n", encoding="utf-8")
+    with _no_home():
+        result = adopt_project(target, no_agent=True, dry_run=True)
+    assert _actions(result)["AGENTS.md"] == "skip"
+    assert _actions(result)[".gitignore"] == "create"
+
+
+# ---------------------------------------------------------------------------
+# contractor mode: no tracked file changes, local state in .git/info/exclude
+# ---------------------------------------------------------------------------
+
+
+class TestContractorMode:
+    def test_a_dry_run_writes_nothing_and_names_every_path_with_its_action(self, client_repo, tmp_path):
+        home = _fake_home(tmp_path)
+        before = _tree(client_repo)
+        result, enroll = _contractor(client_repo, home, no_agent=True, dry_run=True)
+        assert _tree(client_repo) == before
+        enroll.assert_not_called()
+        actions = _actions(result)
+        assert actions["SEED_REGISTRY.json"] == "create"
+        assert actions[".aipass/hooks.json"] == "create"
+        assert actions[".claude/settings.local.json"] == "create"
+        assert actions[".gitignore"] == "skip"
+        assert actions["AGENTS.md"] == "skip"
+        assert actions[".git/info/exclude"] == "append"
+        assert all(row["reason"] for row in result["rows"])
+
+    def test_apply_leaves_git_status_clean_and_never_touches_gitignore(self, client_repo, tmp_path):
+        home = _fake_home(tmp_path)
+        gitignore = (client_repo / ".gitignore").read_bytes()
+        result, enroll = _contractor(client_repo, home, no_agent=True)
+        assert _git(client_repo, "status", "--porcelain", "--untracked-files=all") == ""
+        assert (client_repo / ".gitignore").read_bytes() == gitignore
+        assert (client_repo / "SEED_REGISTRY.json").is_file()
+        assert (client_repo / ".aipass" / "hooks.json").read_text(encoding="utf-8") == '{"hooks_enabled": true}\n'
+        assert result["gitignore_action"] == "untouched"
+        enroll.assert_called_once_with(client_repo.resolve())
+
+    def test_a_rerun_appends_no_exclude_line_twice(self, client_repo, tmp_path):
+        home = _fake_home(tmp_path)
+        _contractor(client_repo, home, no_agent=True)
+        (client_repo / "SEED_REGISTRY.json").rename(client_repo / "registry.bak")
+        _contractor(client_repo, home, no_agent=True)
+        lines = (client_repo / ".git" / "info" / "exclude").read_text(encoding="utf-8").splitlines()
+        assert lines.count("/SEED_REGISTRY.json") == 1
+
+    def test_a_tracked_aipass_file_is_a_named_clash_and_apply_refuses_before_any_write(self, client_repo, tmp_path):
+        home = _fake_home(tmp_path)
+        (client_repo / ".aipass").mkdir()
+        (client_repo / ".aipass" / "hooks.json").write_text('{"old": {}}\n', encoding="utf-8")
+        (client_repo / ".aipass" / "tier1_navmap.md").write_text("old\n", encoding="utf-8")
+        _git(client_repo, "add", "-A")
+        _git(client_repo, "commit", "-q", "-m", "leftover")
+        preview, _ = _contractor(client_repo, home, no_agent=True, dry_run=True)
+        assert _actions(preview)[".aipass/hooks.json"] == "clash"
+        assert _actions(preview)[".aipass/tier1_navmap.md"] == "clash"
+        before = _tree(client_repo)
+        with pytest.raises(RuntimeError, match=r"\.aipass/hooks\.json"):
+            _contractor(client_repo, home, no_agent=True)
+        assert _tree(client_repo) == before
+
+    def test_a_directory_without_its_own_git_repo_is_refused(self, tmp_path):
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        with pytest.raises(RuntimeError, match="git repo"):
+            _contractor(plain, _fake_home(tmp_path), no_agent=True, dry_run=True)
+
+    def test_a_fresh_resident_is_refused_since_it_would_land_in_the_client_src(self, client_repo, tmp_path):
+        with pytest.raises(RuntimeError, match="--citizen"):
+            _contractor(client_repo, _fake_home(tmp_path), dry_run=True)
+
+
+# ---------------------------------------------------------------------------
+# --citizen @name: @spawn adopt-citizen brings the citizen and seats the registry
+# ---------------------------------------------------------------------------
+
+
+class TestCitizen:
+    def test_the_preview_embeds_spawn_verbatim_and_leaves_the_registry_to_spawn(
+        self, client_repo, tmp_path, monkeypatch
+    ):
+        drone = _Drone(stdout="  move   grow/  @grow's branch\n")
+        monkeypatch.setattr(adopt_handler, "_run_drone", drone)
+        result, _ = _contractor(client_repo, _fake_home(tmp_path), citizen="@grow", dry_run=True)
+        assert drone.calls == [["drone", "@spawn", "adopt-citizen", "@grow", str(client_repo.resolve())]]
+        assert result["citizen"] == {
+            "name": "@grow",
+            "ok": True,
+            "output": "  move   grow/  @grow's branch",
+            "reason": "",
+        }
+        assert _actions(result)["SEED_REGISTRY.json"] == "skip"
+        assert (
+            "/SEED_REGISTRY.json" not in next(r for r in result["rows"] if r["path"] == ".git/info/exclude")["reason"]
+        )
+
+    def test_apply_runs_spawn_with_apply_after_the_local_writes(self, client_repo, tmp_path, monkeypatch):
+        drone = _Drone(stdout="moved")
+        monkeypatch.setattr(adopt_handler, "_run_drone", drone)
+        _contractor(client_repo, _fake_home(tmp_path), citizen="@grow")
+        assert drone.calls[-1][-1] == "--apply"
+        assert (client_repo / ".aipass" / "hooks.json").is_file()
+        assert not (client_repo / "SEED_REGISTRY.json").exists()
+
+    def test_a_spawn_refusal_blocks_apply_before_any_write(self, client_repo, tmp_path, monkeypatch):
+        monkeypatch.setattr(adopt_handler, "_run_drone", _Drone(returncode=1, stderr="refused: open dispatch"))
+        before = _tree(client_repo)
+        with pytest.raises(RuntimeError, match="refused: open dispatch"):
+            _contractor(client_repo, _fake_home(tmp_path), citizen="@grow")
+        assert _tree(client_repo) == before
+
+    def test_a_name_without_the_at_sign_is_refused_before_spawn_is_called(self, client_repo, tmp_path, monkeypatch):
+        drone = _Drone()
+        monkeypatch.setattr(adopt_handler, "_run_drone", drone)
+        with pytest.raises(RuntimeError, match="@name"):
+            _contractor(client_repo, _fake_home(tmp_path), citizen="grow; rm", dry_run=True)
+        assert drone.calls == []
+
+    def test_the_command_prints_each_row_and_spawn_preview(self, client_repo, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(adopt_handler, "_run_drone", _Drone(stdout="SPAWN PREVIEW LINE"))
+        home = _fake_home(tmp_path)
+        with patch("aipass.aipass.apps.handlers.new_project.adopt._detect_aipass_home", return_value=str(home)):
+            handle_command("adopt", [str(client_repo), "--mode", "contractor", "--citizen", "@grow", "--dry-run"])
+        printed = " ".join(capsys.readouterr().out.split())
+        assert "create .aipass/hooks.json" in printed
+        assert "skip .gitignore" in printed
+        assert "SPAWN PREVIEW LINE" in printed
+        assert not (client_repo / ".aipass").exists()

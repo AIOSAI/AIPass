@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: aipass.py
 # Description: AIPASS branch entry point — thin command router
-# Version: 0.5.2
+# Version: 0.5.3
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-11-08
 # =============================================
 
 """
@@ -42,7 +42,7 @@ except ModuleNotFoundError:  # pragma: no cover — Python 3.10
 
 
 _PUBLIC_COMMANDS = {
-    "adopt": "Turn an existing projects/ directory into a full project",
+    "adopt": "Turn an existing directory anywhere into a project",
     "baud": "Install the baud phone face from a release",
     "doctor": "System health — structure, registry, hooks, tests",
     "handoff": "Launch your CLI in a new session",
@@ -201,8 +201,7 @@ def print_help(modules: List[Any] | None = None) -> None:
     console.print("  [green]install[/green]                      [dim]Bootstrap — clone, setup.sh, hooks, chat[/dim]")
     console.print("  [green]new <name>[/green]                   [dim]Create a project inside AIPass[/dim]")
     console.print(
-        "  [green]adopt <name>[/green]                 "
-        "[dim]Turn an existing projects/ directory into a full project[/dim]"
+        "  [green]adopt <name>[/green]                 [dim]Turn an existing directory anywhere into a project[/dim]"
     )
     console.print("  [green]profile[/green]                      [dim]Show/edit user profile[/dim]")
     console.print(

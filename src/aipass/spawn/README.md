@@ -82,7 +82,7 @@ Three layers. `apps/spawn.py` is a thin entry point: it intercepts the help and 
 flags before parsing, routes a verb to the first module that claims it, and resolves the
 exit code so a refusal can never leave as success. `apps/modules/` holds one coordinator per
 surface — `core` (mint and adopt), `update`, `delete`, `retire_project`, `sync_registry`,
-`regenerate_registry`, `migrate_passports`, `export_seeds`, `repair` and `grant_admin` —
+`regenerate_registry`, `migrate_passports`, `export_seeds`, `repair`, `adopt_citizen` and `grant_admin` —
 each parsing arguments and delegating. Two door modules, `door_owner` and
 `door_class_registry`, are no commands: they re-export handler names for other branches,
 because `apps/handlers/__init__.py` is a fence that refuses a foreign importer.
@@ -90,7 +90,7 @@ because `apps/handlers/__init__.py` is a fence that refuses a foreign importer.
 concern: the template lanes (`file_ops`, `placeholders`, `meta_ops`, `mint_verify`,
 `class_registry`, `docs_page`), the identity lanes (`registry`, `passport_migration`, `seed_ops`,
 `receipt_ops`, `adoption_ops`), the engines (`update_ops`, `update_ignore`, `delete_ops`, `deletion_receipts`,
-`sync_registry_ops`, `regenerate_registry_ops`, `repair_ops`), and the primitives
+`sync_registry_ops`, `regenerate_registry_ops`, `repair_ops`, `adopt_citizen_ops`), and the primitives
 (`atomic_write`, `metadata`, and the fleet json shim under `json/`).
 
 `templates/citizen/` is the one template both classes mint from, and its
@@ -114,6 +114,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | [docs/birth.md](docs/birth.md) | Citizen classes, the mint pipeline step by step, the birth receipt, the newborn budget contract, adoption, the Python API |
 | [docs/update_engine.md](docs/update_engine.md) | The template walk, `.updateignore`, markdown drift, the list policy, the passport heal, create-only paths |
 | [docs/registry_and_repair.md](docs/registry_and_repair.md) | Registry entry shapes, sync and fix modes, passport migration, seeds, template registry regeneration, repair, the admin ceremony |
+| [docs/adopt_citizen.md](docs/adopt_citizen.md) | Moving a citizen whole into another project: the preview rows, follow-ups, apply order and proof |
 | [docs/retire.md](docs/retire.md) | Archive then deregister, delete by path, `retire-project` from the admin seat, receipt rows |
 | [docs/cli_contract.md](docs/cli_contract.md) | Exit codes and the refusal seam, introspection, the class-registry import door, the docs page skeleton door |
 | [docs/tests_and_quality.md](docs/tests_and_quality.md) | What each test file pins, and the command that produces every number |
