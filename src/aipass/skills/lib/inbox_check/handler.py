@@ -2,8 +2,8 @@
 # META DATA HEADER
 # Name: handler.py - Inbox Check skill handler
 # Date: 2026-03-29
-# Version: 1.1.0
-# Modified: 2026-10-24
+# Version: 1.2.0
+# Modified: 2026-11-09
 # Category: skills/lib/inbox_check
 # =============================================
 
@@ -15,6 +15,8 @@ Called by: drone @skills run inbox_check <action>
 
 import json
 from pathlib import Path
+
+from aipass.memory.apps.modules import door_registry_scope
 
 
 def run(action, args=None, config=None):
@@ -46,16 +48,11 @@ def _src_root():
 
 
 def _find_inboxes():
-    """Yield (branch_name, inbox_path) for all branches with inbox files."""
-    src = _src_root()
-
-    aipass_dir = src / "aipass"
-    if aipass_dir.is_dir():
-        for branch_dir in sorted(aipass_dir.iterdir()):
-            if branch_dir.is_dir():
-                inbox = branch_dir / ".ai_mail.local" / "inbox.json"
-                if inbox.is_file():
-                    yield (branch_dir.name, inbox)
+    """Yield (branch_name, inbox_path) for every citizen memory's door reports that has an inbox."""
+    for row in door_registry_scope.fleet_branches():
+        inbox = Path(row["path"]) / ".ai_mail.local" / "inbox.json"
+        if inbox.is_file():
+            yield (row["name"], inbox)
 
 
 def _read_inbox(inbox_path):

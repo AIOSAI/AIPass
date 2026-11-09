@@ -3,15 +3,16 @@
 # Description: Unit tests for skills runner
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-11-02
+# Modified: 2026-11-09
 # Category: skills/tests
 # =============================================
 
-"""Tests for apps/modules/runner.py and the built-in skills it runs (system_status, drone_commands, branch_health, inbox_check)."""
+"""Tests for apps/modules/runner.py and the built-in skills it runs."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that runner.py and runner_handler.py parse and import
 
+import json
 import os
 import subprocess
 import time
@@ -19,6 +20,7 @@ from collections import namedtuple
 
 import pytest
 
+from aipass.memory.apps.modules import door_registry_scope
 from aipass.skills.apps.modules.loader import load_skill
 from aipass.skills.apps.modules.runner import handle_command, run_skill
 
@@ -100,6 +102,44 @@ class TestABranchNameIsNeverAPath:
         result = run_skill(skill, action=name)
         assert result["success"] is False
         assert result["error"] == f"Not a branch name: {name!r}"
+
+
+class TestTheFleetComesFromMemorysDoor:
+    """branch_health and inbox_check read citizens from the door, not a src/aipass walk."""
+
+    @pytest.fixture
+    def fleet(self, tmp_path, monkeypatch):
+        grow = tmp_path / "seed" / "grow"
+        (grow / "apps").mkdir(parents=True)
+        (grow / "apps" / "grow.py").write_text("", encoding="utf-8")
+        (grow / "tests").mkdir()
+        (grow / "tests" / "test_grow.py").write_text("def test_one():\n    pass\n", encoding="utf-8")
+        (grow / ".ai_mail.local").mkdir()
+        (grow / ".ai_mail.local" / "inbox.json").write_text(
+            json.dumps({"messages": [{"status": "new", "from": "@x", "subject": "hi"}]}), encoding="utf-8"
+        )
+        calls = []
+
+        def fake_fleet_branches(*args, **kwargs):
+            calls.append(args)
+            return [{"name": "grow", "path": grow, "residency": "external"}]
+
+        monkeypatch.setattr(door_registry_scope, "fleet_branches", fake_fleet_branches)
+        return calls
+
+    def test_branch_health_lists_an_external_citizen_and_no_stray_directory(self, fleet):
+        result = run_skill("branch_health", action="summary")
+        assert result["success"] is True
+        assert "  grow                     1 py     1 tests      1 fns" in result["output"]
+        assert "(1 branches)" in result["output"]
+        assert fleet == [()]
+
+    def test_inbox_check_counts_an_external_citizens_inbox_once_per_run(self, fleet):
+        result = run_skill("inbox_check", action="summary")
+        assert result["success"] is True
+        assert "Inbox Check -- 1 branches scanned" in result["output"]
+        assert "  grow: 1 new (1 total)" in result["output"]
+        assert fleet == [()]
 
 
 class TestRunSkillMarkdown:

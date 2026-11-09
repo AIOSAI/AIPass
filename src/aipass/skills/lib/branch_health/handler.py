@@ -2,8 +2,8 @@
 # META DATA HEADER
 # Name: handler.py - Branch Health skill handler
 # Date: 2026-03-29
-# Version: 1.1.0
-# Modified: 2026-10-24
+# Version: 1.2.0
+# Modified: 2026-11-09
 # Category: skills/lib/branch_health
 # =============================================
 
@@ -14,6 +14,8 @@ Called by: drone @skills run branch_health <action>
 """
 
 from pathlib import Path
+
+from aipass.memory.apps.modules import door_registry_scope
 
 
 def run(action, args=None, config=None):
@@ -47,19 +49,9 @@ def _src_root():
 
 
 def _find_branches():
-    """Yield (branch_name, branch_path) for all branches."""
-    src = _src_root()
-
-    aipass_dir = src / "aipass"
-    if aipass_dir.is_dir():
-        for branch_dir in sorted(aipass_dir.iterdir()):
-            if branch_dir.is_dir() and not branch_dir.name.startswith((".", "_")):
-                if (
-                    (branch_dir / "apps").is_dir()
-                    or (branch_dir / "tests").is_dir()
-                    or (branch_dir / ".trinity").is_dir()
-                ):
-                    yield (branch_dir.name, branch_dir)
+    """Yield (branch_name, branch_path) for every citizen memory's door reports."""
+    for row in door_registry_scope.fleet_branches():
+        yield (row["name"], Path(row["path"]))
 
 
 def _count_py_files(directory):
