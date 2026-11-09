@@ -3,7 +3,7 @@
 # Description: adopt-citizen handler — plan and apply moving a citizen whole into another project
 # Version: 1.0.0
 # Created: 2026-11-08
-# Modified: 2026-11-08
+# Modified: 2026-11-09
 # =============================================
 
 """Move an existing citizen, memory and registry row with ids kept, into another project root.
@@ -17,6 +17,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
+from aipass.memory.apps.modules.fleet import declared_roots
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
@@ -24,27 +25,26 @@ from aipass.spawn.apps.handlers.json import json_handler
 from aipass.spawn.apps.handlers.passport_migration import repo_root
 from aipass.spawn.apps.handlers.registry import (
     branches_as_list,
+    fleet_rows,
     load_registry,
     registry_lock,
     resolve_project_credential,
     save_registry,
 )
-from aipass.spawn.apps.handlers.repair_ops import _registry_in
 
 CORE_REGISTRY = "AIPASS_REGISTRY.json"
 LEFTOVER = "tracked AIPass leftover; untrack before --apply"
 
 
 def _find_citizen(name, home):
-    """(registry, row) for name in AIPass's registry, then each projects/*/ registry; (None, None) if absent."""
-    projects = home / "projects"
-    found = [_registry_in(d) for d in sorted(projects.iterdir()) if d.is_dir()] if projects.is_dir() else []
-    for candidate in [home / CORE_REGISTRY, *[f for f in found if f is not None]]:
-        if not candidate.is_file():
+    """(registry, row) for name among the citizens memory's door answers; (None, None) if absent."""
+    for citizen in fleet_rows(home):
+        registry = citizen["registry_path"]
+        if citizen["name"].lower() != name or registry is None:
             continue
-        for row in branches_as_list(load_registry(candidate).get("branches", [])):
+        for row in branches_as_list(load_registry(registry).get("branches", [])):
             if row.get("name", "").lower() == name:
-                return candidate, row
+                return registry, row
     return None, None
 
 
@@ -89,9 +89,7 @@ def _follow_ups(home, dest, source_dir, source_root, left_empty):
     """Records spawn does not write, by owner."""
     target = dest.parent
     out = [{"owner": "@flow", "what": f"re-point {p} file_path into {dest}"} for p in _flow_rows(home, source_dir)]
-    roots_doc = json_handler.read_json(home / "AIPASS_ROOTS.json") if (home / "AIPASS_ROOTS.json").is_file() else {}
-    roots = {(home / r.get("path", "")).resolve() for r in (roots_doc or {}).get("roots", [])}
-    if not target.is_relative_to(home) and target not in roots:
+    if not target.is_relative_to(home) and target not in declared_roots(home):
         out.append({"owner": "@memory", "what": f"roots add {target} (drone resolves the name only after this)"})
     trust_file = Path.home() / ".aipass" / "trusted_projects.json"
     trusted = (json_handler.read_json(trust_file) or {}).get("projects", {}) if trust_file.is_file() else {}
@@ -127,7 +125,7 @@ def plan_adoption(citizen, target_root):
 
     src_reg, row = _find_citizen(name, home)
     if src_reg is None or row is None:
-        blocked.append(f"'{name}' is not in {CORE_REGISTRY} or any projects/*/*_REGISTRY.json")
+        blocked.append(f"'{name}' is not a citizen memory's door answers ({CORE_REGISTRY}, residents, declared roots)")
         return plan
     plan["source_registry"] = str(src_reg)
     if src_reg.name == CORE_REGISTRY:

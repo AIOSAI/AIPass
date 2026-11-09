@@ -6,7 +6,7 @@
 
 ## The plan
 
-The plan is a pure read. It finds the citizen's row in `AIPASS_REGISTRY.json` or a `projects/*/` registry under the AIPass home, and refuses a core citizen: a row in `AIPASS_REGISTRY.json` never leaves AIPass. The passport's `citizen_id` must equal the row's `registry_id`, and an open dispatch in the citizen's inbox (`auto_execute` true, status not `closed`) refuses by message id.
+The plan is a pure read. It finds the citizen among those @memory's door answers (core, resident, and external at a declared root), reads its row from the registry that lists it, and refuses a core citizen: a row in `AIPASS_REGISTRY.json` never leaves AIPass. The passport's `citizen_id` must equal the row's `registry_id`, and an open dispatch in the citizen's inbox (`auto_execute` true, status not `closed`) refuses by message id.
 
 The target root must exist, and must neither sit inside the source project nor contain it. The destination is `<target_root>/<name>`; an existing destination is a clash. The target registry is the one `*_REGISTRY.json` at the root, or a new `<DIRNAME>_REGISTRY.json` with a freshly minted `metadata.id` when there is none; two or more refuse. When the target registry has no `owner: true` row, the moved row takes the seat and the passport's class becomes `manager`.
 
@@ -18,7 +18,7 @@ Every write is a row: `create`, `move`, `append`, `edit`, `skip` or `clash`, wit
 
 ### Follow-ups
 
-Records spawn does not write are listed by owner: @flow re-points each plan row whose `file_path` sits under the old directory, @memory declares the target root when it is outside the AIPass home and not yet in `AIPASS_ROOTS.json`, @hooks enrols an untrusted target and revokes the old root once it holds no citizens, and @devpulse archives that emptied root.
+Records spawn does not write are listed by owner: @flow re-points each plan row whose `file_path` sits under the old directory, @memory declares the target root when it is outside the AIPass home and not among the roots @memory's `declared_roots()` answers (an inactive row is not declared), @hooks enrols an untrusted target and revokes the old root once it holds no citizens, and @devpulse archives that emptied root.
 
 ## Apply
 

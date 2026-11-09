@@ -3,11 +3,12 @@
 # Description: Shared test fixtures for spawn test suite
 # Version: 1.3.1
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-11-09
 # =============================================
 
 """Shared test fixtures for spawn test suite."""
 
+import json
 import os
 import tempfile
 
@@ -175,6 +176,32 @@ def _isolate_spawn_json(tmp_path, monkeypatch) -> Path:
 
 MACHINE_REGISTRY_ID = "11111111-1111-4111-8111-111111111111"
 MACHINE_CITIZEN_ID = "22222222-2222-4222-8222-222222222222"
+
+
+def write_registry(path: Path, rows: dict[str, str]) -> Path:
+    """A *_REGISTRY.json at ``path`` listing each ``name: relative path`` row active."""
+    branches = [{"name": name.upper(), "path": rel, "status": "active"} for name, rel in rows.items()]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"metadata": {"id": "pid-test"}, "branches": branches}), encoding="utf-8")
+    return path
+
+
+def external_fleet(tmp_path: Path) -> tuple[Path, Path]:
+    """(home, citizen dir): an empty AIPass home declaring ../ext, whose EXT_REGISTRY.json lists @grow.
+
+    The passport is already 2.0 and names its own project registry, which a migration must keep."""
+    home, ext = tmp_path / "home", tmp_path / "ext"
+    write_registry(home / "AIPASS_REGISTRY.json", {})
+    (home / "AIPASS_ROOTS.json").write_text(
+        json.dumps({"roots": [{"path": "../ext", "status": "active"}]}), encoding="utf-8"
+    )
+    write_registry(ext / "EXT_REGISTRY.json", {"grow": "grow"})
+    passport = make_passport("grow")
+    passport["branch_info"].update({"path": "grow", "module": "grow"})
+    passport["citizenship"].update({"residency": "external", "registry_path": "EXT_REGISTRY.json"})
+    (ext / "grow" / ".trinity").mkdir(parents=True)
+    (ext / "grow" / ".trinity" / "passport.json").write_text(json.dumps(passport, indent=2), encoding="utf-8")
+    return home, ext / "grow"
 
 
 def make_passport(branch: str = "wanderer") -> dict:

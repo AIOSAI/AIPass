@@ -3,7 +3,7 @@
 # Description: Update handler — path-based template sync engine (P1 rewrite, TDPLAN-0006)
 # Version: 2.6.0
 # Created: 2026-03-07
-# Modified: 2026-11-02
+# Modified: 2026-11-09
 # =============================================
 
 """Update handler — path-based template sync engine.
@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from aipass.memory.apps.modules.fleet import find_repo_root
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from aipass.aipass.shared.json_ops import backup_json, deep_merge
@@ -29,7 +30,7 @@ from aipass.spawn.apps.handlers.meta_ops import (
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.file_ops import SKIP_NAMES
 from aipass.spawn.apps.handlers.placeholders import build_replacements_dict, replace_placeholders
-from aipass.spawn.apps.handlers.registry import find_registry, load_registry, branches_as_list
+from aipass.spawn.apps.handlers.registry import find_registry, fleet_rows, load_registry, branches_as_list
 from aipass.spawn.apps.handlers.update_ignore import IGNORE_NAME, is_ignored, read_ignore
 from aipass.spawn.apps.handlers.json import json_handler
 
@@ -318,21 +319,18 @@ def _failed_row(branch: str, exc: Exception, dry_run: bool) -> dict:
 
 
 def update_all(dry_run: bool = False, trace: bool = False, citizen_class: str | None = None) -> list[dict]:
-    """Update all branches from AIPASS_REGISTRY.json, skipping spawn itself, optionally by class."""
+    """Update every citizen memory's door answers, skipping spawn itself, optionally by class.
+
+    The registry above the cwd only anchors the AIPass home the door reads from."""
     registry_path = find_registry()
     if registry_path is None:
         logger.error("[update] No *_REGISTRY.json found above the current directory — no branches to update")
         return []
-    registry = load_registry(registry_path)
-    branches = branches_as_list(registry.get("branches", []))
-
-    if not branches:
-        return []
 
     results: list[dict] = []
 
-    for branch_entry in branches:
-        name = branch_entry.get("name", "")
+    for citizen in fleet_rows(find_repo_root(registry_path.parent)):
+        name = citizen["name"]
         lower_name = name.lower()
 
         if lower_name == "spawn":
@@ -341,8 +339,8 @@ def update_all(dry_run: bool = False, trace: bool = False, citizen_class: str | 
             continue
 
         if citizen_class:
-            branch_dir = _resolve_branch_path(lower_name)
-            if branch_dir and branch_dir.is_dir():
+            branch_dir = citizen["path"]
+            if branch_dir.is_dir():
                 try:
                     actual_class = _read_citizen_class(branch_dir)
                 except (OSError, ValueError) as exc:
@@ -358,7 +356,7 @@ def update_all(dry_run: bool = False, trace: bool = False, citizen_class: str | 
             logger.info("[update] Processing branch: %s", name)
 
         try:
-            result = update_branch(lower_name, dry_run=dry_run, trace=trace)
+            result = update_branch(lower_name, dry_run=dry_run, trace=trace, registry_path=citizen["registry_path"])
             results.append(result)
         except Exception as exc:
             logger.error("[update] Error updating %s: %s", name, exc)

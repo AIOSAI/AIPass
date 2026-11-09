@@ -3,7 +3,7 @@
 # Description: TDPLAN-0017 — passport seeds: export, validation, mint-from-seed
 # Version: 1.1.0
 # Created: 2026-08-28
-# Modified: 2026-11-02
+# Modified: 2026-11-09
 # =============================================
 
 """Tests for apps/handlers/seed_ops.py and apps/modules/core.py's mint-from-seed path."""
@@ -37,22 +37,28 @@ from aipass.spawn.apps.handlers.seed_ops import (
     validate_seed,
 )
 from aipass.spawn.apps.modules.core import spawn_agent
-from aipass.spawn.tests.conftest import MACHINE_CITIZEN_ID, MACHINE_REGISTRY_ID, make_passport
+from aipass.spawn.tests.conftest import MACHINE_CITIZEN_ID, MACHINE_REGISTRY_ID, make_passport, write_registry
 
 # Pinned separately because each can be lost alone: exact strip, idempotent export,
 # valid mint with fresh ids and a byte stamp, invalid seed refuses with nothing written.
 
 
 def write_repo(root: Path, branches=("wanderer",), residents=()) -> Path:
-    """Build a fake repo root the passport globs can discover."""
+    """Build a fake repo root, registries included, that memory's door answers."""
     for branch in branches:
         trinity = root / "src" / "aipass" / branch / ".trinity"
         trinity.mkdir(parents=True)
         (trinity / "passport.json").write_text(canonical_text(make_passport(branch)), encoding="utf-8")
+    write_registry(root / "AIPASS_REGISTRY.json", {branch: f"src/aipass/{branch}" for branch in branches})
     for branch in residents:
         trinity = root / "projects" / "somewhere" / "src" / "pkg" / branch / ".trinity"
         trinity.mkdir(parents=True)
-        (trinity / "passport.json").write_text(canonical_text(make_passport(branch)), encoding="utf-8")
+        passport = make_passport(branch)
+        passport["citizenship"]["residency"] = "resident"
+        (trinity / "passport.json").write_text(canonical_text(passport), encoding="utf-8")
+    if residents:
+        rows = {branch: f"src/pkg/{branch}" for branch in residents}
+        write_registry(root / "projects" / "somewhere" / "SOMEWHERE_REGISTRY.json", rows)
     return root
 
 
@@ -513,12 +519,6 @@ class TestExportSeeds:
 
         receipt = export_seeds(root, confirm=True)
         assert "unreadable passport" in receipt["errors"][0]["error"]
-
-    def test_baseline_flags_a_fleet_that_is_not_the_measured_one(self, tmp_path):
-        root = write_repo(tmp_path)
-        baseline = export_seeds(root)["baseline"]
-        assert baseline["matches"] is False
-        assert baseline["discovered_core"] == 1
 
 
 def _registry(tmp_path: Path) -> Path:

@@ -3,7 +3,7 @@
 # Description: Passport seeds — tracked identity, untracked live file (TDPLAN-0017)
 # Version: 1.0.0
 # Created: 2026-08-28
-# Modified: 2026-10-17
+# Modified: 2026-11-09
 # =============================================
 
 """Passport seeds: the identity that ships with the repo (TDPLAN-0017).
@@ -27,7 +27,6 @@ from aipass.spawn.apps.handlers.class_registry import resolve_template_class
 from aipass.spawn.apps.handlers.json import json_handler
 from aipass.spawn.apps.handlers.passport_migration import (
     BLOCK_ORDER,
-    EXPECTED_FLEET,
     KEY_ORDER,
     SCHEMA_VERSION,
     discover_passports,
@@ -458,14 +457,6 @@ def export_seeds(root=None, *, only: str | None = None, confirm: bool = False) -
     records = [export_seed(target, confirm=confirm) for target in targets]
     errors = [{"branch": r["branch"], "error": r["error"]} for r in records if r["error"]]
 
-    # An alarm, never a gate: the discovered set is the truth.
-    baseline = {
-        "expected_core": EXPECTED_FLEET["core"],
-        "discovered_core": len(core),
-        "filtered": bool(wanted),
-        "matches": len(core) == EXPECTED_FLEET["core"],
-    }
-
     receipt = {
         "root": str(base),
         "confirm": confirm,
@@ -479,7 +470,6 @@ def export_seeds(root=None, *, only: str | None = None, confirm: bool = False) -
         "skipped_resident": skipped_resident,
         "errors": errors,
         "seeds": records,
-        "baseline": baseline,
     }
 
     # Dry runs are logged by the CLI layer instead.

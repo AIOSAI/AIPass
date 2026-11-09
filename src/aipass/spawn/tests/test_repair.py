@@ -3,7 +3,7 @@
 # Description: Tests for repair and adopt-citizen — move, rename, pollution, cross-project adoption
 # Version: 1.1.0
 # Created: 2026-05-15
-# Modified: 2026-11-08
+# Modified: 2026-11-09
 # =============================================
 
 """Tests for apps/handlers/repair_ops.py and adopt_citizen_ops.py — move, rename, pollution, adopt-citizen."""
@@ -1254,7 +1254,7 @@ def _adopt_pair(tmp_path, monkeypatch, tracked=(), messages=()):
     """AIPass home with a core citizen, project SRC holding @grow, and a git target 'seed'."""
     home = tmp_path / "home"
     (home / "src" / "aipass" / "core").mkdir(parents=True)
-    core_row = {"name": "CORE", "path": "src/aipass/core", "registry_id": "cid-core"}
+    core_row = {"name": "CORE", "path": "src/aipass/core", "registry_id": "cid-core", "status": "active"}
     (home / "AIPASS_REGISTRY.json").write_text(
         json.dumps({"metadata": {"id": "pid-aipass"}, "branches": [core_row]}), encoding="utf-8"
     )
@@ -1264,14 +1264,26 @@ def _adopt_pair(tmp_path, monkeypatch, tracked=(), messages=()):
     (branch / ".ai_mail.local").mkdir()
     passport = {
         "branch_info": {"branch_name": "grow", "path": "src/grow/grow"},
-        "citizenship": {"citizen_id": "cid-grow", "registry_id": "pid-src", "registry_path": "SRC_REGISTRY.json"},
+        "citizenship": {
+            "citizen_id": "cid-grow",
+            "registry_id": "pid-src",
+            "registry_path": "SRC_REGISTRY.json",
+            "residency": "resident",
+        },
         "identity": {"citizen_class": "specialist"},
     }
     (branch / ".trinity" / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
     (branch / ".trinity" / "local.json").write_text('{"sessions": ["kept"]}', encoding="utf-8")
     inbox = {"mailbox": "grow", "messages": list(messages)}
     (branch / ".ai_mail.local" / "inbox.json").write_text(json.dumps(inbox), encoding="utf-8")
-    row = {"name": "GROW", "path": "src/grow/grow", "email": "@grow", "registry_id": "cid-grow", "custom": "kept"}
+    row = {
+        "name": "GROW",
+        "path": "src/grow/grow",
+        "email": "@grow",
+        "registry_id": "cid-grow",
+        "custom": "kept",
+        "status": "active",
+    }
     (source_root / "SRC_REGISTRY.json").write_text(
         json.dumps({"metadata": {"id": "pid-src"}, "branches": [row]}), encoding="utf-8"
     )
@@ -1456,3 +1468,48 @@ class TestAdoptCitizen:
 
         assert code == 1
         assert "proof failed: citizen_id_matches_row" in json.loads(out)["blocked"]
+
+
+def _declare(home, *rows):
+    """Write home's AIPASS_ROOTS.json with (relative path, status) rows."""
+    roots = [{"path": path, "status": status} for path, status in rows]
+    (home / "AIPASS_ROOTS.json").write_text(json.dumps({"roots": roots}), encoding="utf-8")
+
+
+def _memory_follow_ups(out):
+    return [f["what"] for f in json.loads(out)["follow_ups"] if f["owner"] == "@memory"]
+
+
+class TestAdoptReadsTheDoor:
+    """The adopt lookup and its roots hint read memory's door, never a parser or a glob of their own."""
+
+    def test_the_hint_names_a_target_whose_declaration_is_not_active(self, tmp_path, monkeypatch, capsys):
+        """Mutant: the hint parses AIPASS_ROOTS.json itself and ignores status -> red."""
+        _source_root, _branch, target = _adopt_pair(tmp_path, monkeypatch)
+        _declare(tmp_path / "home", ("../seed", "retired"))
+
+        _code, out, _err = _adopt(monkeypatch, capsys, "@grow", str(target), "--json")
+
+        assert _memory_follow_ups(out) == [f"roots add {target} (drone resolves the name only after this)"]
+
+    def test_the_hint_is_silent_for_a_root_already_declared(self, tmp_path, monkeypatch, capsys):
+        """Mutant: the declared-root check is dropped -> red."""
+        _source_root, _branch, target = _adopt_pair(tmp_path, monkeypatch)
+        _declare(tmp_path / "home", ("../seed", "active"))
+
+        _code, out, _err = _adopt(monkeypatch, capsys, "@grow", str(target), "--json")
+
+        assert _memory_follow_ups(out) == []
+
+    def test_a_citizen_at_a_declared_root_is_found(self, tmp_path, monkeypatch, capsys):
+        """Mutant: the lookup globs AIPASS_REGISTRY.json and projects/*/ again -> red (externals unseen)."""
+        source_root, _branch, target = _adopt_pair(tmp_path, monkeypatch)
+        old = tmp_path / "old"
+        shutil.move(source_root, old)
+        _declare(tmp_path / "home", ("../old", "active"))
+
+        code, out, _err = _adopt(monkeypatch, capsys, "@grow", str(target), "--json")
+
+        plan = json.loads(out)
+        assert (code, plan["blocked"]) == (0, [])
+        assert plan["source_registry"] == str(old / "SRC_REGISTRY.json")

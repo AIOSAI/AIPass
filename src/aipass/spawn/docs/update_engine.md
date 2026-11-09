@@ -142,11 +142,15 @@ needs a dispatch to the branch that owns the file rather than a fleet update.
 
 ## Batch updates
 
-`update <class> --all` walks the registry, skips spawn itself (the lane runs in spawn's own
-process, so it cannot rewrite the module it is executing), and reports per branch plus a
-totals line: additions, updates, py-skipped, owner-protected, and markdown drift reported
-but never written. With no `*_REGISTRY.json` above the cwd it exits 1.
+`update <class> --all` walks every citizen @memory's door (`fleet_branches`) answers: core,
+resident, and external citizens at the roots declared in `AIPASS_ROOTS.json`. The
+`*_REGISTRY.json` above the cwd only anchors the AIPass home the door reads; each citizen is
+then updated against its own project's registry. The class filter reads each passport. It
+skips spawn itself (the lane runs in spawn's own process, so it cannot rewrite the module it
+is executing), and reports per branch plus a totals line: additions, updates, py-skipped,
+owner-protected, and markdown drift reported but never written. With no `*_REGISTRY.json`
+above the cwd it exits 1.
 
 ---
 
-**Last Updated:** 2026-10-24
+**Last Updated:** 2026-11-09

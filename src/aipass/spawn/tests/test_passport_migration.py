@@ -3,7 +3,7 @@
 # Description: DPLAN-0319 — passport 2.0 fleet migration: order, drops, lanes, idempotency
 # Version: 1.0.2
 # Created: 2026-08-28
-# Modified: 2026-11-02
+# Modified: 2026-11-09
 # =============================================
 
 """Tests for apps/handlers/passport_migration.py's fleet-wide passport 2.0 migration (DPLAN-0319 deliverable 3)."""
@@ -19,12 +19,12 @@ from pathlib import Path
 
 import pytest
 
+from aipass.memory.apps.modules.door_registry_scope import fleet_branches
 from aipass.spawn.apps import spawn as spawn_entry
 from aipass.spawn.apps.handlers.passport_migration import (
     BACKUP_SUFFIX,
     BLOCK_ORDER,
     CANONICAL_REGISTRY_PATH,
-    EXPECTED_FLEET,
     KEY_ORDER,
     IDENTITY_CONTENT_KEYS,
     PassportMigrationError,
@@ -36,6 +36,7 @@ from aipass.spawn.apps.handlers.passport_migration import (
 )
 from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 from aipass.spawn.apps.modules.migrate_passports import handle_migrate_passports
+from aipass.spawn.tests.conftest import external_fleet, write_registry
 
 # synthetic_fleet always runs and carries the mutation weight; live_fleet_copy skips on a
 # clone (passports are gitignored). Every write lands in tmp_path, never the live tree.
@@ -245,20 +246,20 @@ def synthetic_fleet(tmp_path):
     for project, package in (("baud", "baud"), ("finch", "finch")):
         upper = project.upper()
         family = {"badge": upper} if project == "finch" else None
-        _write_passport(
-            root,
-            f"projects/{project}/src/{package}/{project}",
-            _legacy_passport(
-                branch_name=upper,
-                path=f"{ABSOLUTE_FOSSIL_PREFIX}/projects/{project}/src/{package}/{project}",
-                module=project,
-                citizen_class="manager",
-                git_branch="main",
-                registry_path=None,
-                owner=True,
-                family=family,
-            ),
+        resident_doc = _legacy_passport(
+            branch_name=upper,
+            path=f"{ABSOLUTE_FOSSIL_PREFIX}/projects/{project}/src/{package}/{project}",
+            module=project,
+            citizen_class="manager",
+            git_branch="main",
+            registry_path=None,
+            owner=True,
+            family=family,
         )
+        # The door admits a resident only when its passport declares so (the two-key rule).
+        resident_doc["citizenship"]["residency"] = "resident"
+        _write_passport(root, f"projects/{project}/src/{package}/{project}", resident_doc)
+        write_registry(root / "projects" / project / f"{upper}_REGISTRY.json", {project: f"src/{package}/{project}"})
 
     # Decoys that must never be discovered: a backup tree and the template.
     _write_passport(
@@ -271,23 +272,32 @@ def synthetic_fleet(tmp_path):
         "src/aipass/spawn/templates/citizen",
         _legacy_passport(branch_name="{{BRANCH}}", path="{{PATH}}", module="{{MODULE}}"),
     )
+    core = ("spawn", "aipass", "canary", "commons", "skills", "devpulse")
+    write_registry(root / "AIPASS_REGISTRY.json", {name: f"src/aipass/{name}" for name in core})
     return root
 
 
 @pytest.fixture
 def live_fleet_copy(tmp_path):
-    """Real live passports copied into tmp_path at their real relative paths."""
+    """Real core and resident passports copied into tmp_path at their real relative paths.
+
+    The registries are written fresh with relative rows: the live ones carry absolute paths, and a copied
+    absolute row would hand the migration a live passport to write."""
     live_root = repo_root()
-    targets = discover_passports(live_root)
+    targets = [t for t in discover_passports(live_root) if t.path.is_relative_to(live_root)]
     if not targets:
         pytest.skip("No live .trinity/passport.json on this machine (gitignored — expected in CI)")
 
     root = tmp_path / "live"
+    rows: dict[Path, dict[str, str]] = {}
     for target in targets:
-        relative = target.path.relative_to(live_root)
-        destination = root / relative
+        destination = root / target.path.relative_to(live_root)
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(target.path, destination)
+        rows.setdefault(target.project_root, {})[target.branch_dir.name] = target.relative_path
+    for project_root, project_rows in rows.items():
+        name = "AIPASS" if project_root == live_root else project_root.name.upper()
+        write_registry(root / project_root.relative_to(live_root) / f"{name}_REGISTRY.json", project_rows)
     return root
 
 
@@ -343,17 +353,46 @@ class TestDiscovery:
         assert baud.project_root == synthetic_fleet / "projects" / "baud"
         assert baud.relative_path == "src/baud/baud"
 
-    def test_live_fleet_matches_the_measured_baseline(self):
-        """Pins THIS machine's fleet — and skips honestly on any world that is not it."""
-        shape, reason = _fleet_baseline_verdict(repo_root())
-        if reason:
-            pytest.skip(reason)
+    def test_live_migration_reports_the_count_the_door_answers(self):
+        """No census of its own: the live dry run scans exactly the door's citizens that carry a passport."""
+        door = [r for r in fleet_branches(repo_root()) if (r["path"] / ".trinity" / "passport.json").is_file()]
+        receipt = migrate_fleet(repo_root(), run_date=RUN_DATE)
 
-        assert shape == (
-            EXPECTED_FLEET["total"],
-            EXPECTED_FLEET["core"],
-            EXPECTED_FLEET["resident"],
-        ), "Fleet size drifted from the 2026-10-31 measurement — report it, do not silently migrate a new shape"
+        assert receipt["confirm"] is False
+        assert receipt["fleet"]["total"] == receipt["scanned"] == len(door)
+        assert {Path(rec["path"]).parent.parent for rec in receipt["files"]} == {r["path"] for r in door}
+
+
+class TestTheDoorIsTheFleet:
+    """A citizen at a declared root is in the migration because memory's door answers it."""
+
+    def test_the_external_citizen_is_found_and_counted(self, tmp_path):
+        """Mutant: discovery globs src/aipass/* and projects/* again -> red."""
+        home, grow = external_fleet(tmp_path)
+
+        receipt = migrate_fleet(home, run_date=RUN_DATE)
+
+        assert [(rec["branch"], rec["residency"]) for rec in receipt["files"]] == [("grow", "external")]
+        assert receipt["fleet"] == {"total": 1, "core": 0, "resident": 0, "external": 1}
+        target = discover_passports(home)[0]
+        assert (target.project_root, target.relative_path) == (grow.parent, "grow")
+
+    def test_an_external_passport_keeps_its_own_project_registry(self, tmp_path):
+        """Mutant: the bare *_REGISTRY.json reconcile reaches externals -> red (EXT_REGISTRY.json rewritten)."""
+        home, _grow = external_fleet(tmp_path)
+
+        receipt = migrate_fleet(home, run_date=RUN_DATE)
+
+        assert receipt["changed"] == 0, receipt["files"][0]["changes"]
+
+    def test_the_report_states_the_count_the_door_answered(self, tmp_path, capsys):
+        """Mutant: the receipt line drops the external tier -> red."""
+        home, _grow = external_fleet(tmp_path)
+
+        assert handle_migrate_passports(["--root", str(home)]) == 0
+
+        out = " ".join(capsys.readouterr().out.split())
+        assert "Fleet: 1 citizen(s) answered by memory's door (core 0 / resident 0 / external 1)" in out
 
 
 class TestBlockAndKeyOrder:
@@ -429,6 +468,7 @@ class TestDrops:
         document["branch_info"]["favourite_colour"] = "green"
         document["mystery_block"] = {"who": "unknown"}
         _write_passport(root, "src/aipass/odd", document)
+        write_registry(root / "AIPASS_REGISTRY.json", {"odd": "src/aipass/odd"})
 
         receipt = migrate_fleet(root, confirm=True, run_date=RUN_DATE)
         migrated = _read(_passport(root, "src/aipass/odd"))
@@ -489,6 +529,7 @@ class TestValueLanes:
             branch_name="odd", path="src/aipass/odd", module="aipass.odd", registry_path="config/custom.json"
         )
         _write_passport(root, "src/aipass/odd", document)
+        write_registry(root / "AIPASS_REGISTRY.json", {"odd": "src/aipass/odd"})
         migrate_fleet(root, confirm=True, run_date=RUN_DATE)
         assert _read(_passport(root, "src/aipass/odd"))["citizenship"]["registry_path"] == "config/custom.json"
 
@@ -742,6 +783,7 @@ class TestRefusals:
             ),
         )
         original = path.read_bytes()
+        write_registry(root / "AIPASS_REGISTRY.json", {"rogue": "src/aipass/rogue"})
 
         receipt = migrate_fleet(root, confirm=True, run_date=RUN_DATE)
 
@@ -756,6 +798,7 @@ class TestRefusals:
         trinity = root / "src/aipass/broken/.trinity"
         trinity.mkdir(parents=True)
         (trinity / "passport.json").write_text("{ not json", encoding="utf-8")
+        write_registry(root / "AIPASS_REGISTRY.json", {"broken": "src/aipass/broken"})
 
         receipt = migrate_fleet(root, confirm=True, run_date=RUN_DATE)
         assert receipt["changed"] == 0
@@ -849,7 +892,7 @@ def _unwrapped(text: str) -> str:
 class TestEmptyScanIsNotAnAllClear:
     """A root with nothing findable must not read as a clean bill of health.
 
-    Discovery only matches this repo's layout, so an external root scans zero."""
+    Discovery reads memory's door, so a root with no registry scans zero."""
 
     def test_zero_scanned_says_zero_scanned(self, tmp_path, capsys):
 
@@ -860,7 +903,7 @@ class TestEmptyScanIsNotAnAllClear:
         assert handle_migrate_passports(["--root", str(empty_root)]) == 1
 
         captured = capsys.readouterr()
-        # The zero-scan line is an error() on stderr; the layout hint is on stdout.
+        # The zero-scan line is an error() on stderr; the discovery hint is on stdout.
         both = _unwrapped(captured.out + captured.err)
         assert _unwrapped("already 2.0") not in both, "an empty scan must not report the fleet as migrated"
         assert _unwrapped("No passports found") in _unwrapped(captured.err), "the zero-scan notice belongs on stderr"
@@ -891,130 +934,52 @@ class TestEmptyScanIsNotAnAllClear:
 
 
 class TestRetiredAndHiddenDirectoriesAreNeverScanned:
-    """The docstring's promise, made true by rule instead of by luck.
+    """A passport on disk is not a citizen: only a registry row the door answers is scanned.
 
-    pathlib's ``*`` matches dotted names; the rule is that a citizen directory never begins with a dot."""
+    Each world lists its archived passport in a registry too, so the door's own refusal is what is pinned."""
 
-    def _plant(self, root, relative):
+    def _plant(self, root, relative, residency="core"):
         passport = root / relative / ".trinity" / "passport.json"
         passport.parent.mkdir(parents=True)
-        passport.write_text(json.dumps({"document_metadata": {"schema_version": "1.0.0"}}), encoding="utf-8")
+        document = {"document_metadata": {"schema_version": "1.0.0"}, "citizenship": {"residency": residency}}
+        passport.write_text(json.dumps(document), encoding="utf-8")
         return passport
 
-    def test_an_archived_core_passport_is_not_discovered(self, tmp_path):
+    def test_an_unregistered_core_passport_is_not_discovered(self, tmp_path):
         self._plant(tmp_path, Path("src/aipass/.archive"))
         live = self._plant(tmp_path, Path("src/aipass/realbranch"))
+        write_registry(tmp_path / "AIPASS_REGISTRY.json", {"realbranch": "src/aipass/realbranch"})
 
         found = [t.path for t in discover_passports(tmp_path)]
 
         assert found == [live], "an archived passport was swept into the migration set"
 
-    def test_a_backup_directory_is_not_discovered(self, tmp_path):
-        self._plant(tmp_path, Path("src/aipass/.backup"))
-        live = self._plant(tmp_path, Path("src/aipass/realbranch"))
+    def test_a_resident_whose_passport_declares_no_residency_is_not_discovered(self, tmp_path):
+        """The two-key rule: a registry row alone does not make a resident."""
+        self._plant(tmp_path, Path("projects/demo/src/demo/stray"), residency="")
+        live = self._plant(tmp_path, Path("projects/demo/src/demo/realbranch"), residency="resident")
+        write_registry(tmp_path / "AIPASS_REGISTRY.json", {})
+        rows = {"stray": "src/demo/stray", "realbranch": "src/demo/realbranch"}
+        write_registry(tmp_path / "projects" / "demo" / "DEMO_REGISTRY.json", rows)
 
         assert [t.path for t in discover_passports(tmp_path)] == [live]
-
-    def test_an_archived_resident_passport_is_not_discovered(self, tmp_path):
-        self._plant(tmp_path, Path("projects/demo/src/demo/.archive"))
-        live = self._plant(tmp_path, Path("projects/demo/src/demo/realbranch"))
-
-        found = [t.path for t in discover_passports(tmp_path)]
-
-        assert found == [live]
 
     def test_a_hidden_project_directory_is_not_discovered(self, tmp_path):
-        """The dot can sit at any level of the resident path, not just the last."""
-        self._plant(tmp_path, Path("projects/.archive/src/demo/oldbranch"))
-        live = self._plant(tmp_path, Path("projects/demo/src/demo/realbranch"))
+        """A registry under projects/.archive/ is a retired project, never a resident one."""
+        self._plant(tmp_path, Path("projects/.archive/src/demo/oldbranch"), residency="resident")
+        live = self._plant(tmp_path, Path("projects/demo/src/demo/realbranch"), residency="resident")
+        write_registry(tmp_path / "AIPASS_REGISTRY.json", {})
+        write_registry(tmp_path / "projects" / ".archive" / "OLD_REGISTRY.json", {"oldbranch": "src/demo/oldbranch"})
+        write_registry(tmp_path / "projects" / "demo" / "DEMO_REGISTRY.json", {"realbranch": "src/demo/realbranch"})
 
         assert [t.path for t in discover_passports(tmp_path)] == [live]
+
+    def test_a_root_with_no_registry_discovers_nothing(self, tmp_path):
+        """A passport walk is never the fallback."""
+        self._plant(tmp_path, Path("src/aipass/realbranch"))
+
+        assert discover_passports(tmp_path) == []
 
     def test_a_normal_fleet_is_untouched_by_the_rule(self, synthetic_fleet):
         """The rule must not cost a single real citizen."""
-        assert len(discover_passports(synthetic_fleet)) > 0
-
-
-def _fleet_baseline_verdict(root):
-    """Return ``(shape, skip_reason)``; reason is None only on the machine the baseline measured."""
-    targets = discover_passports(root)
-    core = sum(1 for t in targets if t.residency == "core")
-    resident = sum(1 for t in targets if t.residency == "resident")
-    shape = (len(targets), core, resident)
-
-    if not targets:
-        return shape, (
-            "no fleet under this root — .trinity/ and AIPASS_REGISTRY.json are both "
-            "gitignored, so a bare checkout carries none; nothing is claimed either way"
-        )
-    if resident == 0:
-        return shape, (
-            f"world is core-only ({core} core, 0 resident) — a real fleet, but not the "
-            "machine this baseline measured; setup.sh mints exactly this shape"
-        )
-    return shape, None
-
-
-class TestLiveBaselineGuardsOnTheWorld:
-    """EXISTENCE IS NOT SUFFICIENCY — the hole that would have redded the train.
-
-    The guard reads the rows, not the environment; a two-tier world must still be measured."""
-
-    def _plant(self, root, relative):
-        passport = root / relative / ".trinity" / "passport.json"
-        passport.parent.mkdir(parents=True)
-        passport.write_text(json.dumps({"document_metadata": {"schema_version": "1.0.0"}}), encoding="utf-8")
-
-    def test_a_bare_checkout_skips_and_says_why(self, tmp_path):
-        shape, reason = _fleet_baseline_verdict(tmp_path)
-
-        assert shape == (0, 0, 0)
-        assert reason is not None
-        assert "gitignored" in reason
-
-    def test_a_core_only_world_skips_instead_of_failing(self, tmp_path):
-        """The exact shape @memory measured: 18 core, 0 resident, non-empty."""
-        for i in range(18):
-            self._plant(tmp_path, Path(f"src/aipass/branch{i:02d}"))
-
-        shape, reason = _fleet_baseline_verdict(tmp_path)
-
-        assert shape == (18, 18, 0)
-        assert reason is not None, "a core-only fleet must not be measured against this machine's baseline"
-        assert "core-only" in reason
-
-    def test_the_skip_reason_reports_the_counts_it_saw(self, tmp_path):
-        """Mutant: discover_passports files core passports as residents -> red."""
-        for i in range(3):
-            self._plant(tmp_path, Path(f"src/aipass/branch{i}"))
-
-        shape, reason = _fleet_baseline_verdict(tmp_path)
-
-        assert shape == (3, 3, 0)
-        assert reason is not None
-        assert "3 core" in reason
-        assert "0 resident" in reason
-
-    def test_a_world_with_both_tiers_still_engages_the_guard(self, tmp_path):
-        """ANTI-VACUITY PIN — the fix must not switch the baseline off everywhere."""
-        self._plant(tmp_path, Path("src/aipass/spawn"))
-        self._plant(tmp_path, Path("projects/baud/src/baud/baud"))
-
-        shape, reason = _fleet_baseline_verdict(tmp_path)
-
-        assert shape == (2, 1, 1)
-        assert reason is None, "a two-tier world IS measurable — the guard must not skip it"
-
-    def test_the_live_machine_is_measured_or_says_why(self):
-        """Whatever this machine is, the verdict must be self-describing.
-
-        It measures exactly when a resident tier is present, and otherwise says which world it saw."""
-        shape, reason = _fleet_baseline_verdict(repo_root())
-        total, core, resident = shape
-
-        assert total == core + resident, f"a discovered passport landed in neither tier: {shape}"
-        assert (reason is None) is (resident > 0), (
-            f"the verdict must measure exactly when a resident is present: shape={shape} reason={reason!r}"
-        )
-        if total and resident == 0:
-            assert reason is not None and f"{core} core, 0 resident" in reason, reason
+        assert len(discover_passports(synthetic_fleet)) == SYNTHETIC_FLEET_SIZE

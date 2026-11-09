@@ -3,7 +3,7 @@
 # Description: Tests for spawn update orchestrator
 # Version: 1.3.0
 # Created: 2026-03-07
-# Modified: 2026-11-02
+# Modified: 2026-11-09
 # =============================================
 
 """Tests for apps/handlers/update_ops.py — the spawn update orchestrator."""
@@ -20,6 +20,7 @@ import pytest
 from aipass.spawn.apps.handlers.update_ignore import UpdateIgnoreUnreadable, read_ignore
 from aipass.spawn.apps.handlers.update_ops import update_all, update_branch
 from aipass.spawn.apps.modules.update import handle_update
+from aipass.spawn.tests.conftest import external_fleet
 
 
 @pytest.fixture
@@ -1089,6 +1090,21 @@ class TestUpdateAll:
         assert results["broken_branch"]["success"] is False
         assert "passport.json" in results["broken_branch"]["errors"][0]
         assert results["test_branch"]["success"] is True
+
+    def test_a_dry_run_lists_the_citizen_at_a_declared_root(self, tmp_path, template_dir):
+        """update --all reads memory's door, so a citizen beyond the home's own registry is listed.
+
+        Mutant: update_all enumerates find_registry()'s one registry again -> red."""
+        home, grow = external_fleet(tmp_path)
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=home / "AIPASS_REGISTRY.json"),
+        ):
+            results = {r["branch"]: r for r in update_all(dry_run=True, citizen_class="specialist")}
+
+        assert list(results) == ["grow"]
+        assert results["grow"]["success"] is True, results["grow"]["errors"]
+        assert not (grow / "README.md").exists(), "a dry run wrote into the external citizen"
 
 
 class TestHandleUpdate:

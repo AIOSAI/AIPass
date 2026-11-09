@@ -3,7 +3,7 @@
 # Description: Passport seed export — thin CLI layer over seed_ops
 # Version: 1.0.1
 # Created: 2026-08-28
-# Modified: 2026-10-24
+# Modified: 2026-11-09
 # =============================================
 
 """Export every core citizen's passport seed (TDPLAN-0017).
@@ -15,7 +15,7 @@ import argparse
 
 from aipass.prax import logger
 
-from aipass.cli.apps.modules import console, err_console, error, header, warning
+from aipass.cli.apps.modules import console, err_console, error, header
 
 from aipass.spawn.apps.handlers.json import json_handler
 from aipass.spawn.apps.handlers.seed_ops import SEED_RELATIVE_PATH, export_seeds
@@ -145,16 +145,8 @@ def _print_receipt(receipt: dict) -> None:
 
     if receipt["skipped_resident"]:
         console.print(
-            f"  [dim]Residents not exported: {receipt['skipped_resident']} "
-            f"— a resident's identity belongs to its own project's repo.[/dim]"
-        )
-
-    baseline = receipt["baseline"]
-    if not baseline["filtered"] and not baseline["matches"]:
-        warning(
-            f"Discovered {baseline['discovered_core']} core passport(s) — the measured fleet is "
-            f"{baseline['expected_core']}. Reporting the discovered set as found; "
-            "verify the difference before applying."
+            f"  [dim]Residents and externals not exported: {receipt['skipped_resident']} "
+            f"— each identity belongs to its own project's repo.[/dim]"
         )
 
     _print_per_branch(receipt)
