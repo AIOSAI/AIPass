@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_operations_display.py
 # Description: Unit tests for the dashboard display and command handlers
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """Tests for the display and command handlers of apps/modules/dashboard.py."""
@@ -242,7 +242,7 @@ def _registry_of(monkeypatch, mod, *branches):
     """Stand in for the registries: each of ``branches`` is declared under its own directory name."""
     declared = {b.name.upper(): b for b in branches}
 
-    def _resolve(ref, caller=None):
+    def _resolve(ref):
         try:
             return declared[ref.lstrip("@").upper()]
         except KeyError:
@@ -478,20 +478,23 @@ class TestCallerDir:
         else:
             monkeypatch.setenv("AIPASS_CALLER_CWD", value)
 
-        seen: list = []
+        refreshed: list = []
 
-        def _record(ref, caller=None):
-            seen.append(caller)
-            return tmp_path / "flow"
+        def _resolve(ref):
+            if ref != tmp_path.name:
+                raise FileNotFoundError(ref)
+            return tmp_path
 
-        # The caller directory is what refresh hands the resolver.
-        monkeypatch.setattr(mod, "resolve_branch_path", _record)
-        monkeypatch.setattr(mod, "refresh_single_dashboard", lambda bp: {"status": "success", "branch": "FLOW"})
+        # A bare refresh walks up from the caller directory to the branch it stands in.
+        monkeypatch.setattr(mod, "resolve_branch_path", _resolve)
+        monkeypatch.setattr(
+            mod, "refresh_single_dashboard", lambda bp: refreshed.append(bp) or {"status": "success", "branch": "X"}
+        )
 
         with _patch("pathlib.Path.cwd", return_value=tmp_path):
-            mod.handle_command("dashboard", ["refresh", "@flow"])
+            mod.handle_command("dashboard", ["refresh"])
 
-        assert seen == [tmp_path]
+        assert refreshed == [tmp_path]
 
 
 class TestDashboardMain:

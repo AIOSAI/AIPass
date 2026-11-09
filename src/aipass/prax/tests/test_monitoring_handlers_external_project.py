@@ -1,17 +1,15 @@
 # =================== AIPass ====================
 # Name: test_monitoring_handlers_external_project.py
 # Description: Unit tests for the branch detector's external project and path strategies
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_detector.py, its external project detection and path strategies."""
 
 # Covers:
-# - BranchDetector: _resolve_external_project_name, _parse_external_project_path,
-#   _detect_from_claude_project, _detect_from_compound_parts,
-#   _detect_from_external_project_path, _extract_branch_from_central,
+# - BranchDetector: _detect_from_claude_project, _detect_from_compound_parts, _extract_branch_from_central,
 #   detect_from_path strategies, detect_from_log caches
 # - branch_detector: detect_branch_from_path, detect_branch_from_log
 
@@ -35,108 +33,6 @@ pytestmark = pytest.mark.usefixtures("_branch_detector_fresh")
 # hardcoded /home/ paths that trip the SENTRY log-structure checker.
 _FAKE_HOME = Path(str(_HOME / "user"))
 _FAKE_PROJECTS = _FAKE_HOME / "Projects"
-
-
-class TestResolveExternalProjectName:
-    """Tests for BranchDetector._resolve_external_project_name()."""
-
-    def test_returns_uppercased_name_when_no_registry(self):
-        """Should return uppercased directory name when no _REGISTRY.json found."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-
-        with patch(f"{mod.__name__}.Path") as mock_path_cls:
-            mock_home = MagicMock(spec=Path)
-            mock_projects = MagicMock(spec=Path)
-            mock_project_dir = MagicMock(spec=Path)
-            mock_project_dir.exists.return_value = True
-            mock_project_dir.iterdir.return_value = []
-            mock_projects.__truediv__ = MagicMock(return_value=mock_project_dir)
-            mock_home.__truediv__ = MagicMock(return_value=mock_projects)
-            mock_path_cls.home.return_value = mock_home
-
-            result = detector._resolve_external_project_name("MyProject")
-
-        assert result == "MYPROJECT"
-
-    def test_returns_uppercased_when_dir_not_found(self):
-        """Should return uppercased name when project dir doesn't exist."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-
-        with patch(f"{mod.__name__}.Path") as mock_path_cls:
-            mock_home = MagicMock(spec=Path)
-            mock_projects = MagicMock(spec=Path)
-            mock_project_dir = MagicMock(spec=Path)
-            mock_project_dir.exists.return_value = False
-            mock_projects.__truediv__ = MagicMock(return_value=mock_project_dir)
-            mock_home.__truediv__ = MagicMock(return_value=mock_projects)
-            mock_path_cls.home.return_value = mock_home
-
-            result = detector._resolve_external_project_name("NoSuchProject")
-
-        assert result == "NOSUCHPROJECT"
-
-    def test_handles_os_error_on_iterdir(self):
-        """Should return uppercased name on OSError reading directory."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-
-        with patch(f"{mod.__name__}.Path") as mock_path_cls:
-            mock_home = MagicMock(spec=Path)
-            mock_projects = MagicMock(spec=Path)
-            mock_project_dir = MagicMock(spec=Path)
-            mock_project_dir.exists.return_value = True
-            mock_project_dir.iterdir.side_effect = OSError("permission denied")
-            mock_projects.__truediv__ = MagicMock(return_value=mock_project_dir)
-            mock_home.__truediv__ = MagicMock(return_value=mock_projects)
-            mock_path_cls.home.return_value = mock_home
-
-            result = detector._resolve_external_project_name("Locked")
-
-        assert result == "LOCKED"
-
-
-class TestParseExternalProjectPath:
-    """Tests for BranchDetector._parse_external_project_path()."""
-
-    def test_returns_none_for_non_encoded_path(self):
-        """Should return (None, None) if path doesn't start with dash."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-        project, agent = detector._parse_external_project_path("not-encoded")
-        assert project is None
-        assert agent is None
-
-    def test_returns_none_when_no_projects_boundary(self):
-        """Should return (None, None) if -projects- not found."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-        project, agent = detector._parse_external_project_path("-fakehome-user-something")
-        assert project is None
-        assert agent is None
-
-    def test_parses_project_without_src(self):
-        """Should parse project name without src subdirectory."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-
-        with patch.object(detector, "_resolve_external_project_name", return_value="VERA-STUDIO"):
-            project, agent = detector._parse_external_project_path("-fakehome-user-Projects-Vera-Studio")
-
-        assert project == "VERA-STUDIO"
-        assert agent is None
-
-    def test_parses_project_with_src_agent(self):
-        """Should parse project and agent from -src- segment."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-
-        with patch.object(detector, "_resolve_external_project_name", return_value="AIPL"):
-            project, agent = detector._parse_external_project_path("-fakehome-user-Projects-AIPL-src-polyglot")
-
-        assert project == "AIPL"
-        assert agent == "POLYGLOT"
 
 
 class TestDetectFromClaudeProject:
@@ -176,55 +72,28 @@ class TestDetectFromClaudeProject:
         result = detector._detect_from_claude_project(path)
         assert result == "AIPASS/PRAX SUB"
 
-    def test_external_project_detection(self):
-        """Should detect external project from Claude project path."""
+    def test_a_folder_encoding_a_cwd_inside_a_declared_row_names_that_row(self):
+        mod = _import_branch_detector()
+        detector = _make_detector_with_branches(mod, branches={str(_FAKE_HOME / "seed" / "grow"): "GROW"})
+
+        path = str(_FAKE_HOME) + "/.claude/projects/" + "-ws-user-seed-grow-apps/file.jsonl"
+        assert detector._detect_from_claude_project(path) == "GROW"
+
+    def test_the_deepest_row_wins_and_a_subagent_gets_sub(self):
+        mod = _import_branch_detector()
+        branches = {str(_FAKE_HOME / "seed"): "SEED", str(_FAKE_HOME / "seed" / "grow"): "GROW"}
+        detector = _make_detector_with_branches(mod, branches=branches)
+
+        path = str(_FAKE_HOME) + "/.claude/projects/" + "-ws-user-seed-grow/subagents/abc/file.jsonl"
+        assert detector._detect_from_claude_project(path) == "GROW SUB"
+
+    def test_a_folder_under_no_declared_row_gets_no_project_label(self):
+        """The ~/Projects walk is gone: a project-shaped folder no row declares is not labelled."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
 
-        with patch.object(
-            detector,
-            "_parse_external_project_path",
-            return_value=("AIPL", "POLYGLOT"),
-        ):
-            path = str(_FAKE_HOME) + "/.claude/projects/" + "-fakehome-user-Projects-AIPL-src-polyglot/file.jsonl"
-            result = detector._detect_from_claude_project(path)
-
-        assert result == "AIPL/POLYGLOT"
-
-    def test_external_project_main_session(self):
-        """Should return project name only for main session (no agent)."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-
-        with patch.object(
-            detector,
-            "_parse_external_project_path",
-            return_value=("VERA-STUDIO", None),
-        ):
-            path = str(_FAKE_HOME) + "/.claude/projects/" + "-fakehome-user-Projects-Vera-Studio/file.jsonl"
-            result = detector._detect_from_claude_project(path)
-
-        assert result == "VERA-STUDIO"
-
-    def test_external_project_subagent(self):
-        """Should append SUB to external project subagent paths."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-
-        with patch.object(
-            detector,
-            "_parse_external_project_path",
-            return_value=("VERA-STUDIO", None),
-        ):
-            path = (
-                str(_FAKE_HOME)
-                + "/.claude/projects/"
-                + "-fakehome-user-Projects-Vera-Studio"
-                + "/subagents/abc/file.jsonl"
-            )
-            result = detector._detect_from_claude_project(path)
-
-        assert result == "VERA-STUDIO SUB"
+        path = str(_FAKE_HOME) + "/.claude/projects/" + "-ws-user-Projects-Vera-Studio/file.jsonl"
+        assert detector._detect_from_claude_project(path) is None
 
     def test_old_fallback_segment_scan(self):
         """Should fall back to segment scanning for unknown external paths."""
@@ -232,13 +101,8 @@ class TestDetectFromClaudeProject:
         detector = _make_detector_with_branches(mod)
         detector.known_branches.add("SENTRY")
 
-        with patch.object(
-            detector,
-            "_parse_external_project_path",
-            return_value=(None, None),
-        ):
-            path = str(_FAKE_HOME) + "/.claude/projects/some-random-sentry/file.jsonl"
-            result = detector._detect_from_claude_project(path)
+        path = str(_FAKE_HOME) + "/.claude/projects/some-random-sentry/file.jsonl"
+        result = detector._detect_from_claude_project(path)
 
         assert result == "SENTRY"
 
@@ -247,13 +111,8 @@ class TestDetectFromClaudeProject:
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
 
-        with patch.object(
-            detector,
-            "_parse_external_project_path",
-            return_value=(None, None),
-        ):
-            path = str(_FAKE_HOME) + "/.claude/projects//file.jsonl"
-            result = detector._detect_from_claude_project(path)
+        path = str(_FAKE_HOME) + "/.claude/projects//file.jsonl"
+        result = detector._detect_from_claude_project(path)
 
         assert result is None
 
@@ -263,13 +122,8 @@ class TestDetectFromClaudeProject:
         detector = _make_detector_with_branches(mod)
         detector.known_branches.add("CLI")
 
-        with patch.object(
-            detector,
-            "_parse_external_project_path",
-            return_value=(None, None),
-        ):
-            path = str(_FAKE_HOME) + "/.claude/projects/unknown-cli/file.jsonl"
-            result = detector._detect_from_claude_project(path)
+        path = str(_FAKE_HOME) + "/.claude/projects/unknown-cli/file.jsonl"
+        result = detector._detect_from_claude_project(path)
 
         assert result == "CLI"
 
@@ -278,13 +132,8 @@ class TestDetectFromClaudeProject:
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
 
-        with patch.object(
-            detector,
-            "_parse_external_project_path",
-            return_value=(None, None),
-        ):
-            path = str(_FAKE_HOME) + "/.claude/projects/completely-unknown-xyz/file.jsonl"
-            result = detector._detect_from_claude_project(path)
+        path = str(_FAKE_HOME) + "/.claude/projects/completely-unknown-xyz/file.jsonl"
+        result = detector._detect_from_claude_project(path)
 
         assert result is None
 
@@ -323,134 +172,6 @@ class TestDetectFromCompoundParts:
         detector = _make_detector_with_branches(mod)
         result = detector._detect_from_compound_parts(["simple", "parts", "here"])
         assert result is None
-
-
-class TestDetectFromExternalProjectPath:
-    """Tests for BranchDetector._detect_from_external_project_path()."""
-
-    def test_path_not_under_projects(self, tmp_path):
-        """Should return None if path is not under ~/Projects/."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-
-        path = tmp_path / "some" / "random" / "file.py"
-        with patch(f"{mod.__name__}.Path") as mock_path_cls:
-            mock_path_cls.home.return_value = _FAKE_HOME
-
-            result = detector._detect_from_external_project_path(path)
-
-        assert result is None
-
-    def test_skips_aipass_directory(self):
-        """Should return None for paths under AIPass directory."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-
-        path = _FAKE_PROJECTS / "AIPass" / "src" / "prax" / "file.py"
-        with patch(f"{mod.__name__}.Path") as mock_path_cls:
-            mock_path_cls.home.return_value = _FAKE_HOME
-
-            result = detector._detect_from_external_project_path(path)
-
-        assert result is None
-
-    def test_returns_project_with_agent(self):
-        """Should return PROJECT/AGENT for path with src subdirectory."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-        detector._external_project_cache["AIPL"] = "AIPL"
-
-        path = _FAKE_PROJECTS / "AIPL" / "src" / "polyglot" / "file.py"
-        with patch(f"{mod.__name__}.Path") as mock_path_cls:
-            mock_path_cls.home.return_value = _FAKE_HOME
-
-            result = detector._detect_from_external_project_path(path)
-
-        assert result == "AIPL/POLYGLOT"
-
-    def test_returns_project_without_agent(self):
-        """Should return PROJECT for path without src subdirectory."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-        detector._external_project_cache["MyApp"] = "MYAPP"
-
-        path = _FAKE_PROJECTS / "MyApp" / "config.json"
-        with patch(f"{mod.__name__}.Path") as mock_path_cls:
-            mock_path_cls.home.return_value = _FAKE_HOME
-
-            result = detector._detect_from_external_project_path(path)
-
-        assert result == "MYAPP"
-
-    def test_test_suffix_appended(self):
-        """Should append TESTS suffix for test-related paths."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-        detector._external_project_cache["AIPL"] = "AIPL"
-
-        path = _FAKE_PROJECTS / "AIPL" / "src" / "polyglot" / "tests" / "test_main.py"
-        with patch(f"{mod.__name__}.Path") as mock_path_cls:
-            mock_path_cls.home.return_value = _FAKE_HOME
-
-            result = detector._detect_from_external_project_path(path)
-
-        assert result == "AIPL/POLYGLOT TESTS"
-
-    def test_cached_project_name(self):
-        """Should use cached project name on subsequent lookups."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-        detector._external_project_cache["CachedProj"] = "CACHED"
-
-        path = _FAKE_PROJECTS / "CachedProj" / "file.py"
-        with patch(f"{mod.__name__}.Path") as mock_path_cls:
-            mock_path_cls.home.return_value = _FAKE_HOME
-
-            result = detector._detect_from_external_project_path(path)
-
-        assert result == "CACHED"
-
-    def test_empty_rel_parts_returns_none(self):
-        """Should return None if relative path has no parts."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-
-        with patch(f"{mod.__name__}.Path") as mock_path_cls:
-            mock_path_cls.home.return_value = _FAKE_HOME
-
-            result = detector._detect_from_external_project_path(_FAKE_PROJECTS)
-
-        assert result is None
-
-    def test_returns_none_when_no_registry_file(self):
-        """Should return None when project directory has no _REGISTRY.json."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-        detector._external_project_cache.clear()
-
-        path = _FAKE_PROJECTS / "SomeProject" / "src" / "module" / "file.py"
-        with patch(f"{mod.__name__}.Path") as mock_path_cls:
-            mock_path_cls.home.return_value = _FAKE_HOME
-            mock_project_dir = MagicMock(spec=Path)
-            mock_project_dir.iterdir.return_value = iter([])
-
-            result = detector._detect_from_external_project_path(path)
-
-        assert result is None
-
-    def test_test_suffix_for_test_log_file(self):
-        """Should append TESTS for paths ending in _test.log."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-        detector._external_project_cache["Proj"] = "PROJ"
-
-        path = _FAKE_PROJECTS / "Proj" / "output_test.log"
-        with patch(f"{mod.__name__}.Path") as mock_path_cls:
-            mock_path_cls.home.return_value = _FAKE_HOME
-
-            result = detector._detect_from_external_project_path(path)
-
-        assert result == "PROJ TESTS"
 
 
 class TestExtractBranchFromCentral:
@@ -665,35 +386,6 @@ class TestDetectFromPathStrategies:
             result = detector.detect_from_path(resolved)
 
         assert result == "WIDGET"
-
-    def test_external_project_path_priority(self):
-        """Strategy 0 (external): Should detect external project with priority."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-
-        resolved = str(_FAKE_PROJECTS / "AIPL" / "src" / "polyglot" / "tests" / "test_main.py")
-
-        with patch(f"{mod.__name__}.Path") as mock_path_cls:
-            mock_path = MagicMock(spec=Path)
-            mock_path.__str__ = MagicMock(return_value=resolved)
-            mock_path.resolve.return_value = mock_path
-            mock_path.parents = []
-            mock_path.parent = MagicMock()
-            mock_path.name = "test_main.py"
-            mock_path_cls.return_value = mock_path
-            mock_path_cls.home.return_value = _FAKE_HOME
-
-            detector._repo_root = MagicMock(spec=Path)
-            detector._repo_root.__str__ = MagicMock(return_value=str(_FAKE_PROJECTS / "AIPass"))
-
-            with patch.object(
-                detector,
-                "_detect_from_external_project_path",
-                return_value="AIPL/POLYGLOT TESTS",
-            ):
-                result = detector.detect_from_path(resolved)
-
-        assert result == "AIPL/POLYGLOT TESTS"
 
 
 class TestDetectFromLogAdditional:

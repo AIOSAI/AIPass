@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: status.py
 # Description: Dashboard Status Calculation Handler
-# Version: 0.5.0
+# Version: 0.6.0
 # Created: 2026-02-25
-# Modified: 2026-10-24
+# Modified: 2026-11-08
 # =============================================
 
 """
@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Tuple
 
 from aipass.prax.apps.modules.logger import get_direct_logger
 from aipass.prax.apps.handlers.json import json_handler
-from aipass.prax.apps.handlers.monitoring.branch_detector import _exact_case_registries
+from aipass.prax.apps.handlers.fleet import fleet_rows
 from aipass.prax.apps.handlers.repo_root import find_repo_root
 
 logger = get_direct_logger()
@@ -153,100 +153,32 @@ def calculate_quick_status(sections: Dict, branch_path: "Path | None" = None) ->
 
 
 def get_branch_paths() -> List[Path]:
-    """Get all branch paths from registry"""
+    """Every citizen's path, read through memory's door."""
     if not AIPASS_REGISTRY.exists():
         raise FileNotFoundError(f"AIPASS_REGISTRY.json not found: {AIPASS_REGISTRY}")
-
-    repo_root = _find_repo_root()
-    data = json.loads(AIPASS_REGISTRY.read_text())
-    paths = []
-    for b in data.get("branches", []):
-        raw = Path(b.get("path", ""))
-        paths.append(raw if raw.is_absolute() else repo_root / raw)
-    return paths
+    return [row["path"] for row in fleet_rows(AIPASS_REGISTRY.parent)]
 
 
-def _nearest_registries(start: Path) -> List[Path]:
-    """The ``*_REGISTRY.json`` files in the nearest directory at or above ``start`` that holds any."""
-    for directory in (start, *start.parents):
-        registries = _exact_case_registries(directory)
-        if registries:
-            return registries
-    return []
-
-
-def _declared_path(registry_file: Path, name: str) -> Optional[Path]:
-    """The path ``registry_file`` declares for ``name``, or None."""
-    # Relative paths resolve against the registry's own directory, not the cwd or AIPass's root.
-    try:
-        data = json.loads(registry_file.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Project registry %s is unreadable (%s); it resolves nothing", registry_file, exc)
-        return None
-
-    branches = data.get("branches", []) if isinstance(data, dict) else []
-    for branch in branches:
-        if not isinstance(branch, dict) or str(branch.get("name", "")).upper() != name:
-            continue
-        path_str = branch.get("path")
-        if path_str:
-            raw = Path(path_str)
-            return raw if raw.is_absolute() else registry_file.parent / raw
-    return None
-
-
-def _caller_project_match(name: str, caller: Optional[Path]) -> Optional[Tuple[Path, Path]]:
-    """``(registry file, branch path)`` for ``name`` in the caller's project registry, or None."""
-    if caller is None:
-        return None
-
-    core = AIPASS_REGISTRY.resolve()
-    for registry_file in _nearest_registries(caller):
-        if registry_file.resolve() == core:
-            continue
-        path = _declared_path(registry_file, name)
-        if path is not None:
-            return registry_file, path
-    return None
-
-
-def resolve_branch_path(branch_ref: str, caller: Optional[Path] = None) -> Path:
-    """Resolve @branch reference to filesystem path."""
-    # Core registry first, then the caller's nearest project registry. caller is passed in:
-    # handlers never read the cwd (tests/test_repo_root.py sweeps for it).
+def resolve_branch_path(branch_ref: str) -> Path:
+    """Resolve @branch reference to filesystem path; the first row by that name wins (core rows come first)."""
     name = branch_ref.lstrip("@").upper()
 
     if not AIPASS_REGISTRY.exists():
         raise FileNotFoundError("AIPASS_REGISTRY.json not found")
 
-    repo_root = _find_repo_root()
-    data = json.loads(AIPASS_REGISTRY.read_text())
-    for branch in data.get("branches", []):
-        if branch.get("name", "").upper() == name:
-            raw = Path(branch["path"])
-            path = raw if raw.is_absolute() else repo_root / raw
-            if not path.exists():
-                raise FileNotFoundError(f"Branch path does not exist: {path}")
-            shadowed = _caller_project_match(name, caller)
-            if shadowed is not None:
-                logger.warning(
-                    "@%s is declared in AIPASS_REGISTRY.json and in %s; the core row wins (%s), "
-                    "so %s is not reachable by this name",
-                    name.lower(),
-                    shadowed[0],
-                    path,
-                    shadowed[1],
-                )
-            return path
-
-    project = _caller_project_match(name, caller)
-    if project is not None:
-        registry_file, path = project
-        if not path.exists():
-            raise FileNotFoundError(f"Branch path does not exist: {path} (declared in {registry_file})")
-        logger.info("Resolved @%s through the caller's project registry %s: %s", name.lower(), registry_file, path)
-        return path
-
-    raise FileNotFoundError(
-        f"Branch '{name}' not found in registry (AIPASS_REGISTRY.json, then the caller's project registry)"
-    )
+    rows = [row for row in fleet_rows(AIPASS_REGISTRY.parent) if row["name"].upper() == name]
+    if not rows:
+        raise FileNotFoundError(f"Branch '{name}' not found in registry (memory's fleet: core, residents, roots)")
+    path = rows[0]["path"]
+    if not path.exists():
+        raise FileNotFoundError(f"Branch path does not exist: {path}")
+    for shadowed in rows[1:]:
+        logger.warning(
+            "@%s is declared in %s and in %s; the first row wins (%s), so %s is not reachable by this name",
+            name.lower(),
+            rows[0]["registry"],
+            shadowed["registry"],
+            path,
+            shadowed["path"],
+        )
+    return path

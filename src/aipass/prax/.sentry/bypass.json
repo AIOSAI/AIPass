@@ -204,12 +204,11 @@
       "file": "apps/handlers/monitoring/branch_detector.py",
       "standard": "logged_fallback",
       "lines": [
-        297,
-        321,
-        471,
-        510
+        165,
+        265,
+        304
       ],
-      "reason": "prax, leg 7: these are display labels and detector hints, and the value means the same on both paths. None at 297/321 is 'this detector has no answer, try the next' (an unreadable passport falls back to path matching, a file outside ~/Projects is not an external project); 'UNKNOWN' at 471/510 is the label for 'branch not determined', which is true when detection failed. The event is still displayed either way; no caller acts on the difference."
+      "reason": "prax, leg 7: these are display labels and detector hints, and the value means the same on both paths. None at 165 is 'this detector has no answer, try the next' (an unreadable passport falls back to path matching); 'UNKNOWN' at 265/304 is the label for 'branch not determined', which is true when detection failed. The event is still displayed either way; no caller acts on the difference."
     },
     {
       "file": "apps/handlers/monitoring/filesystem_handler.py",

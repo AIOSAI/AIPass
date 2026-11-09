@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: template_differ.py
 # Description: Dashboard Template Diff Handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-02-25
-# Modified: 2026-10-24
+# Modified: 2026-11-08
 # =============================================
 
 """
@@ -20,6 +20,7 @@ from aipass.prax.apps.modules.logger import get_direct_logger
 
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.repo_root import find_repo_root
+from aipass.prax.apps.handlers.fleet import fleet_rows
 from aipass.prax.apps.handlers.repo_root import resolved_file
 from aipass.prax.apps.handlers.dashboard.template_pusher import DEPRECATED_QUICK_STATUS_KEYS, DEPRECATED_SECTIONS
 
@@ -130,25 +131,20 @@ def diff_dashboard_template(branch_name: Optional[str] = None) -> Dict[str, Any]
         return {"error": f"AIPASS_REGISTRY.json not found: {AIPASS_REGISTRY}", "branches": [], "summary": {}}
 
     try:
-        registry = json.loads(AIPASS_REGISTRY.read_text())
-    except json.JSONDecodeError as e:
+        branches = fleet_rows(AIPASS_REGISTRY.parent)
+    except RuntimeError as e:
         logger.error("Invalid registry JSON: %s", e)
         return {"error": f"Invalid registry JSON: {e}", "branches": [], "summary": {}}
 
-    branches = [b for b in registry.get("branches", []) if b.get("status") == "active"]
-
     if branch_name:
         target = branch_name.upper()
-        branches = [b for b in branches if b.get("name", "").upper() == target]
+        branches = [b for b in branches if b["name"].upper() == target]
         if not branches:
             return {"error": f"Branch '{target}' not found in registry", "branches": [], "summary": {}}
 
-    repo_root = _find_repo_root()
-
     for branch in branches:
-        bname = branch.get("name", "UNKNOWN").upper()
-        raw_path = Path(branch.get("path", ""))
-        bpath = raw_path if raw_path.is_absolute() else repo_root / raw_path
+        bname = branch["name"].upper()
+        bpath = branch["path"]
 
         if not bpath.exists():
             branch_diff = {

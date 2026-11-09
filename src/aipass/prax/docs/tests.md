@@ -23,7 +23,7 @@ One row per file, no counts: the count belongs to the run, the coverage belongs 
 |---|---|
 | test_filesystem_handler.py | Multi-CLI adapters, Codex branch detection |
 | test_monitoring_handlers.py | Branch detector, stream output, event handling, the registry read that opens instead of checking |
-| test_operations.py | Dashboard operations, write-through; `refresh @branch` through the caller's project registry (core wins a collision), the caller's directory over the process cwd, mail counted from the branch's own inbox |
+| test_operations.py | Dashboard operations, write-through; `refresh @branch` through memory's door rows (the first row by a name wins), the caller's directory over the process cwd, mail counted from the branch's own inbox |
 | test_json_handler.py | The fleet json service: branch resolution, the per-call seam, document modes, the NaN refusal, the exception table, bounded retry, the log cap, the data-leg bump and heal (incl. rate_tracker sharing the document), the shim binds-never-wraps |
 | test_log_watcher.py | Log file tailing, agent activity parsing |
 | test_monitor_module.py | Monitor commands, thread lifecycle (4-thread), branch scoping |

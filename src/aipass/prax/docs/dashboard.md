@@ -11,7 +11,7 @@ How a branch dashboard is built, pushed and updated, and the programmatic API ot
 ```bash
 drone @prax dashboard                    # Show dashboard sections
 drone @prax dashboard refresh --all      # Refresh all branch dashboards from centrals
-drone @prax dashboard refresh @flow      # Refresh a specific branch (core, then the caller's project registry)
+drone @prax dashboard refresh @flow      # Refresh a specific branch (any citizen memory's door lists: core, resident, declared roots)
 drone @prax dashboard refresh            # Refresh the branch the CALLER stands in
 drone @prax dashboard status             # Show dashboard status
 drone @prax dashboard template           # Show the template schema

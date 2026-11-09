@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: refresh.py
 # Description: Dashboard Refresh Handler
-# Version: 0.8.0
+# Version: 0.8.1
 # Created: 2026-02-25
-# Modified: 2026-10-24
+# Modified: 2026-11-08
 # =============================================
 
 """Dashboard Refresh Handler
@@ -26,6 +26,7 @@ from ..central.reader import read_all_centrals
 from aipass.prax.apps.handlers.json import json_handler
 from .template_pusher import DEPRECATED_SECTIONS
 from aipass.prax.apps.handlers.repo_root import find_repo_root
+from aipass.prax.apps.handlers.fleet import fleet_rows
 
 logger = get_direct_logger()
 
@@ -41,24 +42,10 @@ AIPASS_REGISTRY = _find_repo_root() / "AIPASS_REGISTRY.json"
 
 
 def _load_branch_paths() -> List[Path]:
-    """Load all branch paths from registry; FileNotFoundError when it is missing."""
+    """Every citizen's path that exists on disk, through memory's door; FileNotFoundError when the registry is missing."""
     if not AIPASS_REGISTRY.exists():
         raise FileNotFoundError(f"AIPASS_REGISTRY.json not found: {AIPASS_REGISTRY}")
-
-    repo_root = _find_repo_root()
-    data = json.loads(AIPASS_REGISTRY.read_text())
-    branches = data.get("branches", [])
-
-    paths = []
-    for branch in branches:
-        path_str = branch.get("path")
-        if path_str:
-            raw = Path(path_str)
-            path = raw if raw.is_absolute() else repo_root / raw
-            if path.exists():
-                paths.append(path)
-
-    return paths
+    return [row["path"] for row in fleet_rows(AIPASS_REGISTRY.parent) if row["path"].exists()]
 
 
 # Mirrors flow's push_branch_dashboard.py::_build_section_data: sections.flow has two
