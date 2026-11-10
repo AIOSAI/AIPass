@@ -243,7 +243,7 @@ class TestHandler:
 
 
 class TestBashLane:
-    def test_a_python_heredoc_writing_an_over_budget_file_logs_one_bash_row_and_answers_over(self, tmp_path):
+    def test_a_python_heredoc_writing_an_over_budget_file_logs_one_bash_row_and_answers_over(self, tmp_path, caplog):
         path = tmp_path / "x.py"
         path.write_text(_hashes(9) + _code(20), encoding="utf-8")
         command = f"python3 - <<'EOF'\nfrom pathlib import Path\nPath('{path}').write_text(TEXT)\nEOF"
@@ -252,7 +252,8 @@ class TestBashLane:
         assert answer["hookSpecificOutput"]["additionalContext"].startswith(
             "[COMMENTS] x.py is over the comment budget: 9 of 29 lines are comments (31%, budget 10%, 7 over)."
         )
-        assert answer["systemMessage"] == "[comments] x.py 31%, 7 over budget"
+        assert "systemMessage" not in answer
+        assert "[comments] x.py 31%, 7 over budget" in caplog.text
 
     def test_sed_in_place_on_an_existing_file_logs_a_row_and_is_silent(self, tmp_path):
         (tmp_path / "x.py").write_text(_hashes(1) + _code(24), encoding="utf-8")
@@ -300,10 +301,7 @@ class TestBashLane:
         assert context.index("heavy.py") < context.index("light.py")
         assert "A comment says why when the code cannot." in context
         assert len(context) < 700
-        assert (
-            answer["systemMessage"]
-            == "[comments] light.py 17%, 2 over budget; heavy.py 38%, 9 over budget; fine.py 0% ok"
-        )
+        assert "systemMessage" not in answer
 
 
 class TestCommentsVerb:

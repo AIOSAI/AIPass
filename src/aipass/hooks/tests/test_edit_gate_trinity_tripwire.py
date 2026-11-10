@@ -3,7 +3,7 @@
 # Description: edit_gate's memory tripwire: a .trinity write a shell made is reported at PostToolUse, project-wide
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-10
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py: tripwire_snapshot and tripwire."""
@@ -75,6 +75,7 @@ class TestShellMemoryTripwire:
     @staticmethod
     def _context(result):
         assert result["exit_code"] == 0, "the tripwire never blocks: the command has already run"
+        assert "systemMessage" not in json.loads(result["stdout"]), "a finding is the model's, never a chat line"
         return json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"]
 
     def test_an_over_cap_write_the_reader_missed_is_named_with_its_cut(self, tmp_path, monkeypatch, caplog):
@@ -207,6 +208,7 @@ class TestTripwireWatchesEveryTrinityInTheProject:
     @staticmethod
     def _context(result):
         assert result["exit_code"] == 0, "the tripwire never blocks: the command has already run"
+        assert "systemMessage" not in json.loads(result["stdout"]), "a finding is the model's, never a chat line"
         return json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"]
 
     def test_a_write_into_another_branchs_memory_is_reported(self, tmp_path, monkeypatch):

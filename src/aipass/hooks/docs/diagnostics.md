@@ -51,8 +51,10 @@ exists — hard-deleted, renamed to `name(disabled).py`, or moved to `.archive/`
 those three are the house cleanup pattern. Escape: recreate the file clean, let re-validation drop the
 state, then remove it.
 
-**A pass is silent.** A clean edit prints nothing. `auto_fix` speaks on an error (`[AUTO-FIX]`, context
-plus a statusline) and when a checker gave no answer (`[diagnostics] NO ANSWER from <checker>`).
+**A pass is silent, and a finding is the model's.** A clean edit prints nothing. An error (`[AUTO-FIX]`) and
+a checker that gave no answer (`[diagnostics] NO ANSWER from <checker>`) go to the model as PostToolUse
+`additionalContext` and to the hooks log, never as a `systemMessage`: that is a chat line the user sees (and
+the phone app reads aloud).
 
 **Scratch is not judged.** An edit under a directory
 named `docs.local`, `dropbox`, `.backup` or `.archive`, or under the harness scratchpad (a `scratchpad`

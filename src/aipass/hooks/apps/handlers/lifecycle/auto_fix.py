@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: auto_fix.py
-# Version: 1.6.0
+# Version: 1.7.0
 # Description: Post-edit diagnostics — syntax, lint, type, pattern, sentry checks (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
@@ -430,6 +430,11 @@ def _fit(error_text: str, frame: str, file_path: str) -> str:
     return kept + marker
 
 
+def _to_model(context: str) -> str:
+    """A finding as the model's context: a systemMessage is a chat line, read aloud by the phone app."""
+    return json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": context}})
+
+
 def handle(hook_data: dict) -> dict:
     """Run diagnostics on edited files and surface errors."""
     try:
@@ -485,18 +490,13 @@ def handle(hook_data: dict) -> dict:
                 tail = f"{tail}\n{no_answer}"
             error_text = _fit("\n".join(f"  - {e}" for e in errors), head + tail, file_path)
             context = f"{head}{error_text}{tail}"
-            result = {
-                "hookSpecificOutput": {
-                    "hookEventName": "PostToolUse",
-                    "additionalContext": context,
-                },
-                "systemMessage": f"[AUTO-FIX] {len(errors)} error(s) — fix before continuing",
-            }
-            return {"stdout": json.dumps(result), "exit_code": 0, "sound": "auto fix diagnostics"}
+            logger.info("[HOOKS] auto_fix: %s", context.replace("\n", " | "))
+            return {"stdout": _to_model(context), "exit_code": 0, "sound": "auto fix diagnostics"}
 
         if not no_answer:
             return {"stdout": "", "exit_code": 0}
-        return {"stdout": json.dumps({"systemMessage": f"[diagnostics] {no_answer}"}), "exit_code": 0}
+        logger.info("[HOOKS] auto_fix: %s in %s", no_answer, file_path)
+        return {"stdout": _to_model(f"[diagnostics] {no_answer}"), "exit_code": 0}
 
     except Exception as exc:
         logger.info("[HOOKS] auto_fix: unexpected error (allowing): %s", exc)

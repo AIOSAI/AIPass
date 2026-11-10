@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: comment_budget.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Description: Comment budget — measures every edit's comment share (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
@@ -152,7 +152,7 @@ def _judge(hook_data: dict, tool_name: str, tool_input: dict, file_path: str) ->
 
 
 def _status(verdict: str | tuple) -> str:
-    """One file's statusline part."""
+    """One file's part of the log line."""
     if isinstance(verdict, str):
         return verdict
     name, scan, _added_count = verdict
@@ -179,10 +179,8 @@ def handle(hook_data: dict) -> dict:
         if not overs:
             return _SILENT
         overs.sort(key=lambda v: v[1].over(), reverse=True)
-        result = {
-            "hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": _over_context(overs)},
-            "systemMessage": "[comments] " + "; ".join(_status(v) for v in verdicts),
-        }
+        logger.info("[HOOKS] comment_budget: [comments] %s", "; ".join(_status(v) for v in verdicts))
+        result = {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": _over_context(overs)}}
         return {"stdout": json.dumps(result), "exit_code": 0}
     except Exception as exc:
         logger.warning("[HOOKS] comment_budget: unexpected error (allowing): %s", exc)

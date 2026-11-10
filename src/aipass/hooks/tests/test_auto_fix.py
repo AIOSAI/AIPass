@@ -123,21 +123,26 @@ class TestAutofixPython:
         mock_pyright.side_effect = lambda path, unanswered: unanswered.append("pyright") or []
         result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "clean.py")}})
         assert json.loads(result["stdout"]) == {
-            "systemMessage": "[diagnostics] NO ANSWER from pyright: this edit cleared no recorded error"
+            "hookSpecificOutput": {
+                "hookEventName": "PostToolUse",
+                "additionalContext": "[diagnostics] NO ANSWER from pyright: this edit cleared no recorded error",
+            }
         }
 
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_sentry_checklist", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_pyright_check", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_ruff_lint_structured", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_python_checks")
-    def test_python_syntax_error(self, mock_py, mock_ruff_s, mock_pyright, mock_sentry, tmp_path):
+    def test_python_syntax_error(self, mock_py, mock_ruff_s, mock_pyright, mock_sentry, tmp_path, caplog):
         mock_py.return_value = ["SYNTAX: invalid syntax at line 5"]
         result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "bad.py")}})
         assert result["exit_code"] == 0
         parsed = json.loads(result["stdout"])
         assert "additionalContext" in parsed.get("hookSpecificOutput", {})
         assert "SYNTAX" in parsed["hookSpecificOutput"]["additionalContext"]
-        assert "1 error(s)" in parsed["systemMessage"]
+        assert "1 error(s) in bad.py" in parsed["hookSpecificOutput"]["additionalContext"]
+        assert "systemMessage" not in parsed
+        assert "SYNTAX: invalid syntax at line 5" in caplog.text
         assert result.get("sound") == "auto fix diagnostics"
 
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_pyright_check", return_value=[])

@@ -4,7 +4,7 @@
 # Description: Tests for post_compact_regrounding lifecycle handler (DPLAN-0276)
 # Branch: hooks
 # Created: 2026-08-01
-# Modified: 2026-11-02
+# Modified: 2026-11-10
 # =============================================
 
 """Tests for apps/handlers/lifecycle/post_compact_regrounding.py."""
@@ -52,6 +52,7 @@ class TestPostCompactRegrounding:
         assert result["sound"] == "post compact reground"
         payload = json.loads(result["stdout"])
         assert payload["hookSpecificOutput"]["hookEventName"] == "PostToolUse"
+        assert "systemMessage" not in payload
         context = payload["hookSpecificOutput"]["additionalContext"]
         assert "KERNEL" in context
         assert "NAVMAP" in context
