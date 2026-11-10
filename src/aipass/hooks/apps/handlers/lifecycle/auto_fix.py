@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: auto_fix.py
-# Version: 1.5.1
+# Version: 1.6.0
 # Description: Post-edit diagnostics — syntax, lint, type, pattern, sentry checks (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-11-02
+# Modified: 2026-11-10
 # =============================================
 
 """Runs diagnostics on edited files and surfaces errors for the agent to fix."""
@@ -446,12 +446,8 @@ def handle(hook_data: dict) -> dict:
         if ext in SKIP_EXTENSIONS:
             return {"stdout": "", "exit_code": 0}
 
-        scratch = _scratch_ground(file_path)
-        if scratch:
-            return {
-                "stdout": json.dumps({"systemMessage": f"[diagnostics] skipped: {scratch} is scratch"}),
-                "exit_code": 0,
-            }
+        if _scratch_ground(file_path):
+            return {"stdout": "", "exit_code": 0}
 
         errors: list[str] = []
         unanswered: list[str] = []
@@ -498,8 +494,9 @@ def handle(hook_data: dict) -> dict:
             }
             return {"stdout": json.dumps(result), "exit_code": 0, "sound": "auto fix diagnostics"}
 
-        result = {"systemMessage": f"[diagnostics] {no_answer or 'ok'}"}
-        return {"stdout": json.dumps(result), "exit_code": 0}
+        if not no_answer:
+            return {"stdout": "", "exit_code": 0}
+        return {"stdout": json.dumps({"systemMessage": f"[diagnostics] {no_answer}"}), "exit_code": 0}
 
     except Exception as exc:
         logger.info("[HOOKS] auto_fix: unexpected error (allowing): %s", exc)

@@ -4,7 +4,7 @@
 # Description: Tests for the comment budget: counter, PostToolUse handler, comments verb
 # Branch: hooks
 # Created: 2026-10-16
-# Modified: 2026-11-02
+# Modified: 2026-11-10
 # =============================================
 
 """Tests for apps/handlers/lifecycle/comment_budget.py, apps/modules/comment_scan.py and apps/modules/comments.py."""
@@ -196,22 +196,21 @@ class TestHandler:
         assert "Heaviest runs: L1-30 (30)." in context
         assert len(context) < 700
 
-    def test_under_budget_answers_the_statusline_only(self, tmp_path):
+    def test_under_budget_is_silent_and_still_logged(self, tmp_path):
         path = tmp_path / "mod.py"
         path.write_text(_hashes(1) + _code(24), encoding="utf-8")
-        answer = _answer(comment_budget.handle(_write(path)))
-        assert answer == {"systemMessage": "[comments] mod.py 4% ok"}
+        assert comment_budget.handle(_write(path)) == {"stdout": "", "exit_code": 0}
+        assert _rows()[-1]["over"] == 0
 
-    def test_a_file_at_exactly_the_budget_answers_ok(self, tmp_path):
+    def test_a_file_at_exactly_the_budget_is_silent(self, tmp_path):
         path = tmp_path / "mod.py"
         path.write_text(_hashes(2) + _code(18), encoding="utf-8")
-        assert _answer(comment_budget.handle(_write(path))) == {"systemMessage": "[comments] mod.py 10% ok"}
+        assert comment_budget.handle(_write(path)) == {"stdout": "", "exit_code": 0}
 
-    def test_a_tiny_module_with_a_docstring_is_not_judged_and_still_logged(self, tmp_path):
+    def test_a_tiny_module_with_a_docstring_is_not_judged_silent_and_still_logged(self, tmp_path):
         path = tmp_path / "__init__.py"
         path.write_text('"""Package.\n\nVersion bump.\n"""\n__version__ = "2.8.19"\n', encoding="utf-8")
-        answer = _answer(comment_budget.handle(_write(path)))
-        assert answer == {"systemMessage": "[comments] __init__.py 50%, not judged: under 20 lines"}
+        assert comment_budget.handle(_write(path)) == {"stdout": "", "exit_code": 0}
         assert {key: _rows()[-1][key] for key in ("body", "comments", "share", "over")} == {
             "body": 4,
             "comments": 2,
@@ -219,12 +218,11 @@ class TestHandler:
             "over": 0,
         }
 
-    def test_a_scratch_path_answers_the_skip_and_writes_no_row(self, tmp_path):
+    def test_a_scratch_path_is_silent_and_writes_no_row(self, tmp_path):
         path = tmp_path / "docs.local" / "draft.py"
         path.parent.mkdir()
         path.write_text(_hashes(9) + _code(1), encoding="utf-8")
-        answer = _answer(comment_budget.handle(_write(path)))
-        assert answer == {"systemMessage": "[comments] skipped: docs.local is scratch"}
+        assert comment_budget.handle(_write(path)) == {"stdout": "", "exit_code": 0}
         assert _rows() == []
 
     def test_an_unjudged_kind_is_silent_and_writes_no_row(self, tmp_path):
@@ -256,17 +254,17 @@ class TestBashLane:
         )
         assert answer["systemMessage"] == "[comments] x.py 31%, 7 over budget"
 
-    def test_sed_in_place_on_an_existing_file_logs_a_row_and_answers_ok(self, tmp_path):
+    def test_sed_in_place_on_an_existing_file_logs_a_row_and_is_silent(self, tmp_path):
         (tmp_path / "x.py").write_text(_hashes(1) + _code(24), encoding="utf-8")
-        answer = _answer(comment_budget.handle(_bash("sed -i s/a/b/ x.py", tmp_path)))
+        result = comment_budget.handle(_bash("sed -i s/a/b/ x.py", tmp_path))
         assert [row["tool"] for row in _rows()] == ["Bash"]
-        assert answer == {"systemMessage": "[comments] x.py 4% ok"}
+        assert result == {"stdout": "", "exit_code": 0}
 
-    def test_a_cat_redirect_heredoc_logs_a_row(self, tmp_path):
+    def test_a_cat_redirect_heredoc_logs_a_row_and_is_silent(self, tmp_path):
         (tmp_path / "x.py").write_text(_code(20), encoding="utf-8")
-        answer = _answer(comment_budget.handle(_bash("cat > x.py <<'EOF'\nx0 = 0\nEOF", tmp_path)))
+        result = comment_budget.handle(_bash("cat > x.py <<'EOF'\nx0 = 0\nEOF", tmp_path))
         assert [(row["tool"], row["body"]) for row in _rows()] == [("Bash", 20)]
-        assert answer == {"systemMessage": "[comments] x.py 0% ok"}
+        assert result == {"stdout": "", "exit_code": 0}
 
     def test_a_read_only_command_on_a_judged_file_is_silent_and_logs_nothing(self, tmp_path):
         (tmp_path / "x.py").write_text(_hashes(9) + _code(20), encoding="utf-8")
@@ -274,11 +272,10 @@ class TestBashLane:
         assert result == {"stdout": "", "exit_code": 0}
         assert _rows() == []
 
-    def test_sed_on_a_scratch_path_answers_the_skip_and_logs_nothing(self, tmp_path):
+    def test_sed_on_a_scratch_path_is_silent_and_logs_nothing(self, tmp_path):
         (tmp_path / "docs.local").mkdir()
         (tmp_path / "docs.local" / "x.py").write_text(_hashes(9) + _code(20), encoding="utf-8")
-        answer = _answer(comment_budget.handle(_bash("sed -i s/a/b/ docs.local/x.py", tmp_path)))
-        assert answer == {"systemMessage": "[comments] skipped: docs.local is scratch"}
+        assert comment_budget.handle(_bash("sed -i s/a/b/ docs.local/x.py", tmp_path)) == {"stdout": "", "exit_code": 0}
         assert _rows() == []
 
     def test_a_held_path_with_an_old_mtime_is_not_counted_as_written(self, tmp_path):
