@@ -66,3 +66,23 @@ Runaway gating decisions are appended to `logs/runaway_suppressed.jsonl` with an
 - [escalation.md](escalation.md) — what happens when an answered error keeps recurring
 - [log_watching.md](log_watching.md) — where the error lines come from
 - [service_and_reload.md](service_and_reload.md) — the systemd unit behind "persistent log watching"
+
+---
+
+## Unit watch: systemd user services that loop or fail
+
+`drone @trigger medic units` checks every systemd user service once (`apps/handlers/unit_watch.py`).
+A unit that exits at once and restarts every few seconds lives a second per run, so it shows in no
+process list; systemd's restart counter is the only witness. The check reads `NRestarts`,
+`ActiveState` and `SubState` for every unit in one `systemctl --user show`, and compares them with
+the last check, kept in `trigger_json/unit_watch.json`.
+
+ - **Failed**: `ActiveState=failed`.
+ - **Restart-looping**: the restart count rose by more than `LOOP_RESTARTS_PER_CHECK` (5) since the
+   last check, or `SubState=auto-restart` on two checks running.
+ - **Mail**: @devpulse gets one mail per unit per incident, naming the unit, its state, its restart
+   count, the unit's own last journal line and its unit file. The incident ends when the unit is
+   healthy again; a later failure mails again. A mail that fails to send is retried on the next check.
+ - **systemctl unreadable**: one mail of its own, never silence; the units' last counters stand.
+ - **Cadence**: the `unit-watch` row in `.daemon/schedule.json` runs it every 10 minutes on the
+   daemon tick, so no process of its own stays up. A 5 s loop adds about 120 restarts per check.

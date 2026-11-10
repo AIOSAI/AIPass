@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: medic.py
 # Description: Medic toggle module for auto-healing error dispatch control
-# Version: 1.10.0
+# Version: 1.11.0
 # Created: 2026-02-12
-# Modified: 2026-10-24
+# Modified: 2026-11-10
 # =============================================
 
 """
@@ -16,6 +16,8 @@ import os
 import sys
 from pathlib import Path
 from typing import Callable
+
+from rich.markup import escape
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.trigger.apps.handlers.cli.help_flags import wants_help
@@ -128,6 +130,7 @@ def print_help() -> None:
     console.print("  [bold]unmute[/bold] @branch     Resume dispatch for a muted branch")
     console.print("  [bold]volume-mute[/bold] @branch    Suppress runaway alerts for 24h (same flags)")
     console.print("  [bold]volume-unmute[/bold] @branch  Resume runaway alerts for a branch")
+    console.print("  [bold]units[/bold]              Mail @devpulse each systemd user service newly looping or failed")
     console.print("  [bold]help[/bold]               Show this help")
     console.print()
     console.rule("OFF vs MUTE")
@@ -485,6 +488,20 @@ def _handle_off(console, args: list | None = None) -> None:
         )
 
 
+def _handle_units(console) -> None:
+    """Check every systemd user service once; mail @devpulse each one newly looping or failed."""
+    from aipass.trigger.apps.handlers import unit_watch
+    from aipass.trigger.apps.handlers.ci import outbound
+    from aipass.trigger.apps.modules.core import trigger
+
+    # The bus's first use runs setup_handlers, which wires the mail adapter outbound sends through.
+    trigger.status()
+    sent = unit_watch.check(lambda subject, body: outbound.mail("@devpulse", subject, body))
+    for subject in sent:
+        console.print(f"  mailed @devpulse: {escape(subject)}")
+    console.print(f"Unit check done: {len(sent)} new incident(s) mailed")
+
+
 def _route_medic_module(args: list) -> bool:
     """Route 'drone @trigger medic <subcmd>' to handle_command."""
     if not args:
@@ -508,7 +525,7 @@ def handle_command(command: str, args: list) -> bool:
             return True
         return _route_medic_module(args)
 
-    if command not in ["on", "off", "status", "mute", "unmute", "volume-mute", "volume-unmute"]:
+    if command not in ["on", "off", "status", "mute", "unmute", "volume-mute", "volume-unmute", "units"]:
         return False
 
     if wants_help(args):
@@ -523,6 +540,7 @@ def handle_command(command: str, args: list) -> bool:
         "on": lambda: _handle_on(console),
         "off": lambda: _handle_off(console, args),
         "status": lambda: _handle_status(console),
+        "units": lambda: _handle_units(console),
     }
     handler = handlers.get(command)
     if handler:

@@ -13,6 +13,18 @@
       "timeout_seconds": 300,
       "notify": false,
       "_note": "WHAT: the CI red lane's poll. A command job: the daemon tick runs it from src/aipass/trigger/, so no agent wakes for the poll itself; it wakes an owner only for a new red, within the two-awake cap. WHY 10 minutes: a CI run takes 20 to 32 minutes, so a red is seen within a third of a run, and a poll is a handful of drone reads (run list, one run view per new red) that holds the tick lock for seconds. WHY notify false: the lane mails @devpulse itself on held, unowned, pushed and green; a start and finish mail every 10 minutes would be noise. Enabled after the lead's live check of the lane passed; disabling is flipping enabled to false. Depth: docs/ci_red_lane.md."
+    },
+    {
+      "id": "unit-watch",
+      "enabled": true,
+      "schedule": {
+        "type": "interval",
+        "interval_minutes": 10
+      },
+      "command": "drone @trigger medic units",
+      "timeout_seconds": 120,
+      "notify": false,
+      "_note": "WHAT: one check of every systemd user service; @devpulse gets one mail per unit per incident when a unit has failed or is restart-looping (restart count up more than 5 since the last check, or auto-restart on two checks running). WHY a command job on the tick, not a new process: a check is three short reads (list-units, one show for all units, a journal line per troubled unit). WHY 10 minutes: a 5 s restart loop adds about 120 restarts per check, far past the threshold; a loop is named within 20 minutes. WHY notify false: the check mails @devpulse itself, only on a new incident. Depth: docs/medic.md."
     }
   ]
 }

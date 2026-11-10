@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_medic.py
 # Description: Unit tests for medic module handle_command
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-10
 # =============================================
 
 """Tests for the medic toggle module (apps/modules/medic.py)."""
@@ -25,6 +25,10 @@ from aipass.trigger.apps.handlers import service_control
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers.medic_state import parse_duration
 from aipass.trigger.apps.modules import medic
+from aipass.trigger.apps.handlers import unit_watch
+from aipass.trigger.apps.handlers.ci import outbound
+from aipass.trigger.apps.modules import core
+from types import SimpleNamespace
 
 
 _STATE_NAMES = (
@@ -757,3 +761,81 @@ def test_medic_off_forever_claims_no_stop_systemctl_never_answered(capsys, syste
     assert [cmd[2] for cmd in systemctl_never_answers] == ["is-active", "stop"]
     assert "systemctl did not answer" in panel_text, panel_text
     assert "Log watcher stopped" not in panel_text, panel_text
+
+
+SEED_EARS_FAILED = {"Id": "seed-ears.service", "NRestarts": "5", "ActiveState": "failed", "SubState": "failed"}
+
+
+@pytest.fixture
+def units(monkeypatch, tmp_path):
+    """systemctl and journalctl answer from `world`; mail to @devpulse lands in `mails`."""
+    world = {"units": {}, "broken": False}
+    mails: list = []
+
+    def fake_run(args):
+        if world["broken"]:
+            raise OSError("Failed to connect to bus: No medium found")
+        if args[0] == "journalctl":
+            return "seed ears needs SEED_HEAD\n"
+        if "list-units" in args:
+            return "".join(f"{name} loaded x y desc\n" for name in world["units"])
+        return "\n\n".join(
+            "\n".join(f"{k}={v}" for k, v in dict(row, FragmentPath=f"/u/{name}").items())
+            for name, row in world["units"].items()
+        )
+
+    monkeypatch.setattr(unit_watch, "run_command", fake_run)
+    monkeypatch.setattr(unit_watch, "STATE_FILE", tmp_path / "unit_watch.json")
+    monkeypatch.setattr(outbound, "mail", lambda to, subject, body: mails.append((to, subject, body)) or True)
+    monkeypatch.setattr(core.trigger, "status", lambda: {})
+    return SimpleNamespace(world=world, mails=mails, check=lambda: medic.handle_command("units", []))
+
+
+class TestUnitsWarnOnARestartLoopOrAFailedService:
+    def test_a_failed_unit_mails_devpulse_once_with_its_count_last_line_and_file(self, units):
+        units.world["units"] = {"seed-ears.service": SEED_EARS_FAILED}
+        units.check()
+        units.check()
+
+        assert len(units.mails) == 1
+        to, subject, body = units.mails[0]
+        assert to == "@devpulse" and "seed-ears.service" in subject
+        assert "Restarts: 5" in body and "seed ears needs SEED_HEAD" in body and "/u/seed-ears.service" in body
+
+    def test_a_restart_count_rising_past_the_threshold_between_checks_is_a_loop(self, units):
+        row = {"Id": "a.service", "NRestarts": "10", "ActiveState": "active", "SubState": "running"}
+        units.world["units"] = {"a.service": row}
+        units.check()
+        row["NRestarts"] = str(10 + unit_watch.LOOP_RESTARTS_PER_CHECK)
+        units.check()
+        assert units.mails == []
+
+        row["NRestarts"] = str(11 + 2 * unit_watch.LOOP_RESTARTS_PER_CHECK)
+        units.check()
+        assert len(units.mails) == 1 and "a.service" in units.mails[0][1]
+
+    def test_auto_restart_on_two_checks_running_is_a_loop_and_on_one_is_not(self, units):
+        row = {"Id": "b.service", "NRestarts": "0", "ActiveState": "activating", "SubState": "auto-restart"}
+        units.world["units"] = {"b.service": row}
+        units.check()
+        assert units.mails == []
+        units.check()
+        assert len(units.mails) == 1
+
+    def test_a_unit_that_recovers_and_fails_again_is_a_second_incident(self, units):
+        units.world["units"] = {"seed-ears.service": SEED_EARS_FAILED}
+        units.check()
+        units.world["units"] = {"seed-ears.service": dict(SEED_EARS_FAILED, ActiveState="active", SubState="running")}
+        units.check()
+        units.world["units"] = {"seed-ears.service": SEED_EARS_FAILED}
+        units.check()
+
+        assert len(units.mails) == 2
+
+    def test_an_unreadable_systemctl_is_one_mail_never_silence(self, units):
+        units.world["broken"] = True
+        units.check()
+        units.check()
+
+        assert len(units.mails) == 1
+        assert "No medium found" in units.mails[0][2]
