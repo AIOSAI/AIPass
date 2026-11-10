@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_reads.py
 # Description: Host API Git Read Handler — the patch, the change list, the log, one commit
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-08-17
-# Modified: 2026-10-24
+# Modified: 2026-11-10
 # =============================================
 
 """
@@ -46,6 +46,10 @@ GIT_CHANGES_TTL_SECONDS = 1.5
 
 # Keyed by (branch, project, grain): a branch name is not unique across projects.
 _changes = ReadCache("git_changes", GIT_CHANGES_TTL_SECONDS)
+
+GIT_SWEEP_TTL_SECONDS = 5.0
+
+_sweeps = ReadCache("git_sweep", GIT_SWEEP_TTL_SECONDS)
 
 JSON_FLAG = "--json"
 
@@ -353,11 +357,7 @@ def _read_git_changes_uncached(branch: str, project: str = "", grain: str = "") 
     grain = _checked_grain(grain)
     root = resolve_branch_root(branch, project)
 
-    command = ["drone", "@git", "status"]
-    if grain == GRAIN_REPO:
-        command.append(ALL_FLAG)
-
-    document = _document(command, root, "git status")
+    document = _status_document(root, grain)
 
     files, untracked, rows = _changed_files(document, root if grain == GRAIN_BRANCH else None)
 
@@ -380,6 +380,38 @@ def _read_git_changes_uncached(branch: str, project: str = "", grain: str = "") 
         answer["root"] = published_root_of(repository) if repository is not None else None
 
     return answer
+
+
+def _status_document(root: Path, grain: str) -> Dict[str, Any]:
+    """One grain's status, cut from the repository's sweep: a face asks one branch per 5 s tick, round-robin."""
+    base = _status_base(root.resolve())
+
+    if base is None:
+        command = ["drone", "@git", "status"] + ([ALL_FLAG] if grain == GRAIN_REPO else [])
+        return _document(command, root, "git status")
+
+    whole = _sweeps.get(str(base), lambda: _document(["drone", "@git", "status", ALL_FLAG], root, "git status"))
+    if grain == GRAIN_REPO:
+        return whole
+
+    prefix = cast(str, _prefix_under(root.resolve(), base))
+    if prefix == "./":
+        return whole
+
+    wanted = [
+        e
+        for e in whole.get(FILES_KEY) or []
+        if str(e.get(PATH_KEY) or "").startswith(prefix) or e.get(PATH_KEY) == prefix[:-1]
+    ]
+    return {**whole, FILES_KEY: wanted}
+
+
+def _status_base(resolved: Path) -> Optional[Path]:
+    for base in (repository_of(resolved), repo_root()):
+        if _prefix_under(resolved, base) is not None:
+            return cast(Path, base).resolve()
+
+    return None
 
 
 def _changed_files(document: Dict[str, Any], root: Optional[Path]) -> Any:
@@ -431,11 +463,10 @@ def _repo_relative_prefix(root: Path) -> str:
     the seat and a nested repository (projects/baud) inside it.
     """
     resolved = root.resolve()
+    base = _status_base(resolved)
 
-    for base in (repository_of(resolved), repo_root()):
-        prefix = _prefix_under(resolved, base)
-        if prefix is not None:
-            return prefix
+    if base is not None:
+        return cast(str, _prefix_under(resolved, base))
 
     # Logged: for a seated branch, un-prefixed rows would be the only symptom of a moved seat.
     logger.info("[host_api] no repository root above %s — paths stay as drone printed them", root)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_read_lane_changes.py
 # Description: Tests for the read lane's git-changes lane — the card contract, the stampede, grains, rows, refusals
-# Version: 1.1.2
+# Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-10
 # =============================================
 
 """Tests for read_git_changes() in apps/handlers/host/git_reads.py and its cache and refusal memory."""
@@ -155,14 +155,18 @@ class TestGitChangesCoalescesTheStampede:
 
     def test_an_expired_entry_is_read_again_rather_than_served_stale(self, fake_repo: dict) -> None:
         """A cache that never expires is a lane that lies about a tree that moved."""
-        with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
+        clock = [1000.0]
+
+        with (
+            patch.object(host_read_cache, "time") as frozen,
+            patch.object(subprocess, "run", return_value=self._completed()) as mock_run,
+        ):
+            frozen.monotonic.side_effect = lambda: clock[0]
             host_git.read_git_changes("demo")
-            key = ("demo", "", "branch")
-            stored_at, answer = host_git._changes._entries[key]
-            host_git._changes._entries[key] = (stored_at - (host_git.GIT_CHANGES_TTL_SECONDS + 1), answer)
+            clock[0] += 5.5
             host_git.read_git_changes("demo")
 
-        assert mock_run.call_count == 2
+        assert mock_run.call_count == 2, "a face's next tick, one interval on, must see a tree that moved"
 
     def test_one_callers_edit_to_a_row_does_not_reach_the_next_caller(self, fake_repo: dict) -> None:
         """A cached answer is handed out as a COPY, and this pin exists because a
@@ -191,14 +195,14 @@ class TestGitChangesCoalescesTheStampede:
             "the file list is shared too, so one card's edit rewrites the next card's list"
         )
 
-    def test_different_branches_are_not_queued_behind_each_other(self, fake_repo: dict) -> None:
-        """The flight lock is PER KEY. A global one would turn the stampede into a
-        queue — every card correct, every card late."""
-        with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
-            host_git.read_git_changes("demo")
-            host_git.read_git_changes("demo", grain="repo")
+    def test_branch_and_repo_grain_read_one_sweep(self, fake_repo: dict) -> None:
+        with patch.object(subprocess, "run", return_value=self._completed(GIT_STATUS_ALL_STDOUT)) as mock_run:
+            branch = host_git.read_git_changes("demo")
+            repo = host_git.read_git_changes("demo", grain="repo")
 
-        assert mock_run.call_count == 2, "branch and repo grain are different questions"
+        assert mock_run.call_count == 1, "both grains are one repository's status"
+        assert branch["files"] == ["hello.txt"]
+        assert repo["files"] == ["src/aipass/demo/hello.txt", "src/aipass/other/thing.py", "src/aipass/third/gone.txt"]
 
     def test_one_branch_name_in_two_projects_is_two_cache_entries(self, fake_repo: dict, tmp_path: Path) -> None:
         """The PROJECT is part of the key, and this pin exists because a mutation
@@ -313,6 +317,101 @@ class TestGitChangesCoalescesTheStampede:
         assert "('demo', 'AIPASS', 'branch')" in message % tuple(values)
 
 
+class TestOneSweepAnswersEveryBranchOfARepository:
+    """A face asks one branch per 5 s tick, round-robin, so a per-branch cache never hit:
+    13 drone spawns a minute for one open face. One repo-wide status per interval answers them all."""
+
+    def _completed(self, stdout: str = GIT_STATUS_ALL_STDOUT) -> Any:
+        result = MagicMock()
+        result.stdout = stdout
+        result.stderr = ""
+        result.returncode = 0
+        return result
+
+    def _seated(self, fake_repo: dict, name: str) -> Any:
+        """A second branch of the fake seat, resolved the way a project's branch is."""
+        root = fake_repo["root"] / "src" / "aipass" / name
+        root.mkdir(parents=True)
+        census = MagicMock()
+        census.FleetUnavailable = host_fleet.FleetUnavailable
+        census.resolve_branch.return_value = {"name": name, "path": str(root)}
+        return patch(PATCH_HOST_FLEET, census)
+
+    def test_two_branches_of_one_repository_share_one_spawn(self, fake_repo: dict) -> None:
+        with (
+            self._seated(fake_repo, "other"),
+            patch.object(subprocess, "run", return_value=self._completed()) as mock_run,
+        ):
+            demo = host_git.read_git_changes("demo")
+            other = host_git.read_git_changes("other", project="SEAT")
+
+        assert mock_run.call_count == 1
+        assert demo["files"] == ["hello.txt"]
+        assert other["files"] == ["thing.py"]
+
+    def test_a_branch_keeps_only_its_own_rows_of_the_repository(self, fake_repo: dict) -> None:
+        # drone's own branch filter: a sibling whose name extends this one ('demo2') is not this branch.
+        stdout = status_document(
+            (
+                (" M", "src/aipass/demo/hello.txt"),
+                (" M", "src/aipass/demo2/near.py"),
+                ("??", "src/aipass/demo/brand_new.py"),
+                (" M", "src/aipass/demo"),
+            )
+        )
+
+        with patch.object(subprocess, "run", return_value=self._completed(stdout)):
+            result = host_git.read_git_changes("demo")
+
+        # The last row is drone's too: a branch that is a submodule shows as its own path, no slash.
+        assert [row["path"] for row in result["rows"]] == ["hello.txt", "brand_new.py", "src/aipass/demo"]
+        assert result["untracked"] == 1
+
+    def test_the_sweep_serves_a_face_for_one_interval_and_no_longer(self, fake_repo: dict) -> None:
+        clock = [1000.0]
+
+        with (
+            self._seated(fake_repo, "other"),
+            patch.object(host_read_cache, "time") as frozen,
+            patch.object(subprocess, "run", return_value=self._completed()) as mock_run,
+        ):
+            frozen.monotonic.side_effect = lambda: clock[0]
+            host_git.read_git_changes("demo")
+            clock[0] += 4.5
+            host_git.read_git_changes("other", project="SEAT")
+            served = mock_run.call_count
+            clock[0] += 1.0
+            host_git.read_git_changes("demo", grain="repo")
+
+        assert served == 1, "the next tick, inside the 5 s interval, must not spawn"
+        assert mock_run.call_count == 2, "an answer older than one interval must be read again"
+
+    def test_a_sibling_after_a_failed_sweep_spawns_its_own(self, fake_repo: dict) -> None:
+        outcomes = [subprocess.TimeoutExpired("drone", 30), self._completed()]
+
+        with self._seated(fake_repo, "other"), patch.object(subprocess, "run", side_effect=outcomes) as mock_run:
+            with pytest.raises(host_reads.ReadUnavailable):
+                host_git.read_git_changes("demo")
+            other = host_git.read_git_changes("other", project="SEAT")
+
+        assert mock_run.call_count == 2, "a failed spawn is never kept as the repository's answer"
+        assert other["files"] == ["thing.py"]
+
+    def test_a_branch_at_its_repository_root_keeps_every_row(self, fake_repo: dict, tmp_path: Path) -> None:
+        # drone's rule when the branch IS the repository: the whole status is the branch's.
+        project = tmp_path / "Rooted"
+        plant_repository(project)
+        census = MagicMock()
+        census.FleetUnavailable = host_fleet.FleetUnavailable
+        census.resolve_branch.return_value = {"name": "rooted", "path": str(project)}
+        stdout = status_document(((" M", "main.py"), (" M", "lib/util.py")))
+
+        with patch(PATCH_HOST_FLEET, census), patch.object(subprocess, "run", return_value=self._completed(stdout)):
+            result = host_git.read_git_changes("rooted", project="ROOTED")
+
+        assert result["files"] == ["main.py", "lib/util.py"]
+
+
 class TestGitStaysDroneOnlyOnThisLaneToo:
     """Git is drone-only in this system, servers included — the same house rule
     the diff lane above is built on."""
@@ -329,7 +428,7 @@ class TestGitStaysDroneOnlyOnThisLaneToo:
         with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
             host_git.read_git_changes("demo")
 
-        assert mock_run.call_args[0][0] == ["drone", "@git", "status", "--json"]
+        assert mock_run.call_args[0][0] == ["drone", "@git", "status", "--all", "--json"]
 
     def test_runs_in_the_branch_directory(self, fake_repo: dict) -> None:
         """drone's git lane is CWD-scoped, so the cwd IS the branch selection."""
@@ -538,12 +637,12 @@ class TestRepoGrainChanges:
 
         assert "--all" in mock_run.call_args[0][0]
 
-    def test_branch_grain_never_asks_for_the_whole_repo(self, fake_repo: dict) -> None:
-        """The card's question is unchanged — no --all leaks into the old grain."""
-        with patch.object(subprocess, "run", return_value=self._completed(GIT_STATUS_STDOUT)) as mock_run:
-            host_git.read_git_changes("demo")
+    def test_branch_grain_never_answers_with_the_whole_repo(self, fake_repo: dict) -> None:
+        """The card's answer is unchanged — the repo-wide sweep's other branches never leak into it."""
+        with patch.object(subprocess, "run", return_value=self._completed()):
+            narrow = host_git.read_git_changes("demo")
 
-        assert "--all" not in mock_run.call_args[0][0]
+        assert narrow["files"] == ["hello.txt"]
 
     def test_the_answer_names_its_own_grain(self, fake_repo: dict) -> None:
         """Both grains say which they are, so a client cannot mistake them."""
