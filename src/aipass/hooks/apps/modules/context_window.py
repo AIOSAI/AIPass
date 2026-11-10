@@ -1,25 +1,27 @@
 # =================== AIPass ====================
 # Name: context_window.py
-# Version: 1.11.0
+# Version: 1.13.0
 # Description: Context fill per CLI (Claude transcript, Codex rollout, OpenCode store) and the compact window
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-20
-# Modified: 2026-11-04
+# Modified: 2026-11-10
 # =============================================
 
-"""Live context fill and the model from a session transcript, and the window Claude Code runs.
+"""Live context fill from a session transcript, and the window each CLI runs, read from a live source only.
 
 Shared by pre_compact_prep.py and context_gauge.py.
 
 Live context size ≈ input_tokens + cache_read_input_tokens + cache_creation_input_tokens
 of the most recent assistant turn (proven readable S326).
 
-Window, as Claude Code 2.1.304 picks it: the model's own window (`[1m]` suffix or a native-1M
-id -> 1M, else 200k), capped by an explicit window when one is set (env beats settings).
-Auto-compact fires at window - 33k. OpenCode keeps no transcript: opencode_fill reads its store, and
-opencode_window its models.dev catalog and compaction.buffer, the rule OpenCode 2.2 compacts by.
-A Seed transcript (provider "seed") is Seed's own shape with no usage or model yet: it reads as none."""
+Claude window: the context_window_size Claude Code hands its status line, which the status line writes
+to live_window_path(session_id); capped by an explicit window when one is set (env beats settings).
+No file, or a value that is not a positive int, is None: window unknown. No model list backs it.
+Auto-compact fires at window - 33k. Codex: the rollout's model_context_window, else config's.
+OpenCode keeps no transcript: opencode_fill reads its store, and opencode_window its models.dev catalog
+and compaction.buffer, the rule OpenCode 2.2 compacts by; a model the catalog lacks is window unknown.
+A Seed transcript (provider "seed") is Seed's own shape with no usage yet: it reads as none."""
 
 import json
 import os
@@ -39,8 +41,6 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
 
-_DEFAULT_WINDOW = 200_000
-_NATIVE_1M_WINDOW = 1_000_000
 _EXPLICIT_MIN = 100_000
 _EXPLICIT_MAX = 1_000_000
 _TAIL_BYTES = 50_000
@@ -52,23 +52,8 @@ AUTOCOMPACT_BUFFER = 33_000
 
 SEED = "seed"
 
-NATIVE_1M_MODELS = frozenset(
-    {
-        "claude-opus-4-7",
-        "claude-opus-4-8",
-        "claude-opus-5",
-        "claude-opus-5-5",
-        "claude-sonnet-5",
-        "claude-sonnet-5-5",
-        "claude-fable-5",
-        "claude-fable-5-1",
-        "claude-mythos-5",
-        "claude-mythos-5-1",
-    }
-)
-
-_BRACKET_SUFFIX = re.compile(r"\[[^\]]*\]$")
-_DATE_SUFFIX = re.compile(r"-\d{8}$")
+_SESSION_ID = re.compile(r"[\w-]+")
+_STATE_DIR = Path(tempfile.gettempdir())
 # One top-level `key = <int>` line of a TOML file: tomllib is 3.11+ and the project supports 3.10.
 _TOML_INT = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*=\s*\+?(\d[\d_]*)\s*(?:#.*)?$")
 
@@ -147,17 +132,6 @@ def _codex_token_info(entry: dict, field: str) -> object:
     return info.get(field) if isinstance(info, dict) else None
 
 
-def _codex_model(entry: dict) -> str | None:
-    payload = entry.get("payload") if entry.get("type") == "turn_context" else None
-    model = payload.get("model") if isinstance(payload, dict) else None
-    return model if isinstance(model, str) and model else None
-
-
-def _is_real_model(model: object) -> bool:
-    # "<synthetic>" marks a locally made assistant line (API error, interrupt), not a model.
-    return isinstance(model, str) and bool(model) and not model.startswith("<")
-
-
 def read_latest_usage(transcript_path: str, tail_bytes: int = _TAIL_BYTES, provider: str = "") -> dict | None:
     """The newest usage dict: Claude's assistant message.usage, or Codex's token_count last_token_usage.
 
@@ -182,24 +156,6 @@ def _is_dict(value: object) -> bool:
     return isinstance(value, dict)
 
 
-def read_latest_model(transcript_path: str, tail_bytes: int = _TAIL_BYTES, provider: str = "") -> str:
-    """The model id of the most recent turn (Codex: turn_context), or "" when the transcript names none."""
-    if not transcript_path or provider == SEED:
-        return ""
-    try:
-        if (provider or transcript_provider(transcript_path)) == "codex":
-            model = _latest(transcript_path, _codex_model, tail_bytes)
-        else:
-            model = _latest(transcript_path, lambda e: _claude_message(e, "model", _is_real_model), tail_bytes)
-    except FileNotFoundError:
-        logger.debug("[HOOKS] context_window: no transcript yet (turn 0): %s", transcript_path)
-        return ""
-    except OSError as exc:
-        logger.info("[HOOKS] context_window: transcript read failed: %s", exc)
-        return ""
-    return model if isinstance(model, str) else ""
-
-
 def context_fill_tokens(usage: dict) -> int:
     """Live context size of one turn. Claude: input + cache_read + cache_creation.
 
@@ -213,15 +169,25 @@ def context_fill_tokens(usage: dict) -> int:
     )
 
 
-def model_window(model_id: str) -> int:
-    """The window Claude Code gives a model id: `[1m]` or a native-1M id -> 1M, anything else -> 200k."""
-    model = (model_id or "").strip().lower()
-    if not model:
-        return _DEFAULT_WINDOW
-    if "[1m]" in model:
-        return _NATIVE_1M_WINDOW
-    model = _DATE_SUFFIX.sub("", _BRACKET_SUFFIX.sub("", model))
-    return _NATIVE_1M_WINDOW if model in NATIVE_1M_MODELS else _DEFAULT_WINDOW
+def live_window_path(session_id: str) -> Path | None:
+    """The status line's window file for a session, beside the hooks' per-session state; None for an unsafe id."""
+    if not _SESSION_ID.fullmatch(session_id or ""):
+        return None
+    return _STATE_DIR / f"aipass-cc-window-{session_id}.json"
+
+
+def live_window(session_id: str) -> int | None:
+    """The context_window_size the status line last wrote for the session; None when absent or not a positive int."""
+    path = live_window_path(session_id)
+    if path is None or not path.is_file():
+        return None
+    try:
+        data = json_files.read_json_file(path)
+    except (OSError, ValueError) as exc:
+        logger.info("[HOOKS] context_window: live window unreadable for %s: %s", session_id, exc)
+        return None
+    size = data.get("context_window_size") if isinstance(data, dict) else None
+    return size if isinstance(size, int) and not isinstance(size, bool) and size > 0 else None
 
 
 def _settings_window(settings_path: Path) -> int | None:
@@ -341,12 +307,12 @@ def opencode_compact_point(limit: int, buffer: int | None) -> int:
     return limit - max(limit * _OPENCODE_HELD_BACK_PCT // 100, floor)
 
 
-def opencode_window(session_id: str, cwd: str) -> tuple[int, int]:
-    """(limit, compact point) OpenCode runs the session at; a model the catalog lacks reads 200k (logged)."""
+def opencode_window(session_id: str, cwd: str) -> tuple[int | None, int | None]:
+    """(limit, compact point) OpenCode runs the session at; (None, None) when the catalog lacks the model (logged)."""
     limit = _opencode_limit(session_id)
     if not limit:
-        logger.info("[HOOKS] context_window: no catalog limit for OpenCode session %s, reading 200k", session_id)
-        limit = _DEFAULT_WINDOW
+        logger.info("[HOOKS] context_window: no catalog limit for OpenCode session %s, window unknown", session_id)
+        return None, None
     return limit, opencode_compact_point(limit, _opencode_buffer(cwd))
 
 
@@ -451,8 +417,8 @@ def _codex_config_int(key: str) -> int | None:
     return None
 
 
-def _codex_window(transcript_path: str) -> int:
-    """The window Codex counts against: the rollout's model_context_window, else config's (cut to the usable 95%)."""
+def _codex_window(transcript_path: str) -> int | None:
+    """The window Codex counts against: the rollout's model_context_window, else config's (cut to the usable 95%), else None."""
     try:
         window = _latest(transcript_path, lambda e: _codex_token_info(e, "model_context_window"))
     except OSError as exc:
@@ -461,28 +427,31 @@ def _codex_window(transcript_path: str) -> int:
     if isinstance(window, int) and window > 0:
         return window
     configured = _codex_config_int("model_context_window")
-    return configured * _CODEX_USABLE_PCT // 100 if configured else _DEFAULT_WINDOW
+    return configured * _CODEX_USABLE_PCT // 100 if configured else None
 
 
-def resolve_compact_window(cwd: str, model_id: str = "", transcript_path: str = "", provider: str = "") -> int:
+def resolve_compact_window(cwd: str, session_id: str = "", transcript_path: str = "", provider: str = "") -> int | None:
     """The effective window. A Codex rollout: the window Codex counts against (_codex_window).
 
-    Claude: min(model window, explicit) when explicit is set, else the model window; with no model id
-    the explicit value (or the 200k default) stands, as before model awareness."""
+    Claude: the session's live window, capped by explicit when one is set. None when the status line
+    has written no window for the session: window unknown, whatever is explicit."""
     if transcript_path and (provider or _provider_or_claude(transcript_path)) == "codex":
         return _codex_window(transcript_path)
+    window = live_window(session_id)
+    if window is None:
+        return None
     explicit = explicit_window(cwd)
-    if not model_id:
-        return explicit if explicit is not None else _DEFAULT_WINDOW
-    window = model_window(model_id)
     return min(window, explicit) if explicit is not None else window
 
 
-def compact_threshold(window: int, provider: str = "claude") -> int:
+def compact_threshold(window: int | None, provider: str = "claude") -> int | None:
     """The fill at which the CLI auto-compacts. Claude Code: window - 33k.
 
     Codex (codex-rs protocol/src/openai_models.rs, ModelInfo::auto_compact_token_limit): 90% of the full
-    window, lowered by config model_auto_compact_token_limit; `window` is the usable 95% of the full one."""
+    window, lowered by config model_auto_compact_token_limit; `window` is the usable 95% of the full one.
+    An unknown window (None) has no point."""
+    if window is None:
+        return None
     if provider != "codex":
         return window - AUTOCOMPACT_BUFFER
     default = window * 100 // _CODEX_USABLE_PCT * 9 // 10
@@ -506,13 +475,14 @@ def _provider_or_claude(transcript_path: str) -> str:
 def print_introspection() -> None:
     """Print context_window config and the resolved window for CWD."""
     CONSOLE.print("[bold cyan]context_window[/bold cyan] Module")
-    CONSOLE.print(f"  Default window: {_DEFAULT_WINDOW:,} (native-1M models: {_NATIVE_1M_WINDOW:,})")
+    CONSOLE.print("  Claude window: the status line's context_window_size per session (none written: unknown)")
     CONSOLE.print(f"  Auto-compact buffer: {AUTOCOMPACT_BUFFER:,}")
     CONSOLE.print(f"  Transcript tail read: {_TAIL_BYTES:,} bytes")
     explicit = explicit_window(str(Path.cwd()))
     CONSOLE.print(f"  Explicit window (CWD): {f'{explicit:,}' if explicit is not None else 'none'}")
-    window = resolve_compact_window(str(Path.cwd()))
-    CONSOLE.print(f"  Resolved window (CWD, no model): {window:,}")
+    session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    window = resolve_compact_window(str(Path.cwd()), session_id)
+    CONSOLE.print(f"  Resolved window (this session): {f'{window:,}' if window is not None else 'unknown'}")
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -520,9 +490,7 @@ def handle_command(command: str, args: list) -> bool:
     if command in ("--help", "-h", "help") or (command == "context_window" and wants_help(args)):
         CONSOLE.print("[bold cyan]context_window[/bold cyan] — Transcript usage + compact-window resolver")
         CONSOLE.print()
-        CONSOLE.print(
-            "  drone @hooks context_window    Show default window, buffer, tail size, resolved window for CWD"
-        )
+        CONSOLE.print("  drone @hooks context_window    Show known windows, buffer, tail size, resolved window for CWD")
         return True
 
     if command == "context_window":

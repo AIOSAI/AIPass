@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_pre_compact_prep.py
-# Version: 1.4.0
+# Version: 1.6.0
 # Description: Tests for pre_compact_prep lifecycle handler
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-11-09
+# Modified: 2026-11-10
 # =============================================
 
 """Tests for apps/handlers/lifecycle/pre_compact_prep.py."""
@@ -81,6 +81,32 @@ class TestHandle:
             result = handle({"cwd": str(branch_dir), "transcript_path": str(rollout), "provider": "codex"})
 
         assert "context ~22k/475k (5%)" in result["stdout"]
+
+    @pytest.mark.parametrize(
+        ("live", "stamped"),
+        [(1_000_000, "context ~230k/1000k (23%)"), (None, "context ~230k (window unknown)")],
+    )
+    def test_a_claude_snapshot_reads_the_live_window_and_never_guesses_200k(self, tmp_path, monkeypatch, live, stamped):
+        monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+        monkeypatch.setattr(context_window, "user_settings_path", lambda: tmp_path / "home" / "user_settings.json")
+        monkeypatch.setattr(context_window, "_STATE_DIR", tmp_path)
+        if live is not None:
+            (tmp_path / "aipass-cc-window-ses-pc.json").write_text(
+                json.dumps({"context_window_size": live}), encoding="utf-8"
+            )
+        branch_dir = _make_branch(tmp_path)
+        transcript = tmp_path / "t.jsonl"
+        turn = {
+            "type": "assistant",
+            "message": {"model": "claude-opus-5-5", "usage": {"cache_read_input_tokens": 230_000}},
+        }
+        transcript.write_text(json.dumps(turn), encoding="utf-8")
+
+        with patch(f"{MODULE}._find_repo_root", return_value=None):
+            result = handle({"cwd": str(branch_dir), "transcript_path": str(transcript), "session_id": "ses-pc"})
+
+        assert stamped in result["stdout"]
+        assert "/200k" not in result["stdout"]
 
     @pytest.mark.skipif(sys.platform == "win32", reason="the stamp lock is fcntl's; Windows stamps unlocked")
     def test_two_concurrent_stamps_keep_both_snapshots(self, tmp_path, monkeypatch):

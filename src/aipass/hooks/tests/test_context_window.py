@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_context_window.py
-# Version: 1.6.0
-# Description: Tests for shared context_window module (model-aware window since 1.1.0)
+# Version: 1.8.0
+# Description: Tests for shared context_window module (live status-line window since 1.8.0)
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-11-04
+# Modified: 2026-11-10
 # =============================================
 
 """Tests for apps/modules/context_window.py."""
@@ -12,8 +12,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that context_window.py parses and imports, ruff and collection cover it
 # sentry: no-test-needed(documentation) — print_introspection()'s console text, the introspection standard covers it
-# sentry: no-test-needed(constant) — _DEFAULT_WINDOW and _TAIL_BYTES' values, pinned through the defaults asserted here
-# sentry: no-test-needed(constant) — NATIVE_1M_MODELS' membership, pinned through the ids model_window is asserted on
+# sentry: no-test-needed(constant) — _TAIL_BYTES' value, pinned through the defaults asserted here
 # sentry: no-test-needed(stdlib) — json.loads' handling of malformed lines, the stdlib's own
 
 import json
@@ -27,8 +26,8 @@ from aipass.hooks.apps.modules.context_window import (
     context_fill_tokens,
     explicit_window,
     find_branch_dir,
-    model_window,
-    read_latest_model,
+    live_window,
+    live_window_path,
     read_latest_usage,
     resolve_compact_window,
     user_settings_path,
@@ -43,6 +42,24 @@ def user_settings(tmp_path, monkeypatch):
     return path
 
 
+@pytest.fixture(autouse=True)
+def live_dir(tmp_path, monkeypatch):
+    """The temp dir the status line's window files live in, moved under tmp_path."""
+    monkeypatch.setattr(context_window, "_STATE_DIR", tmp_path)
+    return tmp_path
+
+
+def _path(session_id):
+    path = live_window_path(session_id)
+    assert path is not None
+    return path
+
+
+def _live(session_id, size):
+    """The file the status line writes for a session: its payload's context_window_size."""
+    _path(session_id).write_text(json.dumps({"context_window_size": size}), encoding="utf-8")
+
+
 def _branch_settings(tmp_path, name, data):
     branch_dir = tmp_path / "src" / "aipass" / "widget"
     claude_dir = branch_dir / ".claude"
@@ -51,10 +68,10 @@ def _branch_settings(tmp_path, name, data):
     return branch_dir
 
 
-def _codex_rollout(path, total_tokens, window=475_000, model="gpt-6.1-sol"):
+def _codex_rollout(path, total_tokens, window: int | None = 475_000, model="gpt-6.1-sol"):
     """A Codex rollout in the shape 0.164 writes: session_meta, turn_context, the newest token_count."""
     usage = {"input_tokens": total_tokens - 568, "cached_input_tokens": 7680, "output_tokens": 568}
-    info = {
+    info: dict[str, object] = {
         "total_token_usage": dict(usage, total_tokens=total_tokens),
         "last_token_usage": dict(usage, total_tokens=total_tokens),
     }
@@ -111,7 +128,6 @@ class TestReadLatestUsage:
     def test_a_missing_transcript_at_turn_zero_logs_no_info_line(self, tmp_path, caplog):
         caplog.set_level("DEBUG")
         assert read_latest_usage(str(tmp_path / "nope.jsonl")) is None
-        assert read_latest_model(str(tmp_path / "nope.jsonl")) == ""
         assert not [r for r in caplog.records if r.levelname == "INFO" and "transcript" in r.getMessage()]
 
     def test_returns_none_for_empty_path(self):
@@ -149,41 +165,31 @@ class TestReadLatestUsage:
         assert usage == {"input_tokens": 5}
 
 
-class TestReadLatestModel:
-    def test_returns_the_latest_assistant_lines_model(self, tmp_path):
-        transcript = tmp_path / "t.jsonl"
-        lines = [
-            json.dumps({"type": "assistant", "message": {"model": "claude-haiku-5-5", "usage": {}}}),
-            json.dumps({"type": "user", "message": {"model": "not-this"}}),
-            json.dumps({"type": "assistant", "message": {"model": "claude-opus-5-5", "usage": {}}}),
-        ]
-        transcript.write_text("\n".join(lines), encoding="utf-8")
+class TestLiveWindow:
+    def test_the_file_sits_beside_the_hook_state_keyed_by_session(self, live_dir):
+        assert live_window_path("ses-1") == live_dir / "aipass-cc-window-ses-1.json"
 
-        assert read_latest_model(str(transcript)) == "claude-opus-5-5"
+    def test_a_positive_int_size_is_the_window(self):
+        _live("ses-1", 1_000_000)
+        assert live_window("ses-1") == 1_000_000
 
-    def test_returns_empty_when_no_assistant_line(self, tmp_path):
-        transcript = tmp_path / "t.jsonl"
-        transcript.write_text(json.dumps({"type": "user", "message": {}}), encoding="utf-8")
+    @pytest.mark.parametrize("size", [0, -5, True, 1.5, "200000", None, [200_000]])
+    def test_anything_but_a_positive_int_is_unknown(self, size):
+        _live("ses-1", size)
+        assert live_window("ses-1") is None
 
-        assert read_latest_model(str(transcript)) == ""
-        assert read_latest_model("") == ""
+    def test_no_file_torn_json_or_a_non_object_is_unknown(self):
+        assert live_window("ses-1") is None
+        _path("ses-1").write_text("{torn", encoding="utf-8")
+        assert live_window("ses-1") is None
+        _path("ses-1").write_text("[1000000]", encoding="utf-8")
+        assert live_window("ses-1") is None
 
-
-class TestModelWindow:
-    @pytest.mark.parametrize(
-        ("model_id", "expected"),
-        [
-            ("claude-opus-5-5", 1_000_000),
-            ("claude-opus-5-5-20261001", 1_000_000),
-            ("claude-haiku-5-5", 200_000),
-            ("claude-sonnet-4-6[1m]", 1_000_000),
-            ("claude-sonnet-4-6[1M]", 1_000_000),
-            ("claude-opus-4-5-20251101", 200_000),
-            ("", 200_000),
-        ],
-    )
-    def test_window_follows_the_model_id(self, model_id, expected):
-        assert model_window(model_id) == expected
+    @pytest.mark.parametrize("session_id", ["", "../ses-1", "a/b", "ses 1"])
+    def test_a_session_id_that_is_not_a_plain_name_reads_nothing(self, session_id, live_dir):
+        _live("ses-1", 1_000_000)
+        assert live_window_path(session_id) is None
+        assert live_window(session_id) is None
 
 
 class TestCompactThreshold:
@@ -191,6 +197,9 @@ class TestCompactThreshold:
         assert AUTOCOMPACT_BUFFER == 33_000
         assert compact_threshold(200_000) == 167_000
         assert compact_threshold(1_000_000) == 967_000
+
+    def test_an_unknown_window_has_no_threshold(self):
+        assert compact_threshold(None) is None
 
 
 class TestUserSettingsPath:
@@ -212,7 +221,8 @@ class TestContextFillTokens:
 class TestResolveCompactWindow:
     def test_env_var_takes_precedence(self, tmp_path, monkeypatch):
         monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "350000")
-        assert resolve_compact_window(str(tmp_path)) == 350000
+        _live("s", 1_000_000)
+        assert resolve_compact_window(str(tmp_path), "s") == 350000
 
     def test_reads_branch_settings_when_no_env(self, tmp_path, monkeypatch):
         monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
@@ -220,34 +230,43 @@ class TestResolveCompactWindow:
         claude_dir = branch_dir / ".claude"
         claude_dir.mkdir(parents=True)
         (claude_dir / "settings.local.json").write_text(json.dumps({"autoCompactWindow": 350000}), encoding="utf-8")
+        _live("s", 1_000_000)
 
-        assert resolve_compact_window(str(branch_dir)) == 350000
+        assert resolve_compact_window(str(branch_dir), "s") == 350000
 
-    def test_defaults_to_200k_when_nothing_found(self, tmp_path, monkeypatch):
-        monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
-        assert resolve_compact_window(str(tmp_path)) == 200_000
+    def test_no_live_window_is_unknown_even_under_an_explicit_window(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "350000")
+        assert resolve_compact_window(str(tmp_path), "s") is None
+        assert resolve_compact_window(str(tmp_path)) is None
 
-    def test_bad_env_value_falls_through(self, tmp_path, monkeypatch):
+    def test_bad_env_value_leaves_the_live_window(self, tmp_path, monkeypatch):
         monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "not-a-number")
-        assert resolve_compact_window(str(tmp_path)) == 200_000
+        _live("s", 200_000)
+        assert resolve_compact_window(str(tmp_path), "s") == 200_000
 
-    def test_a_1m_model_with_nothing_explicit_gets_1m(self, tmp_path, monkeypatch):
+    def test_a_live_1m_capped_at_350k_compacts_at_317k(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "350000")
+        _live("s", 1_000_000)
+        window = resolve_compact_window(str(tmp_path), "s")
+        assert window == 350_000
+        assert compact_threshold(window) == 317_000
+
+    def test_a_window_no_code_knows_is_read_as_the_status_line_reports_it(self, tmp_path, monkeypatch):
         monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+        _live("s", 750_000)
         assert explicit_window(str(tmp_path)) is None
-        assert resolve_compact_window(str(tmp_path), "claude-opus-5-5") == 1_000_000
+        assert resolve_compact_window(str(tmp_path), "s") == 750_000
 
-    def test_explicit_350k_caps_a_1m_model(self, tmp_path, monkeypatch):
+    def test_explicit_350k_never_raises_a_live_200k(self, tmp_path, monkeypatch):
         monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "350000")
-        assert resolve_compact_window(str(tmp_path), "claude-opus-5-5") == 350_000
-
-    def test_explicit_350k_never_raises_a_200k_model(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "350000")
-        assert resolve_compact_window(str(tmp_path), "claude-haiku-5-5") == 200_000
+        _live("s", 200_000)
+        assert resolve_compact_window(str(tmp_path), "s") == 200_000
 
     def test_env_below_100k_is_clamped_up(self, tmp_path, monkeypatch):
         monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "50000")
+        _live("s", 1_000_000)
         assert explicit_window(str(tmp_path)) == 100_000
-        assert resolve_compact_window(str(tmp_path), "claude-opus-5-5") == 100_000
+        assert resolve_compact_window(str(tmp_path), "s") == 100_000
 
     def test_env_above_1m_is_clamped_down(self, tmp_path, monkeypatch):
         monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "5000000")
@@ -257,16 +276,18 @@ class TestResolveCompactWindow:
         monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
         user_settings.parent.mkdir(parents=True)
         user_settings.write_text(json.dumps({"autoCompactWindow": 400000}), encoding="utf-8")
+        _live("s", 1_000_000)
 
-        assert resolve_compact_window(str(tmp_path), "claude-opus-5-5") == 400_000
+        assert resolve_compact_window(str(tmp_path), "s") == 400_000
 
     def test_branch_auto_falls_through_to_the_user_value(self, tmp_path, monkeypatch, user_settings):
         monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
         branch_dir = _branch_settings(tmp_path, "settings.local.json", {"autoCompactWindow": "auto"})
         user_settings.parent.mkdir(parents=True)
         user_settings.write_text(json.dumps({"autoCompactWindow": 400000}), encoding="utf-8")
+        _live("s", 1_000_000)
 
-        assert resolve_compact_window(str(branch_dir), "claude-opus-5-5") == 400_000
+        assert resolve_compact_window(str(branch_dir), "s") == 400_000
 
     def test_an_unreadable_branch_file_falls_through_to_the_user_value(self, tmp_path, monkeypatch, user_settings):
         monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
@@ -274,16 +295,18 @@ class TestResolveCompactWindow:
         (branch_dir / ".claude" / "settings.local.json").write_text("{not json", encoding="utf-8")
         user_settings.parent.mkdir(parents=True)
         user_settings.write_text(json.dumps({"autoCompactWindow": 400000}), encoding="utf-8")
+        _live("s", 1_000_000)
 
-        assert resolve_compact_window(str(branch_dir), "claude-opus-5-5") == 400_000
+        assert resolve_compact_window(str(branch_dir), "s") == 400_000
 
     def test_branch_settings_json_beats_the_user_value(self, tmp_path, monkeypatch, user_settings):
         monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
         branch_dir = _branch_settings(tmp_path, "settings.json", {"autoCompactWindow": 300000})
         user_settings.parent.mkdir(parents=True)
         user_settings.write_text(json.dumps({"autoCompactWindow": 400000}), encoding="utf-8")
+        _live("s", 1_000_000)
 
-        assert resolve_compact_window(str(branch_dir), "claude-opus-5-5") == 300_000
+        assert resolve_compact_window(str(branch_dir), "s") == 300_000
 
 
 if __name__ == "__main__":
@@ -315,6 +338,7 @@ class TestCodexRollout:
         rollout = tmp_path / "t.jsonl"
         _codex_rollout(rollout, total_tokens=22_113)
         usage = read_latest_usage(str(rollout))
+        assert usage is not None
         assert usage == {
             "input_tokens": 21_545,
             "cached_input_tokens": 7680,
@@ -322,7 +346,6 @@ class TestCodexRollout:
             "total_tokens": 22_113,
         }
         assert context_window.context_fill_tokens(usage) == 22_113
-        assert read_latest_model(str(rollout)) == "gpt-6.1-sol"
 
     def test_the_first_line_decides_the_shape(self, tmp_path):
         rollout, claude = tmp_path / "a.jsonl", tmp_path / "b.jsonl"
@@ -337,10 +360,15 @@ class TestCodexRollout:
     def test_the_window_is_the_rollouts_and_the_point_is_90_percent_of_the_full_one(self, tmp_path):
         rollout = tmp_path / "t.jsonl"
         _codex_rollout(rollout, total_tokens=1, window=258_400)
-        window = context_window.resolve_compact_window(str(tmp_path), "gpt-6.1-sol", str(rollout))
+        window = context_window.resolve_compact_window(str(tmp_path), "s", str(rollout))
         assert window == 258_400
         assert context_window.compact_threshold(window, "codex") == 244_800
         assert context_window.compact_threshold(200_000) == 167_000
+
+    def test_no_rollout_window_and_no_config_is_unknown(self, tmp_path):
+        rollout = tmp_path / "t.jsonl"
+        _codex_rollout(rollout, total_tokens=1, window=None)
+        assert context_window.resolve_compact_window(str(tmp_path), "s", str(rollout)) is None
 
     @pytest.mark.parametrize(
         ("text", "expected"),
@@ -371,10 +399,9 @@ def _seed_transcript(path):
 
 
 class TestSeedTranscript:
-    def test_a_seed_transcript_reads_as_no_usage_and_no_model_without_a_parse(self, tmp_path, monkeypatch):
+    def test_a_seed_transcript_reads_as_no_usage_without_a_parse(self, tmp_path, monkeypatch):
         parsed: list[str] = []
         monkeypatch.setattr(context_window, "_latest", lambda path, *_: parsed.append(path))
         transcript = str(_seed_transcript(tmp_path / "transcript.jsonl"))
         assert read_latest_usage(transcript, provider="seed") is None
-        assert read_latest_model(transcript, provider="seed") == ""
         assert parsed == [], "Seed's lines are not Claude's: nothing may parse them as such"
