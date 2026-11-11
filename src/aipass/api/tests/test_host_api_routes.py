@@ -1011,7 +1011,9 @@ class TestEditAndWriteLinesCarryTheirChange:
 
     def test_edits_and_writes_carry_counts_text_and_start_even_past_the_hunk(self, agents: Any, tmp_path: Path) -> None:
         head = "h\nh\nh\nh\nh\n"
-        edits = [  # (old, new, the first hunk's oldStart and lines): inside it, past its context, a drifted insert, a trailing newline, a block repeated after
+        # (old, new, the first hunk's oldStart and lines): inside it, past its context, a drifted insert,
+        # a trailing newline, a block repeated after
+        edits = [
             ("b\nc", "b\nC\nd", 1, [" a", " b", "-c", "+C", "+d", " e"]),
             (head + "X", head + "Y", 12, [" h", " h", " h", "-X", "+Y", " h", " h", " h"]),
             ("p\nq\nr", "p\nq\nr\n\nN", 11, [" q", " r", " ", "+", "+N", " z"]),
@@ -1061,6 +1063,24 @@ class TestEditAndWriteLinesCarryTheirChange:
 
         assert [("change" in line, line["text"]) for line in lines] == [(False, "edited f.py")] * 3
 
+    def test_a_line_polled_before_its_result_comes_again_with_its_change(self, agents: Any, tmp_path: Path) -> None:
+        call = _claude("assistant", [_call("w1", "Write")])
+        _jsonl(tmp_path / CLAUDE_FILE, [call])
+        early = _feed(agents).json()["lines"]
+        answer = _answer("w1", {"type": "create", "content": "1\n", "structuredPatch": []})
+        said = _claude("assistant", [{"type": "text", "text": "done"}])
+        _jsonl(tmp_path / CLAUDE_FILE, [call, answer, said])
+
+        again = _feed(agents, since=early[0]["n"]).json()["lines"]
+        settled = _feed(agents, since=again[-1]["n"]).json()["lines"]
+
+        assert "change" not in early[0]
+        assert [(line["n"], line.get("change", {}).get("added")) for line in again] == [
+            (early[0]["n"], 1),
+            (again[-1]["n"], None),
+        ]
+        assert settled == []
+
     def test_a_change_past_the_cap_keeps_only_path_and_counts(self, agents: Any, tmp_path: Path) -> None:
         big = "".join(f"{i}\n" for i in range(401))
         _jsonl(
@@ -1100,7 +1120,10 @@ class TestTheFeedReadsACodexRollout:
 
     def test_rollout_rows_become_lines_with_the_turns_model(self, agents: Any, tmp_path: Path) -> None:
         agents[2].rows[:] = [agent_row(provider="codex", session="c-1")]
-        script = 'tools.exec_command({cmd:"ls -la"}); tools.write_stdin({}); tools.apply_patch("*** Begin Patch\\n*** Update File: src/app.py")'
+        script = (
+            'tools.exec_command({cmd:"ls -la"}); tools.write_stdin({}); '
+            'tools.apply_patch("*** Begin Patch\\n*** Update File: src/app.py")'
+        )
         _jsonl(
             tmp_path / CODEX_FILE,
             [

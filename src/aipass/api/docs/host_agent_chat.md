@@ -71,6 +71,8 @@ change: {path, added, removed, large?, start?, old?, new?, before?, after?}
   line it overlaps and covers the hunk's first removed line; no such single placement, no `change`.
 - A Write has `before` (`null` for a new file) and `after`, the whole file each side.
 - Past 400 diff lines or 40 000 bytes of body, `large: true` replaces the body: only path and counts are kept.
+- A poller that read the line before its result row gets it again, under the same `n` and now with `change`, on
+  every read whose `since` is before that result row: a client replaces a line it holds by `n`.
 - No `change`: a call still running, refused, or failed (`is_error`), a result row answering several calls, a
   `Write` row from a Claude Code that writes no `type`, any other tool, and every Codex line.
 - A poller holds a tool line it read before the result arrived without its `change`: the line's `n` never

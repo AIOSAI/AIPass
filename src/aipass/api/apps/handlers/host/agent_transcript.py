@@ -368,14 +368,24 @@ def to_lines(row: Dict[str, Any], model: Optional[str] = None, results: Optional
     return [line for line in lines if line is not None]
 
 
+def _call_ids(row: Dict[str, Any]) -> List[str]:
+    """The ids of the tool calls a Claude row makes."""
+    content = (row.get("message") or {}).get("content")
+    parts = content if isinstance(content, list) else []
+    return [str(p.get("id")) for p in parts if isinstance(p, dict) and p.get("type") == "tool_use"]
+
+
 def read_feed(path: Path, since: Optional[int] = None) -> List[dict]:
     """The transcript's lines after *since* (all in the tail when None), the last FEED_ROWS of them.
+
+    A changed line the poller already holds without its change comes again once its result row is past *since*.
 
     A line's n is the byte offset of its row in the file plus the line's index within that row: stable while the
     file grows, so a poller keeps its place; it starts again near 0 in a new session's file.
     """
     rows: List[Tuple[int, Dict[str, Any]]] = []
     results: Dict[str, Any] = {}  # a call's result row comes after it: read them all before any line is made
+    landed: Dict[str, int] = {}  # where each result row sits: a poller past the call but not the result has no change
     for offset, chunk in tail_rows(path, TAIL_BYTES):
         if not chunk.strip():
             continue
@@ -386,14 +396,19 @@ def read_feed(path: Path, since: Optional[int] = None) -> List[dict]:
             continue
         if isinstance(row, dict):
             rows.append((offset, row))
+            known = len(results)
             tool_results(row, results)
+            if len(results) > known:
+                landed[next(reversed(results))] = offset
     lines: List[dict] = []
     model = None  # Codex's, from the last turn_context row read
     for offset, row in rows:
         if row.get("type") == "turn_context":
             model = display_model((row.get("payload") or {}).get("model"))
+        # A result written after the poller's place: its call's line goes again, now with its change, under the same n.
+        late = since is not None and any(landed.get(call, 0) > since for call in _call_ids(row))
         for index, line in enumerate(to_lines(row, model, results)):
-            if since is None or offset + index > since:
+            if since is None or offset + index > since or (late and "change" in line):
                 lines.append({"n": offset + index, **line})
     json_handler.log_operation("host_api_agent_transcript_read", {"lines": len(lines), "since": since})
     return lines[-FEED_ROWS:]
