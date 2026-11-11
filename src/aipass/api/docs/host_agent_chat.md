@@ -23,7 +23,7 @@ before any lookup. The agent is looked up in @baud's roster (`baud-cli --roster`
 
 | Route | Scope | Request | Answer | Refusals |
 |---|---|---|---|---|
-| `GET /v1/agent/{project}/{name}/feed?since=<n>` | read | `since` optional, a line's `n` | `{lines: [{n, role, text, time, model?}], busy, waiting: {tool} or null, session}` | 400 `agent_refused`, `agent_feed_refused` (since not a whole number, any other parameter); 404 `agent_not_live`, `transcript_unavailable`; 503 `fleet_unavailable` |
+| `GET /v1/agent/{project}/{name}/feed?since=<n>` | read | `since` optional, a line's `n` | `{lines: [{n, role, text, time, model?, change?}], busy, waiting: {tool} or null, session}` | 400 `agent_refused`, `agent_feed_refused` (since not a whole number, any other parameter); 404 `agent_not_live`, `transcript_unavailable`; 503 `fleet_unavailable` |
 | `POST /v1/agent/{project}/{name}/send` | operate | `{text}` | `{ok: true}` | 400 `agent_refused`, `agent_body_refused` (not JSON), `agent_text_refused` (no text, or nothing left after cleaning); 404 `agent_not_live`; 409 `agent_no_room`; 503 `fleet_unavailable` (no baud binary), `agent_send_failed` |
 | `POST /v1/agent/{project}/{name}/interrupt` | operate | `{}` | `{ok: true}` | as send, less the text refusals |
 | `POST /v1/agent/{project}/{name}/allow` | operate | `{}` | `{ok: true}` | as interrupt |
@@ -56,6 +56,25 @@ and Codex transcripts are read. A Codex rollout not yet written, or a session fi
 - `tool`: one line per tool call, the verb and the key argument, a path by its file name only
   (`edited server.py`, `ran: pytest -q`). A Codex exec script gives one line per call in it (`ran:` for
   commands, `edited` for patches), its stdin polls left out.
+
+**What a change is.** A Claude Code `Edit` or `Write` tool line carries `change` once its result row is in the
+transcript, read from that row's `toolUseResult` and the call's input only, never from the file on disk:
+
+```
+change: {path, added, removed, large?, start?, old?, new?, before?, after?}
+```
+
+- `path` is the file as the tool was given it; `added` and `removed` count the lines of Claude Code's own line diff
+  (`structuredPatch`), so a new file counts every line of its content as added.
+- An Edit has `start`, the 1-based line the old text began on, with `old` and `new`, the replaced text and its
+  replacement. `start` is the one placement of the old text on the first hunk's old side that agrees with every
+  line it overlaps and covers the hunk's first removed line; no such single placement, no `change`.
+- A Write has `before` (`null` for a new file) and `after`, the whole file each side.
+- Past 400 diff lines or 40 000 bytes of body, `large: true` replaces the body: only path and counts are kept.
+- No `change`: a call still running, refused, or failed (`is_error`), a result row answering several calls, a
+  `Write` row from a Claude Code that writes no `type`, any other tool, and every Codex line.
+- A poller holds a tool line it read before the result arrived without its `change`: the line's `n` never
+  repeats, so the change shows on a later full read only.
 
 **What `n` is.** A line's `n` is the byte offset of its row in the transcript file plus the line's index
 within that row. It never changes while the file grows, and it rises through the file, so a client that

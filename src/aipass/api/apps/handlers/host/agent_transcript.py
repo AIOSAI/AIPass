@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: agent_transcript.py
 # Description: Host API Agent Transcript — find a live agent's session file and read it as chat lines
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-11-04
-# Modified: 2026-11-08
+# Modified: 2026-11-10
 # =============================================
 
 """
@@ -26,6 +26,9 @@ MODEL_TAIL_BYTES = 1024 * 1024  # assistant rows are small; the big rows are too
 FEED_ROWS = 80
 TEXT_CAP = 20000  # a whole reply: 2000 cut long ones mid-sentence
 TOOL_CAP = 120
+# A change rides in every feed answer: past either cap only its path and counts are kept.
+DIFF_LINES = 400
+DIFF_BYTES = 40_000
 PASTED = re.compile(r"<pasted_content[^>]*>(.*?)</pasted_content[^>]*>", re.S)
 # A teammate's report lands as a user row; Claude Code shows it as one line, so the feed does too.
 TEAMMATE = re.compile(
@@ -200,14 +203,115 @@ def codex_lines(row: Dict[str, Any], model: Optional[str]) -> List[dict]:
     return out
 
 
-def _claude_part(part: Any, kind: str, stamp: Any, model: Optional[str]) -> Optional[dict]:
+def _text_lines(text: str) -> List[str]:
+    """A text's lines as a line diff counts them: none for empty, one trailing newline not a line of its own."""
+    return re.split(r"\r?\n", re.sub(r"\r?\n$", "", text)) if text else []
+
+
+def _patch_counts(patch: Any) -> Optional[Tuple[int, int]]:
+    """(added, removed) from Claude Code's structuredPatch hunks, or None when the patch is not that shape."""
+    if not isinstance(patch, list) or not all(isinstance(h, dict) and isinstance(h.get("lines"), list) for h in patch):
+        return None
+    marks = [str(line)[:1] for hunk in patch for line in hunk["lines"]]
+    return marks.count("+"), marks.count("-")
+
+
+def _meets(want: List[str], side: List[str], at: int) -> int:
+    """How many non-empty hunk lines the old text overlaps put at *at*; 0 when any overlapped line disagrees."""
+    met, last = 0, len(want) - 1
+    for i, line in enumerate(want):
+        if not 0 <= at + i < len(side):
+            continue
+        have = side[at + i]
+        # The old text may begin and end mid-line: its first line ends a file line, its last begins one.
+        agree = (
+            line in have
+            if last == 0
+            else have.endswith(line)
+            if i == 0
+            else have.startswith(line)
+            if i == last
+            else have == line
+        )
+        if not agree:
+            return 0
+        met += bool(line)  # an empty line agrees anywhere: it places nothing
+    return met
+
+
+def _edit_start(patch: List[dict], old: str) -> Optional[int]:
+    """The 1-based file line the old text began on: its one best placement on the first hunk's old side, else None."""
+    if not patch or not isinstance(patch[0].get("oldStart"), int):
+        return None
+    marked = [str(line) for line in patch[0]["lines"] if str(line)[:1] in (" ", "-")]
+    side, want = [line[1:] for line in marked], old.split("\n")
+    # A removed line is inside the old text, so a placement must cover the first; an insert-only hunk has none.
+    cut = next((i for i, line in enumerate(marked) if line[:1] == "-"), None)
+    # The old text can reach past the hunk's 3 context lines, so placements overlapping only part of it count too.
+    reach = range(1 - len(want), len(side))
+    met = {at: _meets(want, side, at) for at in reach if cut is None or at <= cut < at + len(want)}
+    best = max(met.values(), default=0)
+    places = [at for at, n in met.items() if n == best]
+    start = patch[0]["oldStart"] + places[0] if best and len(places) == 1 else 0
+    return start if start >= 1 else None
+
+
+def change_of(name: str, args: Dict[str, Any], result: Any) -> Optional[dict]:
+    """The change an Edit or a Write made, from its call and Claude Code's toolUseResult only; None when unreadable."""
+    path = args.get("file_path")
+    counts = _patch_counts(result.get("structuredPatch")) if isinstance(result, dict) else None
+    if not isinstance(path, str) or counts is None:
+        return None
+    if name == "Edit":
+        old, new = result.get("oldString", args.get("old_string")), result.get("newString", args.get("new_string"))
+        start = _edit_start(result["structuredPatch"], old) if isinstance(old, str) and isinstance(new, str) else None
+        if start is None:
+            return None
+        body: Dict[str, Any] = {"start": start, "old": old, "new": new}
+    elif name == "Write":
+        after, kind = result.get("content", args.get("content")), result.get("type")
+        before = None if kind == "create" else result.get("originalFile")
+        if (
+            not isinstance(after, str)
+            or kind not in ("create", "update")
+            or (kind == "update" and not isinstance(before, str))
+        ):
+            return None
+        if kind == "create":
+            counts = (len(_text_lines(after)), 0)
+        body = {"before": before, "after": after}
+    else:
+        return None
+    change = {"path": path, "added": counts[0], "removed": counts[1]}
+    fits = sum(counts) <= DIFF_LINES and len(json.dumps(body).encode("utf-8")) <= DIFF_BYTES
+    return {**change, **body} if fits else {**change, "large": True}
+
+
+def tool_results(row: Dict[str, Any], results: Dict[str, Any]) -> None:
+    """Note a Claude user row's toolUseResult under its call's id: only a row answering one call, never an error."""
+    content = (row.get("message") or {}).get("content") if row.get("type") == "user" else None
+    answers = (
+        [p for p in content if isinstance(p, dict) and p.get("type") == "tool_result"]
+        if isinstance(content, list)
+        else []
+    )
+    if len(answers) == 1 and not answers[0].get("is_error") and isinstance(row.get("toolUseResult"), dict):
+        results[str(answers[0].get("tool_use_id"))] = row["toolUseResult"]
+
+
+def _claude_part(
+    part: Any, kind: str, stamp: Any, model: Optional[str], results: Optional[Dict[str, Any]] = None
+) -> Optional[dict]:
     """The line for one content part of a Claude user or assistant row, or None for a part that shows nothing."""
     if not isinstance(part, dict):
         return None
     if part.get("type") == "tool_use":
-        args = part.get("input")
-        line = tool_line(str(part.get("name") or "?"), args if isinstance(args, dict) else {})
-        return {"role": "tool", "text": line, "time": stamp}
+        given = part.get("input")
+        args: Dict[str, Any] = given if isinstance(given, dict) else {}
+        name = str(part.get("name") or "?")
+        line = {"role": "tool", "text": tool_line(name, args), "time": stamp}
+        change = change_of(name, args, (results or {}).get(str(part.get("id"))))
+        return {**line, "change": change} if change else line
     if part.get("type") != "text":
         return None
     text = (part.get("text") or "").strip()
@@ -239,8 +343,11 @@ def _claude_part(part: Any, kind: str, stamp: Any, model: Optional[str]) -> Opti
     return {"role": "agent", "text": text[:TEXT_CAP], "time": stamp, "model": model} if text else None
 
 
-def to_lines(row: Dict[str, Any], model: Optional[str] = None) -> List[dict]:
-    """The lines for one transcript row: the user's prompts, the agent's text, one line per tool call."""
+def to_lines(row: Dict[str, Any], model: Optional[str] = None, results: Optional[Dict[str, Any]] = None) -> List[dict]:
+    """The lines for one transcript row: the user's prompts, the agent's text, one line per tool call.
+
+    *results* maps a Claude tool call's id to its toolUseResult: an Edit or Write line with one carries its change.
+    """
     if row.get("type") == "response_item":
         return codex_lines(row, model)
     queued = row.get("attachment") if row.get("type") == "attachment" else None
@@ -257,7 +364,7 @@ def to_lines(row: Dict[str, Any], model: Optional[str] = None) -> List[dict]:
         return []
     kind = row["type"]
     model = display_model((row.get("message") or {}).get("model")) if kind == "assistant" else None
-    lines = (_claude_part(part, kind, row.get("timestamp"), model) for part in content)
+    lines = (_claude_part(part, kind, row.get("timestamp"), model, results) for part in content)
     return [line for line in lines if line is not None]
 
 
@@ -267,8 +374,8 @@ def read_feed(path: Path, since: Optional[int] = None) -> List[dict]:
     A line's n is the byte offset of its row in the file plus the line's index within that row: stable while the
     file grows, so a poller keeps its place; it starts again near 0 in a new session's file.
     """
-    lines: List[dict] = []
-    model = None  # Codex's, from the last turn_context row read
+    rows: List[Tuple[int, Dict[str, Any]]] = []
+    results: Dict[str, Any] = {}  # a call's result row comes after it: read them all before any line is made
     for offset, chunk in tail_rows(path, TAIL_BYTES):
         if not chunk.strip():
             continue
@@ -277,11 +384,15 @@ def read_feed(path: Path, since: Optional[int] = None) -> List[dict]:
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             logger.warning("[host_api] skipped a bad transcript line in %s: %s", path.name, exc)
             continue
-        if not isinstance(row, dict):
-            continue
+        if isinstance(row, dict):
+            rows.append((offset, row))
+            tool_results(row, results)
+    lines: List[dict] = []
+    model = None  # Codex's, from the last turn_context row read
+    for offset, row in rows:
         if row.get("type") == "turn_context":
             model = display_model((row.get("payload") or {}).get("model"))
-        for index, line in enumerate(to_lines(row, model)):
+        for index, line in enumerate(to_lines(row, model, results)):
             if since is None or offset + index > since:
                 lines.append({"n": offset + index, **line})
     json_handler.log_operation("host_api_agent_transcript_read", {"lines": len(lines), "since": since})
