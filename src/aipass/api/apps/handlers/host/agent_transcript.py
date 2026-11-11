@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: agent_transcript.py
 # Description: Host API Agent Transcript — find a live agent's session file and read it as chat lines
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-11-04
-# Modified: 2026-11-05
+# Modified: 2026-11-08
 # =============================================
 
 """
@@ -34,6 +34,7 @@ TEAMMATE = re.compile(
 TEAMMATE_SUMMARY = re.compile(r'summary="([^"]*)"')
 COMPACTED = "This session is being continued from a previous conversation"
 BASH_INPUT = re.compile(r"^<bash-input>(.*?)</bash-input>", re.S)
+COMMAND = re.compile(r"<command-name>(/\S+)</command-name>(?:\s*<command-args>(.*?)</command-args>)?", re.S)
 CODEX_SESSIONS = Path(".codex") / "sessions"
 CLAUDE_PROJECTS = Path(".claude") / "projects"
 # What Codex itself writes as user rows; a typed '#' or '<' prompt still shows.
@@ -217,6 +218,11 @@ def _claude_part(part: Any, kind: str, stamp: Any, model: Optional[str]) -> Opti
         if shell:
             # A '!' command typed in the chat: the line the sender sees, so its pending mark can settle.
             return {"role": "user", "text": f"! {shell.group(1).strip()}"[:TEXT_CAP], "time": stamp}
+        command = COMMAND.search(text)
+        if command:
+            # A slash command typed in the chat, shown as typed: the sender's pending mark settles on it.
+            typed = " ".join(s for s in (command.group(1), (command.group(2) or "").strip()) if s)
+            return {"role": "user", "text": typed[:TEXT_CAP], "time": stamp}
         if text.startswith(COMPACTED):
             return {"role": "tool", "text": "context compacted", "time": stamp}
         mate = TEAMMATE.match(text)

@@ -51,10 +51,14 @@ exists — hard-deleted, renamed to `name(disabled).py`, or moved to `.archive/`
 those three are the house cleanup pattern. Escape: recreate the file clean, let re-validation drop the
 state, then remove it.
 
+**A pass is silent, and a finding is the model's.** A clean edit prints nothing. An error (`[AUTO-FIX]`) and
+a checker that gave no answer (`[diagnostics] NO ANSWER from <checker>`) go to the model as PostToolUse
+`additionalContext` and to the hooks log, never as a `systemMessage`: that is a chat line the user sees (and
+the phone app reads aloud).
+
 **Scratch is not judged.** An edit under a directory
 named `docs.local`, `dropbox`, `.backup` or `.archive`, or under the harness scratchpad (a `scratchpad`
-directory below a `claude-<uid>` one), runs no check, records nothing, and answers
-`[diagnostics] skipped: <ground> is scratch`. The lane's rows are the shipped tree's; on scratch they would be an order to dress throwaway code, and a
+directory below a `claude-<uid>` one), runs no check, records nothing, and prints nothing. The lane's rows are the shipped tree's; on scratch they would be an order to dress throwaway code, and a
 recorded error would block the seat's next edit. Git-ignored
 paths are deliberately NOT skipped: `.trinity/` is ignored, and its JSON is what the corruption check guards.
 

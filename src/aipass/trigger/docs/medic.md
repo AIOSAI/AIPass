@@ -17,7 +17,7 @@ Error monitoring subsystem. Watches branch and system logs for errors, fingerpri
 2. **Branch not muted** — per-branch suppression
 3. **Count >= 2** — first occurrence suppressed, dispatch on recurrence
 4. **Recipient is not `@devpulse`** — the manager is protected from self-dispatch. The code gates on the literal recipient string `@devpulse` in `error_detected.py`
-5. **Branch in registry** — target must be a registered citizen
+5. **Branch in the declared fleet** — the target's email is in `fleet_branches()` from memory's door: core, resident and external citizens, re-read at most every 60 s (`REGISTERED_TTL_SECONDS`)
 6. **Not suppressed + backoff elapsed** — `should_dispatch()` checks registry status first, then exponential backoff
 7. **Circuit breaker closed** — trips after 10 errors in 60s, 300s cooldown. It runs after the backoff check, so a half-open breaker's one probe goes to a fingerprint that would be sent. Every error past gate 3 still counts toward tripping, including one gate 6 refuses
 
@@ -66,3 +66,23 @@ Runaway gating decisions are appended to `logs/runaway_suppressed.jsonl` with an
 - [escalation.md](escalation.md) — what happens when an answered error keeps recurring
 - [log_watching.md](log_watching.md) — where the error lines come from
 - [service_and_reload.md](service_and_reload.md) — the systemd unit behind "persistent log watching"
+
+---
+
+## Unit watch: systemd user services that loop or fail
+
+`drone @trigger medic units` checks every systemd user service once (`apps/handlers/unit_watch.py`).
+A unit that exits at once and restarts every few seconds lives a second per run, so it shows in no
+process list; systemd's restart counter is the only witness. The check reads `NRestarts`,
+`ActiveState` and `SubState` for every unit in one `systemctl --user show`, and compares them with
+the last check, kept in `trigger_json/unit_watch.json`.
+
+ - **Failed**: `ActiveState=failed`.
+ - **Restart-looping**: the restart count rose by more than `LOOP_RESTARTS_PER_CHECK` (5) since the
+   last check, or `SubState=auto-restart` on two checks running.
+ - **Mail**: @devpulse gets one mail per unit per incident, naming the unit, its state, its restart
+   count, the unit's own last journal line and its unit file. The incident ends when the unit is
+   healthy again; a later failure mails again. A mail that fails to send is retried on the next check.
+ - **systemctl unreadable**: one mail of its own, never silence; the units' last counters stand.
+ - **Cadence**: the `unit-watch` row in `.daemon/schedule.json` runs it every 10 minutes on the
+   daemon tick, so no process of its own stays up. A 5 s loop adds about 120 restarts per check.

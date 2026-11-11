@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: conftest.py
-# Version: 2.8.1
+# Version: 2.9.0
 # Description: Shared pytest fixtures for hooks tests
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-11-04
+# Modified: 2026-11-09
 # =============================================
 
 """Shared pytest fixtures for hooks tests.
@@ -31,7 +31,7 @@ import pytest
 from aipass.ai_mail.apps.modules import door_dispatch_grant, door_verified_caller
 from aipass.cli.apps.modules import display
 from aipass.hooks.apps import sound
-from aipass.hooks.apps.handlers.config import diagnostics, trust_registry
+from aipass.hooks.apps.handlers.config import diagnostics, loader, trust_registry
 from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.handlers.lifecycle import session_boot
 from aipass.hooks.apps.modules import cadence, cc_transcripts
@@ -86,6 +86,34 @@ def clean_command_state() -> Generator[None, None, None]:
     """error() marks the process failed; a test must not hand that to the next."""
     yield
     display.reset_command_state()
+
+
+@pytest.fixture(autouse=True)
+def fresh_fleet_cache(monkeypatch) -> None:
+    """The door's rows are cached per process; each test reads its own fleet."""
+    monkeypatch.setattr(loader, "_fleet_cache", {}, raising=False)
+
+
+@pytest.fixture
+def external_fleet(tmp_path: Path) -> SimpleNamespace:
+    """AIPass home with one core citizen and a declared root ../seed holding external citizen GROW.
+
+    The real tree memory's door reads: core registry, AIPASS_ROOTS.json, SEED_REGISTRY.json, passports.
+    """
+    home = tmp_path / "AIPass"
+    hooks = home / "src" / "aipass" / "hooks"
+    grow = tmp_path / "seed" / "grow"
+    for seat, residency in ((hooks, "core"), (grow, None)):
+        (seat / ".trinity").mkdir(parents=True)
+        passport = {"citizenship": {"residency": residency}} if residency else {}
+        (seat / ".trinity" / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+    core = {"branches": [{"name": "HOOKS", "path": "src/aipass/hooks", "status": "active"}]}
+    (home / "AIPASS_REGISTRY.json").write_text(json.dumps(core), encoding="utf-8")
+    roots = {"roots": [{"path": "../seed", "status": "active"}]}
+    (home / "AIPASS_ROOTS.json").write_text(json.dumps(roots), encoding="utf-8")
+    seed = {"branches": [{"name": "GROW", "path": "grow", "status": "active"}]}
+    (tmp_path / "seed" / "SEED_REGISTRY.json").write_text(json.dumps(seed), encoding="utf-8")
+    return SimpleNamespace(home=home, hooks=hooks, grow=grow)
 
 
 @pytest.fixture(autouse=True)

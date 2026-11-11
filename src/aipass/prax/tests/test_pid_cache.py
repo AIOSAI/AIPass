@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_pid_cache.py
 # Description: Tests for the PID cache handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-07-10
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """Tests for apps/handlers/monitoring/pid_cache.py"""
@@ -238,7 +238,8 @@ class TestDefaultRoot:
             json.dumps({"pid": 12345, "timestamp": "2026-10-23T10:00:00", "branch": "flow"}), encoding="utf-8"
         )
         (tmp_path / "AIPASS_REGISTRY.json").write_text(
-            json.dumps({"branches": [{"name": "flow", "path": "src/aipass/flow"}]}), encoding="utf-8"
+            json.dumps({"branches": [{"name": "flow", "path": "src/aipass/flow", "status": "active"}]}),
+            encoding="utf-8",
         )
         real_exists = Path.exists
         with (

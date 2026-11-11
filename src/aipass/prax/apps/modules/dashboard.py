@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dashboard.py
 # Description: Dashboard Section Utilities
-# Version: 0.5.0
+# Version: 0.5.1
 # Created: 2026-02-25
-# Modified: 2026-10-24
+# Modified: 2026-11-08
 # =============================================
 
 """Dashboard Section Utilities
@@ -182,8 +182,8 @@ def _caller_dir() -> "Path | None":
 
 
 def _resolve_branch_path(branch_ref: str) -> Path:
-    """Resolve @branch reference to filesystem path: AIPASS_REGISTRY.json, then the caller's project registry."""
-    return resolve_branch_path(branch_ref, _caller_dir())
+    """Resolve @branch reference to filesystem path through memory's fleet rows."""
+    return resolve_branch_path(branch_ref)
 
 
 def _registered_branch_at(start: Path) -> "Path | None":
@@ -193,7 +193,7 @@ def _registered_branch_at(start: Path) -> "Path | None":
         if not directory.name:
             continue
         try:
-            if resolve_branch_path(directory.name, start).resolve() == directory.resolve():
+            if resolve_branch_path(directory.name).resolve() == directory.resolve():
                 return directory
         except (FileNotFoundError, OSError, json.JSONDecodeError) as e:
             logger.info("No registry row for %s, walking up: %s", directory, e)

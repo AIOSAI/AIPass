@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_monitoring_handlers.py
 # Description: Unit tests for monitoring handler modules
-# Version: 1.4.1
+# Version: 1.5.0
 # Created: 2026-04-25
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_detector.py, the detector and its branch registry."""
@@ -261,34 +261,6 @@ class TestDetectFromLog:
         assert result == "CLI"
 
 
-class TestExactCaseRegistries:
-    """Path.glob is case-INSENSITIVE on Windows, and the registry is a trust anchor.
-
-    A stand-in glob drives the filter, since Linux's case-sensitive glob never yields the bad input.
-    """
-
-    def test_a_lowercase_registry_is_rejected_even_when_the_glob_returns_it(self, tmp_path, monkeypatch):
-        mod = _import_branch_detector()
-
-        real = tmp_path / "PROJECT_REGISTRY.json"
-        windows_only = tmp_path / "project_registry.json"
-        for path in (real, windows_only):
-            path.write_text("{}", encoding="utf-8")
-
-        # Stand in for the Windows matcher: return BOTH, the way it would there.
-        monkeypatch.setattr(type(tmp_path), "glob", lambda self, _pattern: iter([real, windows_only]))
-
-        assert mod._exact_case_registries(tmp_path) == [real]
-
-    def test_the_exact_case_name_still_passes(self, tmp_path):
-        mod = _import_branch_detector()
-        real = tmp_path / "AIPASS_REGISTRY.json"
-        real.write_text("{}", encoding="utf-8")
-        (tmp_path / "notes.json").write_text("{}", encoding="utf-8")
-
-        assert mod._exact_case_registries(tmp_path) == [real]
-
-
 class TestFindRepoRoot:
     """Tests for BranchDetector._find_repo_root()."""
 
@@ -399,7 +371,7 @@ class TestRegisterBranch:
 
 
 class TestLoadRegistry:
-    """Tests for BranchDetector._load_registry()."""
+    """Tests for BranchDetector._load_registry(): the tables come from memory's fleet rows."""
 
     # The registry is written for real under tmp_path: a mocked open would fake the read under test.
 
@@ -412,7 +384,9 @@ class TestLoadRegistry:
         """Should populate known_branches and branch_map from a valid registry file."""
         mod = _import_branch_detector()
         detector = self._detector_at(mod, tmp_path)
-        branches = [{"name": n.lower(), "path": str(tmp_path / n.lower())} for n in ("PRAX", "FLOW")]
+        branches = [
+            {"name": n.lower(), "path": str(tmp_path / n.lower()), "status": "active"} for n in ("PRAX", "FLOW")
+        ]
         _write_registry(tmp_path, json.dumps({"branches": branches}))
 
         detector._load_registry()
@@ -420,69 +394,30 @@ class TestLoadRegistry:
         assert detector.known_branches == {"PRAX", "FLOW"}
         assert detector.branch_map[str((tmp_path / "prax").resolve())] == "PRAX"
 
-    def test_loads_fallback_when_registry_missing(self, tmp_path):
-        """Should load fallback branches when registry file not found."""
+    def test_a_missing_registry_labels_nothing_rather_than_a_built_in_list(self, tmp_path):
         mod = _import_branch_detector()
         detector = self._detector_at(mod, tmp_path)
 
         detector._load_registry()
 
-        assert "PRAX" in detector.known_branches
-        assert "SENTRY" in detector.known_branches
-        assert "no branch registry at" in _detector_log().warning.call_args.args[0]
+        assert detector.known_branches == set()
 
-    def test_loads_fallback_when_no_branches_key(self, tmp_path):
-        """Should load fallback when registry has empty branches array."""
-        mod = _import_branch_detector()
-        detector = self._detector_at(mod, tmp_path)
-        _write_registry(tmp_path, json.dumps({"branches": []}))
-
-        detector._load_registry()
-
-        assert "PRAX" in detector.known_branches
-        assert "lists no branches" in _detector_log().warning.call_args.args[0]
-
-    def test_loads_fallback_on_json_decode_error(self, tmp_path):
-        """Should load fallback on JSONDecodeError, and say it was the JSON."""
+    def test_an_unreadable_registry_is_logged_and_labels_nothing(self, tmp_path):
         mod = _import_branch_detector()
         detector = self._detector_at(mod, tmp_path)
         _write_registry(tmp_path, "{bad json")
 
         detector._load_registry()
 
-        assert "PRAX" in detector.known_branches
-        assert "is not valid JSON (line 1)" in _detector_log().error.call_args.args[0]
+        assert detector.known_branches == set()
+        assert "could not read the fleet" in _detector_log().error.call_args.args[0]
 
-    def test_loads_fallback_on_generic_exception(self, tmp_path):
-        """Should load fallback when the registry cannot be read at all (it is a directory)."""
+    def test_a_registry_that_is_a_directory_is_logged_and_labels_nothing(self, tmp_path):
         mod = _import_branch_detector()
         detector = self._detector_at(mod, tmp_path)
         (tmp_path / "AIPASS_REGISTRY.json").mkdir()
 
         detector._load_registry()
 
-        assert "PRAX" in detector.known_branches
-        assert "could not read the branch registry" in _detector_log().error.call_args.args[0]
-
-
-class TestLoadFallbackBranches:
-    """Tests for BranchDetector._load_fallback_branches()."""
-
-    def test_populates_known_branches(self):
-        """Should populate known_branches with standard fallback set."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod, branches={})
-        detector.known_branches.clear()
-        detector._load_fallback_branches()
-
-        expected = {
-            "SENTRY",
-            "CLI",
-            "FLOW",
-            "PRAX",
-            "DRONE",
-            "BACKUP",
-            "SECURITY",
-            "AIPASS",
-        }
-        assert detector.known_branches == expected
+        assert detector.known_branches == set()
+        assert "could not read the fleet" in _detector_log().error.call_args.args[0]

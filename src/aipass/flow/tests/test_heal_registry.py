@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_heal_registry.py
 # Description: Tests for heal_registry doctrine self-heal handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-07-29
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """Tests for apps/handlers/registry/heal_registry.py."""
@@ -12,6 +12,7 @@
 # sentry: no-test-needed(ruff) — that the module parses and imports
 
 import copy
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -65,6 +66,13 @@ def quiet_cross_prefix():
         return_value={"types": {}},
     ) as mock:
         yield mock
+
+
+@pytest.fixture(autouse=True)
+def no_declared_roots():
+    """The real gateway reads this machine's AIPASS_ROOTS.json; a test that wants a declared root hands it in."""
+    with patch.object(mod, "_declared_root_citizens", return_value=[]) as stand_in:
+        yield stand_in
 
 
 def _heal(root, store, types, seats=None):
@@ -1368,3 +1376,135 @@ class TestFindQuarantinedLocations:
                 rows = mod.find_quarantined_locations(load)
 
         assert [r["plan_id"] for r in rows] == ["TDPLAN-0015"]
+
+
+PLAN_NAME = "RPLAN-0020_learn_seed_2026-11-08.md"
+
+
+def _moved_citizen(tmp_path: Path, row_id: str = "id-1", passport: bool = True):
+    """@grow moved whole from the AIPass home into a commissioned project: (home, old seat, new seat, store)."""
+    home = tmp_path / "aipass"
+    _git_repo(home)
+    old = home / "projects" / "grow" / "src" / "grow" / "grow"
+    project = tmp_path / "seed"
+    _git_repo(project)
+    seat = project / "grow"
+    _make_plan_file(seat, PLAN_NAME)
+    if passport:
+        (seat / ".trinity").mkdir()
+        citizenship = {"citizen_id": "id-1", "registry_path": "SEED_REGISTRY.json"}
+        (seat / ".trinity" / "passport.json").write_text(json.dumps({"citizenship": citizenship}), encoding="utf-8")
+    (project / "SEED_REGISTRY.json").write_text(
+        json.dumps({"branches": [{"path": "grow", "registry_id": row_id}]}), encoding="utf-8"
+    )
+    row = {"status": "open", "location": str(old), "relative_path": str(old), "file_path": str(old / PLAN_NAME)}
+    store = FakeRegistryStore({"rplan_registry.json": {"plans": {"0020": row}, "next_number": 21}})
+    return home, old, seat, store
+
+
+def _scan_with_declared(home: Path, store: FakeRegistryStore, declared: list):
+    """The public heal over RPLAN, the seat index built for real from a handed-in declared root."""
+    with (
+        patch.object(mod, "_load_template_registry", return_value={"types": {"research_plans": {"prefix": "RPLAN"}}}),
+        patch.object(mod, "_find_repo_root", return_value=home),
+        patch.object(mod, "load_registry", store.load),
+        patch.object(mod, "_declared_root_citizens", return_value=declared),
+    ):
+        return mod.heal_registry_doctrine_impl(home, store.load, store.save)
+
+
+class TestAMovedCitizenKeepsItsPlans:
+    def test_its_open_plan_follows_it_into_a_declared_root_and_stays_open(self, tmp_path):
+        home, old, seat, store = _moved_citizen(tmp_path)
+
+        result = _scan_with_declared(home, store, [{"path": str(seat)}])
+
+        row = store.plans("rplan_registry.json")["0020"]
+        assert row["status"] == "open"
+        assert (row["location"], row["file_path"]) == (str(seat), str(seat / PLAN_NAME))
+        assert result["quarantined"] == []
+
+    @pytest.mark.parametrize(
+        "case, reason",
+        [
+            ("id_differs", "orphan lies outside the repository of citizen 'grow'"),
+            ("no_passport", "no live citizen named 'grow'"),
+            ("two_seats", "2 live citizens named 'grow' — ambiguous"),
+        ],
+    )
+    def test_a_seat_the_evidence_does_not_name_is_refused_and_the_row_is_not_moved(self, tmp_path, case, reason):
+        home, old, seat, store = _moved_citizen(
+            tmp_path, row_id="id-other" if case == "id_differs" else "id-1", passport=case != "no_passport"
+        )
+        declared = [{"path": str(seat)}]
+        if case == "two_seats":
+            declared.append({"path": str(_seat(tmp_path / "other", "grow"))})
+
+        result = _scan_with_declared(home, store, declared)
+
+        assert [q["reason"] for q in result["quarantined"]] == [reason]
+        row = store.plans("rplan_registry.json")["0020"]
+        assert (row["location"], row["status"]) == (str(old), "closed")
+
+
+class TestMoveLocationRows:
+    TYPES = {"research_plans": {"prefix": "RPLAN"}, "flow_plans": {"prefix": "FPLAN"}}
+
+    def _world(self, tmp_path):
+        _home, old, seat, _ = _moved_citizen(tmp_path)
+        reopened = {
+            "status": "closed",
+            "closed": "2026-11-09T00:53:27+00:00",
+            "closed_reason": "auto_closed_missing_file",
+            "location": str(old),
+            "relative_path": str(old),
+            "file_path": str(old / PLAN_NAME),
+        }
+        finished = {"status": "closed", "location": str(old), "file_path": str(old / "FPLAN-0871_done.md")}
+        sibling = {"status": "open", "location": f"{old}2", "file_path": f"{old}2/FPLAN-0872_x.md"}
+        store = FakeRegistryStore(
+            {
+                "rplan_registry.json": {"plans": {"0020": reopened}},
+                "fplan_registry.json": {"plans": {"0871": finished, "0872": sibling}},
+            }
+        )
+        return old, seat, store
+
+    def _move(self, store, old, new, apply):
+        with patch.object(mod, "_load_template_registry", return_value={"types": self.TYPES}):
+            return mod.move_location_rows(old, new, apply, store.load, store.save)
+
+    def test_a_preview_reports_every_row_and_writes_nothing(self, tmp_path):
+        old, seat, store = self._world(tmp_path)
+        before = copy.deepcopy(store.registries)
+
+        actions = self._move(store, old, seat, apply=False)
+
+        assert [(a["plan_id"], a["action"]) for a in actions] == [
+            ("FPLAN-0871", "moved"),
+            ("RPLAN-0020", "moved_and_reopened"),
+        ]
+        assert store.saves == [] and store.registries == before
+
+    def test_apply_repoints_every_path_reopens_only_the_wrongly_closed_row_and_spares_a_sibling(self, tmp_path):
+        old, seat, store = self._world(tmp_path)
+
+        self._move(store, old, seat, apply=True)
+
+        rplan = store.plans("rplan_registry.json")["0020"]
+        assert rplan == {
+            "status": "open",
+            "location": str(seat),
+            "relative_path": str(seat),
+            "file_path": str(seat / PLAN_NAME),
+        }
+        fplans = store.plans("fplan_registry.json")
+        assert (fplans["0871"]["status"], fplans["0871"]["location"]) == ("closed", str(seat))
+        assert fplans["0872"]["location"] == f"{old}2"
+
+    def test_a_new_location_that_is_not_a_directory_is_refused_before_any_write(self, tmp_path):
+        old, _seat_dir, store = self._world(tmp_path)
+
+        with pytest.raises(ValueError, match="is not a directory"):
+            self._move(store, old, tmp_path / "nowhere", apply=True)
+        assert store.saves == []

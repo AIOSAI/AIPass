@@ -3,7 +3,7 @@
 # Description: Tests for the verified-admin cross-project bridge + reply return path (FPLAN-0401 ph5/5b)
 # Version: 1.1.2
 # Created: 2026-08-12
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py and the cross-project bridge across wake.py and registry/read.py."""
@@ -603,9 +603,9 @@ class TestBroadcastScope:
         assert [b["email"] for b in es.resolve_broadcast_targets()] == ["@flow"]
         verifier.assert_called_once_with()
 
-    def test_verified_admin_broadcast_includes_residents(self, monkeypatch):
+    def test_verified_admin_broadcast_includes_residents_and_externals(self, monkeypatch):
         monkeypatch.setattr(es, "get_all_branches", lambda: [{"email": "@flow", "name": "FLOW"}])
-        monkeypatch.setattr(es, "get_resident_branches", lambda: {"@baud": "/p/baud"})
+        monkeypatch.setattr(es, "get_fleet_branches", lambda: [{"email": "@baud", "name": "BAUD", "path": "/p/baud"}])
         verifier = MagicMock(return_value=True)
         monkeypatch.setattr(es.verified_caller, "is_verified_admin_caller", verifier)
         emails = [b["email"] for b in es.resolve_broadcast_targets()]
@@ -615,7 +615,7 @@ class TestBroadcastScope:
     def test_a_resident_already_in_the_core_registry_is_not_duplicated(self, monkeypatch):
         """One inbox, one copy -- a duplicate would deliver the announcement twice."""
         monkeypatch.setattr(es, "get_all_branches", lambda: [{"email": "@baud", "name": "BAUD"}])
-        monkeypatch.setattr(es, "get_resident_branches", lambda: {"@baud": "/p/baud"})
+        monkeypatch.setattr(es, "get_fleet_branches", lambda: [{"email": "@baud", "name": "BAUD", "path": "/p/baud"}])
         verifier = MagicMock(return_value=True)
         monkeypatch.setattr(es.verified_caller, "is_verified_admin_caller", verifier)
         assert [b["email"] for b in es.resolve_broadcast_targets()] == ["@baud"]
@@ -628,6 +628,37 @@ class TestBroadcastScope:
             raise RuntimeError("grant unreadable")
 
         monkeypatch.setattr(es, "get_all_branches", lambda: [{"email": "@flow", "name": "FLOW"}])
-        monkeypatch.setattr(es, "get_resident_branches", lambda: {"@baud": "/p/baud"})
+        monkeypatch.setattr(es, "get_fleet_branches", lambda: [{"email": "@baud", "name": "BAUD", "path": "/p/baud"}])
         monkeypatch.setattr(es.verified_caller, "is_verified_admin_caller", boom)
         assert [b["email"] for b in es.resolve_broadcast_targets()] == ["@flow"]
+
+
+class TestBroadcastReachesDeclaredRoots:
+    """@all through the door at the edge: externals join for a verified admin, as residents do."""
+
+    def _fleet(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(es, "get_all_branches", lambda: [{"email": "@flow", "name": "FLOW"}])
+        monkeypatch.setattr(
+            reg,
+            "fleet_branches",
+            lambda **kw: [
+                {"name": "FLOW", "path": tmp_path / "flow", "email": "@flow", "residency": "core"},
+                {"name": "GROW", "path": tmp_path / "seed" / "grow", "email": "@grow", "residency": "external"},
+            ],
+        )
+
+    def test_a_verified_admin_reaches_an_external_citizen(self, monkeypatch, tmp_path):
+        self._fleet(monkeypatch, tmp_path)
+        verifier = MagicMock(return_value=True)
+        monkeypatch.setattr(es.verified_caller, "is_verified_admin_caller", verifier)
+
+        assert [b["email"] for b in es.resolve_broadcast_targets()] == ["@flow", "@grow"]
+        verifier.assert_called_once_with()
+
+    def test_anyone_else_does_not(self, monkeypatch, tmp_path):
+        self._fleet(monkeypatch, tmp_path)
+        verifier = MagicMock(return_value=False)
+        monkeypatch.setattr(es.verified_caller, "is_verified_admin_caller", verifier)
+
+        assert [b["email"] for b in es.resolve_broadcast_targets()] == ["@flow"]
+        verifier.assert_called_once_with()

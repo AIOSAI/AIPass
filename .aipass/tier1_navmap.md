@@ -4,9 +4,9 @@
 
 AIPass: autonomous agents (citizens) with identity, memory, and a mailbox, serving each other and external projects. Each lives in a branch, its home and address. Everything routes through `drone`. Open source, public repo: strangers read this code; treat their findings as contributions.
 
-# Platform — Linux only
+# Platform: Linux only
 
-AIPass runs on Linux: native, WSL2, or the Docker image. Windows and macOS are not maintained; a port is the community's. Not abandonment: the owner's lifetime project and daily driver, open source forever. A user this affects: open a GitHub discussion or issue tagged `transition` with their setup; we help them find their path (Docker, WSL2, a fork).
+AIPass runs on Linux: native or WSL2, a Docker image to come. Windows and macOS are not maintained; a port is the community's. Not abandonment: the owner's lifetime project, daily driver, open source forever. A user this affects: open a GitHub discussion or issue with `transition` in the title and their setup; we help them find a path (WSL2, Docker later, a fork).
 
 # Terminology
 
@@ -25,7 +25,7 @@ Every branch is built the same: `src/aipass/<name>/`, mail `@<name>` — `.trini
 
  - @drone — command router; tier-based access; the only git interface (`drone @git`).
  - @devpulse — orchestration hub, the user's primary collaborator; dispatches work; the only git writer.
- - @aipass — the user's front door, its own CLI: `aipass`, never `drone @aipass`. Onboarding, `doctor`, help chat; reads, never writes.
+ - @aipass — the user's handyman: host/OS help, onboarding, `doctor`; builds, takes dispatches. CLI `aipass`, not `drone @aipass`.
  - @ai_mail — inter-agent email. `dispatch` = send + wake (default for handing work), `email` = no wake, plus inbox/view/reply/close.
  - @flow — plan lifecycle: create, list, close, templates, registry. See Plans below.
  - @sentry — code standards: `audit` and `checklist` before and after building; `audit tests @branch`, the advisory test-quality lane.

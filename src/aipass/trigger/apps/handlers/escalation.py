@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: escalation.py
 # Description: Repeat-signature escalation digest — repeat warns/errors email the operator
-# Version: 1.6.1
+# Version: 1.7.0
 # Created: 2026-08-08
-# Modified: 2026-10-24
+# Modified: 2026-11-08
 # =============================================
 
 """
@@ -21,7 +21,6 @@ regenerates a blank template over any trio name in trigger_json/.
 """
 
 import hashlib
-import json
 import re
 import time
 from datetime import datetime
@@ -37,6 +36,7 @@ from aipass.trigger.apps.config import (
 from aipass.trigger.apps.handlers.repo_root import find_repo_root
 from aipass.trigger.apps.handlers.json import config_loader
 from aipass.trigger.apps.handlers.json import json_handler
+from aipass.memory.apps.modules.door_registry_scope import fleet_branches
 
 STATE_FILE = TRIGGER_JSON_DIR / "escalation_state.json"
 
@@ -110,8 +110,10 @@ def _branch_name_pattern() -> Optional[re.Pattern]:
 
     pattern: Optional[re.Pattern] = None
     try:
-        data = json.loads(BRANCH_REGISTRY_FILE.read_text(encoding="utf-8"))
-        names = {str(b["name"]).upper() for b in data.get("branches", []) if b.get("name")}
+        if not BRANCH_REGISTRY_FILE.exists():
+            raise FileNotFoundError(BRANCH_REGISTRY_FILE)
+        rows = fleet_branches(repo_root=BRANCH_REGISTRY_FILE.parent, name_from="registry", strict=True)
+        names = {str(row["name"]).upper() for row in rows if row.get("name")}
         if names:
             # Longest first so AI_MAIL is matched before AI.
             ordered = sorted(names, key=len, reverse=True)

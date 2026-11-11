@@ -45,6 +45,7 @@ apps/
 │   ├── migrate_passports.py     # fleet passport 2.0 migration
 │   ├── export_seeds.py          # tracked passport seeds
 │   ├── repair.py                # scan, relocate, clean pollution
+│   ├── adopt_citizen.py         # adopt-citizen CLI, the stable preview
 │   └── grant_admin.py           # the admin flag ceremony
 ├── handlers/
 │   ├── class_registry.py        # class → template dir, retired names refuse
@@ -64,6 +65,7 @@ apps/
 │   ├── sync_registry_ops.py     # CWD-first scan, external projects
 │   ├── regenerate_registry_ops.py
 │   ├── repair_ops.py            # pollution, relocation, ARCHIVE_EXCLUDE
+│   ├── adopt_citizen_ops.py     # move a citizen across projects, plan + apply
 │   ├── json_ops.py              # deep_merge, backup_json
 │   ├── atomic_write.py          # stage → fsync → os.replace
 │   ├── metadata.py              # branch name extraction

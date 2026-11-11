@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for prax tests
-# Version: 2.5.1
+# Version: 2.6.0
 # Created: 2025-11-08
-# Modified: 2026-10-24
+# Modified: 2026-11-08
 # =============================================
 
 """Shared pytest fixtures for prax tests."""
@@ -15,14 +15,18 @@ import tempfile
 if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
+import json
 import sys
 import types
+from types import SimpleNamespace
+
 import pytest
 from pathlib import Path
 from typing import Generator
 from unittest.mock import MagicMock
 
 from aipass.cli.apps.modules import display
+from aipass.prax.apps.handlers import fleet as fleet_handler
 from aipass.prax.apps.handlers.config import load as config_load
 from aipass.prax.apps.handlers.monitoring import branch_detector, filesystem_handler
 from aipass.prax.apps.handlers.registry import load as registry_load
@@ -120,6 +124,44 @@ def mock_prax_infrastructure(monkeypatch, tmp_path) -> Path:
     monkeypatch.setattr(registry_save, "PRAX_JSON_DIR", json_dir)
     monkeypatch.setattr(registry_save, "REGISTRY_FILE", json_dir / "prax_registry.json")
     return root
+
+
+@pytest.fixture(autouse=True)
+def _fresh_fleet_cache(monkeypatch) -> None:
+    """The door's rows are cached per process; a test never inherits another test's fleet."""
+    monkeypatch.setattr(fleet_handler, "_cache", {})
+
+
+def _write_passport(branch: Path, passport: dict) -> None:
+    (branch / ".trinity").mkdir(parents=True)
+    (branch / ".trinity" / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+
+
+@pytest.fixture
+def fleet(tmp_path: Path) -> SimpleNamespace:
+    """Core @flow under home/, @grow at the declared root seed/, and an undeclared sibling stray/."""
+    root = tmp_path / "home"
+    flow = root / "src" / "aipass" / "flow"
+    flow.mkdir(parents=True)
+    core = {"branches": [{"name": "FLOW", "email": "@flow", "path": "src/aipass/flow", "status": "active"}]}
+    (root / "AIPASS_REGISTRY.json").write_text(json.dumps(core), encoding="utf-8")
+
+    seed = tmp_path / "seed"
+    # Nameless, as an external's may be: only its row can name it.
+    _write_passport(seed / "grow", {})
+    rows = {"branches": [{"name": "GROW", "email": "@grow", "path": "grow", "status": "active"}]}
+    (seed / "SEED_REGISTRY.json").write_text(json.dumps(rows), encoding="utf-8")
+    roots = {"roots": [{"path": str(seed), "status": "active"}]}
+    (root / "AIPASS_ROOTS.json").write_text(json.dumps(roots), encoding="utf-8")
+
+    # Shaped like a project, but no AIPASS_ROOTS.json row declares it.
+    stray = tmp_path / "stray"
+    _write_passport(stray / "rogue", {"branch_info": {"branch_name": "ROGUE"}})
+    rows = {"branches": [{"name": "ROGUE", "email": "@rogue", "path": "rogue", "status": "active"}]}
+    (stray / "STRAY_REGISTRY.json").write_text(json.dumps(rows), encoding="utf-8")
+    return SimpleNamespace(
+        root=root, registry=root / "AIPASS_REGISTRY.json", flow=flow, grow=seed / "grow", rogue=stray / "rogue"
+    )
 
 
 @pytest.fixture

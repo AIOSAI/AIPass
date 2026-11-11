@@ -1,16 +1,15 @@
 # =================== AIPass ====================
 # Name: sync.py
 # Description: Status sync handler — scans branches for STATUS.local.md
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-03-10
-# Modified: 2026-10-17
+# Modified: 2026-11-08
 # =============================================
 
 """
 Status Sync Handler
 """
 
-import json
 import re
 from datetime import datetime
 from typing import Dict
@@ -18,6 +17,7 @@ from typing import Dict
 from aipass.prax.apps.handlers.config.load import _find_repo_root
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.prax.apps.handlers.json import json_handler
+from aipass.prax.apps.handlers.fleet import fleet_rows
 
 
 _STATE_RE = re.compile(r"^\*\*State:\*\*\s*(.+)", re.MULTILINE)
@@ -49,8 +49,8 @@ def sync_status() -> Dict:
         }
 
     try:
-        registry = json.loads(registry_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
+        branches = fleet_rows(repo_root)
+    except RuntimeError as exc:
         logger.error("Failed to read AIPASS_REGISTRY.json: %s", exc)
         return {
             "status": "error",
@@ -59,16 +59,16 @@ def sync_status() -> Dict:
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
         }
 
-    branches = registry.get("branches", [])
-
     synced = []
     missing = []
     entries = []  # (branch_email, state, date, content)
 
-    for branch in sorted(branches, key=lambda b: b.get("email", "").lower()):
-        branch_email = branch.get("email", f"@{branch.get('name', 'unknown').lower()}")
-        branch_path = repo_root / branch.get("path", "")
-        status_file = branch_path / "STATUS.local.md"
+    def _email(branch: Dict) -> str:
+        return branch["email"] or f"@{branch['name'].lower()}"
+
+    for branch in sorted(branches, key=lambda b: _email(b).lower()):
+        branch_email = _email(branch)
+        status_file = branch["path"] / "STATUS.local.md"
 
         if not status_file.exists():
             missing.append(branch_email)

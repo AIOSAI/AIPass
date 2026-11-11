@@ -31,7 +31,7 @@
   <a href="https://aipass.ai">aipass.ai</a>
 </p>
 
-> **AIPass is simplifying.** It is moving to Linux only: native, WSL2 on Windows, or a Docker image. Native macOS and Windows maintenance ends; a port is the community's to carry. AIPass stays open source and in daily development, the developer's lifetime project. If this changes how you use it, open a [discussion](https://github.com/AIOSAI/AIPass/discussions) or an [issue](https://github.com/AIOSAI/AIPass/issues) tagged `transition` and tell us your setup. We will help you find your path: Docker, WSL2, or a fork.
+> **AIPass is simplifying.** It is moving to Linux only: native, WSL2 on Windows, and a Docker image to come. Native macOS and Windows maintenance ends; a port is the community's to carry. AIPass stays open source and in daily development, the developer's lifetime project. If this changes how you use it, open a [discussion](https://github.com/AIOSAI/AIPass/discussions) or an [issue](https://github.com/AIOSAI/AIPass/issues) with `transition` in the title and tell us your setup. We will help you find your path: WSL2, Docker when it lands, or a fork.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/AIOSAI/AIPass/main/assets/demo.gif" alt="Terminal demo: the fleet listed, a memory an agent kept a month ago found by meaning, and an agent audited at 100%" width="760">

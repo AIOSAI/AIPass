@@ -3,7 +3,7 @@
 # Description: The hook engine's safeguards: trust, timeouts, one document, the ledger, fail-closed gates, promote
 # Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-10
 # =============================================
 
 """Tests for apps/modules/engine.py: trust, timeouts, the ledger and the fail-closed gates."""
@@ -750,8 +750,12 @@ class TestOneDocumentPerEvent:
 
     def test_a_single_output_passes_through_byte_identical(self, mock_logger):
         """Compact spacing on purpose: a re-serialised document would not match it."""
-        raw = '{"systemMessage":"[diagnostics] ok"}\n'
+        raw = '{"systemMessage":"[diagnostics] 1 issue"}\n'
         assert _post_tool_use({"auto_fix_diagnostics": raw}) == raw
+
+    def test_a_silent_pass_beside_a_reground_leaves_the_reground_whole_and_no_user_line(self, mock_logger):
+        regroup = _context("R" * 500)
+        assert _post_tool_use({"auto_fix_diagnostics": "", "post_compact_regrounding": regroup}) == regroup
 
     def test_plain_outputs_are_joined_as_before(self, mock_logger):
         assert _post_tool_use({"auto_fix_diagnostics": "A", "post_compact_regrounding": "B"}) == "A\nB"

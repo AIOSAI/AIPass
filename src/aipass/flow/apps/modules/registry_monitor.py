@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_monitor.py
 # Description: Registry auto-healing module
-# Version: 3.5.0
+# Version: 3.6.0
 # Created: 2025-11-21
-# Modified: 2026-10-24
+# Modified: 2026-11-08
 # =============================================
 
 """
@@ -29,6 +29,7 @@ Commands:
     scan    - One-time scan and heal registry
     heal    - Alias for scan
     status  - Show registry status
+    move    - Re-point a moved citizen's plan rows (preview; --apply writes)
 """
 
 import sys
@@ -68,12 +69,14 @@ from aipass.flow.apps.handlers.registry.monitor_ops import (
 from aipass.flow.apps.handlers.registry.heal_registry import (
     find_quarantined_locations,
     heal_registry_doctrine_impl,
+    move_location_rows,
 )
 
 
 MODULE_NAME = "registry_monitor"
 
-REGISTRY_SUBCOMMANDS = ("scan", "heal", "status")
+REGISTRY_SUBCOMMANDS = ("scan", "heal", "status", "move")
+MOVE_USAGE = "drone @flow registry move <old location> <new location> [--apply]"
 
 
 def _find_repo_root() -> Path:
@@ -196,10 +199,13 @@ def handle_command(command: str, args: List[str]) -> bool:
             console.print("[dim]No quarantined plan locations[/dim]")
 
         console.print()
-        console.print("[dim]Commands: scan | status[/dim]")
+        console.print("[dim]Commands: scan | status | move[/dim]")
         console.print()
 
         return True
+
+    elif subcommand == "move":
+        return _move(args[1:])
 
     else:
         # Exit here, never return False: False makes flow.py print a second "Unknown command".
@@ -208,6 +214,31 @@ def handle_command(command: str, args: List[str]) -> bool:
         except UnknownArgument as exc:
             error(exc.message, suggestion=exc.usage)
             raise SystemExit(1) from exc
+
+
+def _move(args: List[str]) -> bool:
+    """Re-point a moved citizen's plan rows; a preview unless --apply."""
+    apply = "--apply" in args
+    paths = [arg for arg in args if arg != "--apply"]
+    # Absolute only: flow never reads the working directory to find a location.
+    if len(paths) != 2 or not all(Path(arg).expanduser().is_absolute() for arg in paths):
+        error("registry move takes two absolute locations, old then new", suggestion=MOVE_USAGE)
+        raise SystemExit(1)
+    old, new = (Path(arg).expanduser() for arg in paths)
+    try:
+        with registry_lock():
+            actions = move_location_rows(old, new, apply=apply)
+    except (ValueError, OSError, RegistryUnreadableError, TimeoutError) as exc:
+        error(f"Registry move refused: {exc}", suggestion=MOVE_USAGE)
+        raise SystemExit(1) from exc
+
+    for action in actions:
+        console.print(f"  • {action['plan_id']}: {action['action']} -> {action['to']}")
+    if apply:
+        success(f"Moved {len(actions)} plan row(s) from {old} to {new}")
+    else:
+        console.print(f"[dim]Preview: {len(actions)} plan row(s) would move. Nothing written; add --apply.[/dim]")
+    return True
 
 
 def print_introspection():
@@ -231,6 +262,7 @@ def print_introspection():
     console.print("  • scan    - One-time scan and heal registry")
     console.print("  • heal    - Alias for scan")
     console.print("  • status  - Show registry status")
+    console.print("  • move    - Re-point a moved citizen's plan rows (preview; --apply writes)")
     console.print()
 
     console.print("[yellow]Connected Handlers:[/yellow]")
@@ -256,10 +288,13 @@ def print_help():
     console.print("  scan      One-time scan and heal")
     console.print("  heal      Alias for scan")
     console.print("  status    Show registry status")
+    console.print("  move      <old> <new> [--apply]  Re-point every plan row recorded under <old> to <new>;")
+    console.print("            a row closed only because its file had moved reopens. Preview unless --apply")
     console.print()
     console.print("[yellow]EXAMPLES:[/yellow]")
     console.print("  [dim]drone @flow registry scan[/dim]             # One-time scan and heal")
     console.print("  [dim]drone @flow registry status[/dim]           # Check registry status")
+    console.print("  [dim]drone @flow registry move /old/seat /new/seat --apply[/dim]")
     console.print()
 
 

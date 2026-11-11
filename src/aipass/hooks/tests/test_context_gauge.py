@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_context_gauge.py
-# Version: 1.10.0
+# Version: 1.12.0
 # Description: Tests for context_gauge (per-window guard, real window, Codex, OpenCode store) and the grounding receipt
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-11-04
+# Modified: 2026-11-10
 # =============================================
 
 """Tests for apps/handlers/prompt/context_gauge.py."""
@@ -41,6 +41,14 @@ def no_user_settings(tmp_path, monkeypatch):
     )
     monkeypatch.delenv("OPENCODE_CONFIG_CONTENT", raising=False)
     monkeypatch.setattr(context_window, "opencode_limit_cache_path", lambda: tmp_path / "home" / "limits.json")
+    monkeypatch.setattr(context_window, "_STATE_DIR", tmp_path)
+
+
+def _live(session_id, size):
+    """The window the status line wrote for a session."""
+    path = context_window.live_window_path(session_id)
+    assert path is not None
+    path.write_text(json.dumps({"context_window_size": size}), encoding="utf-8")
 
 
 def _write_transcript(path, input_tokens=0, cache_read=0, cache_creation=0, model=""):
@@ -81,7 +89,8 @@ class TestContextGaugeHandle:
         assert result == {"stdout": "", "exit_code": 0}
 
     def test_below_nudge_threshold_is_silent(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "200000")
+        monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+        _live("s-below", 200_000)
         transcript = tmp_path / "t.jsonl"
         _write_transcript(transcript, cache_read=50_000)
 
@@ -90,7 +99,8 @@ class TestContextGaugeHandle:
         assert result == {"stdout": "", "exit_code": 0}
 
     def test_fires_nudge_at_80_percent_of_trigger(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "200000")
+        monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+        _live("s-nudge", 200_000)
         transcript = tmp_path / "t.jsonl"
         # trigger = 200000 - 33000 = 167000; 80% of that = 133600
         _write_transcript(transcript, cache_read=145_000)
@@ -104,7 +114,8 @@ class TestContextGaugeHandle:
         assert result["sound"] == "context gauge"
 
     def test_fires_escalate_at_95_percent_of_trigger(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "200000")
+        monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+        _live("s-escalate", 200_000)
         transcript = tmp_path / "t.jsonl"
         # 95% of 167000 trigger = 158650
         _write_transcript(transcript, cache_read=175_000)
@@ -117,7 +128,8 @@ class TestContextGaugeHandle:
         assert result["sound"] == "context gauge"
 
     def test_fires_once_per_threshold_per_session(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "200000")
+        monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+        _live("s-once", 200_000)
         transcript = tmp_path / "t.jsonl"
         _write_transcript(transcript, cache_read=145_000)
         hook_data = {"session_id": "s-once", "transcript_path": str(transcript), "cwd": str(tmp_path)}
@@ -130,7 +142,9 @@ class TestContextGaugeHandle:
         assert second == {"stdout": "", "exit_code": 0}
 
     def test_different_sessions_fire_independently(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "200000")
+        monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+        _live("s-indep-a", 200_000)
+        _live("s-indep-b", 200_000)
         transcript = tmp_path / "t.jsonl"
         _write_transcript(transcript, cache_read=145_000)
 
@@ -158,8 +172,9 @@ class TestContextGaugeHandle:
 
 
 class TestGaugeMeasuresTheRealWindow:
-    def test_a_1m_model_at_230k_is_silent(self, tmp_path, monkeypatch):
+    def test_a_1m_window_at_230k_is_silent(self, tmp_path, monkeypatch):
         monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+        _live("s-1m", 1_000_000)
         transcript = tmp_path / "t.jsonl"
         _write_transcript(transcript, cache_read=230_000, model="claude-opus-5-5")
 
@@ -167,8 +182,9 @@ class TestGaugeMeasuresTheRealWindow:
             result = handle({"session_id": "s-1m", "transcript_path": str(transcript), "cwd": str(tmp_path)})
         assert result == {"stdout": "", "exit_code": 0}
 
-    def test_a_200k_model_at_230k_escalates(self, tmp_path, monkeypatch):
+    def test_a_200k_window_at_230k_escalates(self, tmp_path, monkeypatch):
         monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+        _live("s-200k", 200_000)
         transcript = tmp_path / "t.jsonl"
         _write_transcript(transcript, cache_read=230_000, model="claude-haiku-5-5")
 
@@ -179,6 +195,7 @@ class TestGaugeMeasuresTheRealWindow:
 
     def test_the_printed_percent_is_fill_over_window(self, tmp_path, monkeypatch):
         monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+        _live("s-pct", 200_000)
         transcript = tmp_path / "t.jsonl"
         _write_transcript(transcript, cache_read=150_000, model="claude-haiku-5-5")
 
@@ -189,8 +206,9 @@ class TestGaugeMeasuresTheRealWindow:
         )
         assert "Compact fires soon" not in result["stdout"]
 
-    def test_a_1m_model_nudges_at_80_percent_of_its_own_trigger(self, tmp_path, monkeypatch):
+    def test_a_1m_window_nudges_at_80_percent_of_its_own_trigger(self, tmp_path, monkeypatch):
         monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+        _live("s-1m-nudge", 1_000_000)
         transcript = tmp_path / "t.jsonl"
         # trigger = 1000000 - 33000 = 967000; 80% of that = 773600
         _write_transcript(transcript, cache_read=800_000, model="claude-opus-5-5")
@@ -199,6 +217,39 @@ class TestGaugeMeasuresTheRealWindow:
             result = handle({"session_id": "s-1m-nudge", "transcript_path": str(transcript), "cwd": str(tmp_path)})
         assert "~800k of 1000k context (80%, as the status line counts it); auto-compact at ~967k." in result["stdout"]
         assert "Compact fires soon" not in result["stdout"]
+
+    def test_a_live_1m_under_350k_nudges_against_350k_and_317k(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "350000")
+        _live("s-fable", 1_000_000)
+        transcript = tmp_path / "t.jsonl"
+        _write_transcript(transcript, cache_read=270_000, model="claude-fable-5-2")
+
+        with patch(f"{MODULE}._GUARD_DIR", tmp_path):
+            result = handle({"session_id": "s-fable", "transcript_path": str(transcript), "cwd": str(tmp_path)})
+        assert "~270k of 350k context (77%, as the status line counts it); auto-compact at ~317k." in result["stdout"]
+        assert "Compact fires soon" not in result["stdout"]
+
+    def test_a_model_never_seen_gets_the_live_window_with_no_code_change(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+        _live("s-new", 750_000)
+        transcript = tmp_path / "t.jsonl"
+        _write_transcript(transcript, cache_read=600_000, model="claude-brand-new-9")
+
+        with patch(f"{MODULE}._GUARD_DIR", tmp_path):
+            result = handle({"session_id": "s-new", "transcript_path": str(transcript), "cwd": str(tmp_path)})
+        assert "~600k of 750k context (80%, as the status line counts it); auto-compact at ~717k." in result["stdout"]
+
+    def test_no_live_window_says_window_unknown_once_with_no_percent_and_no_nudge(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "200000")
+        transcript = tmp_path / "t.jsonl"
+        _write_transcript(transcript, cache_read=230_000, model="claude-opus-5-5")
+        hook_data = {"session_id": "s-unknown", "transcript_path": str(transcript), "cwd": str(tmp_path)}
+
+        with patch(f"{MODULE}._GUARD_DIR", tmp_path):
+            first = handle(hook_data)
+            repeat = handle(hook_data)
+        assert first == {"stdout": "CONTEXT GAUGE: ~230k (window unknown)", "exit_code": 0}
+        assert repeat == {"stdout": "", "exit_code": 0}, "same window, already said"
 
 
 class TestGaugeGuardIsPerWindow:
@@ -217,7 +268,8 @@ class TestGaugeGuardIsPerWindow:
         return {"session_id": "s-window", "transcript_path": str(transcript), "cwd": str(tmp_path)}
 
     def test_the_next_window_gets_its_own_nudge(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "200000")
+        monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+        _live("s-window", 200_000)
         hook_data = self._data(tmp_path)
         stamps = [None, None, 1_758_000_000.0]
         monkeypatch.setattr(f"{CADENCE_MODULE}.window_opened_at", lambda *_a, **_k: stamps.pop(0))
@@ -232,7 +284,8 @@ class TestGaugeGuardIsPerWindow:
         assert "CONTEXT GAUGE" in after_compact["stdout"], "a fresh window is a fresh climb"
 
     def test_an_unreadable_stamp_falls_back_to_one_key_and_warns(self, tmp_path, monkeypatch, caplog):
-        monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "200000")
+        monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+        _live("s-window", 200_000)
 
         def _boom(*_args, **_kwargs):
             raise RuntimeError("no state dir")
@@ -389,9 +442,9 @@ class TestOpenCodeStore:
         )
         assert stdout.startswith("CONTEXT GAUGE: ~110k of 160k context (69%,") and "auto-compact at ~136k." in stdout
 
-    def test_a_model_the_catalog_lacks_reads_200k(self, tmp_path, monkeypatch):
+    def test_a_model_the_catalog_lacks_is_window_unknown(self, tmp_path, monkeypatch):
         stdout = self._gauge(tmp_path, monkeypatch, ("ses_1", "assistant", 2, _tokens(read=140_000)), catalog={})
-        assert stdout.startswith("CONTEXT GAUGE: ~140k of 200k context (70%,") and "auto-compact at ~170k." in stdout
+        assert stdout == "CONTEXT GAUGE: ~140k (window unknown)"
 
     def test_config_content_beats_the_project_file(self, tmp_path, monkeypatch):
         (tmp_path / "opencode.json").write_text('{"compaction": {"buffer": 100000}}', encoding="utf-8")

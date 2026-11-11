@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: pid_cache.py
 # Description: PID cache for branch-to-agent mapping
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-07-10
-# Modified: 2026-10-24
+# Modified: 2026-11-08
 # =============================================
 
 """PID cache — maps branch names to active agent PIDs from dispatch lock files.
@@ -21,6 +21,7 @@ from typing import Optional
 from aipass.prax.apps.modules.logger import get_direct_logger
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.repo_root import find_repo_root
+from aipass.prax.apps.handlers.fleet import fleet_rows
 
 logger = get_direct_logger()
 
@@ -32,7 +33,7 @@ _PID_CACHE_TTL = 30.0
 
 def parse_lock_pid(branch_entry: dict, new_cache: dict[str, int], repo_root: Path) -> None:
     """Parse a single dispatch lock file and add to cache if PID is live."""
-    # Registry paths are repo-relative; an absolute one survives the join unchanged.
+    # Fleet rows carry absolute paths, which survive the join unchanged.
     branch_path = repo_root / branch_entry.get("path", "")
     lock_path = branch_path / ".ai_mail.local" / ".dispatch.lock"
     if not lock_path.exists():
@@ -65,9 +66,8 @@ def refresh(repo_root: Optional[Path] = None) -> None:
         registry_path = repo_root / "AIPASS_REGISTRY.json"
         if not registry_path.exists():
             return
-        data = _json.loads(registry_path.read_text(encoding="utf-8"))
         new_cache: dict[str, int] = {}
-        for branch in data.get("branches", []):
+        for branch in fleet_rows(repo_root):
             parse_lock_pid(branch, new_cache, repo_root)
         with _pid_cache_lock:
             _pid_cache.clear()

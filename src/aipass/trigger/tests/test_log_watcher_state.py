@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_log_watcher_state.py
 # Description: Tests for the branch log watcher's state: positions, seen hashes, start/stop and the debounced writer
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """Tests for apps/handlers/log_watcher.py's persisted state and lifecycle (trigger_data.json, start/stop)."""
@@ -86,6 +86,7 @@ class TestStartStopStatus:
             "excluded_files",
             "stale_threshold_seconds",
             "aipass_root",
+            "watched_logs",
         }
         assert expected_keys == set(status.keys())
 

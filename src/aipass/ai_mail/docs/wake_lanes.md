@@ -60,39 +60,34 @@ each — openable only with the grant:
   (Vera-Studio) is reached through the declared-roots external tier
   ([identity_and_boundaries.md](identity_and_boundaries.md)), not through this sweep.
 
-## `@all` Scope: Fleet, Plus Residents for a Verified Admin
+## `@all` Scope: Fleet, Plus Residents and Declared Roots for a Verified Admin
 
 `@all` resolves the core citizens. A **verified-admin** `@all` also reaches the
-resident projects — baud, earmark, finch, aipass_site. Ordinary citizens' `@all`
-is the core citizens only: the widening rides the same five-leg verification that already permits
-admin-initiated direct mail into projects, and grants no new authority — every
-recipient still passes the per-delivery boundary check.
+resident projects (baud, earmark, finch, aipass_site) and the citizens of every
+root declared in `AIPASS_ROOTS.json` (Seed's @grow, Vera-Studio's citizens).
+Ordinary citizens' `@all` is the core citizens only: the widening rides the same
+five-leg verification that already permits admin-initiated direct mail into
+projects, and grants no new authority. Every recipient still passes the
+per-delivery boundary check.
 
-- **Residency is DECLARED, not listed.** `get_resident_branches()` discovers `projects/<name>/*_REGISTRY.json` one level down, then reads
-  `citizenship.residency` from each listed branch's own passport. Both keys are
-  required: the registry must say `active` **and** the passport must say
-  `resident`. That asymmetry is the point — a passport can never *add* scope (a
-  self-declared resident that no registry lists is unreachable by construction),
-  and a stale registry field can never *carry* one (marketstand's registry still
-  says `active`; its passport does not say `resident`, so it is refused and named
-  at error level).
-- **Two exclusion layers, each load-bearing alone.** `pathlib` globs match hidden
-  directories — unlike a shell — so `.archive` needs an *explicit* dot filter, and
-  the one-level depth rule is separate from it. On the live tree they overlap
-  (`projects/.archive/marketstand(on _hold)/` is caught by both), which is exactly
-  how a single-layer regression hides. Each layer therefore has a fixture that
-  only *it* refuses.
-- **Broadcast scope and resolution scope are different questions.**
-  `get_project_tree_branches()` still globs, and should: a held project's citizen
-  legitimately has an *address*. Being reachable is not the same as being on the
-  announcement list. It refuses dot-prefixed projects through the same
-  `_has_dot_component` the resident half uses, so a parked archive is never an
-  address.
-- **The semantics are mirrored, the code is mine.** @memory's
-  `registry_scope.accepted_resident_paths()` is the fleet definition; this reads
-  the same passport field with its own code. No runtime import — `@all` must not
-  need @memory to know who it is talking to. The pins are behavioural, on this
-  branch's own resolution, never on another branch's source text.
+- **The fleet is read through @memory's door.** `get_fleet_branches()` in
+  `handlers/registry/read.py` takes its rows from
+  `door_registry_scope.fleet_branches(name_from="registry")`: core, then residents,
+  then externals, each with an absolute path and a `residency`. A project takes
+  part by being declared; its own registry makes its citizens real, and no seat
+  here keeps a census of its own. The same rows feed `contacts`, the interactive
+  recipient pick and the central inbox stats.
+- **First address wins.** A later row that reuses an earlier email is dropped
+  and logged, so a declared root's namesake never shadows a core citizen.
+- **Cached for a minute.** The door logs every refused row at ERROR on each read,
+  so `get_fleet_branches()` reads it at most once per `FLEET_CACHE_SECONDS` (60 s).
+- **Listing is not resolution.** Delivery and wake keep their own tier order
+  (core, the caller's project, the admin-only project sweep, the external tier
+  last with its boundary flag). They do not read these rows, so a listing can
+  never widen what a sender may reach.
+- **Residency is declared, not listed.** @memory accepts a resident only when its
+  project registry says `active` **and** its passport says `resident`. A passport
+  can never *add* scope, and a stale registry field can never *carry* one.
 - **Fails closed in both directions.** An unverified caller widens nothing, and a
   verifier that *raises* is a refusal, not an opening.
 - **One inbox, one copy** — a resident already in the core registry is not added

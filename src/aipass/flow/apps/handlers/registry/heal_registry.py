@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: heal_registry.py
 # Description: Registry Doctrine Self-Heal Handler
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-07-29
-# Modified: 2026-11-01
+# Modified: 2026-11-08
 # =============================================
 
 """
@@ -17,6 +17,8 @@ Heals the plan-registry corruption classes so none needs a manual JSON edit:
 5. Orphan location: a row recorded at a ghost path or a project root instead of its seat.
    Stale paths are expected debris, so the class is healed; unattributable rows are quarantined.
 6. Not a plan: an open row whose file is_plan_file calls False; closed in the registry only.
+move_location_rows is the door for a citizen moved on purpose: its rows follow it, and a row
+closed only because its file had moved reopens.
 
 On-disk .md files are never renamed, moved or deleted here; only registry rows change,
 always through save_registry. Nothing is guessed.
@@ -374,11 +376,53 @@ def _project_root(path: Path) -> Path | None:
     return None
 
 
+def _declared_root_citizens() -> List[Dict[str, Any]]:
+    """Citizens of the declared roots, read through @memory's gateway; [] (logged) when it cannot answer."""
+    try:
+        from aipass.memory.apps.modules.door_registry_scope import external_branches
+
+        return external_branches(_find_repo_root())
+    except Exception as exc:
+        logger.warning(
+            f"[{MODULE_NAME}] Declared roots unreadable for the seat index; "
+            f"citizens of commissioned projects may be quarantined this run: {exc}"
+        )
+        return []
+
+
+def _id_matches_registry_row(seat: Path) -> bool:
+    """Whether the seat's passport citizen_id is the registry_id its own project registry gave it.
+
+    The id survives a move, so a seat that holds it may claim its old location in another repo.
+    """
+    try:
+        import json
+
+        citizenship = json.loads((seat / ".trinity" / "passport.json").read_text(encoding="utf-8")).get(
+            "citizenship", {}
+        )
+        citizen_id, registry_name = citizenship.get("citizen_id"), citizenship.get("registry_path")
+        if not citizen_id or not registry_name:
+            return False
+        for root in [seat, *seat.parents]:
+            registry = root / registry_name
+            if registry.is_file():
+                rows = json.loads(registry.read_text(encoding="utf-8")).get("branches", [])
+                return any(
+                    (root / row.get("path", "")).resolve() == seat.resolve() and row.get("registry_id") == citizen_id
+                    for row in rows
+                    if row.get("path")
+                )
+    except Exception as exc:
+        logger.warning(f"[{MODULE_NAME}] Could not verify the citizen id of seat '{seat}': {exc}")
+    return False
+
+
 def _citizen_seat_index() -> Dict[str, List[Path]]:
     """Index live citizen seats by directory name.
 
-    Sources: the ecosystem registry, plus locations in the plan registries (the only way citizens
-    in other repos are known). A path counts only if it carries a passport.
+    Sources: the ecosystem registry, the registries of the declared roots, and locations in the
+    plan registries. A path counts only if it carries a passport.
     """
     repo_root = _find_repo_root()
     candidates: set[Path] = set()
@@ -417,6 +461,9 @@ def _citizen_seat_index() -> Dict[str, List[Path]]:
             if location:
                 candidates.add(Path(location))
 
+    for record in _declared_root_citizens():
+        candidates.add(Path(record["path"]))
+
     index: Dict[str, List[Path]] = {}
     for path in candidates:
         if _is_citizen_seat(path):
@@ -447,7 +494,8 @@ def _attribute_orphan(location: Path, seats: Dict[str, List[Path]]) -> Tuple[Pat
     """Decide which live citizen an orphaned location belongs to.
 
     Containment of exactly one seat wins; otherwise exactly one same-named seat whose repository
-    holds the orphan. A bare name match across repos is refused. Returns (seat, "") or (None, reason).
+    holds the orphan, or whose passport id its own registry row confirms (a moved citizen keeps
+    its id). A bare name match across repos is refused. Returns (seat, "") or (None, reason).
     """
     enclosed = _seats_beneath(location, seats)
     if len(enclosed) == 1:
@@ -460,6 +508,8 @@ def _attribute_orphan(location: Path, seats: Dict[str, List[Path]]) -> Tuple[Pat
         return None, f"{len(matches)} live citizens named '{location.name}' — ambiguous"
 
     seat = matches[0]
+    if _id_matches_registry_row(seat):
+        return seat, ""
     root = _project_root(seat)
     if root is None:
         return None, f"cannot establish the repository of seat '{seat}'"
@@ -602,6 +652,14 @@ def heal_registry_doctrine_impl(
 
     actions: List[Dict[str, Any]] = []
 
+    # First, so a moved citizen's rows reach its seat before a file found nowhere is closed.
+    quarantined: List[Dict[str, Any]] = []
+    try:
+        orphan_actions, quarantined = _heal_orphan_locations(types, load_registry_fn, save_registry_fn)
+        actions.extend(orphan_actions)
+    except Exception as e:
+        logger.error(f"[{MODULE_NAME}] Orphan-location sweep failed: {e}")
+
     for _type_key, config in sorted(types.items()):
         prefix = config.get("prefix", "")
         if not prefix:
@@ -627,13 +685,6 @@ def heal_registry_doctrine_impl(
     except Exception as e:
         logger.error(f"[{MODULE_NAME}] Wrong-prefix sweep failed: {e}")
 
-    quarantined: List[Dict[str, Any]] = []
-    try:
-        orphan_actions, quarantined = _heal_orphan_locations(types, load_registry_fn, save_registry_fn)
-        actions.extend(orphan_actions)
-    except Exception as e:
-        logger.error(f"[{MODULE_NAME}] Orphan-location sweep failed: {e}")
-
     by_action: Dict[str, int] = {}
     for entry in actions:
         name = entry.get("action", "unknown")
@@ -658,3 +709,59 @@ def heal_registry_doctrine_impl(
         "quarantined": quarantined,
         "quarantined_count": len(quarantined),
     }
+
+
+def move_location_rows(
+    old: Path,
+    new: Path,
+    apply: bool = False,
+    load_registry_fn: Callable[..., Dict[str, Any]] = load_registry,
+    save_registry_fn: Callable[..., bool] = save_registry,
+) -> List[Dict[str, Any]]:
+    """Re-point every row recorded at or under *old* to *new*, across every plan type.
+
+    A row the missing-file sweep closed whose file now exists at its new path is reopened: it was
+    moved, not finished. Writes only when *apply*; the actions are the same either way. Raises
+    ValueError when *new* is not a directory, OSError when a registry cannot be saved.
+    """
+    if not new.is_dir():
+        raise ValueError(f"new location '{new}' is not a directory")
+    if old == new:
+        raise ValueError("old and new location are the same")
+
+    actions: List[Dict[str, Any]] = []
+    for _type_key, config in sorted(_load_template_registry().get("types", {}).items()):
+        prefix = config.get("prefix", "")
+        if not prefix:
+            continue
+        registry_file = f"{prefix.lower()}_registry.json"
+        registry = load_registry_fn(registry_file=registry_file)
+        dirty = False
+        for number, row in sorted(registry.get("plans", {}).items()):
+            moved = {}
+            for key in ("location", "relative_path", "file_path"):
+                value = row.get(key, "")
+                if value and Path(value).is_relative_to(old):
+                    moved[key] = str(new / Path(value).relative_to(old))
+            if not moved:
+                continue
+            row.update(moved)
+            reopen = row.get("closed_reason") == "auto_closed_missing_file" and Path(row.get("file_path", "")).is_file()
+            if reopen:
+                row["status"] = "open"
+                row.pop("closed", None)
+                row.pop("closed_reason", None)
+            dirty = True
+            actions.append(
+                {
+                    "action": "moved_and_reopened" if reopen else "moved",
+                    "plan_id": f"{prefix}-{str(number).zfill(4)}",
+                    "registry": registry_file,
+                    "to": row.get("file_path") or row["location"],
+                }
+            )
+        if apply and dirty and not save_registry_fn(registry, registry_file=registry_file):
+            raise OSError(f"could not save {registry_file}: rows from it were not moved")
+
+    logger.info(f"[{MODULE_NAME}] {'Moved' if apply else 'Preview:'} {len(actions)} row(s) {old} -> {new}")
+    return actions

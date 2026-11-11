@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate.py
-# Version: 1.10.0
+# Version: 1.11.0
 # Description: Tests for edit_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-11-04
+# Modified: 2026-11-08
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py and its PreToolUse sibling settings_backup.py."""
@@ -20,19 +20,22 @@
 import datetime
 import hashlib
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
 
-from aipass.ai_mail.apps.modules import door_dispatch_grant
+from aipass.ai_mail.apps.handlers.dispatch import grant as dispatch_grant_handler
+from aipass.ai_mail.apps.modules import door_dispatch_grant, door_verified_caller
 from aipass.hooks.apps.handlers.lifecycle import auto_fix
 from aipass.hooks.apps.handlers.security.edit_gate import handle
 from aipass.hooks.apps.handlers.security import git_gate, settings_backup
 from aipass.hooks.apps.modules import diagnostics_state as ds
-from aipass.hooks.apps.modules import engine_closure
+from aipass.hooks.apps.modules import engine_closure, write_grant
 
 # A made-up session for the seat pins: no real session or agent id is written here.
 _SESSION = "a-test-session"
@@ -559,6 +562,117 @@ class TestADispatchGrantOpensOnlyItsPaths:
         assert _write(dispatch_grant.seat, target)["exit_code"] == 0
         edit = {"tool_name": "Edit", "tool_input": {"file_path": str(target)}, "cwd": dispatch_grant.seat}
         assert git_gate.handle(edit)["exit_code"] == 2
+
+
+def _register_row(register: Path, **row) -> None:
+    register.parent.mkdir(parents=True, exist_ok=True)
+    with register.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row) + "\n")
+
+
+@pytest.fixture
+def nested_grant(tmp_path: Path, monkeypatch) -> SimpleNamespace:
+    """@grow seated in projects/grow under the AIPass root, dispatch g1's grant row in the ROOT register only.
+
+    @ai_mail's real door reads real register files; only the verified rail is faked, to name @grow.
+    """
+    aipass = tmp_path / "Projects" / "AIPass"
+    (aipass / "AIPASS_REGISTRY.json").parent.mkdir(parents=True)
+    (aipass / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+    grow = aipass / "projects" / "grow"
+    seat = grow / "src" / "grow" / "grow"
+    seat.mkdir(parents=True)
+    (grow / "GROW_REGISTRY.json").write_text("{}", encoding="utf-8")
+    seed = tmp_path / "Projects" / "seed"
+    (seed / "src" / "head").mkdir(parents=True)
+    (seed / ".git").mkdir()
+    (seed / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    register = aipass / ".aipass" / "dispatch_register.jsonl"
+    row = {
+        "dispatch_id": "g1",
+        "status": "outstanding",
+        "ts": "2026-11-08T10:00:00",
+        "sender": "@devpulse",
+        "target": "@grow",
+        "monitor_pid": os.getpid(),
+        door_dispatch_grant.GRANT_KEY: {"root": str(seed), "files": [], "dirs": ["src/head"]},
+    }
+    _register_row(register, **row)
+    monkeypatch.setattr(write_grant, "aipass_root", lambda: aipass.resolve())
+    monkeypatch.setattr(door_verified_caller, "resolve_verified_caller", lambda: "@grow")
+    state = SimpleNamespace(
+        aipass=aipass, grow=grow, seat=str(seat), seed=seed, register=register, row=row, admin=False
+    )
+    monkeypatch.setattr(door_verified_caller, "is_verified_admin_caller", lambda: state.admin)
+    monkeypatch.setattr(dispatch_grant_handler.json_handler, "log_operation", lambda *a, **k: None)
+    monkeypatch.setenv("AIPASS_DISPATCH_ID", "g1")
+    monkeypatch.setenv("AIPASS_SESSION_TYPE", "daemon")
+    return state
+
+
+class TestANestedCitizensGrantIsReadWhereItWasRegistered:
+    """A dispatch from the AIPass root registers there; a projects/* citizen's grant must be read from it."""
+
+    def test_the_grant_row_only_in_theaipass_root_register_lets_the_write_land(self, nested_grant):
+        assert not (nested_grant.grow / ".aipass" / "dispatch_register.jsonl").exists()
+        assert _write(nested_grant.seat, nested_grant.seed / "src" / "head" / "new.py", "Write")["exit_code"] == 0
+
+    def test_with_no_dispatch_id_the_root_register_grants_nothing(self, nested_grant, monkeypatch):
+        monkeypatch.delenv("AIPASS_DISPATCH_ID")
+        refused = _refusal(_write(nested_grant.seat, nested_grant.seed / "src" / "head" / "new.py", "Write"))
+        assert "grants nothing" not in refused and "Cross-project write blocked" in refused
+
+    def test_a_closed_row_in_the_root_register_refuses(self, nested_grant):
+        _register_row(nested_grant.register, dispatch_id="g1", status="completed (replied)")
+        refused = _refusal(_write(nested_grant.seat, nested_grant.seed / "src" / "head" / "new.py", "Write"))
+        assert "Dispatch g1 grants nothing here: dispatch g1 is not open with a grant." in refused
+
+    def test_a_path_outside_the_grant_refuses_and_names_the_root_registers_grant(self, nested_grant):
+        refused = _refusal(_write(nested_grant.seat, nested_grant.seed / "package.json", "Write"))
+        assert "is outside dispatch g1's grant" in refused
+        assert "directories (new files allowed under these) src/head" in refused
+
+    def test_a_root_register_row_sent_to_another_seat_refuses(self, nested_grant):
+        nested_grant.register.write_text("", encoding="utf-8")
+        _register_row(nested_grant.register, **{**nested_grant.row, "target": "@flow"})
+        refused = _refusal(_write(nested_grant.seat, nested_grant.seed / "src" / "head" / "new.py", "Write"))
+        assert "dispatch g1 was sent to @flow, not @grow" in refused
+
+    def test_a_register_planted_under_the_landing_root_is_never_read(self, nested_grant):
+        nested_grant.register.rename(nested_grant.seed / "planted.jsonl")
+        _register_row(nested_grant.seed / ".aipass" / "dispatch_register.jsonl", **nested_grant.row)
+        refused = _refusal(_write(nested_grant.seat, nested_grant.seed / "src" / "head" / "new.py", "Write"))
+        assert "Dispatch g1 grants nothing here: dispatch g1 is not open with a grant." in refused
+
+    def test_when_the_landing_is_theaipass_root_its_register_is_never_read(self, nested_grant):
+        inside = nested_grant.aipass / "src" / "aipass" / "drone"
+        inside.mkdir(parents=True)
+        nested_grant.register.write_text("", encoding="utf-8")
+        grant = {"root": str(nested_grant.aipass), "files": [], "dirs": ["src/aipass/drone"]}
+        _register_row(nested_grant.register, **{**nested_grant.row, door_dispatch_grant.GRANT_KEY: grant})
+        refused = _refusal(_write(nested_grant.seat, inside / "x.py", "Write"))
+        assert "Dispatch g1 grants nothing here: dispatch g1 is not open with a grant." in refused
+
+    def test_with_noaipass_root_found_only_the_callers_register_answers(self, nested_grant, monkeypatch):
+        monkeypatch.setattr(write_grant, "aipass_root", no_root := Mock(return_value=None))
+        refused = _refusal(_write(nested_grant.seat, nested_grant.seed / "src" / "head" / "new.py", "Write"))
+        assert "Dispatch g1 grants nothing here: dispatch g1 is not open with a grant." in refused
+        no_root.assert_called_once_with()
+
+    def test_an_unreadable_caller_register_refuses_before_any_fallback(self, nested_grant):
+        (nested_grant.grow / ".aipass" / "dispatch_register.jsonl").mkdir(parents=True)
+        refused = _refusal(_write(nested_grant.seat, nested_grant.seed / "src" / "head" / "new.py", "Write"))
+        assert "edit_gate could not read the dispatch register" in refused
+
+    def test_theaipass_root_is_read_from_this_codes_location_never_env_or_cwd(self, tmp_path, monkeypatch):
+        decoy = tmp_path / "decoy"
+        decoy.mkdir()
+        (decoy / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+        monkeypatch.setenv("AIPASS_HOME", str(decoy))
+        monkeypatch.chdir(decoy)
+        home = write_grant.aipass_root()
+        assert home is not None and home != decoy.resolve()
+        assert (home / "AIPASS_REGISTRY.json").is_file() and Path(write_grant.__file__).resolve().is_relative_to(home)
 
 
 @pytest.fixture

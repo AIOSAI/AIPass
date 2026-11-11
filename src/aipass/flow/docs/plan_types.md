@@ -89,8 +89,21 @@ as debris would bury the real orphans under false positives.
 
 Attribution runs on evidence, in order: a directory containing exactly one live
 seat *is* that citizen's ground; failing that, exactly one live citizen sharing
-the directory name **within the same repository**. A bare name match across
-repositories is a coincidence, not an identity, and is refused.
+the directory name **within the same repository**, or one in another repository
+whose passport `citizen_id` is the `registry_id` its own project registry gave
+it: an id survives a move. A bare name match across repositories is a
+coincidence, not an identity, and is refused. The seat index reads the AIPass
+registry, the registries of the declared roots (through @memory's gateway) and
+the plan rows' locations.
+
+The scan re-attributes locations before it closes rows whose file is missing,
+so a moved citizen's open plan follows it to its seat; only a file found nowhere
+closes.
+
+A move made on purpose has its own door: `drone @flow registry move <old> <new>`
+previews, `--apply` writes. It re-points `location`, `relative_path` and
+`file_path` for every row at or under `<old>`, and reopens a row that was closed
+only because its file had moved (`auto_closed_missing_file`, file now present).
 
 Anything unattributable is **quarantined, never guessed and never dropped** —
 the row stays untouched and `drone @flow registry status` lists it with the

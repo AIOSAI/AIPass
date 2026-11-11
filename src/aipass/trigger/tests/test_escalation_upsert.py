@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_escalation_upsert.py
 # Description: Tests that escalation digests upsert in place instead of stacking
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-10
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """Tests for apps/handlers/escalation.py digest upsert keys and the send adapter in handlers/events/registry.py."""
@@ -57,6 +57,8 @@ def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cfg: Dict[str, Any]):
     monkeypatch.setattr(escalation, "_send_email", None)
     # The aged lane opens a registry row; never let it reach the live registry.
     monkeypatch.setattr(escalation, "_registry_report", lambda **kwargs: {})
+    # No registry, so no name collapse: the live fleet's citizens would fold this file's owners together.
+    monkeypatch.setattr(escalation, "BRANCH_REGISTRY_FILE", tmp_path / "AIPASS_REGISTRY.json")
     escalation._config_cache = (0.0, None)
     escalation._branch_names_cache = (0.0, None)
     yield escalation

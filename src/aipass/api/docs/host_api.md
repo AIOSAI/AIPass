@@ -204,11 +204,10 @@ freezes the single worker's loop. `/v1/ping` and `/v1/whoami` stay `async` (no
 blocking work); write routes stay `async` deliberately, the loop being their only
 serialization. The citizen registry is pinned once at boot.
 
-**Expensive reads are single-flight with a short TTL** (`read_cache.py`: the change
-list at 1.5 s, machine vitals, lock state): N concurrent callers share one
-subprocess, a re-poll hits the TTL, and a failure is never cached. `fleet.py`
-coalesces @baud's snapshot the same way, one exec per 1.5 s for `/v1/fleet` and
-`/v1/rooms`.
+**Expensive reads are single-flight with a short TTL** (`read_cache.py`): callers
+share one subprocess, and a failure is never cached. Changes: one `drone @git
+status --all` per repository per 5 s, each branch cut by drone's path rule.
+`fleet.py`: one snapshot exec per 1.5 s.
 
 **Terminal sockets pump on their own 16-thread pool** (`PUMP_WORKERS`, `attach.py`);
 attach seventeen is refused with a sentence naming the cap.

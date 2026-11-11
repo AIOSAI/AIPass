@@ -2,7 +2,7 @@
   "metadata": {
     "version": "2.0.1",
     "created": "2026-05-18",
-    "updated": "2026-11-07",
+    "updated": "2026-11-10",
     "description": "Standards bypass configuration for this branch",
     "audit_context": "DPLAN-0191: Full ownership hardening. All handler wiring verified against .aipass/hooks.json + engine.jsonl firing evidence. Dynamic dispatch via engine._run_handler (importlib.import_module + getattr) means handlers are never statically imported — sentry's dead_code/unused_function checks are false positives for this architecture."
   },
@@ -1198,7 +1198,7 @@
     {
       "file": "apps/handlers/lifecycle/pre_compact_prep.py",
       "standard": "json_structure",
-      "reason": "Uses stdlib json for .trinity/local.json read+stamp (own branch's memory file, DPLAN-0253) plus AIPASS_REGISTRY.json/inbox.json/memory.config.json reads (external system + other branches' state) — not this branch's own hooks_json/ triplet storage. Matches compact.py precedent (same local.json access)."
+      "reason": "Uses stdlib json for .trinity/local.json read+stamp (own branch's memory file, DPLAN-0253) plus inbox.json/memory.config.json reads (external system + other branches' state) — not this branch's own hooks_json/ triplet storage. Matches compact.py precedent (same local.json access)."
     },
     {
       "file": "apps/handlers/prompt/context_gauge.py",
@@ -1490,15 +1490,14 @@
       "file": "apps/modules/context_window.py",
       "standard": "logged_fallback",
       "lines": [
-        174,
-        177,
-        196,
-        199,
-        320,
-        383,
-        402
+        148,
+        151,
+        188,
+        286,
+        349,
+        368
       ],
-      "reason": "Fleet green leg 5: the context gauge's reading; None shows no gauge. Display only, guards no write. 174-199: an unreadable transcript (Claude's or a Codex rollout) reads as no usage / no model. 320: an unreadable OpenCode store reads as no usage, logged at INFO. 383: an unreadable OpenCode catalog reads as no limit, so the documented 200k stands, logged at INFO. 402: an unreadable limit cache reads as empty, so the catalog is read, logged at INFO."
+      "reason": "Fleet green leg 5: the context gauge's reading; None shows no gauge. Display only, guards no write. 148-151: an unreadable transcript (Claude's or a Codex rollout) reads as no usage. 188: an unreadable status-line window file reads as window unknown, logged at INFO. 286: an unreadable OpenCode store reads as no usage, logged at INFO. 349: an unreadable OpenCode catalog reads as no limit, so the window is unknown, logged at INFO. 368: an unreadable limit cache reads as empty, so the catalog is read, logged at INFO."
     },
     {
       "file": "apps/modules/cc_transcripts.py",
@@ -1548,13 +1547,13 @@
       "file": "apps/handlers/lifecycle/pre_compact_prep.py",
       "standard": "logged_fallback",
       "lines": [
-        65,
-        135,
-        204,
-        218,
-        251
+        68,
+        131,
+        200,
+        214,
+        247
       ],
-      "reason": "Fleet green leg 5: 65 and 135 are counts for the compact snapshot, None renders as unknown, never zero. 204 (the .trinity lock will not open), 218 and 251: the session stamp is skipped and logged at WARNING; the agent's own memory is untouched."
+      "reason": "Fleet green leg 5: 68 (the fleet door cannot be read) and 131 are counts for the compact snapshot, None renders as unknown, never zero. 200 (the .trinity lock will not open), 214 and 247: the session stamp is skipped and logged at WARNING; the agent's own memory is untouched."
     },
     {
       "file": "apps/handlers/lifecycle/session_boot.py",

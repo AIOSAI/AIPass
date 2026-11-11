@@ -4,7 +4,7 @@
 # Description: Tests for auto_fix lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-02
+# Modified: 2026-11-10
 # =============================================
 
 """Tests for apps/handlers/lifecycle/auto_fix.py."""
@@ -111,23 +111,38 @@ class TestAutofixPython:
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_python_checks", return_value=[])
     def test_python_no_errors(self, mock_py, mock_ruff_s, mock_pyright, mock_sentry, tmp_path):
         result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "clean.py")}})
-        assert result["exit_code"] == 0
-        parsed = json.loads(result["stdout"])
-        assert parsed["systemMessage"] == "[diagnostics] ok"
-        assert "sound" not in result
+        assert result == {"stdout": "", "exit_code": 0}
+
+    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_sentry_checklist", return_value=[])
+    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_pyright_check")
+    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_ruff_lint_structured", return_value=[])
+    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_python_checks", return_value=[])
+    def test_a_checker_that_did_not_answer_still_speaks(
+        self, mock_py, mock_ruff_s, mock_pyright, mock_sentry, tmp_path
+    ):
+        mock_pyright.side_effect = lambda path, unanswered: unanswered.append("pyright") or []
+        result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "clean.py")}})
+        assert json.loads(result["stdout"]) == {
+            "hookSpecificOutput": {
+                "hookEventName": "PostToolUse",
+                "additionalContext": "[diagnostics] NO ANSWER from pyright: this edit cleared no recorded error",
+            }
+        }
 
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_sentry_checklist", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_pyright_check", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_ruff_lint_structured", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_python_checks")
-    def test_python_syntax_error(self, mock_py, mock_ruff_s, mock_pyright, mock_sentry, tmp_path):
+    def test_python_syntax_error(self, mock_py, mock_ruff_s, mock_pyright, mock_sentry, tmp_path, caplog):
         mock_py.return_value = ["SYNTAX: invalid syntax at line 5"]
         result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "bad.py")}})
         assert result["exit_code"] == 0
         parsed = json.loads(result["stdout"])
         assert "additionalContext" in parsed.get("hookSpecificOutput", {})
         assert "SYNTAX" in parsed["hookSpecificOutput"]["additionalContext"]
-        assert "1 error(s)" in parsed["systemMessage"]
+        assert "1 error(s) in bad.py" in parsed["hookSpecificOutput"]["additionalContext"]
+        assert "systemMessage" not in parsed
+        assert "SYNTAX: invalid syntax at line 5" in caplog.text
         assert result.get("sound") == "auto fix diagnostics"
 
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_pyright_check", return_value=[])
@@ -234,9 +249,7 @@ class TestAutoFixJson:
         json_file.write_text('{"key": "value"}', encoding="utf-8")
 
         result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(json_file)}})
-        parsed = json.loads(result["stdout"])
-        assert parsed["systemMessage"] == "[diagnostics] ok"
-        assert "sound" not in result
+        assert result == {"stdout": "", "exit_code": 0}
 
     def test_json_invalid_syntax(self, tmp_path):
         json_file = tmp_path / "bad.json"
@@ -507,13 +520,12 @@ class TestAutoFixPatterns:
         assert _check_line_pattern('    msg = "logger.debug(test)"', "logger.debug(") is False
 
     def test_check_emoji_list_clean(self, tmp_path):
-        """Reached through handle on a .json edit: a clean emoji list reports ok."""
+        """Reached through handle on a .json edit: a clean emoji list is silent."""
         json_file = tmp_path / "emojis.json"
         json_file.write_text(json.dumps({"emojis": ["hello", "world"]}), encoding="utf-8")
 
         result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(json_file)}})
-        assert json.loads(result["stdout"])["systemMessage"] == "[diagnostics] ok"
-        assert "sound" not in result
+        assert result == {"stdout": "", "exit_code": 0}
 
     def test_check_emoji_list_suspicious(self, tmp_path):
         """An ASCII single char in an emoji list is named, with its key, in the advisory.
@@ -610,7 +622,7 @@ _SCRATCH = [
 
 class TestScratchIsNotJudged:
     @pytest.mark.parametrize(("parts", "named", "spell"), _SCRATCH)
-    def test_a_scratch_edit_is_skipped_runs_no_check_and_leaves_the_seat_record(
+    def test_a_scratch_edit_is_silent_runs_no_check_and_leaves_the_seat_record(
         self, parts, named, spell, tmp_path, monkeypatch
     ):
         ran: list = []
@@ -622,8 +634,7 @@ class TestScratchIsNotJudged:
 
         result = handle({"tool_name": "Write", "tool_input": {"file_path": spell(probe)}})
 
-        assert json.loads(result["stdout"]) == {"systemMessage": f"[diagnostics] skipped: {named} is scratch"}
-        assert "sound" not in result
+        assert result == {"stdout": "", "exit_code": 0}
         assert ran == []
         held = ds.load_seat("nosession")
         assert held is not None

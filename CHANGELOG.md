@@ -9,6 +9,23 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-11-10] — v2.8.37: citizens at any path, the fleet read through memory's door, quieter hooks
+
+### Added
+- **adopt / spawn**: `adopt` works at any path, in contractor or framework mode; `spawn adopt-citizen` moves a citizen whole.
+- **flow**: a moved citizen keeps its plans; a registry `move` verb; seats come from the declared roots.
+- **trigger**: medic warns on a user service that restart-loops or fails.
+
+### Changed
+- **The fleet is read through memory's door**: trigger's log watcher and error gate, prax dashboards and monitor labels, ai_mail contacts, `@all` and central stats, daemon activity reports, the commons agents table, spawn `update --all`, `migrate-passports` and `adopt`, hooks session reclaim and the dispatch-lock count, skills `branch_health` and `inbox_check` (by name too), devpulse `release_notify` roots and the watchdog resolver. No module keeps a private list of citizens.
+- **api**: the host's git changes come from one shared sweep per repo.
+- **prompts**: @aipass is described as the user's handyman, a seat that builds.
+
+### Fixed
+- **hooks**: a PostToolUse finding reaches the model and never the user's chat; a passing PostToolUse hook prints nothing; the context window comes from a live source, with no model lists; a dispatch grant reaches a citizen in a nested project.
+- **api**: a slash command typed in the BAUD chat (`/prep`, `/clear`) shows in the agent feed as typed, so the sender's pending mark settles instead of reading "not delivered" after a turn that ran (`handlers/host/agent_transcript.py` 1.1.0). Same cure the `!` shell line got.
+- **docs**: the Linux-only notice asks for `transition` in the issue title, not a label an outsider cannot apply, and says the Docker image is to come; the merge playbook names the lint-only gate and the three required checks.
+
 ## [2026-11-08] — v2.8.36: AIPass is Linux only, the transition notice, lint-only CI
 
 ### Changed

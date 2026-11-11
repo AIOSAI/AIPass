@@ -3,7 +3,7 @@
 # Description: Passport 2.0 fleet migration — thin CLI layer over passport_migration
 # Version: 1.0.1
 # Created: 2026-08-28
-# Modified: 2026-10-24
+# Modified: 2026-11-09
 # =============================================
 
 """One-shot fleet passport migration to schema 2.0 (DPLAN-0319).
@@ -141,22 +141,15 @@ def _print_receipt(receipt: dict) -> None:
         console.print(f"  [bold]Only:[/bold]     {receipt['only']}")
     console.print()
 
-    baseline = receipt["baseline"]
-    scanned_core = sum(1 for rec in receipt["files"] if rec["residency"] == "core")
-    scanned_resident = receipt["scanned"] - scanned_core
-    console.print(f"  Scanned:   {receipt['scanned']}  [dim](core {scanned_core} / resident {scanned_resident})[/dim]")
+    fleet = receipt["fleet"]
+    console.print(
+        f"  Fleet:     {fleet['total']} citizen(s) answered by memory's door "
+        f"[dim](core {fleet['core']} / resident {fleet['resident']} / external {fleet['external']})[/dim]"
+    )
+    console.print(f"  Scanned:   {receipt['scanned']}")
     console.print(f"  Changed:   {receipt['changed']}")
     console.print(f"  Unchanged: {receipt['unchanged']}")
     console.print(f"  Backups:   {receipt['backups_written']}")
-
-    if not baseline["filtered"] and not baseline["matches"]:
-        warning(
-            f"Discovered {baseline['discovered_total']} passport(s) "
-            f"(core {baseline['discovered_core']} / resident {baseline['discovered_resident']}) — "
-            f"the measured fleet is {baseline['expected']['total']} "
-            f"(core {baseline['expected']['core']} / resident {baseline['expected']['resident']}). "
-            "Reporting the discovered set as found; verify the difference before applying."
-        )
 
     _print_field_counts(receipt)
     _print_per_branch(receipt)
@@ -172,10 +165,7 @@ def _print_receipt(receipt: dict) -> None:
             f"No passports found under {receipt['root']} — nothing was scanned.",
             suggestion="Point --root at an AIPass checkout, or drop --root to scan this repository.",
         )
-        console.print(
-            "  [dim]Discovery matches this repository's layout "
-            "(src/aipass/<branch>/ and projects/<project>/src/<pkg>/<branch>/).[/dim]"
-        )
+        console.print("  [dim]Discovery reads memory's door: the root's registries and its declared roots.[/dim]")
     elif not receipt["changed"] and not receipt["errors"]:
         console.print("  [green]Nothing to migrate — every scanned passport is already 2.0.[/green]")
     console.print()

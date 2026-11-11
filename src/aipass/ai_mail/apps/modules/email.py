@@ -3,7 +3,7 @@
 # Description: Email Orchestration Module
 # Version: 3.5.0
 # Created: 2025-12-02
-# Modified: 2026-10-17
+# Modified: 2026-11-08
 # =============================================
 
 """
@@ -32,7 +32,7 @@ from aipass.ai_mail.apps.handlers.email.inbox_cleanup import (
 )
 from aipass.ai_mail.apps.handlers.email.reply import get_email_by_id, send_reply
 from aipass.ai_mail.apps.handlers.users.user import get_current_user
-from aipass.ai_mail.apps.handlers.registry.read import get_all_branches, get_branch_by_email
+from aipass.ai_mail.apps.handlers.registry.read import get_branch_by_email, get_fleet_branches
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.email.close_ops import batch_close, batch_close_post_ops
 from aipass.ai_mail.apps.handlers.email.inbox_resolve import resolve_inbox_target
@@ -363,7 +363,7 @@ def handle_contacts(args: List[str]) -> bool:
     """View contacts."""
     json_handler.log_operation("contacts_viewed")
     try:
-        branches = get_all_branches()
+        branches = get_fleet_branches()
         if not branches:
             error("No contacts found")
             return True
@@ -435,7 +435,7 @@ def print_introspection():
     console.print("    - user.py (get_current_user — get current branch user info)")
     console.print("    - branch_detection.py (get_branch_info_from_registry — look up branch info)")
     console.print("  handlers/registry/")
-    console.print("    - read.py (get_all_branches — list all registered branches)")
+    console.print("    - read.py (get_fleet_branches — every citizen, declared roots included)")
     console.print("    - read.py (get_branch_by_email — look up branch by email address)")
     console.print("  handlers/json_utils/")
     console.print("    - json_handler.py (log_operation — log structured operation to JSON)")

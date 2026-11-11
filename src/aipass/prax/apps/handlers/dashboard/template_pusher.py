@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: template_pusher.py
 # Description: Dashboard Template Push Handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-02-25
-# Modified: 2026-10-24
+# Modified: 2026-11-08
 # =============================================
 
 """
@@ -26,6 +26,7 @@ from aipass.prax.apps.handlers.json import json_handler
 from .operations import atomic_write_text, dashboard_lock
 from .status import calculate_quick_status, merge_quick_status
 from aipass.prax.apps.handlers.repo_root import find_repo_root
+from aipass.prax.apps.handlers.fleet import fleet_rows
 from aipass.prax.apps.handlers.repo_root import resolved_file
 
 _PRAX_ROOT = resolved_file(Path(__file__)).parents[3]  # .../prax/
@@ -243,22 +244,20 @@ def push_dashboard_template(dry_run: bool = False) -> Dict[str, Any]:
         return result
 
     try:
-        registry = json.loads(AIPASS_REGISTRY.read_text())
-    except json.JSONDecodeError as e:
+        branches = fleet_rows(AIPASS_REGISTRY.parent)
+    except RuntimeError as e:
         logger.error("Invalid registry JSON: %s", e)
         result["success"] = False
         result["errors"].append(f"Invalid registry JSON: {e}")
         return result
 
-    branches = [b for b in registry.get("branches", []) if b.get("status") == "active"]
     branches_updated_list: List[str] = []
 
     repo_root = _find_repo_root()
 
     for branch in branches:
-        branch_name = branch.get("name", "UNKNOWN").upper()
-        raw_path = Path(branch.get("path", ""))
-        branch_path = raw_path if raw_path.is_absolute() else repo_root / raw_path
+        branch_name = branch["name"].upper()
+        branch_path = branch["path"]
         result["branches_scanned"] += 1
 
         if not branch_path.exists():

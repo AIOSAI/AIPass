@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_status.py
 # Description: Unit tests for PRAX status module
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """Tests for apps/modules/status.py and apps/handlers/status/sync.py."""
@@ -180,7 +180,18 @@ class TestSyncDoesNotResurrectTheRootFile:
             "**State:** Operational\n**Last update:** 2026-09-24\n", encoding="utf-8"
         )
         (tmp_path / "AIPASS_REGISTRY.json").write_text(
-            json.dumps({"branches": [{"name": "somebranch", "email": "@somebranch", "path": "src/aipass/somebranch"}]}),
+            json.dumps(
+                {
+                    "branches": [
+                        {
+                            "name": "somebranch",
+                            "email": "@somebranch",
+                            "path": "src/aipass/somebranch",
+                            "status": "active",
+                        }
+                    ]
+                }
+            ),
             encoding="utf-8",
         )
         return tmp_path

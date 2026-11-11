@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_project_citizens.py
 # Description: projects/* citizens resolve by registry and passport, not path shape
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-14
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_detector.py."""
@@ -19,6 +19,7 @@
 # sentry: no-test-needed(json_structure) — __init__'s log_operation("branch_detected") record, covered by that row
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -40,12 +41,18 @@ def _build_repo(tmp_path: Path, main_branches=None, projects=None, passports=())
     _write_json(repo / "AIPASS_REGISTRY.json", {"branches": main_branches})
 
     for dir_name, entries in (projects or {}).items():
-        _write_json(repo / "projects" / dir_name / f"{dir_name.upper()}_REGISTRY.json", {"branches": entries})
+        project = repo / "projects" / dir_name
+        _write_json(project / f"{dir_name.upper()}_REGISTRY.json", {"branches": entries})
+        # The door admits a project citizen only when its passport declares it resident.
+        passports = [*passports, *(str((project / e["path"]).relative_to(repo)) for e in entries if e.get("path"))]
 
     for rel in passports:
         _write_json(
             repo / rel / ".trinity" / "passport.json",
-            {"branch_info": {"branch_name": Path(rel).name.upper(), "path": str(repo / rel)}},
+            {
+                "citizenship": {"residency": "resident"},
+                "branch_info": {"branch_name": Path(rel).name.upper(), "path": str(repo / rel)},
+            },
         )
     return repo
 
@@ -122,7 +129,9 @@ class TestPathsResolveAgainstTheirRegistry:
     """A registry's relative path is relative to that registry, never to CWD."""
 
     def test_relative_main_registry_path_ignores_cwd(self, tmp_path, monkeypatch):
-        repo = _build_repo(tmp_path, main_branches=[{"name": "BACKUP", "path": "src/aipass/backup"}])
+        repo = _build_repo(
+            tmp_path, main_branches=[{"name": "BACKUP", "path": "src/aipass/backup", "status": "active"}]
+        )
         foreign = tmp_path / "elsewhere"
         foreign.mkdir()
         detector = _detector_for(repo, monkeypatch, cwd=foreign)
@@ -136,7 +145,7 @@ class TestPathsResolveAgainstTheirRegistry:
 
     def test_absolute_paths_are_left_alone(self, tmp_path, monkeypatch):
         absolute = tmp_path / "somewhere" / "prax"
-        repo = _build_repo(tmp_path, main_branches=[{"name": "PRAX", "path": str(absolute)}])
+        repo = _build_repo(tmp_path, main_branches=[{"name": "PRAX", "path": str(absolute), "status": "active"}])
         detector = _detector_for(repo, monkeypatch)
         assert detector.branch_map.get(str(absolute)) == "PRAX"
 
@@ -205,3 +214,21 @@ class TestSweepIsFaultTolerant:
         repo = _build_repo(tmp_path, projects={"baud": [entry, BAUD_ENTRY]})
         detector = _detector_for(repo, monkeypatch)
         assert "BAUD" in detector.known_branches
+
+
+class TestDeclaredRootsLabelTheMonitor:
+    """A session under a declared root is labelled by its row; an undeclared sibling gets no label."""
+
+    def test_a_file_under_the_external_is_labelled_by_its_row(self, fleet, monkeypatch):
+        detector = _detector_for(fleet.root, monkeypatch)
+        assert detector.detect_from_path(str(fleet.grow / "apps" / "x.py")) == "GROW"
+
+    def test_a_transcript_folder_encoding_a_cwd_inside_the_external_is_labelled(self, fleet, monkeypatch):
+        detector = _detector_for(fleet.root, monkeypatch)
+        folder = re.sub(r"[^A-Za-z0-9]", "-", str(fleet.grow / "apps"))
+        transcript = fleet.root.parent / ".claude" / "projects" / folder / "session.jsonl"
+        assert detector.detect_from_path(str(transcript)) == "GROW"
+
+    def test_an_undeclared_sibling_with_a_passport_is_not_labelled(self, fleet, monkeypatch):
+        detector = _detector_for(fleet.root, monkeypatch)
+        assert detector.detect_from_path(str(fleet.rogue / "apps" / "x.py")) == "UNKNOWN"

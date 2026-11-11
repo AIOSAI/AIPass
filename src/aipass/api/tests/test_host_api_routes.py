@@ -3,7 +3,7 @@
 # Description: Tests for the host API's live app — the extra guard, ping, bearer auth, scopes, the declared routes
 # Version: 1.4.0
 # Created: 2026-10-08
-# Modified: 2026-11-05
+# Modified: 2026-11-08
 # =============================================
 
 """Tests for create_app(), its auth and the declared routes in apps/handlers/host/server.py."""
@@ -916,6 +916,10 @@ class TestTheFeedReadsAClaudeSession:
             [
                 _claude("user", "fix the bug"),
                 _claude("user", "<command-name>/clear</command-name>"),
+                _claude(
+                    "user",
+                    "<command-message>prep</command-message>\n<command-name>/prep</command-name>\n<command-args>now</command-args>",
+                ),
                 _claude("user", "<bash-input> ls -la</bash-input>"),
                 _claude("user", "<bash-stdout>total 0</bash-stdout><bash-stderr></bash-stderr>"),
                 _claude("user", [{"type": "text", "text": "<pasted_content>a long paste</pasted_content>"}]),
@@ -948,6 +952,8 @@ class TestTheFeedReadsAClaudeSession:
 
         assert _said(body) == [
             ("user", "fix the bug"),
+            ("user", "/clear"),
+            ("user", "/prep now"),
             ("user", "! ls -la"),
             ("user", "a long paste"),
             ("agent", "on it"),
@@ -958,7 +964,7 @@ class TestTheFeedReadsAClaudeSession:
             ("tool", "teammate b2: finished"),
             ("tool", "context compacted"),
         ]
-        assert body["lines"][3]["model"] == "Claude Opus 5.5"
+        assert body["lines"][5]["model"] == "Claude Opus 5.5"
         assert body["session"] == "s-1"
 
     def test_since_returns_only_the_lines_after_n(self, agents: Any, tmp_path: Path) -> None:

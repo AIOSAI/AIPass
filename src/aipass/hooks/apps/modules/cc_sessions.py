@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cc_sessions.py
-# Version: 3.6.0
+# Version: 3.7.0
 # Description: CC-native session discovery, listing, and reclaim
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-30
-# Modified: 2026-10-25
+# Modified: 2026-11-09
 # =============================================
 
 """Read Claude Code native session files (~/.claude/sessions/<pid>.json).
@@ -21,7 +21,7 @@ from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
-from aipass.hooks.apps.handlers.config.loader import aipass_home
+from aipass.hooks.apps.handlers.config.loader import aipass_home, fleet_rows
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
@@ -377,15 +377,13 @@ def _stop_session(session: dict) -> str:
 
 
 def registered_branch_dir(name: str) -> str | None:
-    """The directory AIPASS_REGISTRY.json registers for branch *name*, or None when it names none."""
+    """The directory of citizen *name* among memory's fleet rows, declared roots included, or None."""
     home = aipass_home()
-    registry = home / "AIPASS_REGISTRY.json" if home is not None else None
-    if registry is None or not registry.is_file():
+    if home is None:
         return None
-    branches = json.loads(registry.read_text(encoding="utf-8")).get("branches", [])
-    for entry in branches:
-        if isinstance(entry, dict) and str(entry.get("name", "")).lower() == name.lower() and entry.get("path"):
-            return str(home / entry["path"])
+    for row in fleet_rows(home):
+        if str(row["name"]).lower() == name.lower():
+            return str(row["path"])
     return None
 
 

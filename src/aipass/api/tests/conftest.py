@@ -1,17 +1,17 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for api tests
-# Version: 2.5.0
+# Version: 2.5.1
 # Created: 2026-03-05
-# Modified: 2026-11-06
+# Modified: 2026-11-10
 # Category: api/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v2.5.1 (2026-11-10): the git sweep cache cleared beside the git-changes cache
 #   - v2.5.0 (2026-11-06): SECRETS_BASE redirected for every test: the host store is files there now
 #   - v2.4.0 (2026-11-05): agent chat: the hooks engine log redirected into tmp_path (autouse)
 #   - v2.3.1 (2026-11-01): remote_repo plants a .git with a HEAD; an empty one is no repository
 #   - v2.3.0 (2026-10-25): no_fsync for the session; host_app shared by request-only fixtures
-#   - v2.2.0 (2026-10-22): dict-backed keyring for every test (autouse); no test reaches the login keyring
 #
 # CODE STANDARDS:
 #   - Error handling: Use error handler system (apps/handlers/error/)
@@ -181,8 +181,10 @@ def _clean_git_changes_cache():
     """Empty the git-changes cache around every case in a file that requests it."""
     # `read_git_changes` coalesces on (branch, project, grain) with a TTL: a later case gets an earlier one's mock.
     host_git._changes.clear()
+    host_git._sweeps.clear()
     yield
     host_git._changes.clear()
+    host_git._sweeps.clear()
 
 
 @pytest.fixture

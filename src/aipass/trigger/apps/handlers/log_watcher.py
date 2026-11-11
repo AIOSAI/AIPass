@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Branch log watcher event producer for error detection
-# Version: 2.9.0
+# Version: 2.10.0
 # Created: 2026-02-02
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """
@@ -18,8 +18,9 @@ import time
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePath
-from typing import Any, Dict, Set, Optional, Callable
+from typing import Any, Dict, Set, Optional, Callable, Tuple
 from aipass.trigger.apps.config import TRIGGER_ROOT, AIPASS_PKG_ROOT, atomic_write_json, json_file_lock
+from aipass.memory.apps.modules.door_registry_scope import fleet_branches
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers.error_registry import report as registry_report
 
@@ -114,6 +115,11 @@ _SYSTEM_LOGS_BRANCH_PREFIXES: list = sorted(
 # TTL: a new branch is attributed within the minute without a listdir per log line.
 _BRANCH_NAMES_TTL_SECONDS = 60.0
 _branch_names_cache: tuple = (0.0, ())
+# Every logs/ dir of the declared fleet -> its branch name; re-read on this TTL, which is the join cadence.
+FLEET_TTL_SECONDS = 300.0
+_fleet_cache: Tuple[float, Dict[Path, str]] = (0.0, {})
+_named_without_logs: Set[Path] = set()
+_fleet_names: Set[str] = set()
 
 # `object`, not None: Trigger.fire returns a summary, and -> None would reject the real bus.
 _fire_event: Optional[Callable[..., object]] = None
@@ -260,16 +266,41 @@ def _known_branch_names() -> tuple:
         return names
 
     found = set(_SYSTEM_LOGS_BRANCH_PREFIXES)
-    try:
-        for entry in AIPASS_PKG_ROOT.iterdir():
-            if entry.is_dir() and not entry.name.startswith((".", "_")):
-                found.add(entry.name)
-    except OSError as exc:
-        logger.warning("Failed to list branch directories under '%s': %s", AIPASS_PKG_ROOT, exc)
+    fleet_logs_dirs()
+    found.update(_fleet_names)
 
     resolved = tuple(sorted(found, key=len, reverse=True))
     _branch_names_cache = (now, resolved)
     return resolved
+
+
+def fleet_logs_dirs() -> Dict[Path, str]:
+    """Each declared citizen's logs/ directory and branch name, read through memory's door."""
+    # TTL-bound: the door logs each refused row at ERROR into a log this watcher reads.
+    global _fleet_cache, _fleet_names
+    cached_at, dirs = _fleet_cache
+    now = time.monotonic()
+    if cached_at and (now - cached_at) < FLEET_TTL_SECONDS:
+        return dirs
+    try:
+        rows = fleet_branches(repo_root=AIPASS_PKG_ROOT.parent.parent, name_from="registry")
+    except Exception as exc:
+        logger.warning("Fleet census unreadable, keeping the last one (%d dirs): %s", len(dirs), exc)
+        _fleet_cache = (now, dirs)
+        return dirs
+    found: Dict[Path, str] = {}
+    _fleet_names = {Path(row["path"]).name for row in rows}
+    for row in rows:
+        branch_dir = Path(row["path"])
+        logs_dir = branch_dir / "logs"
+        if logs_dir.is_dir():
+            # The address, not the directory: dispatch mails "@" + this name lowered ("my-agent/" is @my_agent).
+            found[logs_dir] = (row.get("email") or branch_dir.name).lstrip("@").upper()
+        elif branch_dir not in _named_without_logs:
+            _named_without_logs.add(branch_dir)
+            logger.info("Citizen %s has no logs/ yet, not watched: %s", branch_dir.name, branch_dir)
+    _fleet_cache = (now, found)
+    return found
 
 
 def classify_log_path(path: PurePath) -> str:
@@ -316,6 +347,10 @@ def detect_branch_from_path(log_path: str) -> str:
             if name_stem.startswith(prefix + "_") or name_stem == prefix:
                 return prefix.upper()
         return "UNKNOWN"
+
+    named = fleet_logs_dirs().get(path.parent)
+    if named:
+        return named
 
     parts = path.parts
     for i, part in enumerate(parts):
@@ -432,6 +467,8 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
         filename = Path(file_path).name
         if filename.lower() in _EXCLUDED_LOG_FILES_LOWER:
             return False
+        if Path(file_path).parent in self.watched_dirs:
+            return True
         kind = classify_log_path(Path(file_path))
         if kind == "branch":
             return True
@@ -481,6 +518,7 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
             return
 
         file_path = str(event.src_path)
+        self.join_new_dirs()
         if not self._should_process(file_path):
             return
 
@@ -577,31 +615,43 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
             logger.warning("Failed to process log line from '%s': %s", log_path, exc)
             return
 
+    def join_new_dirs(self) -> None:
+        """Schedule any logs/ dir the fleet census gained since start; its files start at EOF."""
+        observer = _branch_log_observer
+        if observer is None:
+            return
+        for logs_dir in fleet_logs_dirs():
+            if logs_dir in self.watched_dirs:
+                continue
+            self._init_dir_positions(logs_dir, {})
+            observer.schedule(self, str(logs_dir), recursive=False)
+            self.watched_dirs.add(logs_dir)
+            logger.info("Joined the watch: %s", logs_dir)
+
+    def _init_dir_positions(self, logs_dir: Path, persisted: Dict[str, int]) -> None:
+        """Record a start position per log file in one dir: the saved one, else EOF."""
+        for log_file in logs_dir.glob("*.log"):
+            try:
+                file_path = str(log_file)
+                current_size = log_file.stat().st_size
+                saved_pos = persisted.get(file_path, -1)
+                # A saved position past EOF means the file rotated; snap to EOF.
+                if 0 <= saved_pos <= current_size:
+                    self._record_position(file_path, saved_pos)
+                else:
+                    self._record_position(file_path, current_size)
+            except Exception as exc:
+                logger.warning("Failed to initialize position for branch log '%s': %s", log_file, exc)
+                continue
+
     def initialize_positions(self) -> None:
         """Initialize log positions from persisted state, falling back to END of file."""
         persisted = _load_log_positions()
         # Seeded from disk; the live stat below wins for files that exist.
         self.log_inodes.update(_load_log_inodes())
 
-        for branch_dir in AIPASS_PKG_ROOT.iterdir():
-            if not branch_dir.is_dir():
-                continue
-            logs_dir = branch_dir / "logs"
-            if not logs_dir.exists():
-                continue
-            for log_file in logs_dir.glob("*.log"):
-                try:
-                    file_path = str(log_file)
-                    current_size = log_file.stat().st_size
-                    saved_pos = persisted.get(file_path, -1)
-                    # A saved position past EOF means the file rotated; snap to EOF.
-                    if 0 <= saved_pos <= current_size:
-                        self._record_position(file_path, saved_pos)
-                    else:
-                        self._record_position(file_path, current_size)
-                except Exception as exc:
-                    logger.warning("Failed to initialize position for branch log '%s': %s", log_file, exc)
-                    continue
+        for logs_dir in fleet_logs_dirs():
+            self._init_dir_positions(logs_dir, persisted)
 
         if SYSTEM_LOGS_DIR.exists():
             for log_file in SYSTEM_LOGS_DIR.glob("*.log"):
@@ -643,13 +693,9 @@ def start_branch_log_watcher() -> Any:
     _callback = watcher.on_modified
     observer = WatchdogObserver()
 
-    for branch_dir in AIPASS_PKG_ROOT.iterdir():
-        if not branch_dir.is_dir():
-            continue
-        logs_dir = branch_dir / "logs"
-        if logs_dir.exists():
-            observer.schedule(watcher, str(logs_dir), recursive=False)
-            watcher.watched_dirs.add(logs_dir)
+    for logs_dir in fleet_logs_dirs():
+        observer.schedule(watcher, str(logs_dir), recursive=False)
+        watcher.watched_dirs.add(logs_dir)
 
     if SYSTEM_LOGS_DIR.exists():
         observer.schedule(watcher, str(SYSTEM_LOGS_DIR), recursive=False)
@@ -701,6 +747,7 @@ def get_watcher_status() -> Dict[str, Any]:
         "excluded_files": list(EXCLUDED_LOG_FILES),
         "stale_threshold_seconds": STALE_ENTRY_THRESHOLD_SECONDS,
         "aipass_root": str(AIPASS_PKG_ROOT),
+        "watched_logs": sorted((name, str(logs_dir)) for logs_dir, name in fleet_logs_dirs().items()),
     }
 
 
@@ -715,7 +762,7 @@ if __name__ == "__main__":
     set_event_callback(test_fire_event)
 
     print("Branch Log Watcher Test")
-    print(f"Monitoring: {AIPASS_PKG_ROOT}/*/logs/*.log")
+    print(f"Monitoring: {len(fleet_logs_dirs())} fleet logs/ dirs")
     print(f"Monitoring: {SYSTEM_LOGS_DIR}/*.log")
     print("Press Ctrl+C to stop")
     print()

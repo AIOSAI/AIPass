@@ -3,7 +3,7 @@
 # Description: Email Send Orchestration (extracted from email.py)
 # Version: 1.3.0
 # Created: 2026-04-22
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """
@@ -28,8 +28,8 @@ from aipass.ai_mail.apps.handlers.email.header import prepend_dispatch_header
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.registry.read import (
     get_all_branches,
+    get_fleet_branches,
     get_branch_by_email,
-    get_resident_branches,
 )
 from aipass.ai_mail.apps.handlers.users import verified_caller
 from aipass.ai_mail.apps.handlers.users.user import get_current_user
@@ -158,7 +158,7 @@ def _send_interactive() -> bool:
         error('Interactive send needs a terminal. Use: email @recipient "Subject" "Message"')
         return False
 
-    branches = get_all_branches()
+    branches = get_fleet_branches()
     console.print("\nAI_Mail - Send Email\n" + "=" * 50)
     console.print("\nSelect recipient:")
     for i, b in enumerate(branches, 1):
@@ -262,10 +262,10 @@ def _fire_dispatch_trigger(to_branch: str, subject: str) -> None:
 
 
 def resolve_broadcast_targets() -> list:
-    """Who @all reaches: the fleet, plus the residents for a verified admin.
+    """Who @all reaches: the core fleet, plus residents and declared-root externals for a verified admin.
 
     Widening rides the five-leg admin check and fails closed (a raising verifier widens nothing).
-    Residents already in the core registry are not added twice.
+    A citizen already in the core registry is not added twice.
     """
     branches = get_all_branches()
     try:
@@ -276,11 +276,11 @@ def resolve_broadcast_targets() -> list:
         return branches
 
     known = {b.get("email", "").lower() for b in branches}
-    for email, path in get_resident_branches().items():
-        if email.lower() in known:
+    for row in get_fleet_branches():
+        if row["email"].lower() in known:
             continue
-        known.add(email.lower())
-        branches.append({"email": email, "path": path, "name": email.lstrip("@").upper()})
+        known.add(row["email"].lower())
+        branches.append(row)
     return branches
 
 

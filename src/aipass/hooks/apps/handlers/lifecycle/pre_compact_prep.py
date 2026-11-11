@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: pre_compact_prep.py
-# Version: 1.4.0
+# Version: 1.6.0
 # Description: Stamps a mechanical AUTO-COMPACT SNAPSHOT into the compacting branch's memory (PreCompact)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-20
-# Modified: 2026-11-04
+# Modified: 2026-11-10
 # =============================================
 
 """Mechanical /prep AT compact time (DPLAN-0253).
@@ -27,6 +27,7 @@ import subprocess
 from datetime import date
 from pathlib import Path
 
+from aipass.hooks.apps.handlers.config.loader import fleet_rows
 from aipass.hooks.apps.handlers.json import files as json_files
 from aipass.prax.apps.modules.logger import system_logger as logger
 
@@ -43,11 +44,14 @@ def _find_repo_root(start: Path) -> Path | None:
 def _context_fill_pct(hook_data: dict, cwd: str) -> str | None:
     context_window = importlib.import_module("aipass.hooks.apps.modules.context_window")
     transcript_path = hook_data.get("transcript_path", "")
-    usage = context_window.read_latest_usage(transcript_path, provider=hook_data.get("provider") or "")
+    provider = hook_data.get("provider") or ""
+    usage = context_window.read_latest_usage(transcript_path, provider=provider)
     if usage is None:
         return None
     fill = context_window.context_fill_tokens(usage)
-    window = context_window.resolve_compact_window(cwd, transcript_path=transcript_path)
+    window = context_window.resolve_compact_window(cwd, hook_data.get("session_id", ""), transcript_path)
+    if window is None:
+        return f"~{fill // 1000}k (window unknown)"
     if window <= 0:
         return None
     pct = round(fill / window * 100)
@@ -57,20 +61,12 @@ def _context_fill_pct(hook_data: dict, cwd: str) -> str | None:
 def _count_active_dispatch_locks(repo_root: Path | None) -> int | None:
     if repo_root is None:
         return None
-    registry_path = repo_root / "AIPASS_REGISTRY.json"
     try:
-        data = json.loads(registry_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        rows = fleet_rows(repo_root)
+    except Exception as exc:
         logger.info("[HOOKS] pre_compact_prep: registry read failed: %s", exc)
         return None
-
-    count = 0
-    for branch in data.get("branches", []):
-        branch_path = repo_root / branch.get("path", "")
-        lock_path = branch_path / ".ai_mail.local" / ".dispatch.lock"
-        if lock_path.is_file():
-            count += 1
-    return count
+    return sum(1 for row in rows if (Path(row["path"]) / ".ai_mail.local" / ".dispatch.lock").is_file())
 
 
 def _count_open_plans(branch_dir: Path) -> int | None:

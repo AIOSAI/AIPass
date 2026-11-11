@@ -3,7 +3,7 @@
 # Description: AI_MAIL Central File Writer
 # Version: 1.3.0
 # Created: 2025-11-27
-# Modified: 2026-10-23
+# Modified: 2026-11-08
 # =============================================
 
 """
@@ -33,7 +33,7 @@ from typing import Dict, Any, List, Tuple
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
-from aipass.ai_mail.apps.handlers.registry.read import check_registry_readable, get_all_branches
+from aipass.ai_mail.apps.handlers.registry.read import check_registry_readable, get_fleet_branches
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -50,14 +50,14 @@ BRANCH_REGISTRY = _REPO_ROOT / "AIPASS_REGISTRY.json"
 
 
 def find_all_inbox_files() -> List[Path]:
-    """Return each registry branch's .ai_mail.local/inbox.json that exists, in registry order.
+    """Return each fleet citizen's .ai_mail.local/inbox.json that exists: core in registry order, then the rest.
 
-    Raises RegistryUnreadable for a registry that cannot be read: get_all_branches alone answers [] for it,
+    Raises RegistryUnreadable for a core registry that cannot be read: the fleet alone answers [] for it,
     and a stale central file is honest where counts over no branches are not.
     """
     check_registry_readable(BRANCH_REGISTRY)
     inbox_files = []
-    for branch in get_all_branches():
+    for branch in get_fleet_branches():
         branch_path = Path(branch["path"])
         if not branch_path.is_absolute():
             branch_path = _REPO_ROOT / branch_path
@@ -87,11 +87,8 @@ def read_inbox_stats(inbox_path: Path) -> Tuple[int, int]:
 
 
 def get_valid_branch_names() -> set:
-    """Load valid branch names from AIPASS_REGISTRY.json."""
-    with open(BRANCH_REGISTRY, "r", encoding="utf-8") as f:
-        registry_data = stdlib_json.load(f)
-
-    return {branch["name"].upper() for branch in registry_data.get("branches", [])}
+    """The fleet's citizen names, uppercased: core, residents and declared-root externals."""
+    return {branch["name"].upper() for branch in get_fleet_branches()}
 
 
 def aggregate_branch_stats() -> Dict[str, Dict[str, int]]:

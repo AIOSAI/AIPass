@@ -3,7 +3,7 @@
 # Description: Passport 2.0 fleet migration — structure transform, backup, measured receipt
 # Version: 1.0.0
 # Created: 2026-08-28
-# Modified: 2026-10-31
+# Modified: 2026-11-09
 # =============================================
 
 """One-shot fleet migration of every live passport to schema 2.0 (DPLAN-0319).
@@ -28,12 +28,12 @@ from aipass.spawn.apps.handlers.class_registry import (
     refuse_forbidden_class,
 )
 from aipass.spawn.apps.handlers.json import json_handler
+from aipass.spawn.apps.handlers.registry import fleet_rows
 
 __all__ = [
     "BACKUP_SUFFIX",
     "BLOCK_ORDER",
     "CANONICAL_REGISTRY_PATH",
-    "EXPECTED_FLEET",
     "KEY_ORDER",
     "PassportMigrationError",
     "PassportTarget",
@@ -115,10 +115,9 @@ IDENTITY_CONTENT_KEYS = (
     "principles",
 )
 
-# The baseline is an alarm, never a gate: drift is reported, the discovered set is the truth.
-CORE_GLOB = "src/aipass/*/.trinity/passport.json"
-RESIDENT_GLOB = "projects/*/src/*/*/.trinity/passport.json"
-EXPECTED_FLEET = {"core": 18, "resident": 6, "total": 24}
+# The door's residency labels; an external passport names its own project's registry.
+RESIDENCIES = ("core", "resident", "external")
+EXTERNAL = "external"
 
 
 class PassportMigrationError(Exception):
@@ -155,52 +154,26 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[5]
 
 
-def _is_hidden_path(passport: Path, base: Path) -> bool:
-    """True when any directory between ``base`` and ``.trinity`` starts with a dot.
-
-    A rule, not a blocklist: no citizen directory begins with a dot, so every archive convention is refused.
-    """
-    try:
-        relative = passport.relative_to(base)
-    except ValueError:
-        # Unreachable today (both globs are anchored); logged so an unanchored caller is seen.
-        logger.warning(f"[spawn] Passport outside the scanned root, refused: {passport}")
-        return True
-    # Drop the trailing ".trinity/passport.json" the globs both end with.
-    return any(part.startswith(".") for part in relative.parts[:-2])
-
-
 def discover_passports(root: Path | str | None = None) -> list[PassportTarget]:
-    """Glob every live fleet passport under ``root``.
+    """Every fleet passport memory's door answers under the AIPass home ``root``.
 
-    Residency is read off the location, not the passport being corrected. Dotted directories are
-    refused by rule: retiring a citizen is a registry act a passport walk cannot see.
+    Residency is the door's tier, never the passport being corrected. A citizen with no passport on
+    disk, or no registry above it, is logged and skipped: the migration only edits what exists.
     """
     base = Path(root) if root is not None else repo_root()
 
     targets: list[PassportTarget] = []
-    for match in sorted(base.glob(CORE_GLOB)):
-        if _is_hidden_path(match, base):
+    for citizen in fleet_rows(base):
+        passport = citizen["path"] / ".trinity" / "passport.json"
+        if not passport.is_file() or citizen["registry_path"] is None:
+            logger.warning(f"[migrate-passports] {citizen['name']} at {citizen['path']} has no passport or registry")
             continue
         targets.append(
             PassportTarget(
-                path=match,
-                branch_dir=match.parent.parent,
-                project_root=base,
-                residency="core",
-            )
-        )
-    for match in sorted(base.glob(RESIDENT_GLOB)):
-        if _is_hidden_path(match, base):
-            continue
-        # projects/<project>/src/<pkg>/<branch>/.trinity/passport.json
-        project_root = match.parents[4]
-        targets.append(
-            PassportTarget(
-                path=match,
-                branch_dir=match.parent.parent,
-                project_root=project_root,
-                residency="resident",
+                path=passport,
+                branch_dir=citizen["path"],
+                project_root=citizen["registry_path"].parent,
+                residency=citizen["residency"],
             )
         )
     return targets
@@ -381,7 +354,7 @@ def migrate_document(
     citizenship["residency"] = record("citizenship.residency", citizenship.get("residency"), residency)
 
     registry_path, reconciled = _migrate_registry_path(citizenship.get("registry_path"))
-    if reconciled:
+    if reconciled and residency != EXTERNAL:
         record("citizenship.registry_path", citizenship.get("registry_path"), registry_path)
         citizenship["registry_path"] = registry_path
 
@@ -524,8 +497,7 @@ def migrate_fleet(
     stamp = run_date or datetime.now().strftime("%Y-%m-%d")
 
     targets = discover_passports(base)
-    discovered_total = len(targets)
-    discovered_core = sum(1 for t in targets if t.residency == "core")
+    fleet = {"total": len(targets), **{tier: sum(t.residency == tier for t in targets) for tier in RESIDENCIES}}
 
     wanted = (only or "").lstrip("@").strip().lower()
     if wanted:
@@ -543,15 +515,6 @@ def migrate_fleet(
 
     errors = [{"branch": r["branch"], "path": r["path"], "error": r["error"]} for r in records if r["error"]]
 
-    baseline = {
-        "expected": dict(EXPECTED_FLEET),
-        "discovered_total": discovered_total,
-        "discovered_core": discovered_core,
-        "discovered_resident": discovered_total - discovered_core,
-        "filtered": bool(wanted),
-        "matches": discovered_total == EXPECTED_FLEET["total"] and discovered_core == EXPECTED_FLEET["core"],
-    }
-
     receipt = {
         "root": str(base),
         "confirm": confirm,
@@ -565,7 +528,7 @@ def migrate_fleet(
         "unknown_fields": unknown_fields,
         "errors": errors,
         "files": records,
-        "baseline": baseline,
+        "fleet": fleet,
     }
 
     # A dry run is logged by the CLI layer instead.

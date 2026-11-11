@@ -4,7 +4,7 @@
 # Description: Tests for navmap prompt handler and its edit-time cap warning
 # Branch: hooks
 # Created: 2026-06-18
-# Modified: 2026-11-02
+# Modified: 2026-11-10
 # =============================================
 
 """Tests for apps/handlers/prompt/navmap.py."""
@@ -161,6 +161,7 @@ class TestNavmapCapWarning:
         context = json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"]
         assert str(navmap) in context
         assert f"{NAVMAP_CHAR_CAP + 422:,} chars, 422 over" in context
+        assert "systemMessage" not in json.loads(result["stdout"])
         assert result["exit_code"] == 0
 
     def test_an_edit_at_the_cap_is_silent(self, tmp_path):
@@ -180,4 +181,6 @@ class TestNavmapCapWarning:
             "tool_input": {"command": "echo more >> .aipass/tier1_navmap.md"},
             "cwd": str(tmp_path),
         }
-        assert str(navmap) in json.loads(handle_edit(hook_data)["stdout"])["systemMessage"]
+        answer = json.loads(handle_edit(hook_data)["stdout"])
+        assert str(navmap) in answer["hookSpecificOutput"]["additionalContext"]
+        assert "systemMessage" not in answer

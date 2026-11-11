@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_error_detected.py
 # Description: Tests for error_detected event handler with Medic v2 dispatch gating
-# Version: 1.3.2
+# Version: 1.4.0
 # Created: 2026-04-25
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """Tests for apps/handlers/events/error_detected.py and the dispatch gates it runs."""
@@ -240,7 +240,7 @@ class TestHandleErrorDetectedGates:
         """
         send = MagicMock(return_value=True)
         error_detected.set_send_email_callback(send)
-        registry = {"branches": [{"email": "@flow"}]}
+        registry = {"branches": [{"email": "@flow", "status": "active", "path": "src/aipass/flow"}]}
         (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
         (tmp_path / "trigger_json").mkdir()
         (tmp_path / "trigger_json" / "medic_state.json").write_text("{not json", encoding="utf-8")
@@ -1100,3 +1100,37 @@ class TestHalfOpenProbe:
         send.assert_called_once()
         assert "fresh" in send.call_args.kwargs["message"]
         assert error_registry.get_circuit_breaker_status(now=later)["state"] == "closed"
+
+
+class TestTheRegisteredGateReadsTheDeclaredFleet:
+    """A citizen at a declared root is registered: its errors dispatch, they are never 'Unknown branch'."""
+
+    def test_an_external_citizens_error_is_dispatched_to_it(self, fleet, monkeypatch) -> None:
+        send = MagicMock(return_value=True)
+        error_detected.set_send_email_callback(send)
+        monkeypatch.setattr(error_detected, "BRANCH_REGISTRY_FILE", fleet.registry)
+
+        error_detected.handle_error_detected(branch="GROW", module="bed", message="dry", error_hash="h1", count=2)
+
+        assert send.call_args.kwargs["to_branch"] == "@grow"
+
+    def test_the_gate_reads_the_door_once_per_ttl_not_once_per_error(self, fleet, monkeypatch) -> None:
+        """The door logs refusals at ERROR into a watched log: a read per error event would feed itself."""
+        reads = []
+
+        def counting_door(**kwargs):
+            reads.append(kwargs)
+            return [{"email": "@grow"}]
+
+        send = MagicMock(return_value=True)
+        error_detected.set_send_email_callback(send)
+        monkeypatch.setattr(error_detected, "fleet_branches", counting_door)
+        monkeypatch.setattr(error_detected, "BRANCH_REGISTRY_FILE", fleet.registry)
+
+        for error_hash in ("h1", "h2"):
+            error_detected.handle_error_detected(
+                branch="GROW", module="bed", message=error_hash, error_hash=error_hash, count=2
+            )
+
+        assert send.call_count == 2
+        assert len(reads) == 1

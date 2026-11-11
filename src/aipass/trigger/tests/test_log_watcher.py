@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_log_watcher.py
 # Description: Unit tests for the branch log watcher's parsing, detection and line pipeline
-# Version: 1.5.2
+# Version: 1.6.0
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """Tests for apps/handlers/log_watcher.py — parsing, detection and the line pipeline that fires events."""
@@ -26,6 +26,7 @@ import aipass.trigger.apps.handlers.error_registry as error_registry
 import aipass.trigger.apps.handlers.json.config_loader as config_loader
 import aipass.trigger.apps.handlers.log_watcher as lw
 from aipass.trigger.tests.support_log_watcher import _BRANCH_LOG_PATH, _SYNTHETIC_HOME
+from aipass.memory.apps.modules.door_registry_scope import fleet_branches as door_fleet_branches
 
 pytestmark = pytest.mark.usefixtures("log_watcher_infrastructure")
 
@@ -766,6 +767,7 @@ def _point_at_tree(lw, monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(lw, "AIPASS_PKG_ROOT", tmp_path / "aipass")
     monkeypatch.setattr(lw, "SYSTEM_LOGS_DIR", tmp_path / "system_logs")
     monkeypatch.setattr(lw, "_branch_names_cache", (0.0, ()))
+    monkeypatch.setattr(lw, "_fleet_cache", (0.0, {}))
 
 
 class TestSystemLogTwinIsNotProcessedTwice:
@@ -923,3 +925,62 @@ class TestLogPathClassificationOnBothPlatforms:
 
         path = PureWindowsPath(r"C:\p\src\aipass\drone\core.log")
         assert lw.classify_log_path(path) == "foreign"
+
+
+class TestTheFleetCensusComesFromMemorysDoor:
+    """Which logs/ dirs are watched, and whose they are, comes from the declared fleet, not an iterdir."""
+
+    @pytest.fixture(autouse=True)
+    def real_door(self, log_watcher_infrastructure, fleet, monkeypatch):
+        monkeypatch.setattr(lw, "fleet_branches", door_fleet_branches)
+        monkeypatch.setattr(lw, "WATCHDOG_AVAILABLE", True)
+        monkeypatch.setattr(lw, "AIPASS_PKG_ROOT", fleet.pkg_root)
+        monkeypatch.setattr(lw, "SYSTEM_LOGS_DIR", fleet.root / "system_logs")
+
+    def test_an_external_citizens_logs_are_watched_and_its_errors_fire_as_its_own(self, fleet):
+        watcher = lw.start_branch_log_watcher().schedule.call_args.args[0]
+        assert fleet.grow_logs in watcher.watched_dirs
+        assert fleet.pkg_root / "flow" / "logs" in watcher.watched_dirs
+
+        fire = MagicMock()
+        lw.set_event_callback(fire)
+        log = fleet.grow_logs / "grow.log"
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log.write_text(f"{now} | captured_grow | ERROR | seed bed dry\n", encoding="utf-8")
+        watcher.on_modified(SimpleNamespace(is_directory=False, src_path=str(log)))
+
+        assert fire.call_args.kwargs["branch"] == "GROW"
+
+    def test_a_citizen_with_no_logs_dir_is_skipped_and_named_once(self, fleet, monkeypatch):
+        monkeypatch.setattr(lw, "FLEET_TTL_SECONDS", 0.0)
+        lw.start_branch_log_watcher()
+        watcher = lw.start_branch_log_watcher().schedule.call_args.args[0]
+
+        assert fleet.sprout / "logs" not in watcher.watched_dirs
+        named = [c for c in lw.logger.info.call_args_list if str(fleet.sprout) in str(c)]
+        assert len(named) == 1
+
+    def test_a_root_declared_after_start_joins_on_the_refresh_without_a_restart(self, fleet, monkeypatch):
+        monkeypatch.setattr(lw, "FLEET_TTL_SECONDS", 0.0)
+        roots = fleet.root / "AIPASS_ROOTS.json"
+        declared = roots.read_text(encoding="utf-8")
+        roots.write_text('{"roots": []}', encoding="utf-8")
+        observer = lw.start_branch_log_watcher()
+        watcher = observer.schedule.call_args.args[0]
+        assert fleet.grow_logs not in watcher.watched_dirs
+
+        roots.write_text(declared, encoding="utf-8")
+        flow_log = fleet.pkg_root / "flow" / "logs" / "flow.log"
+        flow_log.write_text("", encoding="utf-8")
+        watcher.on_modified(SimpleNamespace(is_directory=False, src_path=str(flow_log)))
+
+        assert fleet.grow_logs in watcher.watched_dirs
+        observer.schedule.assert_any_call(watcher, str(fleet.grow_logs), recursive=False)
+
+    def test_a_branch_is_named_by_its_address_not_its_directory(self, monkeypatch, tmp_path):
+        """'my-agent/' is @my_agent: a directory name would address mail to @my-agent, an unknown branch."""
+        logs = tmp_path / "my-agent" / "logs"
+        logs.mkdir(parents=True)
+        monkeypatch.setattr(lw, "fleet_branches", lambda **kwargs: [{"path": logs.parent, "email": "@my_agent"}])
+
+        assert lw.detect_branch_from_path(str(logs / "agent.log")) == "MY_AGENT"

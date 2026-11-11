@@ -1,17 +1,18 @@
 # =================== AIPass ====================
 # Name: context_gauge.py
-# Version: 1.8.0
+# Version: 1.10.0
 # Description: Heads-up to run /prep ($prep on Codex) before auto-compact, and the grounding receipt (UserPromptSubmit)
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-20
-# Modified: 2026-11-04
+# Modified: 2026-11-10
 # =============================================
 
 """Heads-up so the model banks memories via /prep before the compact ceiling.
 The guard is keyed per context window, not per session: a session id outlives every compaction.
-The window is the one Claude Code really runs for the transcript's model; the trigger is its
+The window is the one Claude Code hands its status line for the session; the trigger is its
 auto-compact point (window - 33k), and the printed percent is fill over window, as the status line shows.
+A session whose window is unknown gets the fill and "window unknown" once per window: no percent, no nudge.
 A Seed transcript is Seed's own shape and carries no usage yet, so a Seed seat gets no gauge."""
 
 import importlib
@@ -57,8 +58,8 @@ def _mark_fired(session_id: str, window: str, threshold: str) -> None:
             logger.info("[HOOKS] context_gauge: guard write failed: %s", exc)
 
 
-def _reading(hook_data: dict, session_id: str) -> tuple[int, int, int] | None:
-    """(fill, window, compact point) for this session, or None when there is nothing to read."""
+def _reading(hook_data: dict, session_id: str) -> tuple[int, int | None, int | None] | None:
+    """(fill, window, compact point) for this session, or None when there is nothing to read; window unknown: None."""
     context_window = importlib.import_module("aipass.hooks.apps.modules.context_window")
     if hook_data.get("provider") == context_window.SEED:
         return None
@@ -76,10 +77,11 @@ def _reading(hook_data: dict, session_id: str) -> tuple[int, int, int] | None:
     if usage is None:
         return None
     cwd = hook_data.get("cwd", "") or str(Path.cwd())
-    model = context_window.read_latest_model(transcript_path, provider=provider)
-    window_size = context_window.resolve_compact_window(cwd, model, transcript_path, provider)
+    window_size = context_window.resolve_compact_window(cwd, session_id, transcript_path, provider)
     trigger = context_window.compact_threshold(window_size, provider)
-    return (context_window.context_fill_tokens(usage), window_size, trigger) if trigger > 0 else None
+    if trigger is not None and trigger <= 0:
+        return None
+    return context_window.context_fill_tokens(usage), window_size, trigger
 
 
 def _receipt_line(hook_data: dict) -> str:
@@ -118,6 +120,13 @@ def _gauge(hook_data: dict) -> dict:
         if reading is None:
             return {"stdout": "", "exit_code": 0}
         fill, window_size, trigger = reading
+        window = _window_key(hook_data)
+
+        if window_size is None or trigger is None:
+            if _already_fired(session_id, window, "unknown"):
+                return {"stdout": "", "exit_code": 0}
+            _mark_fired(session_id, window, "unknown")
+            return {"stdout": f"CONTEXT GAUGE: ~{fill // 1000}k (window unknown)", "exit_code": 0}
 
         pct = fill / trigger * 100
         used = round(fill / window_size * 100)
@@ -126,7 +135,6 @@ def _gauge(hook_data: dict) -> dict:
             f"({used}%, as the status line counts it); auto-compact at ~{trigger // 1000}k."
         )
 
-        window = _window_key(hook_data)
         prep = "$prep" if hook_data.get("provider") == "codex" else "/prep"
 
         if pct >= _ESCALATE_THRESHOLD_PCT and not _already_fired(session_id, window, "95"):

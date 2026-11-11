@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: comment_budget.py
-# Version: 1.2.0
+# Version: 1.4.0
 # Description: Comment budget — measures every edit's comment share (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-10-16
-# Modified: 2026-10-16
+# Modified: 2026-11-10
 # =============================================
 
 """Measures an edited file's comment share and tells the agent when it is over budget (docs/comments.md)."""
@@ -152,7 +152,7 @@ def _judge(hook_data: dict, tool_name: str, tool_input: dict, file_path: str) ->
 
 
 def _status(verdict: str | tuple) -> str:
-    """One file's statusline part."""
+    """One file's part of the log line."""
     if isinstance(verdict, str):
         return verdict
     name, scan, _added_count = verdict
@@ -175,16 +175,12 @@ def handle(hook_data: dict) -> dict:
         else:
             return _SILENT
         verdicts = [v for v in (_judge(hook_data, tool_name, tool_input, p) for p in paths if p) if v is not None]
-        if not verdicts:
-            return _SILENT
-        result: dict = {"systemMessage": "[comments] " + "; ".join(_status(v) for v in verdicts)}
         overs = [v for v in verdicts if not isinstance(v, str) and v[1].judged and v[1].over() > 0]
-        if overs:
-            overs.sort(key=lambda v: v[1].over(), reverse=True)
-            result = {
-                "hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": _over_context(overs)},
-                **result,
-            }
+        if not overs:
+            return _SILENT
+        overs.sort(key=lambda v: v[1].over(), reverse=True)
+        logger.info("[HOOKS] comment_budget: [comments] %s", "; ".join(_status(v) for v in verdicts))
+        result = {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": _over_context(overs)}}
         return {"stdout": json.dumps(result), "exit_code": 0}
     except Exception as exc:
         logger.warning("[HOOKS] comment_budget: unexpected error (allowing): %s", exc)

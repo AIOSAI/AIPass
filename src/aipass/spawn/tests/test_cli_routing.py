@@ -3,7 +3,7 @@
 # Description: Tests for CLI routing and help output
 # Version: 1.1.0
 # Created: 2026-03-27
-# Modified: 2026-11-02
+# Modified: 2026-11-09
 # =============================================
 
 """Tests for apps/spawn.py's CLI routing, help output, and introspection."""
@@ -24,7 +24,7 @@ from aipass.spawn.apps.modules.migrate_passports import handle_migrate_passports
 from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
 from aipass.spawn.apps.modules.update import handle_update
 from aipass.spawn.apps.spawn import handle_create, main, print_help, print_introspection
-from aipass.spawn.tests.conftest import make_passport
+from aipass.spawn.tests.conftest import make_passport, write_registry
 
 
 class TestCliRouting:
@@ -424,6 +424,7 @@ class TestExportSeedsOnlyFlag:
             trinity = tmp_path / "src" / "aipass" / branch / ".trinity"
             trinity.mkdir(parents=True)
             (trinity / "passport.json").write_text(canonical_text(make_passport(branch)), encoding="utf-8")
+        write_registry(tmp_path / "AIPASS_REGISTRY.json", {b: f"src/aipass/{b}" for b in ("wanderer", "stranger")})
         monkeypatch.chdir(tmp_path)
 
         assert handle_export_seeds(["--root", str(tmp_path), "--only", "@wanderer", "--confirm"]) == 0
@@ -447,6 +448,7 @@ class TestFleetCommandsNeverSayAllClearAfterAFailure:
         trinity = tmp_path / "src" / "aipass" / "wanderer" / ".trinity"
         trinity.mkdir(parents=True)
         (trinity / "passport.json").write_text("{not json", encoding="utf-8")
+        write_registry(tmp_path / "AIPASS_REGISTRY.json", {"wanderer": "src/aipass/wanderer"})
 
         assert handle_export_seeds(["--root", str(tmp_path)]) == 1
         assert "already current" not in capsys.readouterr().out
@@ -455,6 +457,7 @@ class TestFleetCommandsNeverSayAllClearAfterAFailure:
         trinity = tmp_path / "src" / "aipass" / "wanderer" / ".trinity"
         trinity.mkdir(parents=True)
         (trinity / "passport.json").write_text("{not json", encoding="utf-8")
+        write_registry(tmp_path / "AIPASS_REGISTRY.json", {"wanderer": "src/aipass/wanderer"})
 
         assert handle_migrate_passports(["--root", str(tmp_path)]) == 1
         assert "Nothing to migrate" not in capsys.readouterr().out

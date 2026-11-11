@@ -3,7 +3,7 @@
 # Description: *_REGISTRY.json discovery and CRUD operations
 # Version: 1.3.0
 # Created: 2026-03-05
-# Modified: 2026-10-31
+# Modified: 2026-11-09
 # =============================================
 
 """*_REGISTRY.json discovery and CRUD operations.
@@ -16,6 +16,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
+from aipass.memory.apps.modules.door_registry_scope import fleet_branches
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.spawn.apps.handlers.json import json_handler
 
@@ -93,6 +94,18 @@ def find_registry(start_path=None):
     from aipass.aipass.shared.registry_discovery import find_registry as _common_find
 
     return _common_find(start_path=start_path)
+
+
+def fleet_rows(repo_root):
+    """Every citizen memory's door answers under the AIPass home ``repo_root``: core, resident, external.
+
+    Each row carries ``registry_path``, the nearest ancestor holding the registry file the door names
+    (None when none does). The door logs refused rows on every read, so a command reads it once."""
+    rows = fleet_branches(Path(repo_root), name_from="registry")
+    for row in rows:
+        owners = (parent / row["registry"] for parent in row["path"].parents)
+        row["registry_path"] = next((path for path in owners if path.is_file()), None)
+    return rows
 
 
 def _default_registry_schema(credential=""):

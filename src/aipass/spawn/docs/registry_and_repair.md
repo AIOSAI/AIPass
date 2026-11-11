@@ -26,8 +26,9 @@ repairs passport `registry_id` values; `--fix --dry-run` previews exactly that;
 `--check` (optionally `--json`) is the read-only owner and identity health check, which
 writes nothing and answers with an exit code.
 
-A named `[project-path]` is the registry every step reads and writes; a path with no registry
-above it, or no registry above the cwd, exits 1 and never falls back. A registry that exists
+Sync acts on ONE registry, never the fleet: a named `[project-path]` is the registry every step
+reads and writes, and with none it takes the nearest `*_REGISTRY.json` walking up from the cwd.
+A path with no registry above it, or no registry above the cwd, exits 1 and never falls back. A registry that exists
 but will not parse is refused by the sync, `--fix` and `--check` alike (`--check` flags
 `unreadable_registry`): rebuilding it would re-mint the project. Under `--fix`, a stale entry
 whose branch is found elsewhere in the project has its `path` rewritten, so `owner`, `admin`
@@ -62,6 +63,13 @@ dry-run by default, can be restricted to a single branch, can be pointed at anot
 root, and backs each passport up before writing. It either completes a passport or raises;
 there is no partial write.
 
+The citizens it walks are the ones @memory's door (`fleet_branches`) answers for the root:
+core, resident and external, each with the residency the door gives it. Spawn keeps no census
+and no expected count; the receipt's `Fleet:` line is the count the door answered, by tier. A
+citizen with no passport on disk is skipped and logged. An external passport keeps its own
+`registry_path`: the bare `*_REGISTRY.json` reconcile to `AIPASS_REGISTRY.json` is for core and
+resident passports only.
+
 A run against a root with no discoverable passports **refuses** rather than reporting
 success — see [cli_contract.md](cli_contract.md) for why that distinction is load-bearing.
 
@@ -71,7 +79,8 @@ success — see [cli_contract.md](cli_contract.md) for why that distinction is l
 
 `export-seeds` regenerates each branch's tracked `.aipass/passport.seed.json` from its live
 passport, stripping machine-local values. Dry-run by default; `--only` restricts to one
-branch and `--root` targets another project. The seeds are what a fresh clone carries, so
+branch and `--root` targets another project. It shares the migration's discovery, so it
+reads the same door; residents and externals are counted, never exported. The seeds are what a fresh clone carries, so
 they are compared, never assumed — see [birth.md](birth.md). A run that scans nothing, or
 hits an error, exits 1 and never prints the all-current line.
 
@@ -87,6 +96,11 @@ file must be followed by a regeneration** or the manifest and the tree disagree.
 ---
 
 ## Repair
+
+Repair acts on ONE registry: the one it is given, else the nearest `*_REGISTRY.json` walking up
+from the cwd. `--rename` finds its registry by walking up from the cwd too, then each
+`projects/*/*_REGISTRY.json`; it looks a name up rather than enumerating citizens, and the door
+cannot answer it, because a renamed directory no longer holds the passport the door checks.
 
 The bare scan is read-only ALWAYS: it reports pollution (duplicate branch directories) and
 registry path mismatches and writes nothing. Two submodes act, and each refuses to act
@@ -123,4 +137,4 @@ from a template; only the owner's ceremony grants it.
 
 ---
 
-**Last Updated:** 2026-10-24
+**Last Updated:** 2026-11-09

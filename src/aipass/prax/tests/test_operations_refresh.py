@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_operations_refresh.py
 # Description: Unit tests for the dashboard refresh and section writes
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-08
 # =============================================
 
 """Tests for the refresh and section writes: apps/handlers/dashboard/refresh.py and status.py."""
@@ -189,8 +189,8 @@ class TestGetBranchPaths:
         mod = _load_status()
         registry_data = {
             "branches": [
-                {"name": "flow", "path": str(tmp_path / "flow")},
-                {"name": "ai_mail", "path": str(tmp_path / "ai_mail")},
+                {"name": "flow", "path": str(tmp_path / "flow"), "status": "active"},
+                {"name": "ai_mail", "path": str(tmp_path / "ai_mail"), "status": "active"},
             ]
         }
         registry_file = tmp_path / "AIPASS_REGISTRY.json"
@@ -216,7 +216,7 @@ class TestGetBranchPaths:
         mod = _load_status()
         registry_data = {
             "branches": [
-                {"name": "flow", "path": "src/aipass/flow"},
+                {"name": "flow", "path": "src/aipass/flow", "status": "active"},
             ]
         }
         registry_file = tmp_path / "AIPASS_REGISTRY.json"
@@ -238,49 +238,32 @@ class TestResolveBranchPath:
         """Point the module at an AIPASS_REGISTRY.json under ``root`` holding ``rows``."""
         root.mkdir(parents=True, exist_ok=True)
         registry = root / "AIPASS_REGISTRY.json"
-        registry.write_text(json.dumps({"branches": rows}), encoding="utf-8")
+        registry.write_text(json.dumps({"branches": [dict(r, status="active") for r in rows]}), encoding="utf-8")
         monkeypatch.setattr(mod, "AIPASS_REGISTRY", registry)
         monkeypatch.setattr(mod, "_find_repo_root", lambda: root)
         return root
 
-    @staticmethod
-    def _studio(root: Path, rows: list) -> Path:
-        """An external project root holding its own STUDIO_REGISTRY.json with ``rows``."""
-        root.mkdir(parents=True, exist_ok=True)
-        (root / "STUDIO_REGISTRY.json").write_text(json.dumps({"branches": rows}), encoding="utf-8")
-        return root
-
-    def test_a_core_miss_resolves_through_the_callers_project_registry(self, tmp_path, monkeypatch):
-        """Vera Studio 77f3335d: a branch only its own project declares resolves, relative to THAT registry.
-
-        The caller stands two levels inside the branch, so the walk has to climb
-        to the project root. The relative path must resolve against the
-        registry's directory: against core's root or the cwd it names nothing.
-        """
-        mod = _load_status()
-        self._core(tmp_path / "aipass", [], monkeypatch, mod)
-        studio = self._studio(tmp_path / "studio", [{"name": "VERIFY", "path": "src/studio/verify"}])
-        verify = studio / "src" / "studio" / "verify"
-        (verify / "apps").mkdir(parents=True)
-
-        assert mod.resolve_branch_path("@verify", verify / "apps") == verify
-
-    def test_core_wins_a_collision_and_the_log_names_both_rows(self, tmp_path, monkeypatch):
-        """A name in core and in the caller's project resolves to core, and the warning names both."""
+    def test_the_first_row_wins_a_collision_and_the_log_names_both_rows(self, tmp_path, monkeypatch):
+        """A name in core and at a declared root resolves to core, and the warning names both."""
         from unittest.mock import MagicMock
 
         mod = _load_status()
         core = self._core(tmp_path / "aipass", [{"name": "FLOW", "path": "src/flow"}], monkeypatch, mod)
         (core / "src" / "flow").mkdir(parents=True)
-        studio = self._studio(tmp_path / "studio", [{"name": "flow", "path": "flow"}])
-        (studio / "flow").mkdir()
+        studio = tmp_path / "studio"
+        (studio / "flow" / ".trinity").mkdir(parents=True)
+        (studio / "flow" / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+        rows = {"branches": [{"name": "flow", "path": "flow", "status": "active"}]}
+        (studio / "STUDIO_REGISTRY.json").write_text(json.dumps(rows), encoding="utf-8")
+        roots = {"roots": [{"path": str(studio), "status": "active"}]}
+        (core / "AIPASS_ROOTS.json").write_text(json.dumps(roots), encoding="utf-8")
         log = MagicMock()
         monkeypatch.setattr(mod, "logger", log)
 
-        assert mod.resolve_branch_path("@flow", studio / "flow") == core / "src" / "flow"
+        assert mod.resolve_branch_path("@flow") == core / "src" / "flow"
         template, *values = log.warning.call_args.args
         rendered = template % tuple(values)
-        assert str(studio / "STUDIO_REGISTRY.json") in rendered
+        assert "STUDIO_REGISTRY.json" in rendered
         assert str(core / "src" / "flow") in rendered
         assert str(studio / "flow") in rendered
 
@@ -291,7 +274,7 @@ class TestResolveBranchPath:
         branch_dir.mkdir()
         registry_data = {
             "branches": [
-                {"name": "flow", "path": str(branch_dir)},
+                {"name": "flow", "path": str(branch_dir), "status": "active"},
             ]
         }
         registry_file = tmp_path / "AIPASS_REGISTRY.json"
@@ -310,7 +293,7 @@ class TestResolveBranchPath:
         branch_dir.mkdir()
         registry_data = {
             "branches": [
-                {"name": "VERA", "path": str(branch_dir)},
+                {"name": "VERA", "path": str(branch_dir), "status": "active"},
             ]
         }
         registry_file = tmp_path / "AIPASS_REGISTRY.json"
@@ -340,7 +323,7 @@ class TestResolveBranchPath:
         mod = _load_status()
         registry_data = {
             "branches": [
-                {"name": "ghost", "path": str(tmp_path / "ghost")},
+                {"name": "ghost", "path": str(tmp_path / "ghost"), "status": "active"},
             ]
         }
         registry_file = tmp_path / "AIPASS_REGISTRY.json"
@@ -361,6 +344,32 @@ class TestResolveBranchPath:
             mod.resolve_branch_path("@flow")
 
 
+class TestTheCensusReadsMemorysDoor:
+    """A citizen at a declared root (@grow) is in every dashboard census; an undeclared sibling is not."""
+
+    def test_get_branch_paths_lists_the_declared_external_and_not_the_stray(self, fleet, monkeypatch):
+        monkeypatch.setattr(status, "AIPASS_REGISTRY", fleet.registry)
+        paths = status.get_branch_paths()
+        assert fleet.grow in paths
+        assert fleet.flow in paths
+        assert fleet.rogue not in paths
+
+    def test_resolve_branch_path_finds_an_external_by_name(self, fleet, monkeypatch):
+        monkeypatch.setattr(status, "AIPASS_REGISTRY", fleet.registry)
+        assert status.resolve_branch_path("@grow") == fleet.grow
+        with pytest.raises(FileNotFoundError, match="not found in registry"):
+            status.resolve_branch_path("@rogue")
+
+    def test_refresh_all_writes_the_externals_dashboard(self, fleet, monkeypatch):
+        monkeypatch.setattr(refresh, "AIPASS_REGISTRY", fleet.registry)
+        monkeypatch.setattr(refresh, "read_all_centrals", lambda: {})
+        result = refresh.refresh_all_dashboards()
+        assert result["status"] == "success"
+        assert result["branches_updated"] == 2
+        assert (fleet.grow / "DASHBOARD.local.json").is_file()
+        assert not (fleet.rogue / "DASHBOARD.local.json").exists()
+
+
 DASHBOARD_MODULE_PATH = "aipass.prax.apps.modules.dashboard"
 
 
@@ -376,7 +385,7 @@ class TestResolveBranchPathWrapper:
         monkeypatch.setattr(
             mod,
             "resolve_branch_path",
-            lambda ref, caller=None: fake_path,
+            lambda ref: fake_path,
         )
         monkeypatch.setattr(
             mod, "refresh_single_dashboard", lambda bp: refreshed.append(bp) or {"status": "success", "branch": "FLOW"}
@@ -385,24 +394,3 @@ class TestResolveBranchPathWrapper:
         mod.handle_command("dashboard", ["refresh", "@flow"])
 
         assert refreshed == [fake_path]
-
-    def test_hands_the_handler_the_callers_directory(self, tmp_path, monkeypatch):
-        """The project walk starts where the CALLER stands, so the wrapper must pass AIPASS_CALLER_CWD on.
-
-        A wrapper that drops it leaves the handler core-only, and Vera Studio's
-        `refresh @verify` answers "not found" again with every handler test green.
-        """
-        mod = _load_dashboard_module()
-        monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
-        seen: list = []
-
-        def _record(ref, caller=None):
-            seen.append((ref, caller))
-            return tmp_path / "verify"
-
-        monkeypatch.setattr(mod, "resolve_branch_path", _record)
-        monkeypatch.setattr(mod, "refresh_single_dashboard", lambda bp: {"status": "success", "branch": "VERIFY"})
-
-        mod.handle_command("dashboard", ["refresh", "@verify"])
-
-        assert seen == [("@verify", tmp_path)]
