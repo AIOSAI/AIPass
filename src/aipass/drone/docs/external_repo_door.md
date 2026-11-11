@@ -2,12 +2,12 @@
 
 # The external-repo door — `--repo <path>`
 
-**Branch** drone · **Code** `apps/handlers/git/repo_door.py`, `apps/modules/git_module.py`
+**Branch** drone · **Code** `apps/handlers/git/repo_door.py`, `apps/handlers/git/external_pr_handler.py`, `apps/modules/git_module.py`
 
 Git in a repo that is not AIPass — a project inside the tree, a clone outside it — goes through one
-door, held by @devpulse's admin grant. Sixteen verbs take
+door, held by @devpulse's admin grant. Twenty verbs take
 `--repo <path>` (or `--repo=<path>`) in any slot: status, diff, show, log, tracked, remote (and `remote set`), commit, untrack, push,
-tag, fetch, sync, merge-upstream, the read side of gh's `run`, and the GitHub chores `release edit`,
+tag, fetch, sync, merge-upstream, init, pr, merge, the read side of gh's `run`, and the GitHub chores `release edit`,
 `label` and `alerts` (see [git_interface.md](git_interface.md)), aimed at the repo's own origin.
 `release list` keeps `--repo` as GitHub's OWNER/NAME.
 
@@ -23,7 +23,7 @@ tag, fetch, sync, merge-upstream, the read side of gh's `run`, and the GitHub ch
    the repo you stand in. A project manager standing in its own repo is refused by name.
 2. **The flag** — a bare `--repo`, or two of them, is refused rather than falling through to the
    standing repo.
-3. **Which verb** — anything outside the eighteen in `DOOR_VERBS` is refused. `issue`, `workflow` and `release list`
+3. **Which verb** — anything outside the twenty in `DOOR_VERBS` is refused. `issue`, `workflow` and `release list`
    never reach the door: their `--repo OWNER/NAME` names a GitHub repo, not a path. `run` reaches it
    only when the value names a directory (see below); `release edit` always does.
 4. **Which repo** — absolute, or relative to the AIPass root (never the cwd). It must exist, be a
@@ -96,6 +96,19 @@ resolves its own target instead of question 4: the directory must exist, sit out
 tree, hold no `.git`, and sit in no other repository's work tree, since a repo nested in another is
 tracked by neither. Every exit, refusals included, is one ledger line like any door use. Without
 `--repo` the verb is unknown, and the refusal points at the door.
+
+**`pr` and `merge` take a project's working branch to its main.** `drone @git pr <title> --repo
+<path>` pushes the checked-out branch under its own name, never forced, and opens it against the
+default branch GitHub reports for origin's repo; nothing names dev or main. It refuses a detached
+HEAD, the default branch itself checked out, a tracked change, a branch level with the default, and a
+title over the commit subject cap, all before any push. An open PR for the branch is reused.
+`drone @git merge <PR#> --repo <path> --confirm` (or y/N at a terminal) runs `gh pr merge --merge`:
+no `--delete-branch`, so the working branch survives, and no `--admin` or `--auto`, so a protected
+branch or a red required check refuses in gh's own words. Nothing local moves, and `sync --repo`
+does not realign: the merge commit lands on the default branch only, and the next `pr` carries the
+working branch on from there. AIPass's PR lock, its sync and its `pr_merged` event never come
+through. The code is `external_pr_handler.py`, shared with a project manager's own `dev-pr` and
+`merge`.
 
 **The door's git never hangs and never prompts.** Every call the door's own runner makes carries a
 timeout: 120 s for `fetch` and `merge`, which talk to the remote or run merge drivers, 60 s for the

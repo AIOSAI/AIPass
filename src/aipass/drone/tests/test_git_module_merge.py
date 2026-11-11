@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_git_module_merge.py
 # Description: Tests for the merge, dev-pr and branches lanes — protected-branch merge, return to dev, external repos
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-10
 # =============================================
 
-"""Tests for apps/plugins/devpulse_ops/merge_plugin.py and the merge, dev-pr and branches handlers it pairs with."""
+"""Tests for apps/plugins/devpulse_ops/merge_plugin.py and the merge, dev-pr, pr and branches handlers it pairs with."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(stdlib) — subprocess.run, which every git and gh call here reaches as a recorded stub
@@ -22,7 +22,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from aipass.drone.apps.handlers.git import external_pr_handler
+from aipass.drone.apps.handlers.git import external_pr_handler, repo_door
 from aipass.drone.apps.handlers.git.branches_handler import list_remote_branches, prune_temp_branches
 from aipass.drone.apps.handlers.git.commit_handler import subject_refusal
 from aipass.drone.apps.handlers.git.dev_pr_handler import DEV_PR_OUTCOME
@@ -413,6 +413,7 @@ class _GitHub:
         self.pr = {"headRefName": "dev", "title": "feat: tier prompt"}
         self.create: tuple[int, str, str] = (0, f"{_PR_URL}\n", "")
         self.merge: tuple[int, str, str] = (0, "", "")
+        self.default = "main"
 
     def __call__(self, argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
         if argv[:4] == ["git", "remote", "get-url", "origin"] and self.origin_on_github:
@@ -424,6 +425,8 @@ class _GitHub:
             rc, out, err = self.create
         elif argv[2] == "merge":
             rc, out, err = self.merge
+        elif argv[1] == "repo":
+            rc, out, err = 0, f"{self.default}\n", ""
         elif "mergeCommit" in argv:
             rc, out, err = 0, f"{_MERGE_SHA}\n", ""
         else:
@@ -528,7 +531,7 @@ class TestExternalDevPrRefusesBeforeAnyPush:
 
         result = handle_command("dev-pr", ["Adopt"])
 
-        assert result["stderr"] == external_pr_handler.REFUSE_NOT_AHEAD
+        assert result["stderr"] == external_pr_handler.REFUSE_NOT_AHEAD.format(head="dev", base="main")
         assert (github.calls, _origin_dev(baud_repo)) == ([], "")
 
     def test_an_origin_off_github_is_refused(self, baud_repo: Path, github: _GitHub) -> None:
@@ -636,3 +639,142 @@ class TestExternalMergeBringsLocalDevUp:
             "Merge failed: gh pr merge failed: Pull request acme/baud#7 is not mergeable"
         )
         assert _git(baud_repo, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+
+
+@pytest.fixture()
+def door(baud_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """The admin seat in its own home, BAUD on a working branch named neither dev nor main; returns the --repo args."""
+    _git(baud_repo, "checkout", "-q", "-b", "work")
+    monkeypatch.setattr(repo_door, "admin_verdict", lambda: repo_door.AdminVerdict(True, "devpulse", ""))
+    monkeypatch.chdir(make_owner_project(tmp_path / "home"))
+    return ["--repo", str(baud_repo)]
+
+
+def _origin_has(work: Path, branch: str) -> str:
+    """*branch* on origin, read from the bare repo itself ('' when it has none)."""
+    found = _REAL_RUN(
+        ["git", "rev-parse", "--verify", "-q", f"refs/heads/{branch}"],
+        cwd=str(work.parent / "origin.git"),
+        capture_output=True,
+        text=True,
+    )
+    return found.stdout.strip()
+
+
+def _door_rows(tmp_path: Path) -> list[tuple[str, str, str]]:
+    path = tmp_path / repo_door.LEDGER_NAME
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+    return [(row["verb"], row["outcome"], row["caller"]) for row in rows]
+
+
+class TestDoorPrOpensTheCheckedOutBranchToTheDefault:
+    """pr --repo pushes the checked-out branch and opens it against the default branch GitHub reports."""
+
+    def test_the_working_branch_opens_against_the_reported_default(
+        self, baud_repo: Path, tmp_path: Path, door: list[str], github: _GitHub
+    ) -> None:
+        """Mutants: head hardcoded to dev, base hardcoded to main, or the -R slug dropped."""
+        _git(baud_repo, "push", "-q", "origin", "main:stable")
+        github.default = "stable"
+
+        result = handle_command("pr", ["Adopt", "tier", "prompt", *door])
+
+        assert result == {"stdout": f"PR created: {_PR_URL}", "stderr": "", "exit_code": 0}
+        assert github.calls[-1] == [
+            *("gh", "pr", "create", "-R", _SLUG, "--head", "work", "--base", "stable"),
+            *("--title", "Adopt tier prompt", "--body", ""),
+        ]
+        assert _origin_has(baud_repo, "work") == _git(baud_repo, "rev-parse", "work")
+        assert _door_rows(tmp_path) == [("pr", "ran", "devpulse")]
+
+    def test_an_open_pr_for_the_branch_answers_its_url(self, door: list[str], github: _GitHub) -> None:
+        github.create = (1, "", f'a pull request for branch "work" into branch "main" already exists:\n{_PR_URL}\n')
+
+        result = handle_command("pr", ["Adopt", *door])
+
+        assert result == {"stdout": f"Pushed work. PR already open: {_PR_URL}", "stderr": "", "exit_code": 0}
+
+    def test_the_default_branch_checked_out_is_refused_before_any_push(
+        self, baud_repo: Path, door: list[str], github: _GitHub
+    ) -> None:
+        """Mutant: the head == base check removed — gh is asked for main -> main after a push."""
+        _git(baud_repo, "checkout", "-q", "main")
+        before = _origin_has(baud_repo, "main")
+
+        result = handle_command("pr", ["Adopt", *door])
+
+        expected = external_pr_handler.REFUSE_ON_DEFAULT.format(repo=baud_repo.resolve(), branch="main")
+        assert (result["stderr"], result["exit_code"]) == (expected, 1)
+        assert [call[1] for call in github.calls] == ["repo"]
+        assert _origin_has(baud_repo, "main") == before
+
+    def test_a_detached_head_is_refused_before_github_is_asked(
+        self, baud_repo: Path, door: list[str], github: _GitHub
+    ) -> None:
+        """Mutant: the detached check removed — a branch literally named HEAD is pushed."""
+        _git(baud_repo, "checkout", "-q", "--detach")
+
+        result = handle_command("pr", ["Adopt", *door])
+
+        assert result["stderr"] == external_pr_handler.REFUSE_DETACHED.format(repo=baud_repo.resolve())
+        assert github.calls == []
+
+    def test_an_over_cap_title_is_refused_before_the_push(
+        self, baud_repo: Path, door: list[str], github: _GitHub
+    ) -> None:
+        """Mutant: the subject_refusal call removed — work is pushed and GitHub refuses the title after."""
+        result = handle_command("pr", ["x" * 257, *door])
+
+        assert result["stderr"] == subject_refusal("x" * 257, DEV_PR_OUTCOME)
+        assert (github.calls, _origin_has(baud_repo, "work")) == ([], "")
+
+    def test_a_seat_without_the_admin_grant_is_refused(
+        self, baud_repo: Path, door: list[str], github: _GitHub, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(repo_door, "admin_verdict", lambda: repo_door.AdminVerdict(False, "baud", "not admin"))
+
+        result = handle_command("pr", ["Adopt", *door])
+
+        assert (result["stderr"], github.calls, _origin_has(baud_repo, "work")) == ("not admin", [], "")
+
+
+class TestDoorMergeKeepsTheWorkingBranch:
+    """merge --repo merges on origin's repo as a merge commit, gated; it deletes no branch and moves nothing local."""
+
+    def test_the_pr_merges_and_its_head_branch_is_kept(
+        self, baud_repo: Path, tmp_path: Path, door: list[str], github: _GitHub
+    ) -> None:
+        """Mutant: the door merge deletes an unprotected head — BAUD's working branch would go with it."""
+        github.pr = {"headRefName": "work", "title": "feat: tier prompt"}
+        head = _git(baud_repo, "rev-parse", "HEAD")
+
+        result = handle_command("merge", ["7", "--confirm", *door])
+
+        assert result == {
+            "stdout": f"PR #7 merged on {_SLUG}: feat: tier prompt ({_MERGE_SHA[:8]}). {external_pr_handler.KEPT}",
+            "stderr": "",
+            "exit_code": 0,
+        }
+        merges = [call for call in github.calls if call[2] == "merge"]
+        assert merges == [["gh", "pr", "merge", "7", "-R", _SLUG, "--merge"]]
+        assert _git(baud_repo, "rev-parse", "--abbrev-ref", "HEAD") == "work"
+        assert _git(baud_repo, "rev-parse", "HEAD") == head
+        assert _door_rows(tmp_path) == [("merge", "ran", "devpulse")]
+
+    def test_headless_without_confirm_is_refused_and_names_the_door(
+        self, baud_repo: Path, door: list[str], github: _GitHub
+    ) -> None:
+        """Mutant: the re-run line without --repo — typed as printed, it merges AIPass's own PR #7."""
+        result = handle_command("merge", ["7", *door])
+
+        assert result["exit_code"] == 1
+        assert result["stderr"].endswith(f"drone @git merge 7 --repo {baud_repo.resolve()} --confirm")
+        assert github.calls == []
+
+    def test_a_red_required_check_refuses_with_ghs_words(self, door: list[str], github: _GitHub) -> None:
+        github.merge = (1, "", 'Required status check "ci" is failing')
+
+        result = handle_command("merge", ["7", "--confirm", *door])
+
+        assert result["stderr"] == 'Merge failed: gh pr merge failed: Required status check "ci" is failing'
+        assert result["exit_code"] == 1

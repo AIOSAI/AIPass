@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.17.0
+# Version: 1.18.0
 # Created: 2026-03-17
-# Modified: 2026-11-08
+# Modified: 2026-11-10
 # =============================================
 
 """
@@ -41,6 +41,7 @@ from aipass.drone.apps.handlers.git import (
     commit_handler,
     checkout_handler,
     dev_pr_handler,
+    external_pr_handler,
     branches_handler,
     delete_branch_handler,
     close_pr_handler,
@@ -48,6 +49,7 @@ from aipass.drone.apps.handlers.git import (
     remote_handler,
     repo_door,
     issue_signing,
+    issue_view,
     help_pages,
     init_handler,
 )
@@ -112,25 +114,6 @@ _COMMANDS = (
 _GH_PASSTHROUGH_COMMANDS = ("issue", "run", "workflow")
 # drone's own GitHub chores; a write is '<command>-write' at the gate, as for the passthroughs.
 _CHORE_COMMANDS = ("release", "label", "alerts")
-
-# gh's default `issue view` requests projectCards, which the API now rejects;
-# pinned --json fields never request it.
-_ISSUE_VIEW_RENDER_FLAGS = ("--json", "-q", "--jq", "-t", "--template", "-w", "--web")
-_ISSUE_VIEW_COMMENT_FLAGS = ("-c", "--comments")
-
-_ISSUE_VIEW_FIELDS = "number,title,state,author,createdAt,url,labels,body"
-
-_ISSUE_VIEW_TEMPLATE = (
-    "#{{.number}} {{.title}}\n"
-    "{{.state}} · opened by {{.author.login}} · {{.createdAt}}"
-    "{{range .labels}} [{{.name}}]{{end}}\n"
-    "{{.url}}\n\n"
-    "{{.body}}\n"
-)
-
-_ISSUE_VIEW_COMMENTS_TEMPLATE = _ISSUE_VIEW_TEMPLATE + (
-    "{{range .comments}}\n--- {{.author.login}} · {{.createdAt}}\n\n{{.body}}\n{{end}}"
-)
 
 # gh 2.45 `run view --log` looks for per-step files the archive no longer holds,
 # so it prints nothing and exits 0; that empty answer is read from the jobs API.
@@ -381,6 +364,8 @@ def _handle_repo_door(command: str, flag: repo_door.RepoFlag) -> dict:
         result = _handle_remote(flag.args, target.root, verdict.caller)
     elif command in _CHORE_COMMANDS:
         result = _handle_chore(command, flag.args, target.root, verdict.caller)
+    elif command == "merge":
+        result = _handle_merge(flag.args, verdict.caller, target.root)
     else:
         result = _run_door_verb(command, flag.args, target.root)
     taken = result.pop("theirs_taken", [])
@@ -430,6 +415,8 @@ def _run_door_verb(command: str, args: list[str], repo_root: Path) -> dict:
         return _handle_untrack(args, repo_root=repo_root)
     if command == "tag":
         return _handle_tag(args, repo_root=repo_root)
+    if command == "pr":
+        return _handle_pr(args, repo_root)
     if command in ("fetch", "sync") and args:
         return {"stdout": "", "stderr": repo_door.REFUSE_NO_ARGS.format(verb=command), "exit_code": 1}
     if command == "fetch":
@@ -449,23 +436,6 @@ def _run_door_verb(command: str, args: list[str], repo_root: Path) -> dict:
     if args:
         return {"stdout": "", "stderr": repo_door.REFUSE_PUSH_ARGS, "exit_code": 1}
     return repo_door.push_current_branch(repo_root)
-
-
-def _rewrite_issue_view(args: list[str]) -> list[str]:
-    """Render ``issue view`` from pinned JSON fields instead of gh's default view.
-
-    Callers who already picked a rendering keep it: their flags conflict with ``--json``.
-    """
-    if not args or args[0] != "view":
-        return args
-    if any(arg in _ISSUE_VIEW_RENDER_FLAGS for arg in args):
-        return args
-
-    wants_comments = any(arg in _ISSUE_VIEW_COMMENT_FLAGS for arg in args)
-    kept = [arg for arg in args if arg not in _ISSUE_VIEW_COMMENT_FLAGS]
-    fields = _ISSUE_VIEW_FIELDS + ",comments" if wants_comments else _ISSUE_VIEW_FIELDS
-    template = _ISSUE_VIEW_COMMENTS_TEMPLATE if wants_comments else _ISSUE_VIEW_TEMPLATE
-    return kept + ["--json", fields, "--template", template]
 
 
 def _flag_value(args: list[str], names: tuple[str, ...]) -> str | None:
@@ -555,7 +525,7 @@ def _run_log_via_job_api(args: list[str]) -> dict:
 def _handle_gh_passthrough(subcommand: str, args: list[str]) -> dict:
     """Pass through to gh CLI for issue, run, and workflow subcommands."""
     if subcommand == "issue":
-        args = _rewrite_issue_view(args)
+        args = issue_view.rewrite_issue_view(args)
     watch = subcommand == "run" and args[:1] == ["watch"]
     if watch and not any(arg in ("-i", "--interval") or arg.startswith("--interval=") for arg in args):
         args = [*args, "--interval", _RUN_WATCH_INTERVAL]
@@ -613,8 +583,8 @@ def _handle_prune_temp() -> dict:
     return {"stdout": "\n".join(lines), "stderr": "", "exit_code": 0}
 
 
-def _handle_pr(args: list[str]) -> dict:
-    """Handle the pr subcommand — push current branch and create PR to main."""
+def _handle_pr(args: list[str], repo_root: Path | None = None) -> dict:
+    """Push the current branch and open its PR: to main at home, to the default branch through the door."""
     if not args:
         return {
             "stdout": "",
@@ -622,7 +592,10 @@ def _handle_pr(args: list[str]) -> dict:
             "exit_code": 1,
         }
     description = " ".join(args)
-    result = dev_pr_handler.create_branch_pr(description)
+    if repo_root is not None:
+        result = external_pr_handler.open_branch_pr(repo_root, description)
+    else:
+        result = dev_pr_handler.create_branch_pr(description)
     if result["success"]:
         return {"stdout": result["message"], "stderr": "", "exit_code": 0}
     return {"stdout": "", "stderr": result["message"], "exit_code": 1}
@@ -673,16 +646,17 @@ def _terminal_answer(prompt: str) -> str | None:
     return input(prompt)
 
 
-def _confirm_merge(pr_number: str, caller: str, confirmed: bool) -> dict | None:
+def _confirm_merge(pr_number: str, caller: str, confirmed: bool, door: str = "") -> dict | None:
     """Joint-decision gate: merges must never happen accidentally.
 
     Returns None to proceed. --confirm passes; a terminal gets y/N; headless is refused.
+    *door* (" --repo <path>") rides in the prompt and the re-run line, so neither names AIPass's PR of that number.
     """
     if confirmed:
         json_handler.log_operation("merge_gate", {"pr_number": pr_number, "caller": caller, "path": "--confirm"})
         return None
 
-    answer = _terminal_answer(f"Merge PR #{pr_number}? Merges are a joint decision. [y/N] ")
+    answer = _terminal_answer(f"Merge PR #{pr_number}{door}? Merges are a joint decision. [y/N] ")
     if answer is not None:
         if answer.strip().lower() in ("y", "yes"):
             json_handler.log_operation("merge_gate", {"pr_number": pr_number, "caller": caller, "path": "tty-yes"})
@@ -696,30 +670,31 @@ def _confirm_merge(pr_number: str, caller: str, confirmed: bool) -> dict | None:
         "stdout": "",
         "stderr": (
             f"Merge of PR #{pr_number} requires explicit confirmation — merges are a joint decision.\n"
-            f"Re-run once agreed: drone @git merge {pr_number} --confirm"
+            f"Re-run once agreed: drone @git merge {pr_number}{door} --confirm"
         ),
         "exit_code": 1,
     }
 
 
-def _handle_merge(args: list[str], caller: str) -> dict:
-    """Handle the merge subcommand (owner-tier, auth pre-checked)."""
+def _handle_merge(args: list[str], caller: str, repo_root: Path | None = None) -> dict:
+    """Handle the merge subcommand (owner tier, or the admin door when *repo_root* is given; auth pre-checked)."""
     confirmed = "--confirm" in args
     pr_args = [a for a in args if not a.startswith("--")]
     if not pr_args or not pr_args[0].isdigit():
         return {"stdout": "", "stderr": "Usage: drone @git merge <PR#> [--confirm]", "exit_code": 1}
 
-    refusal = _confirm_merge(pr_args[0], caller, confirmed)
+    refusal = _confirm_merge(pr_args[0], caller, confirmed, f" --repo {repo_root}" if repo_root else "")
     if refusal is not None:
         return refusal
-
-    try:
-        from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import merge_pr
-    except ImportError as exc:
-        logger.error("Failed to import devpulse_ops merge plugin: %s", exc)
-        return {"stdout": "", "stderr": f"devpulse_ops plugin not available: {exc}", "exit_code": 1}
-
-    result = merge_pr(pr_args[0], caller)
+    if repo_root is not None:
+        result = external_pr_handler.merge_door_pr(repo_root, pr_args[0], caller)
+    else:
+        try:
+            from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import merge_pr
+        except ImportError as exc:
+            logger.error("Failed to import devpulse_ops merge plugin: %s", exc)
+            return {"stdout": "", "stderr": f"devpulse_ops plugin not available: {exc}", "exit_code": 1}
+        result = merge_pr(pr_args[0], caller)
     if result["success"]:
         return {"stdout": result["message"], "stderr": "", "exit_code": 0}
     return {"stdout": "", "stderr": result["message"], "exit_code": 1}

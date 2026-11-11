@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access_gh_door.py
 # Description: Tests for the gh passthrough verbs, release edit, restore and the external-repo door (--repo)
-# Version: 1.9.0
+# Version: 1.9.1
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-10
 # =============================================
 
 """Tests for apps/handlers/git/repo_door.py, the gh verbs and release edit of apps/modules/git_module.py."""
@@ -345,7 +345,7 @@ class TestRepoDoorRefusals:
     @pytest.mark.parametrize(
         ("command", "args", "expected"),
         [
-            ("merge", ["12", "--confirm", "--repo", "projects/ext"], repo_door.REFUSE_VERB.format(verb="merge")),
+            ("dev-pr", ["Title", "--repo", "projects/ext"], repo_door.REFUSE_VERB.format(verb="dev-pr")),
             ("status", ["--repo"], repo_door.REFUSE_NO_VALUE),
             ("status", ["--repo", "projects/ext", "--repo=projects/ext"], repo_door.REFUSE_TWICE),
             ("push", ["--force", "--repo", "projects/ext"], repo_door.REFUSE_PUSH_ARGS),
