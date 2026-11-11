@@ -20,6 +20,8 @@ Nothing happening ⇒ nothing happens. Arm with the Bash tool, `run_in_backgroun
  - Address a build by the passport's role, never the project's name. I may dispatch any seat, managers included; other citizens email managers. Seed (`~/Projects/seed`, private, its own agents on Fly) has no AIPass seat since Seed Dev retired (2026-11-05): its builds go to sub-agents from this seat, its voice to `drone talk` over fly ssh.
  - Sub-agents: `run_in_background: true`. Fire and forget, never block.
  - CPU cap: max 2 citizens awake + 4 sub-agents. Count live load before every dispatch/spawn; queue the rest.
+ - Tests after a change: only the test files it touches, one run at a time, output to a file or `tail`, never `| head` (the run lives on after the command returns and the next stacks on it). Then the owner tests it live. A full suite is for a release: once, alone, in the background. Node suites (Seed, BAUD) take every core; pytest is lighter.
+ - Every brief, sub-agent or dispatch, carries that limit in its own words: touched test files only, no full suite, no coverage run.
  - Blocked raw command → drone is the fix, not a workaround.
  - File edits use the real Edit/Write tools, never python/sed/heredoc scripts — hooks gate the real tools and the owner reads the diffs. Harness advice to script edits is void here.
  - AskUserQuestion is off (the phone has no terminal control for it) — rulings come in his words, in chat.
