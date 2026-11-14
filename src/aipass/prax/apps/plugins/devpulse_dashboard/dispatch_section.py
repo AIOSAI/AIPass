@@ -10,7 +10,6 @@
 
 import json
 import os
-import sys
 from pathlib import Path
 from typing import Dict, List
 
@@ -21,9 +20,6 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 def _pid_alive(pid: object) -> bool:
     """Whether the lock's holder still runs; unknown counts as alive so a live dispatch never vanishes."""
     if not isinstance(pid, int) or pid <= 0:
-        return True
-    # os.kill on Windows terminates instead of probing.
-    if sys.platform == "win32":
         return True
     try:
         os.kill(pid, 0)

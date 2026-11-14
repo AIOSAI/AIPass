@@ -102,7 +102,7 @@ def _module_name_from_filename(filename: str) -> str:
     """Turn a frame's ``co_filename`` into a module name, or admit there is none.
 
     The name becomes a directory (get_module_logs_dir mkdirs it): ``<stdin>`` makes
-    a junk directory on Linux and raises on Windows, so a pseudo-frame gets "unknown".
+    a junk directory, so a pseudo-frame gets "unknown".
     """
     if filename.startswith(_PSEUDO_FILENAME[0]) and filename.endswith(_PSEUDO_FILENAME[1]):
         return "unknown"
@@ -114,7 +114,7 @@ def _get_caller_module_name(depth: int = 1) -> str:
     """Name the module `depth` frames above this one, without touching the disk.
 
     sys._getframe, never inspect.stack(): inspect.stack() reaches realpath, which
-    calls os.getcwd() on Windows and raises from the logging path with a dead cwd.
+    calls os.getcwd() and raises from the logging path with a dead cwd.
     """
     try:
         frame = sys._getframe(depth)

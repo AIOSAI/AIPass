@@ -198,8 +198,6 @@ class BranchDetector:
         try:
             path = Path(file_path).resolve()
             path_str = str(path)
-            # String matching needs '/' (Windows resolves to backslashes); branch_map keys stay native.
-            path_str_fwd = path_str.replace("\\", "/")
 
             if path_str in self.log_map:
                 return self.log_map[path_str]
@@ -216,8 +214,8 @@ class BranchDetector:
                     self.log_map[path_str] = result
                     return result
 
-            if ".claude/projects/" in path_str_fwd:
-                result = self._detect_from_claude_project(path_str_fwd)
+            if ".claude/projects/" in path_str:
+                result = self._detect_from_claude_project(path_str)
                 if result:
                     self.log_map[path_str] = result
                     return result
@@ -239,7 +237,7 @@ class BranchDetector:
                 self.log_map[path_str] = result
                 return result
 
-            path_parts = path_str_fwd.lower().split("/")
+            path_parts = path_str.lower().split("/")
             for part in path_parts:
                 branch_upper = part.upper()
                 if branch_upper in self.known_branches:

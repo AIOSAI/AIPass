@@ -14,7 +14,7 @@ from typing import Dict, List, Optional
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 
-# No .resolve(): on Windows ntpath.realpath reads the cwd, and the parents here are structural.
+# No .resolve(): realpath can read the cwd, and the parents here are structural.
 _AIPASS_SRC = Path(__file__).parents[4]  # .../src/aipass/
 DEVPULSE_PATH = _AIPASS_SRC / "devpulse"
 

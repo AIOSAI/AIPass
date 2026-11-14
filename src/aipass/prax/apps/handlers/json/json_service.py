@@ -3,7 +3,7 @@
 # Description: The fleet's one JSON handler service (prax-owned)
 # Version: 1.2.0
 # Created: 2026-09-03
-# Modified: 2026-10-24
+# Modified: 2026-11-14
 # =============================================
 
 """The fleet's one JSON handler implementation (DPLAN-0325).
@@ -17,7 +17,6 @@ import logging
 import os
 import stat
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -26,10 +25,6 @@ logger = logging.getLogger("aipass.prax.json")
 
 JSON_TYPES = ("config", "data", "log")
 DEFAULT_MAX_LOG_ENTRIES = 100
-
-# Windows os.replace raises PermissionError while any reader holds the target; readers hold it microseconds.
-_REPLACE_ATTEMPTS = 40
-_REPLACE_BACKOFF_SECONDS = 0.005
 
 # What open(path, "w") asks for; the umask narrows it, so a new document gets this process's usual mode.
 _NEW_DOCUMENT_MODE = 0o666
@@ -102,8 +97,8 @@ def _stage(directory: Path, content: str, mode: Optional[int] = None) -> str:
                 raise
 
     try:
-        # fchmod on the fd, not chmod on the path: no second lookup to redirect. Absent on Windows.
-        if mode is not None and hasattr(os, "fchmod"):
+        # fchmod on the fd, not chmod on the path: no second lookup to redirect.
+        if mode is not None:
             os.fchmod(fd, mode)
         staged = open(fd, "w", encoding="utf-8")
     except BaseException:
@@ -148,26 +143,11 @@ def _discard(temp_path: str) -> None:
         logger.warning("json_service: temp cleanup failed for '%s': %s", temp_path, exc)
 
 
-def replace_with_retry(source: str, destination: str) -> None:
-    """os.replace that tolerates Windows sharing violations, bounded.
-
-    Public as a test seam: patch ``aipass.prax.json_handler.replace_with_retry``; write_json reads it at call time.
-    """
-    for attempt in range(_REPLACE_ATTEMPTS):
-        try:
-            os.replace(source, destination)
-            return
-        except PermissionError:
-            if attempt == _REPLACE_ATTEMPTS - 1:
-                raise
-            time.sleep(_REPLACE_BACKOFF_SECONDS)
-
-
 def _get_caller_module_name() -> str:
     """Name the module that called ``log_operation``, or "unknown" when no module is behind the frame.
 
     Frame depth 2 is exact: the branch shim BINDS log_operation and never wraps it, or every entry is renamed.
-    sys._getframe, never inspect.stack(): inspect reaches os.getcwd() via realpath on Windows.
+    sys._getframe, never inspect.stack(): inspect reaches os.getcwd() via realpath.
     """
     try:
         caller_frame = sys._getframe(2)
@@ -239,7 +219,7 @@ class JsonHandle:
         temp_path = ""
         try:
             temp_path = _stage(file_path.parent, content, _current_mode(file_path))
-            replace_with_retry(temp_path, str(file_path))
+            os.replace(temp_path, str(file_path))
             return True
         except OSError as exc:
             logger.warning("json_service: write failed for '%s': %s", file_path, exc)

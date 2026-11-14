@@ -327,7 +327,6 @@ class TestDashboardWritesAreAtomicAndLocked:
         assert ops.write_section(branch, "dispatch", {"agents_active": []}) is False
         assert (branch / "DASHBOARD.local.json").read_text(encoding="utf-8") == content
 
-    @pytest.mark.skipif(ops.fcntl is None, reason="no advisory lock on this platform")
     @pytest.mark.parametrize(
         "writer",
         [

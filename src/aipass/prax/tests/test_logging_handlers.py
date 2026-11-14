@@ -81,10 +81,9 @@ class TestDirectLog:
                     handler.close()
                     built.removeHandler(handler)
 
-    # The only route to an unwritable log home is a permission bit: Windows has
-    # none to set, and root writes through it.
+    # The only route to an unwritable log home is a permission bit, and root writes through it.
     @pytest.mark.skipif(
-        os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+        os.geteuid() == 0,
         reason="needs a POSIX permission bit that binds the writer",
     )
     def test_an_unwritable_log_home_degrades_to_log_handler_failed_and_never_raises(
@@ -425,7 +424,7 @@ class TestEnforceBranchLogLimits:
                 assert "LOG TRUNCATED by PRAX watchdog" in content
 
 
-class TestSetupWindowsSafeRotatingHandlerDoRollover:
+class TestSetupSafeRotatingHandlerDoRollover:
     """Tests for the rotating handler setup.py builds into every module logger."""
 
     @pytest.fixture

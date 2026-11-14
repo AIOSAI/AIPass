@@ -28,8 +28,7 @@ _PRAX_INTERNAL_MARKERS = (
 
 def _is_prax_internal(module_path: str) -> bool:
     """Check if a module path belongs to prax internals."""
-    norm = module_path.replace("\\", "/")
-    return any(marker in norm for marker in _PRAX_INTERNAL_MARKERS)
+    return any(marker in module_path for marker in _PRAX_INTERNAL_MARKERS)
 
 
 def _find_external_caller_path() -> Optional[str]:

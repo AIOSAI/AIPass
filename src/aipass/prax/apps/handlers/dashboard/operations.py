@@ -16,10 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterator
 
-try:
-    import fcntl
-except ImportError:  # Windows: no advisory lock, the atomic replace still holds
-    fcntl = None  # type: ignore[assignment]
+import fcntl
 
 from aipass.prax.apps.modules.logger import get_direct_logger
 
@@ -61,9 +58,6 @@ def get_dashboard_path(branch_path: Path) -> Path:
 def dashboard_lock(branch_path: Path) -> Iterator[None]:
     """Hold the sidecar lock every prax read-modify-write of a branch dashboard takes."""
     # flock is per open file: never nest two dashboard_lock() on one branch in one process.
-    if fcntl is None:
-        yield
-        return
     lock_path = get_dashboard_path(branch_path).with_name("DASHBOARD.local.json.lock")
     with open(lock_path, "a", encoding="utf-8") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)

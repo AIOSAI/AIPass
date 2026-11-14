@@ -16,10 +16,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterator, Optional
 from logging.handlers import RotatingFileHandler
 
-try:
-    import fcntl
-except ImportError:  # Windows: rotation runs unlocked
-    fcntl = None  # type: ignore[assignment]
+import fcntl
 
 from aipass.prax.apps.handlers.config.load import (
     get_system_logs_dir,
@@ -47,10 +44,7 @@ _logger_build_lock = threading.RLock()
 
 @contextmanager
 def rotation_lock(path: Path) -> Iterator[None]:
-    """Exclusive cross-process lock on '<path>.lock' while a file rotates; no-op without fcntl."""
-    if fcntl is None:
-        yield
-        return
+    """Exclusive cross-process lock on '<path>.lock' while a file rotates."""
     with open(f"{path}.lock", "a", encoding="utf-8") as lock_file:
         fcntl.flock(lock_file, fcntl.LOCK_EX)
         yield
@@ -60,7 +54,7 @@ class SafeRotatingFileHandler(RotatingFileHandler):
     """Size rotation shared by every process writing one file.
 
     Each process rotates on the on-disk size and follows a rename another process made,
-    so a rotation is never repeated or written past. Rotation errors (Windows file locks) are skipped."""
+    so a rotation is never repeated or written past. Rotation errors are skipped."""
 
     def _follow_rotation(self) -> bool:
         """Reopen the stream if the file on disk is no longer the one it writes to; True if reopened."""
@@ -93,7 +87,7 @@ class SafeRotatingFileHandler(RotatingFileHandler):
                 if not self._follow_rotation():
                     super().doRollover()
         except OSError as exc:
-            # Windows locks open files, so the rename fails; keep writing to the current file.
+            # A failed rotation keeps writing to the current file.
             logger.warning("Log rotation skipped (file locked): %s", exc)
 
 

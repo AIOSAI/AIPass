@@ -21,9 +21,6 @@ import pytest
 
 from aipass.prax.apps.handlers.monitoring import instance_lock as mod
 
-needs_flock = pytest.mark.skipif(mod.fcntl is None, reason="no fcntl on this platform: the lock is a no-op")
-
-
 @pytest.fixture(autouse=True)
 def lock_world(monkeypatch, tmp_path):
     """Recorders doubled; lock file at tmp_path / "monitor.lock"; any hold dropped after each test."""
@@ -36,7 +33,6 @@ def lock_world(monkeypatch, tmp_path):
     mod.release()
 
 
-@needs_flock
 class TestTryAcquire:
     """One holder at a time, decided by the kernel lock, not by the file's contents."""
 

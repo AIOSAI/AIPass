@@ -87,7 +87,7 @@ def _resync_module_attrs() -> Generator[None, None, None]:
 
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
-    """Pin the consoles past any tmp_path line (macOS's passed 200): unpinned, Rich sizes per print."""
+    """Pin the consoles past any tmp_path line: unpinned, Rich sizes per print."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 1000
 

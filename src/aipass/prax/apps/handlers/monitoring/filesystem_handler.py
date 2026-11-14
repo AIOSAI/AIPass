@@ -435,21 +435,18 @@ class MonitoringFileHandler(FileSystemEventHandler):
 
             branch = detect_branch_from_path(str(file_path))
 
-            # Markers use forward slashes; match on a local copy so Windows paths match too
-            norm = path_str.replace("\\", "/")
-
             if file_path.suffix == ".jsonl" and action != "created" and str(file_path) not in self._jsonl_positions:
                 # A transcript first seen mid-life starts at its end: its history is not live activity.
                 with contextlib.suppress(OSError):
                     self._jsonl_positions[str(file_path)] = file_path.stat().st_size
 
-            if file_path.suffix == ".jsonl" and ".claude/projects/" in norm:
-                if "/subagents/" in norm:
+            if file_path.suffix == ".jsonl" and ".claude/projects/" in path_str:
+                if "/subagents/" in path_str:
                     branch = branch + " agent"
                 if self._parse_agent_activity(file_path, branch):
                     return
 
-            if file_path.suffix == ".jsonl" and ".codex/sessions/" in norm:
+            if file_path.suffix == ".jsonl" and ".codex/sessions/" in path_str:
                 codex_branch = self._get_codex_branch(file_path, path_str)
                 if self._parse_codex_activity(file_path, codex_branch):
                     return

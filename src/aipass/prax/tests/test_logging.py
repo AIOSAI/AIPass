@@ -64,13 +64,6 @@ class TestIsPraxInternal:
         path = tmp_path / "src" / "aipass" / "prax" / "apps" / "handlers" / "logging" / "setup.py"
         assert _caller_seen_from(str(path)) == __file__
 
-    def test_prax_paths_windows_form(self, mock_prax_infrastructure):
-        """Windows-form logger and handler paths are detected as prax internal (backslash normalisation)."""
-        handler = "D:\\dev\\AIPass\\src\\aipass\\prax\\apps\\handlers\\logging\\setup.py"
-        logger_module = "D:\\dev\\AIPass\\src\\aipass\\prax\\apps\\modules\\logger.py"
-        assert _caller_seen_from(handler) == __file__
-        assert _caller_seen_from(logger_module) == __file__
-
     def test_prax_logger_filename(self, mock_prax_infrastructure, tmp_path):
         """prax_logger.py filename is detected as prax internal."""
         assert _caller_seen_from(str(tmp_path / "some" / "path" / "prax_logger.py")) == __file__
@@ -447,10 +440,9 @@ class TestSameModuleNameInTwoBranches:
 class TestAnUnwritableLogHome:
     """A logger call degrades to 'Log handler failed' over a log home it cannot make."""
 
-    # The only route to an unwritable log home is a permission bit: Windows has
-    # none to set, and root writes through it.
+    # The only route to an unwritable log home is a permission bit, and root writes through it.
     @pytest.mark.skipif(
-        os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+        os.geteuid() == 0,
         reason="needs a POSIX permission bit that binds the writer",
     )
     def test_a_first_line_over_an_unwritable_home_is_reported_and_never_raised(self, monkeypatch, tmp_path, caplog):

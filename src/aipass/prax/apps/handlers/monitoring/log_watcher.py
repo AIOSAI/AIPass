@@ -9,20 +9,11 @@
 """PRAX Log Watcher - Event Queue Integration"""
 
 import ast
-import os
-import sys
 from pathlib import Path
 
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Tuple
 import re
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 from aipass.prax.apps.modules.logger import get_direct_logger
 from watchdog.observers import Observer as WatchdogObserver  # type: ignore
@@ -311,8 +302,7 @@ class LogFileWatcher(FileSystemEventHandler):
         target_match = re.search(r"@(\w+)", cmd)
         if target_match:
             return target_match.group(1).upper()
-        norm = cmd.replace("\\", "/")
-        path_match = re.search(r"/aipass/(\w+)", norm)
+        path_match = re.search(r"/aipass/(\w+)", cmd)
         if path_match:
             return path_match.group(1).upper()
         return None

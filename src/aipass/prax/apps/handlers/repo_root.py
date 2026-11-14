@@ -29,8 +29,7 @@ SOURCE_DIR_NAME = "src"
 def resolved_file(path: Path) -> Path:
     """``Path.resolve()`` that cannot need a working directory.
 
-    On Windows ``ntpath.realpath`` calls ``os.getcwd()`` even for absolute paths;
-    the input is already absolute, so the unresolved path is a correct fallback.
+    The input is already absolute, so the unresolved path is a correct fallback.
     """
     try:
         return path.resolve()

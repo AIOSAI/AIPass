@@ -120,9 +120,7 @@ class TestGetSystemLogsDir:
         """A uv tool install resolved its log home to /system_logs, Errno 13."""
         _patch_load_world(monkeypatch, tmp_path)
         home = tmp_path / "home"
-        # Path.home() reads HOME on POSIX and USERPROFILE on Windows.
         monkeypatch.setenv("HOME", str(home))
-        monkeypatch.setenv("USERPROFILE", str(home))
         monkeypatch.setattr(load_mod, "_find_repo_root", lambda: Path(tmp_path.anchor))
 
         result = load_mod.get_system_logs_dir()
@@ -130,10 +128,9 @@ class TestGetSystemLogsDir:
         assert result == home / ".aipass" / "system_logs"
         assert result.is_dir()
 
-    # The only route to an unmakeable log home is a permission bit: Windows has
-    # none to set, and root writes through it.
+    # The only route to an unmakeable log home is a permission bit, and root writes through it.
     @pytest.mark.skipif(
-        os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+        os.geteuid() == 0,
         reason="needs a POSIX permission bit that binds the writer",
     )
     def test_a_log_home_that_cannot_be_made_raises_every_time_and_is_never_cached(

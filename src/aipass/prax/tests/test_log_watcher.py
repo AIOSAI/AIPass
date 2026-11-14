@@ -751,16 +751,6 @@ class TestExtractTargetFromCmd:
         result = mod.LogFileWatcher._extract_target_from_cmd(cmd_path)
         assert result == "SENTRY"
 
-    def test_extracts_path_target_windows_form(self):
-        """Should extract target from a Windows-form path with backslashes.
-
-        Mutant: searching the raw cmd instead of its slash-normalised copy reddens this.
-        """
-        mod = _import_log_watcher()
-        cmd = "D:\\dev\\AIPass\\src\\aipass\\sentry\\run.py"
-        result = mod.LogFileWatcher._extract_target_from_cmd(cmd)
-        assert result == "SENTRY"
-
     def test_returns_none_when_no_target(self):
         """Should return None when no target pattern matches."""
         mod = _import_log_watcher()

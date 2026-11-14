@@ -164,7 +164,7 @@
       "file": "apps/modules/status.py",
       "standard": "logged_fallback",
       "lines": [
-        104
+        96
       ],
       "reason": "prax, leg 7: True is the handler contract's 'this module owned the command', not an answer. The failure reaches the caller through error() on the line above, which is what marks the run failed for the exit seam in prax.py main(). The checker's error() exemption reads a success-path return, not the handler's own."
     },
@@ -172,7 +172,7 @@
       "file": "apps/prax.py",
       "standard": "logged_fallback",
       "lines": [
-        145
+        137
       ],
       "reason": "prax, leg 7: same contract as status.py:132. The router's True means a module owned the command, as its docstring says, and the failure is reported through error() on the line above, which sets the exit code."
     },
@@ -188,7 +188,7 @@
       "file": "apps/handlers/json/json_service.py",
       "standard": "logged_fallback",
       "lines": [
-        175
+        155
       ],
       "reason": "prax, leg 7: 'unknown' means one thing on both paths, as the docstring says: there is no module behind frame 2. sys._getframe raises ValueError exactly when the stack is too shallow to have that frame; it is the same answer, not a failure dressed as one."
     },
@@ -196,7 +196,7 @@
       "file": "apps/handlers/logging/introspection.py",
       "standard": "logged_fallback",
       "lines": [
-        107
+        106
       ],
       "reason": "prax, leg 7: the docstring names None as the answer 'the caller cannot be located — an answer, not a failure'. A path that will not resolve is a caller that cannot be located; branch detection is a routing hint and must never raise into the caller's import."
     },
@@ -205,8 +205,8 @@
       "standard": "logged_fallback",
       "lines": [
         165,
-        265,
-        304
+        263,
+        302
       ],
       "reason": "prax, leg 7: these are display labels and detector hints, and the value means the same on both paths. None at 165 is 'this detector has no answer, try the next' (an unreadable passport falls back to path matching); 'UNKNOWN' at 265/304 is the label for 'branch not determined', which is true when detection failed. The event is still displayed either way; no caller acts on the difference."
     },
@@ -242,17 +242,16 @@
       "file": "tests/test_repo_root.py",
       "standard": "through_the_command",
       "lines": [
-        203,
-        617
+        526
       ],
-      "reason": "prax, leg 14. 203: the walk on the OTHER platform's dialect (a drive-qualified Windows path, from a Linux run). source_root makes a host Path of its start, so only the pure walk can take that dialect; the host's own dialect goes through source_root in the three tests above it. 617: load's lane of the repo root; its one public reader, get_system_logs_dir outside a pytest session, ends in a mkdir of the live system_logs, so the lane is asked by name (prax, leg 5, HELD; re-read this leg, unchanged)."
+      "reason": "prax, leg 14. 526: load's lane of the repo root; its one public reader, get_system_logs_dir outside a pytest session, ends in a mkdir of the live system_logs, so the lane is asked by name (prax, leg 5, HELD; re-read this leg, unchanged)."
     },
     {
       "file": "apps/handlers/monitoring/instance_lock.py",
       "standard": "logged_fallback",
       "lines": [
-        70,
-        79
+        65,
+        74
       ],
       "reason": "prax, leg 15. True is the fail-safe answer: a PID the check could not read (70) or may not signal (79, the process exists) is held alive, so try_acquire never steals a lock it could not check and agent_status_writer never marks an unchecked agent dead. The failure is logged beside 70."
     },
@@ -319,7 +318,7 @@
     {
       "file": "tests/test_json_handler.py",
       "standard": "stdlib_patch",
-      "reason": "prax, leg 11 (file-wide: this checker passes no line; the patches are at 358, 375, 393). The subject is the atomic write's retry on a Windows sharing violation: os.replace raising PermissionError while another process holds the target. Linux never raises it, so the double raises it a set number of times and then does the real replace; monkeypatch undoes it at the test's end."
+      "reason": "prax, Linux-only purge (file-wide: this checker passes no line; the patches are at 216, 222, 232, 428, 485). The subject is a write that cannot land: os.replace raises the test's own OSError so write_json answers False, cleans its temp file and leaves the original intact, and save_json raises WriteFailed. No platform fails a rename on demand under tmp_path; monkeypatch undoes it at the test's end. The retry helper that was the seam is gone with Windows support."
     },
     {
       "file": "tests/test_logging_handlers.py",
@@ -334,7 +333,7 @@
     {
       "file": "tests/test_pid_cache.py",
       "standard": "stdlib_patch",
-      "reason": "prax, leg 10 (file-wide: this checker passes no line; the patches are at 64-65 and 115-116). The subject is the POSIX /proc liveness branch, chosen by sys.platform at call time. The tests pin that branch on every CI platform; Path.exists is wrapped to answer for the one /proc pid and fall through to the real call otherwise. A platform seam in pid_cache would be a door for the tests alone. Each patch is a with-block, undone at its end."
+      "reason": "prax, leg 10 (file-wide: this checker passes no line; the patches are at 63 and 113). The subject is the /proc liveness check. Path.exists is wrapped to answer for the one /proc pid and fall through to the real call otherwise. A seam in pid_cache would be a door for the tests alone. Each patch is a with-block, undone at its end."
     },
     {
       "file": "apps/handlers/logging/jsonl_writer.py",
@@ -374,32 +373,22 @@
     {
       "file": "apps/handlers/logging/setup.py",
       "standard": "silent_catch",
-      "reason": "File-wide (this checker reads no line). 21: the fcntl import probe; ImportError means Windows, where rotation runs unlocked, and nothing can log yet at import. 71: FileNotFoundError is the answer, not a failure: the file was rotated away by another process, so moved = True reopens it."
+      "reason": "File-wide (this checker reads no line). 65: FileNotFoundError is the answer, not a failure: the file was rotated away by another process, so moved = True reopens it."
     },
     {
       "file": "apps/handlers/logging/setup.py",
       "standard": "logged_fallback",
       "lines": [
-        86
+        80
       ],
       "reason": "shouldRollover's False is 'do not roll now', the truth for a file whose size cannot be read: it cannot be rotated either. The next record asks again; a raise here would drop the record inside logging's handler."
-    },
-    {
-      "file": "apps/handlers/monitoring/instance_lock.py",
-      "standard": "silent_catch",
-      "reason": "File-wide (this checker reads no line). The fcntl import probe: ImportError means Windows, where every monitor takes the duties, as the comment on the line says. Not an error, and nothing can log yet at import."
-    },
-    {
-      "file": "apps/handlers/dashboard/operations.py",
-      "standard": "silent_catch",
-      "reason": "File-wide (this checker reads no line). The fcntl import probe: ImportError means Windows, where there is no advisory lock and the atomic replace still holds. Not an error, and nothing can log yet at import."
     },
     {
       "file": "apps/handlers/dashboard/operations.py",
       "standard": "logged_fallback",
       "lines": [
-        143,
-        191
+        137,
+        185
       ],
       "reason": "143: _load_for_write's docstring names None as 'unreadable'; its success path returns a dict, never None, and the error is logged beside it. 191: write_section's False means 'not written', the same answer a failed save gives, logged at error; callers retry or report, neither treats False as written."
     },
@@ -407,7 +396,7 @@
       "file": "apps/plugins/devpulse_dashboard/dispatch_section.py",
       "standard": "logged_fallback",
       "lines": [
-        33
+        29
       ],
       "reason": "_pid_alive's docstring makes unknown count as alive, so a live dispatch never vanishes from the dashboard. An OSError other than ProcessLookupError (EPERM) means the process exists, so True is the truth there too."
     },

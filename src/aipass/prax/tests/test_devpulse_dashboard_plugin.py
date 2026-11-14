@@ -299,7 +299,6 @@ class TestDispatchSection:
         assert dispatch["agents_active"] == ["daemon"]
         assert dispatch["details"]["daemon"] == {"pid": os.getpid(), "timestamp": "2026-05-16T14:00:00"}
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="os.kill terminates on Windows, so a pid is never probed there")
     def test_a_dead_pid_lock_is_not_active(self, branch_path):
         """A lock left by a process that is gone is not an active dispatch."""
         gone = subprocess.run(

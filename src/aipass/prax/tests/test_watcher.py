@@ -398,39 +398,6 @@ class TestDispatcherSurvivesHandlerFailure:
 
         assert set(saved) == {"live"}
 
-    def test_the_recorded_size_is_the_real_size_under_crlf(self, tmp_path, monkeypatch):
-        """The Windows half of the size pin, run on Linux: CRLF bytes are recorded as the OS holds them."""
-        mod = self._real_watcher_module()
-        monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
-        asked = []
-        monkeypatch.setattr(mod, "should_ignore_path", lambda p: asked.append(p) or p.parent != tmp_path)
-        monkeypatch.setattr(mod, "load_module_registry", lambda: {})
-        bus = MagicMock()
-        monkeypatch.setattr(mod, "_get_trigger", lambda: bus)
-
-        saved = {}
-        monkeypatch.setattr(mod, "save_module_registry", lambda modules: saved.update(modules))
-
-        crlf_file = tmp_path / "crlf.py"
-        crlf_file.write_bytes(b"y = 2\r\n")  # what Windows text mode produces
-        assert crlf_file.stat().st_size == 7, "fixture broken: CRLF file should be 7 bytes"
-
-        handler = mod.PythonFileWatcher()
-        event = MagicMock()
-        event.event_type = "created"
-        event.is_directory = False
-        event.src_path = str(crlf_file)
-        handler.dispatch(event)
-
-        assert "crlf" in saved
-        assert saved["crlf"]["size"] == crlf_file.stat().st_size == 7, (
-            "the registry must record the bytes the OS holds, not the length of a Python string"
-        )
-        assert asked == [crlf_file], "the ignore filter was never consulted"
-        bus.fire.assert_called_once_with(
-            "module_discovered", module_name="crlf", file_path=str(crlf_file), relative_path="crlf.py"
-        )
-
     def test_the_file_is_stat_ed_once_not_twice(self, tmp_path, monkeypatch):
         """One stat, not two: a file vanishing between two stats gives a torn description."""
         mod = self._real_watcher_module()

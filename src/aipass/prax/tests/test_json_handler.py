@@ -3,7 +3,7 @@
 # Description: Tests for the fleet json service through prax's own shim
 # Version: 2.2.0
 # Created: 2026-03-28
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/json/json_handler.py and apps/handlers/json/json_service.py."""
@@ -18,7 +18,6 @@ import logging
 import os
 import stat
 from datetime import date
-from unittest.mock import patch
 
 import pytest
 
@@ -66,12 +65,8 @@ class TestForModule:
 
         assert resolved.branch_root == tmp_path / "notabranch"
 
-    @pytest.mark.skipif(os.name == "nt", reason="creating a directory symlink needs privileges on Windows")
     def test_a_symlinked_path_is_not_followed(self, tmp_path):
-        """resolve() would walk the link to its target and name the WRONG branch.
-
-        The skip asks the machine (``os.name``) only: a skip in an ``except`` turned any OSError into a pass.
-        """
+        """resolve() would walk the link to its target and name the WRONG branch."""
         real = tmp_path / "real_branch" / "apps" / "handlers" / "json"
         real.mkdir(parents=True)
         (real / "json_handler.py").write_text("", encoding="utf-8")
@@ -218,13 +213,13 @@ class TestWriteJson:
 
     def test_a_failed_write_answers_false_and_never_raises(self, handle, tmp_path, monkeypatch):
         """OSError anywhere on the way answers False: the six production bool consumers depend on it."""
-        monkeypatch.setattr(json_service, "replace_with_retry", _raise_oserror)
+        monkeypatch.setattr(json_service.os, "replace", _raise_oserror)
 
         assert handle.write_json(tmp_path / "doc.json", {"a": 1}) is False
 
     def test_a_failed_write_cleans_up_its_temp_file(self, handle, tmp_path, monkeypatch):
         """A staged file left behind is litter that accumulates silently."""
-        monkeypatch.setattr(json_service, "replace_with_retry", _raise_oserror)
+        monkeypatch.setattr(json_service.os, "replace", _raise_oserror)
 
         handle.write_json(tmp_path / "doc.json", {"a": 1})
 
@@ -234,32 +229,18 @@ class TestWriteJson:
         """The staged-write guarantee: a write that cannot land destroys nothing."""
         target = tmp_path / "doc.json"
         target.write_text(json.dumps({"live": True}), encoding="utf-8")
-        monkeypatch.setattr(json_service, "replace_with_retry", _raise_oserror)
+        monkeypatch.setattr(json_service.os, "replace", _raise_oserror)
 
         handle.write_json(target, {"replacement": True})
 
         assert json.loads(target.read_text(encoding="utf-8")) == {"live": True}
 
-    def test_a_caller_fails_the_real_replace_through_the_package_path(self, handle, tmp_path):
-        """The seam another branch's test uses to fail the replace: aipass.prax.json_handler.replace_with_retry,
-        a package path that never names these handlers, so the fence and the encapsulation wall stand."""
-        target = tmp_path / "doc.json"
-        target.write_text(json.dumps({"live": True}), encoding="utf-8")
-
-        with patch("aipass.prax.json_handler.replace_with_retry", side_effect=_raise_oserror):
-            landed = handle.write_json(target, {"replacement": True})
-
-        assert landed is False
-        assert json.loads(target.read_text(encoding="utf-8")) == {"live": True}
-        assert list(tmp_path.glob("*.tmp")) == []
-
 
 def _raise_oserror(source, destination):
-    """Stand-in for the bounded replace that always fails."""
+    """Stand-in for an os.replace that always fails."""
     raise OSError("replace refused")
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits — Windows has no mode to preserve")
 class TestTheWriteNeverChoosesTheDocumentsMode:
     """A write must not change permissions the caller never asked it to change.
 
@@ -302,62 +283,6 @@ class TestTheWriteNeverChoosesTheDocumentsMode:
         handle.ensure_json_exists("mode_probe", "config")
 
         assert stat.S_IMODE((sandbox / "mode_probe_config.json").stat().st_mode) == expected
-
-
-class TestTheBoundedReplaceRetry:
-    """os.replace on Windows fails while any reader holds the target open."""
-
-    def test_a_transient_sharing_violation_is_survived(self, handle, monkeypatch, tmp_path):
-        """Through write_json, the door every writer uses."""
-        attempts = {"count": 0}
-        real_replace = os.replace
-
-        def flaky(source, destination):
-            attempts["count"] += 1
-            if attempts["count"] < 3:
-                raise PermissionError("sharing violation")
-            real_replace(source, destination)
-
-        monkeypatch.setattr(json_service.os, "replace", flaky)
-        target = tmp_path / "live.json"
-
-        assert handle.write_json(target, {"payload": 1}) is True
-
-        assert attempts["count"] == 3
-        assert json.loads(target.read_text(encoding="utf-8")) == {"payload": 1}
-
-    def test_the_retry_is_bounded_and_then_fails_honestly(self, handle, monkeypatch, tmp_path):
-        """Bounded, then honest: a permanent permission problem is not retried forever; write_json answers False."""
-        attempts = {"count": 0}
-
-        def always_blocked(source, destination):
-            attempts["count"] += 1
-            raise PermissionError("sharing violation")
-
-        monkeypatch.setattr(json_service.os, "replace", always_blocked)
-        monkeypatch.setattr(json_service, "_REPLACE_BACKOFF_SECONDS", 0)
-        # The bound is set here, so the count is the test's own number, never a copy of the product's.
-        monkeypatch.setattr(json_service, "_REPLACE_ATTEMPTS", 3)
-        target = tmp_path / "live.json"
-
-        assert handle.write_json(target, {"payload": 1}) is False
-
-        assert attempts["count"] == 3
-        assert target.exists() is False
-
-    def test_a_non_sharing_oserror_is_not_retried(self, handle, monkeypatch, tmp_path):
-        """Only the Windows sharing violation is transient; retrying a genuine failure only hides it."""
-        attempts = {"count": 0}
-
-        def wrong_kind(source, destination):
-            attempts["count"] += 1
-            raise FileNotFoundError("no such file")
-
-        monkeypatch.setattr(json_service.os, "replace", wrong_kind)
-
-        assert handle.write_json(tmp_path / "live.json", {"payload": 1}) is False
-
-        assert attempts["count"] == 1
 
 
 class TestValidateJsonStructure:
@@ -500,7 +425,7 @@ class TestSaveJson:
 
     def test_a_write_that_cannot_land_raises_writefailed(self, handle, monkeypatch):
         """A lost document must not look like success, nor like a caller's validation mistake."""
-        monkeypatch.setattr(json_service, "replace_with_retry", _raise_oserror)
+        monkeypatch.setattr(json_service.os, "replace", _raise_oserror)
 
         with pytest.raises(json_service.WriteFailed):
             handle.save_json("doomed", "log", [])
@@ -557,7 +482,7 @@ class TestLogOperation:
 
     def test_a_write_failure_answers_false_and_does_not_raise(self, handle, monkeypatch):
         """log_operation runs on the monitor's threads: a raising writer there is silent half-death."""
-        monkeypatch.setattr(json_service, "replace_with_retry", _raise_oserror)
+        monkeypatch.setattr(json_service.os, "replace", _raise_oserror)
 
         assert handle.log_operation("doomed", module_name="ops") is False
 

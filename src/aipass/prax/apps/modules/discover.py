@@ -11,16 +11,8 @@
 Reference: docs/discovery.md
 """
 
-import os
 import sys
 from typing import List
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 from aipass.prax.apps.handlers.discovery.scan import run_scan
 from aipass.prax.apps.modules.logger import system_logger as logger

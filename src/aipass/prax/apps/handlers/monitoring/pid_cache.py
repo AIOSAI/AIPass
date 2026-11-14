@@ -12,7 +12,6 @@ The monitor attributes events to the owning agent process through this map.
 """
 
 import json as _json
-import sys
 import threading
 import time as _time
 from pathlib import Path
@@ -41,7 +40,7 @@ def parse_lock_pid(branch_entry: dict, new_cache: dict[str, int], repo_root: Pat
     try:
         lock_data = _json.loads(lock_path.read_text(encoding="utf-8"))
         pid = lock_data.get("pid", 0)
-        if not pid or not (sys.platform == "linux" and Path(f"/proc/{pid}").exists()):
+        if not pid or not Path(f"/proc/{pid}").exists():
             return
         name = branch_entry.get("name", "").upper()
         if name:

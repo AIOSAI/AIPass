@@ -17,10 +17,7 @@ import os
 from pathlib import Path
 from typing import IO, Optional
 
-try:
-    import fcntl
-except ImportError:  # Windows: no lock, every monitor takes the duties
-    fcntl = None  # type: ignore[assignment]
+import fcntl
 
 from aipass.prax.apps.modules.logger import get_direct_logger
 from aipass.prax.apps.handlers.json import json_handler
@@ -42,8 +39,6 @@ def try_acquire() -> bool:
     """Take the lock without blocking. True if this process now holds it."""
     global _held_file
     json_handler.log_operation("instance_lock_acquire", {"pid": os.getpid()})
-    if fcntl is None:
-        return True
     lock_path = get_lock_path()
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_file = open(lock_path, "a+", encoding="utf-8")
