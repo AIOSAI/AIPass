@@ -110,7 +110,7 @@ def _project_name_from_registry(reg_file: Path) -> str | None:
 def _working_directory() -> Path:
     """The one raw read of where this process stands. Raises ENOENT when that is gone.
 
-    Unguarded test seam beneath ``caller_cwd``: Windows cannot stand in a deleted directory.
+    Unguarded test seam beneath ``caller_cwd``.
     """
     return Path.cwd()
 

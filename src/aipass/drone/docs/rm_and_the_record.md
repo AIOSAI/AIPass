@@ -109,12 +109,8 @@ rmtree would take every branch, `.trinity/` and all, so a second guard looks the
 - **A symlink is not a citizen.** rmtree unlinks the link and never touches what it points at.
 - **A folder the walk cannot list refuses the delete.** A guard that could not look must not report
   clear.
-- **Whether you may delete the folder you are standing in is the host's call, not ours.** POSIX
-  allows it, so removing a folder of your own branch while standing in it completes. Windows holds the current directory open
-  without delete sharing and refuses with `WinError 32` — the fence's verdict is identical on both
-  hosts, and what fails there is the removal. The message and the record name where the process was
-  standing and say to run it from outside. The suite marks the end-to-end case `deletable_cwd`,
-  which Windows skips, and pins the verdict itself beside it on every OS.
+- **You may delete the folder you are standing in.** Removing a folder of your own branch while
+  standing in it completes.
 - Refusals are recorded like every other refusal. A caller standing outside every branch finds
   every citizen foreign.
 

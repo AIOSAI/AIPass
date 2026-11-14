@@ -185,8 +185,7 @@ per-project registration.
   runs in `discovery_handler` (`discover_modules`, `get_help`) and `scanning/scanner`.
   - A branch outside the resolved home, or no home at all: `sys.executable`.
   - The home is `Path(sys.prefix).parent`, so this drone is the home's: `sys.executable`.
-  - Otherwise, the home's `.venv/bin/python` (`.venv/Scripts/python.exe` on Windows), logged
-    INFO once per home.
+  - Otherwise, the home's `.venv/bin/python`, logged INFO once per home.
   - No venv there: `sys.executable`, with one WARNING naming the half-installed home.
 
   A machine can hold aipass twice. The uv tool venv's `drone` comes first on PATH, and the home's

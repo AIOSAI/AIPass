@@ -24,11 +24,9 @@ import aipass.drone.apps as drone_apps
 # Sandbox names (dropbox, .archive, __pycache__) come from conftest, never from sentry's handlers.
 from .conftest import SANDBOX_DIRS
 
-# ntpath.realpath reads os.getcwd() unconditionally (posixpath only for a relative path) and
-# Path.resolve() routes through it, so a module-level resolve() kills the import with no cwd.
 # inspect.stack() reaches getmodule()'s unguarded os.path.realpath for a pseudo-file frame.
-# World A (ntpath emulation) convicts resolve(); only world B (realpath denied) convicts
-# inspect.stack(), and only from a <string> frame: <stdin> sits in linecache and goes green.
+# World B (realpath denied) convicts resolve() and inspect.stack(), the latter only from a
+# <string> frame: <stdin> sits in linecache and goes green.
 
 # Other branches' import-time code is preloaded in the healthy world: their cure is their own.
 # Delete a line once that branch's own dead-cwd pin is green.
@@ -41,38 +39,6 @@ import aipass.api  # noqa: F401
 
 # 3.10's pathlib._NormalAccessor copies os.path.realpath at import, so the accessor class is
 # patched too; that arms every interpreter in either import order.
-# staticmethod AND *a are redundant on purpose: staticmethod stops the accessor binding, *a
-# survives its removal. A bound wrapper still raises, so only a return-value pin catches it.
-# Class only: an instance attribute shadows it and left staticmethod unfalsifiable (mutant M24b).
-_NTPATH_WRAPPER = """
-import os
-
-_real_realpath = os.path.realpath
-
-
-def _ntpath_condition(path, *a, **kw):
-    os.getcwd()  # ntpath.realpath reads cwd before checking absoluteness
-    return _real_realpath(path, *a, **kw)
-
-
-os.path.realpath = _ntpath_condition
-
-import pathlib as _pathlib_rp
-
-if hasattr(_pathlib_rp, "_NormalAccessor"):
-    _pathlib_rp._NormalAccessor.realpath = staticmethod(_ntpath_condition)
-"""
-
-_DENY_GETCWD = """
-def _dead_getcwd(*a, **k):
-    raise FileNotFoundError(2, "cwd deleted", "")
-
-
-os.getcwd = _dead_getcwd
-"""
-
-_WORLD_A = _NTPATH_WRAPPER + _DENY_GETCWD
-
 _WORLD_B = """
 import os
 
@@ -102,38 +68,6 @@ class _NormalAccessor:
 
 _p._NormalAccessor = _NormalAccessor
 _p._normal_accessor = _NormalAccessor()
-"""
-
-# A probe asking "did my patch reach X" lets X capture a sentinel, not the real function, or
-# the platform answers: ntpath.realpath('/tmp') is D:\\tmp (a POSIX literal is drive-relative).
-# This returns its argument and touches no filesystem, cwd or path module.
-_SENTINEL_REALPATH = """
-import os
-
-
-def _sentinel_realpath(path, *a, **kw):
-    return path
-
-
-os.path.realpath = _sentinel_realpath
-"""
-
-# The opposite platform, for the litmus: the verdict must not move under an nt emulation.
-# Trap: never alias ntpath.realpath here; on POSIX it falls back to abspath, which reads the cwd
-# only for a relative path, so the alias emulates this host. The win32 branch is built by name.
-_NT_EMULATION = """
-import os
-
-
-def _win32_realpath(path, *a, **kw):
-    os.getcwd()  # unconditional on nt, unlike posixpath
-    p = os.fspath(path)
-    if p[:1] in ("/", "\\\\"):
-        return "D:" + p.replace("/", "\\\\")
-    return "D:\\\\emulated_cwd\\\\" + p.replace("/", "\\\\")
-
-
-os.path.realpath = _win32_realpath
 """
 
 # Does THIS interpreter's resolve() reach the denied call for an ABSOLUTE path?
@@ -198,7 +132,7 @@ def drone_modules() -> list[str]:
 
 
 class TestEveryModuleImportsWithoutACwd:
-    """The import fan, in both worlds, with the world's own liveness asserted."""
+    """The import fan, in world B, with the world's own liveness asserted."""
 
     IMPORT_BODY = """
 import importlib
@@ -225,19 +159,8 @@ for entry in dead:
 print("SWEPT: " + str(len({names!r})))
 """
 
-    def test_world_a_ntpath_emulation_kills_no_drone_import(self, drone_modules):
-        """A raw ``Path(__file__).resolve()`` anywhere on the import fan reds this."""
-        result = _run_world(_WORLD_A, _RESOLVE_CONTROL, self.IMPORT_BODY.format(names=drone_modules))
-
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "RESOLVE_DIES: YES" in result.stdout, (
-            "the ntpath world did not arm — every assertion below it would be vacuous.\n" + result.stdout
-        )
-        assert "DEAD: 0" in result.stdout, result.stdout
-        assert f"SWEPT: {len(drone_modules)}" in result.stdout, result.stdout
-
     def test_world_b_denied_realpath_kills_no_drone_import(self, drone_modules):
-        """Harsher, and the only world that convicts ``inspect.stack()``."""
+        """A raw ``Path(__file__).resolve()`` or ``inspect.stack()`` anywhere on the import fan reds this."""
         result = _run_world(_WORLD_B, _STACK_CONTROL, self.IMPORT_BODY.format(names=drone_modules))
 
         assert result.returncode == 0, result.stdout + result.stderr
@@ -343,7 +266,7 @@ os.path.realpath = _bare
     def test_a_bare_module_patch_does_not_reach_a_pre_captured_accessor(self):
         """CI's Python 3.10 failure, reproduced here. This is the red-first half.
 
-        If this ever fails, the bug is no longer expressible and the two below prove less.
+        If this ever fails, the bug is no longer expressible and the one below proves less.
         """
         result = self._run(_FAKE_ACCESSOR + self.BARE_PATCH_ONLY + self.PROBE)
 
@@ -364,74 +287,6 @@ os.path.realpath = _bare
             "function — this is exactly the 3.10 red: " + result.stdout
         )
 
-    def test_world_a_also_reaches_a_pre_captured_accessor(self):
-        """Both worlds carry the cure, so both are measured against the shape (A is the one CI reddened)."""
-        result = self._run(_FAKE_ACCESSOR + _WORLD_A + self.PROBE)
-
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "ACCESSOR_DENIED: YES" in result.stdout, (
-            "world A left a pre-captured accessor holding the real function — "
-            "this is CI's 3.10 red exactly: " + result.stdout
-        )
-
-    def test_the_shipped_world_still_arms_where_no_accessor_exists(self):
-        """3.11+ — the ``hasattr`` guard must not turn the world into a no-op."""
-        result = self._run(_WORLD_A + _RESOLVE_CONTROL)
-
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "RESOLVE_DIES: YES" in result.stdout, result.stdout
-
-    RESOLVE_PROBE = """
-import pathlib as _p
-
-print("RESOLVED: " + str(_p._normal_accessor.realpath("/tmp")))
-"""
-
-    def test_the_ntpath_wrapper_resolves_the_path_not_the_accessor(self):
-        """@memory's return-value pin, cured of the platform it was importing.
-
-        A bound wrapper eats the path into ``*a`` and still raises, so only the return value
-        (denial off) tells them apart; a sentinel keeps the host's path module from answering.
-        """
-        result = self._run(_SENTINEL_REALPATH + _FAKE_ACCESSOR + _NTPATH_WRAPPER + self.RESOLVE_PROBE)
-
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "RESOLVED: /tmp" in result.stdout, (
-            "the wrapper did not receive the path it was handed — it is arriving "
-            "bound and passing the accessor through: " + result.stdout
-        )
-
-    def test_the_nt_emulation_reproduces_the_ci_red_without_the_sentinel(self):
-        """Red-first, locally: the failure @devpulse relayed, rebuilt on this host.
-
-        If this stops producing ``D:\\tmp``, the emulation cannot express the bug and the litmus proves nothing.
-        """
-        result = self._run(_NT_EMULATION + _FAKE_ACCESSOR + _NTPATH_WRAPPER + self.RESOLVE_PROBE)
-
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "RESOLVED: D:\\tmp" in result.stdout, (
-            "the nt emulation no longer reproduces the drive-relative spelling, "
-            "so it cannot defend the sentinel: " + result.stdout
-        )
-
-    def test_the_sentinel_gives_the_same_verdict_under_either_platform(self):
-        """@devpulse's litmus: run the probe under the OPPOSITE platform's
-        emulation and require the verdict not to move.
-
-        The comparison is the pin: revert the sentinel AND neuter it and the whole file passes
-        (compound mutant). Do not delete it as redundant with the literal check below.
-        """
-        here = self._run(_SENTINEL_REALPATH + _FAKE_ACCESSOR + _NTPATH_WRAPPER + self.RESOLVE_PROBE)
-        as_nt = self._run(_NT_EMULATION + _SENTINEL_REALPATH + _FAKE_ACCESSOR + _NTPATH_WRAPPER + self.RESOLVE_PROBE)
-
-        assert here.returncode == 0, here.stdout + here.stderr
-        assert as_nt.returncode == 0, as_nt.stdout + as_nt.stderr
-        assert here.stdout == as_nt.stdout, (
-            "the verdict moved when the platform did — this pin is measuring the "
-            f"host rather than the wrapper.\n  here: {here.stdout!r}\n  as nt: {as_nt.stdout!r}"
-        )
-        assert "RESOLVED: /tmp" in here.stdout, here.stdout
-
 
 class TestTheFenceLetsKinThroughWithNoCwd:
     """The fence (handlers/__init__.py, v2) survives a dead cwd and still lets kin in.
@@ -449,9 +304,8 @@ from aipass.drone.tests import support_fence
 print("FENCE: " + support_fence._run("pkg"))
 """
 
-    @pytest.mark.parametrize("world", [_WORLD_A, _WORLD_B], ids=["ntpath_getcwd_denied", "realpath_denied"])
-    def test_the_kin_probe_is_allowed_when_every_resolve_dies(self, world: str) -> None:
-        result = _run_world(world, _RESOLVE_CONTROL, self.BODY)
+    def test_the_kin_probe_is_allowed_when_every_resolve_dies(self) -> None:
+        result = _run_world(_WORLD_B, _RESOLVE_CONTROL, self.BODY)
 
         assert result.returncode == 0, result.stdout + result.stderr
         assert "RESOLVE_DIES: YES" in result.stdout, "the world did not arm.\n" + result.stdout
@@ -531,7 +385,7 @@ class TestNoModuleLevelLocationCallSurvives:
                 offenders.append(f"{source.name}:{lineno}  {text}")
 
         assert offenders == [], (
-            "module-level location calls crash the import on a Windows box with no cwd; "
+            "module-level location calls crash the import when the path cannot be resolved; "
             "route them through handlers/module_root.module_file(): " + ", ".join(offenders)
         )
 

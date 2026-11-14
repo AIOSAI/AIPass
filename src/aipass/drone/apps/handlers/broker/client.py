@@ -13,6 +13,7 @@ Reference: docs/broker.md
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import hmac as hmac_mod
 import os
@@ -24,12 +25,6 @@ from pathlib import Path
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.broker.protocol import BrokerRequest, BrokerResponse
-
-try:
-    import fcntl
-except ImportError:
-    fcntl = None
-    logger.info("broker client: fcntl unavailable (Windows), and no broker either")
 
 BROKER_FD_ENV = "AIPASS_BROKER_FD"
 
@@ -103,8 +98,7 @@ def _exchange(sock: socket.socket, fd: int, req: BrokerRequest) -> bytes:
     """Send one request and read one reply line, holding the fd's lock so no sharer reads it."""
     # lockf, not flock: flock belongs to the open file description every sharing process holds.
     with _FD_THREAD_LOCK:
-        if fcntl is not None:
-            fcntl.lockf(fd, fcntl.LOCK_EX)
+        fcntl.lockf(fd, fcntl.LOCK_EX)
         try:
             sock.sendall(req.to_bytes())
             data = b""
@@ -115,8 +109,7 @@ def _exchange(sock: socket.socket, fd: int, req: BrokerRequest) -> bytes:
                 data += chunk
             return data
         finally:
-            if fcntl is not None:
-                fcntl.lockf(fd, fcntl.LOCK_UN)
+            fcntl.lockf(fd, fcntl.LOCK_UN)
 
 
 def broker_delete(path: str) -> tuple[bool, str]:

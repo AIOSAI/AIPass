@@ -23,9 +23,9 @@ import aipass.drone.apps as drone_apps
 from aipass.drone.tests import conftest as drone_conftest
 
 
-# Path.glob lets a case-insensitive filesystem (Windows, default macOS) match *_registry.json
+# Path.glob lets a case-insensitive filesystem match *_registry.json
 # for *_REGISTRY.json, and a registry is a project's trust anchor. The fixture supplies that
-# folded listing; registries_in is never patched, so the pins red on every OS.
+# folded listing; registries_in is never patched, so the pins red on any filesystem.
 
 # Wrong-case suffix, real and tracked in this branch's directory (TestTheDecoyIsLive).
 DECOY_NAME = "drone_command_registry.json"
@@ -54,7 +54,7 @@ def case_insensitive_filesystem(monkeypatch):
 
 @pytest.fixture()
 def no_cwd(monkeypatch):
-    """The state Windows CI was in when it hit this: the walk starts from the package."""
+    """No cwd: the walk starts from the package."""
 
     def gone():
         raise FileNotFoundError(2, "No such file or directory")
@@ -158,5 +158,5 @@ class TestTheSweepIsComplete:
 
         assert offenders == [], (
             "registry globs outside registries_in() — each one is case-widened on "
-            "Windows and macOS: " + ", ".join(offenders)
+            "a case-insensitive filesystem: " + ", ".join(offenders)
         )

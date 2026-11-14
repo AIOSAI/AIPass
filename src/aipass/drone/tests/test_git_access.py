@@ -608,7 +608,6 @@ def start_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[
     user_home = tmp_path / "user_home"
     user_home.mkdir()
     monkeypatch.setenv("HOME", str(user_home))
-    monkeypatch.setenv("USERPROFILE", str(user_home))
     monkeypatch.setenv(session_home.SESSION_ENV, _SESSION)
 
     def start(directory: Path) -> None:

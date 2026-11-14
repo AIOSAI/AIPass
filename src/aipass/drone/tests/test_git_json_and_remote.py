@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -934,8 +933,8 @@ class TestRemoteCommand:
 # ---------------------------------------------------------------------------
 
 
-#: Why the unreadable-index pin skips: a mode-0 file binds no one on Windows or as root.
-_PERMISSIONS_REASON = "needs POSIX permissions that bind the caller"
+#: Why the unreadable-index pin skips: a mode-0 file binds no one as root.
+_PERMISSIONS_REASON = "needs file permissions that bind the caller"
 
 
 def _git(cwd: Path, *argv: str, check: bool = True) -> str:
@@ -1031,7 +1030,7 @@ class TestMergeMain:
         parents = _git(work, "rev-list", "--parents", "-n", "1", "HEAD").split()[1:]
         assert parents == [dev_before, _git(work, "rev-parse", "origin/main")]
 
-    @pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason=_PERMISSIONS_REASON)
+    @pytest.mark.skipif(os.geteuid() == 0, reason=_PERMISSIONS_REASON)
     def test_a_git_read_that_fails_refuses_rather_than_reading_as_no_overlap(self, diverged: dict[str, Path]) -> None:
         """An unreadable index is the command route to a failed listing; mode restored in finally."""
         work = diverged["work"]
@@ -1468,8 +1467,8 @@ class TestLockHolderUnchecked:
             return json.loads(handle_command("lock", [])["stdout"])
 
     def test_a_failed_liveness_check_reads_as_unchecked(self, tmp_path: Path) -> None:
-        """Red first: the Windows check failing answered True ("assuming alive"), so this read as active."""
-        doc = self._lock(tmp_path, OSError("OpenProcess failed"))
+        """Red first: a failing check answered True ("assuming alive"), so this read as active."""
+        doc = self._lock(tmp_path, OSError("liveness check failed"))
 
         assert (doc["locked"], doc["orphaned"], doc["pid_checked"]) == (True, False, False)
         assert doc["message"].startswith(f"Lock held by @api (PID {os.getpid()}, unchecked, ")

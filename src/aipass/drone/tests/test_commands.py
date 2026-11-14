@@ -3,7 +3,7 @@
 # Description: Tests for the custom command registry
 # Version: 1.0.5
 # Created: 2026-03-17
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/commands.py and the command registry handlers it drives."""
@@ -204,12 +204,11 @@ class TestCRUDOperations:
         def refuse(source: str, destination: str) -> None:
             raise OSError("stand-in: replace refused")
 
-        monkeypatch.setattr(prax_json, "replace_with_retry", refuse)
+        monkeypatch.setattr(prax_json.os, "replace", refuse)
 
         assert ops.add_command("list", "@t", "list") is False
         assert isolated_registry.read_bytes() == before
 
-    @pytest.mark.skipif(ops.fcntl is None, reason="no flock on this platform")
     def test_add_waits_for_the_registry_lock(self, isolated_registry: Path) -> None:
         """A second writer blocks on the lock instead of interleaving load+save."""
         import threading

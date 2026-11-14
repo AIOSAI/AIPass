@@ -22,7 +22,7 @@ from aipass.drone.apps.handlers.exceptions import (
     BranchNotFoundError,
     CommandExecutionError,
 )
-from aipass.drone.apps.handlers import registry_handler, router_handler
+from aipass.drone.apps.handlers import router_handler
 from aipass.drone.apps.handlers.executor import CommandResult
 from aipass.drone.apps.handlers.router_handler import (
     detect_caller_signal,
@@ -211,7 +211,6 @@ class TestExecuteBranchCommand:
         Mutant: executable=sys.executable at the launch site."""
         mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="", command="")
         (branch_dir / "AIPASS_REGISTRY.json").write_text('{"branches": []}', encoding="utf-8")
-        monkeypatch.setattr(registry_handler, "_venv_layout", lambda: registry_handler.VENV_LAYOUTS["posix"])
         venv_python = branch_dir.resolve() / ".venv" / "bin" / "python"
         venv_python.parent.mkdir(parents=True)
         venv_python.write_text("", encoding="utf-8")
@@ -564,7 +563,6 @@ class TestDetectCallerFallsBackToRegistry:
             assert detect_caller_signal(temp_test_dir).name is None
         mock_logger.info.assert_called_once()
         assert mock_logger.warning.call_args_list == []
-        # Compare as Paths: on Windows a substring match fails on separator style alone.
         assert any(
             Path(str(arg)) == temp_test_dir for arg in mock_logger.info.call_args.args if isinstance(arg, (str, Path))
         )
@@ -844,7 +842,6 @@ class TestIdentityMessageSeverity:
     def test_agreement_and_project_root_print_nothing(self, temp_test_dir: Path, monkeypatch, capsys):
         """Only a passport disagreement is a conflict; a registry is location, not a second citizen."""
         home = _plant_passport(temp_test_dir / "aipass", "AIPASS")
-        # Not "AIPass" beside "aipass": a case-folding filesystem (macOS) makes them one directory.
         root = self._plant_registry(temp_test_dir / "project_root")
         monkeypatch.setenv("AIPASS_BRANCH_NAME", "aipass")
         resolve_caller_identity(home)

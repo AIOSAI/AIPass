@@ -180,7 +180,6 @@ class TestFileNotFoundWrapping:
             )
         cause = exc_info.value.__cause__
         assert isinstance(cause, FileNotFoundError)
-        # Not cause.filename: Windows leaves it None for a missing executable.
         assert "this_executable_does_not_exist_xyz" in str(exc_info.value)
 
 

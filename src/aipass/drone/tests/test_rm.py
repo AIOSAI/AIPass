@@ -13,11 +13,9 @@
 # sentry: no-test-needed(covered_elsewhere) — the broker lane of a sandboxed delete, pinned in tests/test_broker.py
 # sentry: no-test-needed(covered_elsewhere) — rm from a deleted working directory, pinned in tests/test_no_cwd_sweep.py
 
-import errno
 import json
 import os
 import shutil
-import sys
 import tempfile
 import time
 from pathlib import Path
@@ -40,20 +38,11 @@ from aipass.drone.apps.handlers.rm_handler import (
 )
 from aipass.drone.apps.modules.rm import handle_command, print_help, print_introspection
 
-#: The POSIX temp root, spelled by the running platform: a rooted literal is drive-relative
-#: under ntpath (``D:\tmp``). ``os.sep`` is "/" wherever these tests run.
 POSIX_TMP = Path(os.sep, "tmp")
 
-_POSIX_CARVE_OUT_REASON = "POSIX-only carve-out: rm_handler adds /tmp on non-win32 platforms only"
-
-#: A mode-0 folder only stops a caller the kernel holds to permissions: not on
-#: Windows, not as root. ``or`` short-circuits, so geteuid is never read on nt.
-_PERMISSIONS_DO_NOT_BIND = sys.platform == "win32" or os.geteuid() == 0
-_PERMISSIONS_REASON = "needs POSIX permissions that bind the caller"
-
-#: Windows makes a symlink only with Developer Mode or elevation.
-_NO_SYMLINKS = sys.platform == "win32"
-_NO_SYMLINKS_REASON = "creating a symlink needs a privilege on Windows"
+#: A mode-0 folder only stops a caller the kernel holds to permissions: not as root.
+_PERMISSIONS_DO_NOT_BIND = os.geteuid() == 0
+_PERMISSIONS_REASON = "needs file permissions that bind the caller"
 
 
 @pytest.fixture()
@@ -80,11 +69,10 @@ def _patch_roots(project_dir):
     tmpdir = Path(tempfile.gettempdir()).resolve()
     roots = [project_dir.resolve()]
     seen = set(roots)
-    if sys.platform != "win32":
-        slash_tmp = POSIX_TMP.resolve()
-        if slash_tmp not in seen:
-            seen.add(slash_tmp)
-            roots.append(slash_tmp)
+    slash_tmp = POSIX_TMP.resolve()
+    if slash_tmp not in seen:
+        seen.add(slash_tmp)
+        roots.append(slash_tmp)
     if tmpdir not in seen:
         seen.add(tmpdir)
         roots.append(tmpdir)
@@ -101,9 +89,8 @@ class TestGetAllowedRoots:
         tmpdir = Path(tempfile.gettempdir()).resolve()
         assert tmpdir in roots
 
-    @pytest.mark.skipif(sys.platform == "win32", reason=_POSIX_CARVE_OUT_REASON)
     def test_includes_slash_tmp(self, tmp_path, monkeypatch):
-        """The POSIX carve-out puts the canonical tmp root in roots by itself.
+        """The /tmp carve-out puts the canonical tmp root in roots by itself.
 
         $TMPDIR is moved off /tmp first: left there, the system-temp root hides a deleted carve-out.
         """
@@ -127,7 +114,6 @@ class TestGetAllowedRoots:
         tmpdir = Path(tempfile.gettempdir()).resolve()
         assert tmpdir in roots
 
-    @pytest.mark.skipif(sys.platform == "win32", reason=_POSIX_CARVE_OUT_REASON)
     def test_tmpdir_and_slash_tmp_both_present_when_different(self, monkeypatch):
         """When $TMPDIR != /tmp, both must appear in roots."""
         fake_tmpdir = POSIX_TMP / "claude-9999"
@@ -163,7 +149,6 @@ class TestCheckContainment:
 
     def test_refuses_outside_path(self, tmp_path):
         root = tmp_path.resolve()
-        # A sibling of the root, not a rooted literal (drive-relative under ntpath).
         outside = (tmp_path.parent / f"{tmp_path.name}_outside" / "secret.txt").resolve()
         allowed, reason = check_containment(outside, [root])
         assert allowed is False
@@ -271,7 +256,6 @@ class TestAllowDeletion:
         results = safe_delete([str(target)])
         assert results[0][1] is True
 
-    @pytest.mark.skipif(sys.platform == "win32", reason=_POSIX_CARVE_OUT_REASON)
     @pytest.mark.usefixtures("_patch_roots")
     def test_slash_tmp_literal_allowed(self):
         """Literal POSIX tmp path must succeed even if $TMPDIR differs."""
@@ -628,43 +612,6 @@ class TestContainedCitizens:
         assert "your own branch spawn/" in message
         assert (only_my_own_tree / "spawn" / ".trinity").is_dir()
 
-    def test_a_host_that_refuses_to_delete_a_live_cwd_is_not_a_refusal_of_ours(
-        self, project_dir, tmp_path, monkeypatch
-    ):
-        """Windows' refusal of a tree the process stands in, manufactured here
-        rather than asked of this host.
-
-        The host's refusal, not a guard's: the message carries the way out and the ledger says failed.
-        It models the refusal only; a real rmtree empties what it can reach before raising.
-        Mutant killed: the `_standing_inside` suffix dropped from the failure message.
-        """
-        scratch = project_dir / "scratch"
-        (scratch / "inner").mkdir(parents=True)
-        monkeypatch.chdir(scratch / "inner")
-
-        def windows_remove_tree(path: Path) -> None:
-            here = Path.cwd()
-            if here == path or path in here.parents:
-                raise PermissionError(
-                    errno.EACCES,
-                    "[WinError 32] The process cannot access the file because it is being used by another process",
-                    str(path),
-                )
-            shutil.rmtree(path)
-
-        monkeypatch.setattr(rm_handler, "_remove_tree", windows_remove_tree)
-
-        ((_path, ok, message),) = safe_delete([".."])
-
-        assert ok is False
-        assert "WinError 32" in message
-        assert "Protected:" not in message, "no guard of ours refused this one"
-        assert f"run drone rm from outside {scratch.resolve()}" in message
-        (record,) = _ledger(tmp_path)
-        assert record["outcome"] == "failed"
-        assert "standing in" in record["reason"], "the durable half must carry the way out too"
-        assert scratch.exists()
-
     def test_a_temp_dir_target_is_unchanged(self, at_drone, tmp_path_factory):
         """Outside the project a .trinity is scaffolding, not a citizen."""
         scratch = tmp_path_factory.mktemp("scratch")
@@ -714,7 +661,6 @@ class TestContainedCitizens:
 # A symlink is guarded and reported where the LINK lives, never by its resolved target.
 
 
-@pytest.mark.skipif(_NO_SYMLINKS, reason=_NO_SYMLINKS_REASON)
 class TestASymlinkIsJudgedWhereItLives:
     @pytest.fixture()
     def aipass_dir(self, project_with_branches):

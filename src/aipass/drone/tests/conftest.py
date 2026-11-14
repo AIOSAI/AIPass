@@ -19,7 +19,6 @@ import json
 import logging
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any, Generator
 
@@ -39,7 +38,7 @@ collect_ignore_glob = [".archive/*", "**/.archive/*"]
 
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
-    """Pin Rich's width: unpinned it is 80 on POSIX, 79 on Windows, or the terminal's."""
+    """Pin Rich's width: unpinned it is 80, or the terminal's."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
 
@@ -75,8 +74,7 @@ def _isolate_deletion_log(tmp_path: Path) -> Generator[None, None, None]:
 def temp_test_dir() -> Generator[Path, None, None]:
     """Creates temporary directory for testing, cleans up after.
 
-    Teardown steps OUT first: autouse monkeypatch undoes its chdir after this runs,
-    and Windows cannot rmtree the cwd (WinError 32).
+    Teardown steps OUT first: autouse monkeypatch undoes its chdir after this runs.
     """
     test_dir = Path(tempfile.mkdtemp())
     yield test_dir
@@ -194,49 +192,12 @@ def sample_registry(temp_test_dir: Path) -> Path:
     return registry_path
 
 
-DELETABLE_CWD_MARKER = "deletable_cwd"
-
-WINDOWS_CWD_REASON = (
-    "This test builds its world by deleting the directory the process stands in. "
-    "Windows holds the current directory open without delete sharing, so rmtree(cwd) "
-    "raises PermissionError WinError 32 and the directory is never removed — the RECIPE "
-    "is unavailable there, not the STATE. A disconnected share or an ejected volume still "
-    "leaves a live Windows process whose getcwd() raises, so the guards themselves stay "
-    "pinned on every OS by the patched-Path.cwd construction (tests/test_no_cwd_sweep.py "
-    "and the portable siblings beside each skipped test). What Windows loses is only the "
-    "end-to-end half: that a real deletion actually produces the state."
-)
-
-
-def pytest_configure(config):
-    """Register the marker here, not pytest.ini: the root CI run uses another inifile with --strict-markers."""
-    config.addinivalue_line(
-        "markers",
-        f"{DELETABLE_CWD_MARKER}: needs a process to delete the directory it stands in (POSIX only)",
-    )
-
-
 def python_sources(root: Path) -> list[Path]:
     """Every ``.py`` under *root*, sorted, skipping SANDBOX_DIRS judged only BELOW *root*.
 
     A root that itself stands inside a dropbox is still walked.
     """
     return sorted(p for p in root.rglob("*.py") if not SANDBOX_DIRS.intersection(p.relative_to(root).parts[:-1]))
-
-
-def host_platform() -> str:
-    """``sys.platform``, as a seam so the Windows branch is testable without patching sys."""
-    return sys.platform
-
-
-def pytest_collection_modifyitems(config, items):
-    """Skip deletable-cwd tests on Windows only, and say the whole reason."""
-    if host_platform() != "win32":
-        return
-    skip = pytest.mark.skip(reason=WINDOWS_CWD_REASON)
-    for item in items:
-        if DELETABLE_CWD_MARKER in item.keywords:
-            item.add_marker(skip)
 
 
 @pytest.fixture(autouse=True)

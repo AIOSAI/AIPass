@@ -398,7 +398,7 @@ class TestFindRegistry:
         # find_registry never returns None -- it returns a conventional fallback path
         result = find_registry()
         assert isinstance(result, Path)
-        # On Windows, case-insensitive glob may match other *_registry.json files
+        # A case-insensitive glob may match other *_registry.json files
         # during the walk from __file__; accept any *_REGISTRY.json variant
         assert result.name.lower().endswith("_registry.json")
 
@@ -574,10 +574,9 @@ class TestAipassHomeResolution:
         assert find_registry() == home / "AIPASS_REGISTRY.json"
 
 
-def _with_venv(home: Path, layout: str = "posix") -> Path:
-    """Give *home* its own venv python in *layout*, the way setup.sh does; returns that python."""
-    directory, name = registry_handler.VENV_LAYOUTS[layout]
-    python = home / ".venv" / directory / name
+def _with_venv(home: Path) -> Path:
+    """Give *home* its own venv python, the way setup.sh does; returns that python."""
+    python = home / ".venv" / "bin" / "python"
     python.parent.mkdir(parents=True, exist_ok=True)
     python.write_text("", encoding="utf-8")
     return python
@@ -585,10 +584,6 @@ def _with_venv(home: Path, layout: str = "posix") -> Path:
 
 class TestBranchInterpreter:
     """A branch app runs on the interpreter of the AIPass home it lives in, not on whichever drone came first."""
-
-    @pytest.fixture(autouse=True)
-    def _posix_layout(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(registry_handler, "_venv_layout", lambda: registry_handler.VENV_LAYOUTS["posix"])
 
     def test_an_enrolled_homes_branch_runs_on_the_homes_venv_announced_once(self, stranger: dict[str, Path]) -> None:
         """The sandbox: the uv tool's drone, an enrolled home with its own .venv (mutant: always sys.executable)."""
@@ -605,14 +600,12 @@ class TestBranchInterpreter:
         assert python.resolve() in log.info.call_args.args
         log.warning.assert_not_called()
 
-    @pytest.mark.parametrize("layout", ["posix", "windows"])
     def test_aipass_home_set_to_another_install_takes_its_venv_in_either_layout(
-        self, stranger: dict[str, Path], monkeypatch: pytest.MonkeyPatch, layout: str
+        self, stranger: dict[str, Path], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         home = _an_aipass_home(stranger["tmp"] / "AIPass")
-        python = _with_venv(home, layout)
+        python = _with_venv(home)
         monkeypatch.setenv("AIPASS_HOME", str(home))
-        monkeypatch.setattr(registry_handler, "_venv_layout", lambda: registry_handler.VENV_LAYOUTS[layout])
 
         assert registry_handler.branch_interpreter(home / "src" / "aipass" / "api") == str(python.resolve())
 

@@ -14,9 +14,9 @@
 
 from __future__ import annotations
 
-import sys
 import hashlib
 import hmac as hmac_mod
+import fcntl
 import json
 import socket
 import os
@@ -25,11 +25,6 @@ import threading
 from pathlib import Path
 
 import pytest
-
-if os.name == "posix":
-    import fcntl
-else:
-    fcntl = None
 
 from aipass.drone.apps.handlers.broker.protocol import BrokerRequest, BrokerResponse
 from aipass.drone.apps.handlers.broker import daemon as broker_daemon
@@ -52,14 +47,8 @@ from aipass.drone.apps.modules.rm import safe_delete
 # policy (identity-scoped), denylist backstop, confused-deputy attacks,
 # client broker_delete / create_identified_connection, and rm broker routing.
 
-pytestmark = pytest.mark.skipif(
-    sys.platform != "linux",
-    reason="broker is Linux-only: AF_UNIX sockets + openat2 RESOLVE_BENEATH",
-)
-
 #: A mode-0 folder does not stop root: the walk would list it and the test would prove nothing.
-#: The platform is read first because a skipif does not stop the import, and Windows' os has no geteuid.
-_RUNS_AS_ROOT = sys.platform == "linux" and os.geteuid() == 0
+_RUNS_AS_ROOT = os.geteuid() == 0
 
 
 # ---------------------------------------------------------------------------
@@ -291,15 +280,13 @@ class TestPathResolver:
         with pytest.raises(OSError):
             resolve_beneath(base, "does_not_exist.txt")
 
-    # -- the walk fallback: the lane every non-Linux host takes ---------------
+    # -- the walk fallback: the lane a host without openat2 takes ------------
 
     @pytest.fixture()
     def walk_host(self, monkeypatch: pytest.MonkeyPatch) -> list[bool]:
         """Stand the resolver on a host with no openat2 and no /proc to read.
 
-        That is macOS, and it is the lane that used to raise FileNotFoundError
-        on every call: the fallback asked /proc for the fd's own path, and /proc
-        is Linux furniture. A walk that reaches for it at all fails here.
+        The fallback once asked /proc for the fd's own path. A walk that reaches for it at all fails here.
         """
 
         def no_proc(fd: int) -> Path:
@@ -327,7 +314,7 @@ class TestPathResolver:
         assert resolve_beneath(base, ".") == base.resolve()
 
     def test_both_lanes_return_the_same_path(self, repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The portable walk answers what the kernel lane answers, or it is a
+        """The walk answers what the kernel lane answers, or it is a
         different resolver wearing the same name."""
         base = repo_root / "src" / "aipass" / "testbranch"
         by_kernel = resolve_beneath(base, "subdir/nested.txt")
@@ -336,9 +323,7 @@ class TestPathResolver:
         assert asked == [False], "the second resolve never asked for the lane, so both answers may be one lane's"
 
     def test_walk_refuses_a_symlinked_directory(self, repo_root: Path, walk_host: list[bool], tmp_path: Path) -> None:
-        """O_NOFOLLOW comes from `os`, so it is the host's own value: 0o0400000
-        is O_NOFOLLOW on Linux and O_NOCTTY on macOS, and the second one would
-        have opened this link instead of refusing it."""
+        """O_NOFOLLOW comes from `os`, so the walk opens no link."""
         base = repo_root / "src" / "aipass" / "testbranch"
         link = base / "link"
         link.symlink_to(tmp_path)
@@ -394,16 +379,6 @@ class TestPathResolver:
         monkeypatch.setattr(path_resolver, "_real_base", lambda _base: tmp_path / "gone")
         with pytest.raises(OSError, match="went away mid-walk"):
             resolve_beneath(base, "subdir/nested.txt")
-
-    def test_walk_refuses_a_host_without_nofollow(
-        self, repo_root: Path, walk_host: list[bool], monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Windows has neither O_NOFOLLOW nor dir_fd, so the walk cannot hold
-        its contract there and says so instead of resolving unverified."""
-        base = repo_root / "src" / "aipass" / "testbranch"
-        monkeypatch.setattr(path_resolver, "_WALK_SUPPORTED", False)
-        with pytest.raises(OSError, match="refusing rather than resolving"):
-            resolve_beneath(base, "deleteme.txt")
 
 
 # ---------------------------------------------------------------------------
@@ -719,13 +694,9 @@ class TestIdentity:
 
     def test_secret_file_0600(self, running_broker: BrokerDaemon) -> None:
         """Secret file is created with mode 0600."""
-        if os.name != "posix":
-            pytest.skip("POSIX permission check")
-        else:
-            mode = running_broker._secret_path.stat().st_mode
-            assert stat.S_IMODE(mode) == 0o600
+        mode = running_broker._secret_path.stat().st_mode
+        assert stat.S_IMODE(mode) == 0o600
 
-    @pytest.mark.skipif(os.name != "posix", reason="POSIX: Windows refuses to replace a file another handle holds")
     def test_a_reader_holding_the_old_secret_file_never_sees_the_new_secret(self, broker: BrokerDaemon) -> None:
         """Mutant: the secret written in place — the old file's open handle reads the new secret."""
         broker._secret_path.write_bytes(b"old-secret")
@@ -1320,10 +1291,7 @@ class TestTheDeleteHoldsWhatItJudged:
 
     def test_the_socket_is_owner_only(self, running_broker: BrokerDaemon) -> None:
         """Mutant killed: no chmod after bind (the socket keeps the umask mode)."""
-        if os.name != "posix":
-            pytest.skip("POSIX permission check")
-        else:
-            assert stat.S_IMODE(os.stat(running_broker.socket_path).st_mode) == 0o600
+        assert stat.S_IMODE(os.stat(running_broker.socket_path).st_mode) == 0o600
 
 
 class TestABadLineKeepsTheConnection:
@@ -1387,39 +1355,36 @@ class TestTheClientOwnsItsReply:
 
     def test_another_process_holding_the_fd_lock_makes_the_call_wait(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Mutant killed: no lockf around send+receive (the call does not wait its turn)."""
-        if os.name != "posix" or fcntl is None:
-            pytest.skip("POSIX: fork and fcntl locks")
-        else:
-            mine, broker_end = socket.socketpair()
-            monkeypatch.setenv(BROKER_FD_ENV, str(mine.fileno()))
-            # Warm the call once, so first-call setup is not mistaken for waiting on the lock.
+        mine, broker_end = socket.socketpair()
+        monkeypatch.setenv(BROKER_FD_ENV, str(mine.fileno()))
+        # Warm the call once, so first-call setup is not mistaken for waiting on the lock.
+        broker_end.sendall(BrokerResponse(ok=True, message="x", request_id="x").to_bytes())
+        broker_delete("anything")
+        ready_r, ready_w = os.pipe()
+        release_r, release_w = os.pipe()
+        child = os.fork()
+        if child == 0:
+            fcntl.lockf(mine.fileno(), fcntl.LOCK_EX)
+            os.write(ready_w, b"L")
+            os.read(release_r, 1)
+            os._exit(0)
+        try:
+            assert os.read(ready_r, 1) == b"L"
             broker_end.sendall(BrokerResponse(ok=True, message="x", request_id="x").to_bytes())
-            broker_delete("anything")
-            ready_r, ready_w = os.pipe()
-            release_r, release_w = os.pipe()
-            child = os.fork()
-            if child == 0:
-                fcntl.lockf(mine.fileno(), fcntl.LOCK_EX)
-                os.write(ready_w, b"L")
-                os.read(release_r, 1)
-                os._exit(0)
-            try:
-                assert os.read(ready_r, 1) == b"L"
-                broker_end.sendall(BrokerResponse(ok=True, message="x", request_id="x").to_bytes())
-                call = threading.Thread(target=broker_delete, args=("anything",))
-                call.start()
-                call.join(timeout=0.3)
-                waited_for_the_lock = call.is_alive()
-                os.write(release_w, b"R")
-                call.join(timeout=5)
-            finally:
-                os.waitpid(child, 0)
-                for fd in (ready_r, ready_w, release_r, release_w):
-                    os.close(fd)
-                mine.close()
-                broker_end.close()
-            assert waited_for_the_lock, "the call went ahead while another process held the fd lock"
-            assert not call.is_alive()
+            call = threading.Thread(target=broker_delete, args=("anything",))
+            call.start()
+            call.join(timeout=0.3)
+            waited_for_the_lock = call.is_alive()
+            os.write(release_w, b"R")
+            call.join(timeout=5)
+        finally:
+            os.waitpid(child, 0)
+            for fd in (ready_r, ready_w, release_r, release_w):
+                os.close(fd)
+            mine.close()
+            broker_end.close()
+        assert waited_for_the_lock, "the call went ahead while another process held the fd lock"
+        assert not call.is_alive()
 
     def test_a_malformed_identify_reply_closes_the_socket(self, tmp_path: Path) -> None:
         """Mutant killed: create_identified_connection leaking its socket on an unparsable reply."""

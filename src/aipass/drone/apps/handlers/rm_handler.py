@@ -17,7 +17,6 @@ import os
 import re
 import shutil
 import stat
-import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -41,10 +40,7 @@ def get_allowed_roots() -> list[Path]:
         seen.add(project_root)
         roots.append(project_root)
 
-    tmp_candidates: list[Path] = []
-    if sys.platform != "win32":
-        tmp_candidates.append(Path("/tmp"))
-    tmp_candidates.append(Path(tempfile.gettempdir()))
+    tmp_candidates = [Path("/tmp"), Path(tempfile.gettempdir())]
 
     for tmp_candidate in tmp_candidates:
         resolved = tmp_candidate.resolve()
@@ -168,24 +164,6 @@ def safe_delete(paths: list[str]) -> list[tuple[str, bool, str]]:
     return _safe_delete_direct(paths)
 
 
-def _standing_inside(resolved: Path, cwd: Path | None) -> str:
-    """Name the caller's own position when that is what blocked the delete.
-
-    Windows refuses to remove a tree the process stands in (WinError 32); ``drone rm ..`` does that.
-    """
-    if cwd is None or not cwd.is_relative_to(resolved):
-        return ""
-    return f" — this process is standing in {cwd}; run drone rm from outside {resolved}"
-
-
-def _remove_tree(path: Path) -> None:
-    """Remove a directory tree in rm's direct lane — where the host answers.
-
-    Its own function so tests/test_rm.py can stand Windows' refusal in for it on POSIX.
-    """
-    shutil.rmtree(path)
-
-
 def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
     """Delete paths directly (unsandboxed mode — current behavior)."""
     roots = get_allowed_roots()
@@ -284,7 +262,7 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
             if target is not None:
                 absolute.unlink()
             elif resolved.is_dir():
-                _remove_tree(resolved)
+                shutil.rmtree(resolved)
             else:
                 resolved.unlink()
             message = f"Deleted: {resolved}" + (f" (symlink to {target})" if target is not None else "")
@@ -300,7 +278,7 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
                 target=target,
             )
         except Exception as exc:
-            message = f"Delete failed: {exc}{_standing_inside(resolved, cwd)}"
+            message = f"Delete failed: {exc}"
             results.append((path_str, False, message))
             logger.error("rm: delete failed for %s: %s", path_str, exc)
             deletion_log.record_deletion(

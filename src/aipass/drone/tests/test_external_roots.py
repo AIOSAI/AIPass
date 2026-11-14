@@ -193,7 +193,6 @@ _SOME_PATH = Path(tempfile.gettempdir()) / "x" / "src" / "a"
 
 
 def _external(name: str, root: str) -> dict:
-    # tempfile.gettempdir(), not a "/tmp" literal: Windows CI runs this suite and has no /tmp.
     return {
         "name": name,
         "path": Path(tempfile.gettempdir()) / root / "src" / name,
@@ -336,7 +335,6 @@ class TestResolutionEndToEnd:
         ):
             resolved = resolve_branch("@alpha_agent")
 
-        # Path parts, not a string suffix: Windows CI's separator is not "/".
         assert Path(resolved).parts[-4:] == ("alpha", "src", "alpha", "worker"), resolved
 
     def test_an_undeclared_repo_is_still_refused(self, standin):

@@ -8,7 +8,7 @@
 
 """Kernel-safe path resolution via openat2 RESOLVE_BENEATH.
 
-The O_NOFOLLOW walk fallback is every non-Linux host's lane: same contract, portable spellings only.
+The O_NOFOLLOW walk fallback is the lane where openat2 is not usable: same contract.
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ import errno
 import os
 import stat
 import struct
-import sys
 from pathlib import Path
 
 from aipass.prax import logger
@@ -29,20 +28,16 @@ RESOLVE_BENEATH = 0x08
 RESOLVE_NO_SYMLINKS = 0x04
 SYS_OPENAT2 = 437
 
-# openat2 takes raw Linux flag numbers; the walk takes host values from `os` (flag numbers differ on macOS).
+# openat2 takes raw Linux flag numbers; the walk takes host values from `os`.
 O_PATH = 0o010000000
 O_DIRECTORY = 0o200000
-
-_WALK_O_PATH = getattr(os, "O_PATH", 0)
-_WALK_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
-_WALK_SUPPORTED = bool(_WALK_O_NOFOLLOW) and os.open in os.supports_dir_fd
 
 _OPEN_HOW_SIZE = 24
 
 
 def _openat2_available() -> bool:
     """Check if the openat2 syscall is usable on this platform."""
-    return sys.platform == "linux" and os.uname().machine == "x86_64"
+    return os.uname().machine == "x86_64"
 
 
 def _openat2(dirfd: int, pathname: bytes, flags: int, resolve: int) -> int:
@@ -145,7 +140,7 @@ def _stat_leaf(component: str, dir_fd: int) -> os.stat_result:
 def _verify_leaf(resolved: Path, leaf: os.stat_result, parts: list[str]) -> None:
     """Prove the path handed back still names the inode the walk verified.
 
-    The portable stand-in for /proc: a component swapped under the walk changes (dev, ino).
+    The stand-in for /proc: a component swapped under the walk changes (dev, ino).
     """
     try:
         seen = os.lstat(resolved)
@@ -174,14 +169,6 @@ def _real_base(base: Path) -> Path:
 
 def _open_via_walk(base: Path, parent: list[str], name: str, parts: list[str]) -> tuple[int, str, Path]:
     """Fallback: open the parent component by component with O_NOFOLLOW to block symlinks."""
-    if not _WALK_SUPPORTED:
-        raise OSError(
-            errno.ENOTSUP,
-            "Path resolution needs O_NOFOLLOW and dir_fd support, and this host "
-            "has neither -- refusing rather than resolving unverified",
-            "/".join(parts),
-        )
-
     current_fd = os.open(str(base), os.O_RDONLY | os.O_DIRECTORY)
     try:
         leaf = os.fstat(current_fd)
@@ -192,7 +179,7 @@ def _open_via_walk(base: Path, parent: list[str], name: str, parts: list[str]) -
                     break
                 next_fd = os.open(
                     component,
-                    _WALK_O_PATH | _WALK_O_NOFOLLOW | os.O_DIRECTORY,
+                    os.O_PATH | os.O_NOFOLLOW | os.O_DIRECTORY,
                     dir_fd=current_fd,
                 )
             except OSError as exc:

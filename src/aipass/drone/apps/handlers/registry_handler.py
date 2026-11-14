@@ -181,18 +181,9 @@ def missing_home_tip() -> str:
 _ANNOUNCED_HOMES: set = set()
 
 
-VENV_LAYOUTS = {"windows": ("Scripts", "python.exe"), "posix": ("bin", "python")}
-
-
-def _venv_layout() -> tuple:
-    """This platform's venv layout, one of VENV_LAYOUTS."""
-    return VENV_LAYOUTS["windows"] if os.name == "nt" else VENV_LAYOUTS["posix"]
-
-
 def _venv_python(home: Path) -> Path:
-    """Where setup.sh puts the home's own interpreter: ``<home>/.venv/bin/python`` or ``Scripts/python.exe``."""
-    directory, name = _venv_layout()
-    return home / ".venv" / directory / name
+    """Where setup.sh puts the home's own interpreter: ``<home>/.venv/bin/python``."""
+    return home / ".venv" / "bin" / "python"
 
 
 def branch_interpreter(branch_path: str | Path) -> str:

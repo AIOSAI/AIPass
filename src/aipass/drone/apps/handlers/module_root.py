@@ -8,7 +8,7 @@
 
 """One guarded spelling for module-level ``__file__`` resolution.
 
-Windows ``Path.resolve()`` always reads ``os.getcwd()``: a module-level resolve dies on a deleted cwd.
+A module-level ``Path.resolve()`` that raises OSError kills the import; this one falls back.
 """
 
 from __future__ import annotations

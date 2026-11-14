@@ -26,8 +26,7 @@ Live counts come from the run, not from a table: `-q` prints them, and `--collec
 prints the collected total without executing anything.
 
 `conftest.py` carries the isolation this branch depends on: an autouse fixture that redirects the
-deletion store away from the live `.ai_central/`, the `deletable_cwd` marker Windows skips, and the
-reset of the caller-identity dedupe set.
+deletion store away from the live `.ai_central/`, and the reset of the caller-identity dedupe set.
 
 ---
 

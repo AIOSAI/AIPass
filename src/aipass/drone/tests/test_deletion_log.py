@@ -15,7 +15,6 @@
 import json
 import os
 import shutil
-import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -29,14 +28,9 @@ from aipass.drone.apps.modules.door_deletion_log import record_deletion as door_
 
 # ``drone rm`` is the only sanctioned delete; refusals are records too (a blocked attempt leaves no other trace).
 
-#: A mode-0 folder only stops a caller the kernel holds to permissions: not on
-#: Windows, not as root. ``or`` short-circuits, so geteuid is never read on nt.
-_PERMISSIONS_DO_NOT_BIND = sys.platform == "win32" or os.geteuid() == 0
-_PERMISSIONS_REASON = "needs POSIX permissions that bind the caller"
-
-#: Windows makes a symlink only with Developer Mode or elevation.
-_NO_SYMLINKS = sys.platform == "win32"
-_NO_SYMLINKS_REASON = "creating a symlink needs a privilege on Windows"
+#: A mode-0 folder only stops a caller the kernel holds to permissions: not as root.
+_PERMISSIONS_DO_NOT_BIND = os.geteuid() == 0
+_PERMISSIONS_REASON = "needs file permissions that bind the caller"
 
 
 @pytest.fixture()
@@ -191,7 +185,6 @@ class TestRecordContents:
         assert record["kind"] == "symlink"
         assert real.exists(), "measuring must not follow the link"
 
-    @pytest.mark.skipif(_NO_SYMLINKS, reason=_NO_SYMLINKS_REASON)
     def test_a_symlink_record_names_the_link_and_its_target(self, project):
         real = project.resolve() / "real.txt"
         real.write_text("x", encoding="utf-8")
@@ -520,7 +513,6 @@ class TestRecordFailureIsContained:
 
         assert log.error.called, "a lost deletion record must be loud"
 
-    @pytest.mark.deletable_cwd
     def test_deleting_the_current_directory_still_reports_success(self, project, monkeypatch):
         """The delete worked. Losing cwd must not turn it into a failure.
 
@@ -536,7 +528,6 @@ class TestRecordFailureIsContained:
         assert results[0][1] is True, "the delete succeeded; the result must say so"
         assert not doomed.exists()
 
-    @pytest.mark.deletable_cwd
     def test_deleting_the_current_directory_does_not_raise(self, project, monkeypatch):
         """safe_delete returns per-path results. It must not become a crash.
 
@@ -554,7 +545,6 @@ class TestRecordFailureIsContained:
         assert ok is True, message
         assert message.startswith("Deleted: ")
 
-    @pytest.mark.deletable_cwd
     def test_record_deletion_does_not_raise_when_cwd_is_gone(self, project, monkeypatch):
         """The docstring says 'Never raises'. Two lines read cwd outside its try."""
         doomed = project / "scratch"
@@ -572,7 +562,6 @@ class TestRecordFailureIsContained:
 
         assert record["outcome"] == deletion_log.OUTCOME_DELETED
 
-    @pytest.mark.deletable_cwd
     def test_a_successful_delete_is_never_logged_as_a_failure(self, project, monkeypatch):
         """The log said 'deleted' and 'delete failed' for one path, one second.
 
@@ -590,7 +579,6 @@ class TestRecordFailureIsContained:
         # Mutant killed: the success path writing its ledger record as outcome "failed".
         assert [r["outcome"] for r in read_records(project)] == [deletion_log.OUTCOME_DELETED]
 
-    @pytest.mark.deletable_cwd
     def test_the_record_still_lands_when_the_cwd_is_deleted(self, project, monkeypatch):
         """Losing cwd must not cost the durable half of the record.
 
@@ -616,10 +604,9 @@ class TestRecordFailureIsContained:
 
 
 class TestTheRecordSurvivesAnAbsentCwdOnEveryOS:
-    """What the deletable-cwd tests above claim, built the portable way.
+    """What the cwd-deleting tests above claim, through a seam instead of a deleted directory.
 
-    Windows refuses deleting the cwd (WINDOWS_CWD_REASON in conftest), so here router_handler's
-    ``_working_directory`` seam beneath ``caller_cwd`` raises the real ENOENT instead. Weaker in one
+    Router_handler's ``_working_directory`` seam beneath ``caller_cwd`` raises the real ENOENT. Weaker in one
     way: it cannot catch an ``os.getcwd`` read inside C, as ``Path.resolve()`` does.
     """
 
