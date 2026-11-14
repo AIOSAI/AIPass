@@ -14,7 +14,6 @@
 # sentry: no-test-needed(ruff) — that admin_lane.py and the modules it imports parse and import
 
 import json
-import os
 from pathlib import Path
 
 import pytest  # pyright: ignore[reportMissingImports]
@@ -299,14 +298,11 @@ def test_never_reads_key_material(world, tmp_path):
     key_path = tmp_path / "fake_home" / ".aipass" / "admin_grant.key"
     # Undecodable, so any text read raises; mode 000 on POSIX refuses a binary one too.
     key_path.write_bytes(b"\xff\xfe\x00 not utf-8 \x80")
-    lock = os.name == "posix"
-    if lock:
-        key_path.chmod(0)
+    key_path.chmod(0)
     try:
         assert admin_lane_state()["key"] is True
     finally:
-        if lock:
-            key_path.chmod(0o600)
+        key_path.chmod(0o600)
 
 
 def test_does_not_import_devpulses_module():

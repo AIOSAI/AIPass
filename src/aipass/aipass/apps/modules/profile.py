@@ -21,11 +21,9 @@ from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
 from aipass.aipass.apps.handlers.json import json_handler
-from aipass.aipass.apps.handlers.module_root import module_file
 
 COMMAND = "profile"
-# module_file, not resolve(): import-time cwd read on Windows (module_root).
-_BRANCH_ROOT = module_file(__file__).parents[2]
+_BRANCH_ROOT = Path(__file__).resolve().parents[2]
 # NOT profile_data.json: json_handler regenerates its own <module>_{config,data,log}.json
 # triplet, so save_profile's log_operation would wipe the profile it just wrote.
 _PROFILE_FILENAME = "user_profile.json"

@@ -149,10 +149,9 @@ after the command", which every CLI understands.
 
 - Claude Code does not read `.agents/skills/`: the `.claude/skills` link is the
   only reason it sees the shared skills.
-- On Windows the link needs `git config core.symlinks true` and the right to
-  make symlinks. Without them `aipass init`, `aipass doctor --fix` and the
-  other scaffold doors write a copy into `.claude/skills/` and say that the
-  copy will not follow `.agents/skills`.
+- Where the filesystem refuses symlinks, `aipass init`, `aipass doctor --fix`
+  and the other scaffold doors write a copy into `.claude/skills/` and say that
+  the copy will not follow `.agents/skills`.
 - Codex runs hooks and tool shells from its app-server daemon, with the
   daemon's environment, not the terminal's. `AIPASS_HOME` therefore comes from
   `~/.profile`, which `setup.sh` writes.

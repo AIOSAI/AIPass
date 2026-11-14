@@ -30,9 +30,6 @@ drone exists — the installer and the scaffold path both reach it before a
 routing layer is available — and @spawn is downstream of it, so an import added
 here lands in someone else's process.
 `tests/test_shared_bootstrap_safety.py` is the guard.
-`tests/test_import_dead_cwd.py` covers a second failure mode for every module
-in the branch, `shared/` included: they must still import when the process's
-cwd has been deleted underneath them.
 
 `shared/` holds no json handler. The branch's json goes through the
 branch-local shim at [`apps/handlers/json/`](../apps/handlers/json), which binds

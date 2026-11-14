@@ -95,7 +95,7 @@ _make_symlink = Path.symlink_to  # the seam a test refuses, as a filesystem with
 def link_skills(target: Path) -> str | None:
     """Point .claude/skills at .agents/skills so Claude Code sees the skills Codex reads.
 
-    Where the filesystem refuses a symlink (Windows without the privilege), each
+    Where the filesystem refuses a symlink, each
     shared SKILL.md is copied instead. Returns None, or the line saying the copy
     will not follow the master. An existing .claude/skills is left as it is."""
     link = target / SKILLS_LINK_REL
@@ -111,10 +111,7 @@ def link_skills(target: Path) -> str | None:
         dest = link / skill.parent.name / "SKILL.md"
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(skill, dest)
-    return (
-        f"{SKILLS_LINK_REL} could not be a symlink here, so it is a copy that will not follow {SKILLS_REL}: "
-        "run 'git config core.symlinks true' and make the link"
-    )
+    return f"{SKILLS_LINK_REL} could not be a symlink here, so it is a copy that will not follow {SKILLS_REL}"
 
 
 def _frontmatter_keys(skill: Path) -> set:
@@ -518,7 +515,7 @@ def init_project(
         created.append(str(target / SKILLS_LINK_REL))
 
     # Sanitized name, never raw: a raw one can nest a slash, carry unimportable
-    # punctuation, or end in a dot Windows rejects.
+    # punctuation, or end in a dot.
     package_name = name.lower().replace("-", "_")
     src_dir = target / "src"
     src_dir.mkdir(exist_ok=True)

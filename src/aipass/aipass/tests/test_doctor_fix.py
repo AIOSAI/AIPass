@@ -13,7 +13,6 @@
 # sentry: no-test-needed(ruff) — that _doctor_fix.py and the modules it imports parse and import
 
 import json
-import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -192,7 +191,6 @@ class TestGenerateRemediation:
         assert len(root_items) == 1
         assert root_items[0].severity == "info"
 
-    @pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
     def test_a_symlinked_venv_is_not_a_remediation_item(self, tmp_path: Path) -> None:
         """The scanner passes a .venv linked to the AIPass runtime; it must not become a warning."""
         _make_agent(tmp_path, "agent1", "uuid-1")

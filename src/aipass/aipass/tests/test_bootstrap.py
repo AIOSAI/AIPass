@@ -51,7 +51,7 @@ def test_project_name_is_sanitized_into_the_registry_name(tmp_path, raw: str, re
     """The registry file and the src/ package carry the sanitized name, and no other registry lands.
 
     Mutant: _sanitize_name's .upper() dropped -> red. Mutant: package_name read off the
-    raw name again -> the punctuated cases red (a trailing-dot directory crashed on Windows).
+    raw name again -> the punctuated cases red.
     """
     target = tmp_path / "proj"
     target.mkdir()
@@ -690,7 +690,7 @@ def test_init_repoints_a_venv_link_left_dangling_by_a_moved_home(tmp_path, monke
 
 
 def _refuse_skills_symlink(monkeypatch) -> None:
-    """The filesystem refuses the .claude/skills link, as Windows without the privilege does."""
+    """The filesystem refuses the .claude/skills link."""
 
     def refuse(*_args, **_kwargs):
         raise OSError("symlink not permitted")
@@ -730,7 +730,6 @@ class TestSharedSkillsScaffold:
         assert copy.read_text(encoding="utf-8") == sc.prep_skill_md()
         (note,) = result["notes"]
         assert "will not follow .agents/skills" in note
-        assert "git config core.symlinks true" in note
 
     def test_the_generated_agents_text_names_memo_on_both_clis(self):
         assert "and on `/memo` (Claude Code) or `$memo` (Codex).\n" in sc.agents_md("DEMO")

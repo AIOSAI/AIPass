@@ -25,7 +25,6 @@
 import hashlib
 import http.server
 import io
-import os
 import socket
 import stat
 import sys
@@ -50,7 +49,6 @@ from aipass.aipass.apps.modules import baud
 from aipass.aipass.apps.modules.install import handle_command as install_command
 
 _TAILNET_IP = "100.101.102.103"
-_POSIX_ONLY = pytest.mark.skipif(os.name == "nt", reason="the fake tailscale is a POSIX shell script")
 
 
 class _Recorder:
@@ -219,7 +217,6 @@ def tailscale(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 class TestPhoneReadiness:
-    @_POSIX_ONLY
     def test_a_dry_run_reads_the_bind_and_runs_no_tailscale_and_no_probe(self, tailscale, face_server):
         answer, runs = tailscale
         answer(_TAILNET_IP)
@@ -228,7 +225,6 @@ class TestPhoneReadiness:
         assert (ready.tailnet, ready.server) == ("absent", "unprobed")
         assert not runs.exists()
 
-    @_POSIX_ONLY
     def test_tailscale_up_and_a_serving_face_are_read_as_such(self, tailscale, face_server):
         answer, runs = tailscale
         answer(f"{_TAILNET_IP}\\n")
@@ -236,7 +232,6 @@ class TestPhoneReadiness:
         assert (ready.tailnet, ready.server) == (_TAILNET_IP, "serving")
         assert runs.read_text(encoding="utf-8").split() == ["ip", "-4"]
 
-    @_POSIX_ONLY
     def test_tailscale_with_no_tailnet_address_is_down_not_an_address(self, tailscale, closed_port):
         answer, _runs = tailscale
         answer("", code=1)
@@ -803,7 +798,6 @@ class TestThePauseBeforeTheCode:
 
 
 class TestInstallEndsOnThePhone:
-    @_POSIX_ONLY
     def test_a_dry_run_install_passes_the_tag_and_ends_on_the_phone_lines(
         self, tmp_path, monkeypatch, capsys, tailscale
     ):

@@ -422,13 +422,7 @@ def test_enroll_missing_hooks_json_leaves_registry_intact(tmp_path):
 
 _ENROLL_ANCHOR = 'echo "Enrolling this install in the hook trust registry ..."'
 
-# setup.sh is a POSIX installer. On Windows, shutil.which("bash") finds
-# System32\bash.exe — the WSL launcher, which exits 1 with no distro installed —
-# so a which() check alone does not prove a usable shell.
-_NEEDS_POSIX_BASH = pytest.mark.skipif(
-    sys.platform == "win32" or shutil.which("bash") is None,
-    reason="needs a POSIX bash (Windows 'bash' is the WSL launcher)",
-)
+_NEEDS_POSIX_BASH = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
 
 
 def _extract_enroll_block() -> str:
@@ -451,7 +445,7 @@ def _run_enroll_block(script_dir: Path, home: Path) -> subprocess.CompletedProce
             'echo "REACHED_END action_needed=${#ACTION_NEEDED[@]}"',
         ]
     )
-    env = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
+    env = dict(os.environ, HOME=str(home))
     # An install has no override: the block must resolve the registry under HOME,
     # not the fixture's AIPASS_TRUST_REGISTRY this process inherited.
     env.pop("AIPASS_TRUST_REGISTRY", None)

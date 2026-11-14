@@ -18,7 +18,6 @@ import os
 import shutil
 import socket
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any, Callable, Dict
 
@@ -257,12 +256,3 @@ def _find_broker_socket(repo_root: Path | None) -> Path | None:
             break
 
     return None
-
-
-def is_linux(platform: str | None = None) -> bool:
-    """Return True if running on Linux.
-
-    ``platform`` is a test seam; None reads sys.platform.
-    """
-    platform = sys.platform if platform is None else platform
-    return platform.startswith("linux")

@@ -27,8 +27,7 @@ def is_throwaway_path(path: str | Path) -> bool:
     """True if path is under a temp dir or Claude Code scratchpad."""
     resolved = str(Path(path).resolve())
     tmp_roots = [tempfile.gettempdir()]
-    if os.name == "posix":
-        tmp_roots.append("/tmp")
+    tmp_roots.append("/tmp")
     for root in tmp_roots:
         try:
             r = str(Path(root).resolve())

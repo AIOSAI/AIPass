@@ -24,7 +24,6 @@ from typing import Dict
 from aipass.prax import logger
 
 from aipass.aipass.apps.handlers.json import json_handler
-from aipass.aipass.apps.handlers.module_root import module_file
 from aipass.aipass.shared.registry_discovery import registries_in
 
 TEST_TOKEN = "[AIPASS-TEST — do not update memories, do not execute, reply 'ack' only]"
@@ -45,8 +44,7 @@ BRANCHES = [
     "devpulse",
 ]
 
-# module_file, not resolve(): import-time cwd read on Windows (module_root).
-_BRANCH_ROOT = module_file(__file__).parents[3]
+_BRANCH_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _discover_branches() -> list[str]:

@@ -28,7 +28,6 @@ from aipass.aipass.apps.handlers.system_detect.system_detector import (
     detect_shell,
     detect_docker,
     detect_tmux,
-    detect_wt,
 )
 from aipass.aipass.apps.handlers.ui.progress import (
     GLYPH_FAIL,
@@ -43,7 +42,7 @@ from aipass.aipass.apps.handlers.ui.progress import (
 
 def _on_path(directory, name: str):
     """Put an executable stub named ``name`` in ``directory`` for shutil.which to find through PATH."""
-    stub = directory / (name if os.name != "nt" or name.endswith(".exe") else f"{name}.exe")
+    stub = directory / name
     stub.write_text("", encoding="utf-8")
     stub.chmod(0o755)
     return stub
@@ -107,7 +106,7 @@ class TestDetectGit:
 
 class TestDetectClaudeCode:
     def test_runs_the_resolved_path_and_parses_the_leading_version(self, tmp_path, monkeypatch) -> None:
-        """Mutant: argv[0] `claude_path` -> "claude" -> red (a bare name misses claude.cmd on Windows)."""
+        """Mutant: argv[0] `claude_path` -> "claude" -> red."""
         stub = _on_path(tmp_path, "claude")
         monkeypatch.setenv("PATH", str(tmp_path))
         with patch("aipass.aipass.apps.handlers.system_detect.system_detector.subprocess.run") as mock_run:
@@ -229,18 +228,13 @@ class TestDetectShell:
 class TestShellFromParentProc:
     """The /proc fallback, reached the way doctor reaches it: detect_shell() with SHELL unset.
 
-    Platform and parent pid go in through detect_shell's os_name/getppid seams: replacing
-    os process-wide makes pathlib dispatch follow the forced os.name on Windows.
+    The parent pid goes in through detect_shell's getppid seam.
     """
 
     @pytest.fixture(autouse=True)
     def _no_shell_env(self, monkeypatch, tmp_path) -> None:
         monkeypatch.delenv("SHELL", raising=False)
         monkeypatch.setenv("PATH", str(tmp_path))
-
-    def test_non_posix_reports_unknown(self) -> None:
-        """Mutant: `if os_name != "posix"` -> `if False` -> red (the real /proc answers on Linux)."""
-        assert detect_shell(os_name="nt")["name"] == "unknown"
 
     def test_reads_comm_file(self, monkeypatch, tmp_path) -> None:
         fake_ppid = 424242
@@ -256,7 +250,7 @@ class TestShellFromParentProc:
             return real_path_cls(arg, *a, **kw)
 
         monkeypatch.setattr(system_detector, "Path", _fake_path)
-        assert detect_shell(os_name="posix", getppid=lambda: fake_ppid) == {"name": "bash", "path": ""}
+        assert detect_shell(getppid=lambda: fake_ppid) == {"name": "bash", "path": ""}
 
     def test_missing_comm_file_reports_unknown(self, monkeypatch, tmp_path) -> None:
         fake_ppid = 999999
@@ -269,7 +263,7 @@ class TestShellFromParentProc:
             return real_path_cls(arg, *a, **kw)
 
         monkeypatch.setattr(system_detector, "Path", _fake_path)
-        assert detect_shell(os_name="posix", getppid=lambda: fake_ppid)["name"] == "unknown"
+        assert detect_shell(getppid=lambda: fake_ppid)["name"] == "unknown"
 
     def test_read_oserror_reports_unknown(self, monkeypatch) -> None:
         class _BoomPath:
@@ -280,7 +274,7 @@ class TestShellFromParentProc:
                 raise OSError("permission denied")
 
         monkeypatch.setattr(system_detector, "Path", lambda *a, **kw: _BoomPath())
-        assert detect_shell(os_name="posix", getppid=lambda: 1)["name"] == "unknown"
+        assert detect_shell(getppid=lambda: 1)["name"] == "unknown"
 
 
 class TestDetectCpu:
@@ -309,11 +303,6 @@ class TestDetectOptionalTools:
         _on_path(tmp_path, "docker")
         monkeypatch.setenv("PATH", str(tmp_path))
         assert detect_docker() is True
-
-    def test_wt_not_on_linux(self, tmp_path, monkeypatch) -> None:
-        """False when wt.exe (Windows Terminal) is absent from PATH."""
-        monkeypatch.setenv("PATH", str(tmp_path))
-        assert detect_wt() is False
 
 
 class TestProgressHelpers:

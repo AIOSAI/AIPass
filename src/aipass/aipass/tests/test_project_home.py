@@ -16,7 +16,6 @@
 
 import json
 import os
-import sys
 from pathlib import Path
 
 import pytest
@@ -34,7 +33,7 @@ def _fence(home: str) -> list[str]:
     return [f"{home}/CLAUDE.md", f"{home}/.claude/CLAUDE.md", f"{home}/AGENTS.md", f"{home}/.claude/AGENTS.md"]
 
 
-@pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason="POSIX mode bits; root reads any directory")
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads any directory")
 def test_is_projects_child_raises_naming_the_host_it_could_not_read(tmp_path):
     """A host whose listing is denied (mode 0o300: enter, never list) cannot say
     whether the target is its projects/ child. The error names the host, where a
@@ -56,8 +55,7 @@ def test_is_projects_child_raises_naming_the_host_it_could_not_read(tmp_path):
 def test_claude_md_excludes_returns_the_host_claude_md_and_agents_md_pairs(tmp_path):
     """Returns the four absolute paths a nested project must fence out.
 
-    The product answers in POSIX form on every platform (settings files carry
-    forward slashes), so home is built with as_posix() to match on Windows.
+    The product answers in POSIX form (settings files carry forward slashes).
     """
     home = (tmp_path / "AIPass").as_posix()
     excludes = claude_md_excludes(home)

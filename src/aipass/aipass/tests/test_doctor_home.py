@@ -634,7 +634,6 @@ class TestSharedSkillsRows:
         assert rows["skills link"].glyph == GLYPH_WARN
         assert rows["skills link"].detail == ".claude/skills missing: Claude Code sees none"
         assert rows["skills link"].remediation.startswith("Run: aipass doctor --fix")
-        assert "git config core.symlinks true" in rows["skills link"].remediation
         assert "writes a copy that will not follow .agents/skills" in rows["skills link"].remediation
 
     def test_a_copied_skills_folder_warns_that_it_will_not_follow(self) -> None:
@@ -645,7 +644,6 @@ class TestSharedSkillsRows:
 
         assert row.glyph == GLYPH_WARN
         assert row.detail == ".claude/skills is a copy, not a link: it will not follow .agents/skills"
-        assert "git config core.symlinks true" in row.remediation
 
     def test_fix_links_the_folder_and_retires_an_unedited_legacy_prep(self) -> None:
         self._skill("prep", "name: prep\ndescription: wrap up\n")
@@ -838,7 +836,6 @@ class TestInstructionShadowRows:
             "Left .claude/CLAUDE.md: the project root holds $HOME, whose CLAUDE files are the user's"
         )
 
-    @pytest.mark.skipif(os.name == "nt", reason="symlinks need a Windows privilege")
     def test_fix_leaves_a_claude_folder_that_links_outside_the_root(self, tmp_path) -> None:
         elsewhere = tmp_path / "elsewhere"
         elsewhere.mkdir()
@@ -851,7 +848,6 @@ class TestInstructionShadowRows:
         assert (elsewhere / "CLAUDE.md").read_text(encoding="utf-8") == "# not this project's\n"
         assert rows["shadow fix"].detail == "Left .claude/CLAUDE.md: its folder resolves outside the project root"
 
-    @pytest.mark.skipif(os.name == "nt", reason="symlinks need a Windows privilege")
     def test_a_claude_md_linked_to_agents_md_is_one_file_and_passes(self) -> None:
         (self.root / "CLAUDE.md").symlink_to("AGENTS.md")
 

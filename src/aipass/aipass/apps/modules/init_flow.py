@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -39,9 +38,7 @@ from aipass.aipass.apps.handlers.system_detect.system_detector import (
     detect_ram,
     detect_shell,
     detect_tmux,
-    detect_wt,
 )
-from aipass.aipass.apps.handlers.module_root import module_file
 from aipass.aipass.shared.registry_discovery import find_registry, registries_in
 
 try:
@@ -56,8 +53,7 @@ except ImportError as _qe:
 COMMAND = "init"
 TOTAL_STAGES = 10
 
-# module_file, not resolve(): import-time cwd read on Windows (module_root).
-_BRANCH_ROOT = module_file(__file__).parents[2]
+_BRANCH_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _get_local_json_path() -> Path:
@@ -295,40 +291,6 @@ def stage_1_welcome(dry_run: bool = False) -> Dict[str, Any]:
     return {}
 
 
-def _print_os_gap_heads_up() -> None:
-    """Print tracked cross-OS gaps that apply to this OS (machine pre-flight, not a guarantee).
-
-    Failures are non-fatal: init must not crash here.
-    """
-    try:
-        from aipass.aipass.apps.handlers.cross_os import CrossOsGapError, gaps_for_platform
-    except ImportError as exc:
-        logger.warning("[init_flow] cross_os handler unavailable: %s", exc)
-        return
-
-    try:
-        gaps = gaps_for_platform(sys.platform)
-    except CrossOsGapError as exc:
-        logger.warning("[init_flow] cross-OS gap registry unavailable: %s", exc)
-        warning("cross-OS gap registry unavailable — skipping OS heads-up.")
-        return
-
-    if not gaps:
-        return
-
-    console.print()
-    console.print(
-        f"[dim]Heads-up — {len(gaps)} tracked cross-OS gap(s) may apply on this OS "
-        "(machine pre-flight, not a guarantee):[/dim]"
-    )
-    from rich.markup import escape
-
-    # The registry's cells are text, never markup: escaped so a bracket prints as written.
-    for gap in gaps:
-        text = escape(f"gap #{gap.number}: {gap.symptom} [{gap.status}]")
-        console.print(f"  [yellow]![/yellow] [dim]{text}[/dim]")
-
-
 def stage_2_system_detect(dry_run: bool = False) -> Dict[str, Any]:
     """Detect OS, Python, shell, RAM, CPU, install method, and optional tools."""
     console.print()
@@ -344,7 +306,6 @@ def stage_2_system_detect(dry_run: bool = False) -> Dict[str, Any]:
     cpu = detect_cpu()
     install = detect_install_method()
     has_tmux = detect_tmux()
-    has_wt = detect_wt()
 
     table = Table(show_header=False, box=None)
     table.add_column("key", style="cyan")
@@ -357,16 +318,12 @@ def stage_2_system_detect(dry_run: bool = False) -> Dict[str, Any]:
     table.add_row("install", install)
     table.add_row("git", git["version"] if git["found"] else "not found")
     table.add_row("tmux", "yes" if has_tmux else "no")
-    if sys.platform == "win32":
-        table.add_row("wt.exe", "yes" if has_wt else "no")
     console.print(table)
 
     console.print()
     console.print(f"You are on [cyan]{os_info['os_name']}[/cyan] with Python [cyan]{py['version']}[/cyan].")
     install_labels = {"dev": "development (editable source)", "pip": "pip", "clone": "git clone", "unknown": "unknown"}
     console.print(f"Install type: [cyan]{install_labels.get(install, install)}[/cyan]")
-
-    _print_os_gap_heads_up()
 
     system_data: Dict[str, Any] = {
         "os": os_info["os_name"],
@@ -443,11 +400,8 @@ def stage_4_style_questions(
 
 
 def _install_claude_code() -> bool:
-    """Run the canonical Claude Code installer, platform-aware. Returns True on success."""
-    if sys.platform == "win32":
-        cmd = ["powershell", "-Command", "irm https://claude.ai/install.ps1 | iex"]
-    else:
-        cmd = ["bash", "-c", "curl -fsSL https://claude.ai/install.sh | bash"]
+    """Run the canonical Claude Code installer. Returns True on success."""
+    cmd = ["bash", "-c", "curl -fsSL https://claude.ai/install.sh | bash"]
 
     try:
         result = subprocess.run(cmd, timeout=300)
@@ -644,8 +598,6 @@ def stage_8_smoke_test(dry_run: bool = False) -> Dict[str, Any]:
     else:
         warning("aipass not on PATH — clone the repo and run setup.sh")
 
-    console.print("[dim]Full cross-OS pre-flight: aipass doctor --cross-os[/dim]")
-
     _save_stage(8, {"drone": drone_bin, "aipass": aipass_bin}, dry_run=dry_run)
     return {"drone": drone_bin, "aipass": aipass_bin}
 
@@ -806,7 +758,7 @@ def _preflight_check(*, allow_projects_child: bool = False) -> str | None:
 
         if is_projects_child(cwd):
             return None
-    # Locked Windows entries at the drive root (pagefile.sys) raise OSError: skip, never crash.
+    # An unreadable ancestor raises OSError: skip, never crash.
     for parent in [cwd] + list(cwd.parents):
         try:
             entries = list(parent.iterdir())
@@ -1328,11 +1280,4 @@ def handle_command(command: str, args: list[str]) -> bool:
 
 
 if __name__ == "__main__":
-    # Windows streams default to cp1252, which cannot encode Rich's glyphs; mirrors apps/aipass.py.
-    if sys.platform == "win32":
-        os.environ.setdefault("PYTHONUTF8", "1")
-        for _stream in (sys.stdout, sys.stderr):
-            if hasattr(_stream, "reconfigure"):
-                _stream.reconfigure(encoding="utf-8", errors="replace")
-
     handle_command("init", sys.argv[1:])

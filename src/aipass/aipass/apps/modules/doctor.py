@@ -16,18 +16,14 @@ import re
 import subprocess
 from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional
-from rich.markup import escape
-from aipass.cli.apps.modules import console, error as cli_error, success
+from aipass.cli.apps.modules import console, error as cli_error
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
 from aipass.aipass.shared.registry_discovery import find_registry as _discover_registry
 from aipass.aipass.shared.project_home import _detect_aipass_home, find_fenceless_projects
 
-from aipass.aipass.apps.handlers.cross_os import RunRecordError, generate_run_record
-from aipass.aipass.apps.handlers.cross_os.doctor_rows import check_cross_os, record_path_arg
 from aipass.aipass.apps.handlers.json import json_handler
-from aipass.aipass.apps.handlers.provider_wire import platform_bridge_command
 from aipass.aipass.apps.handlers.settings_backup import DOOR_DOCTOR_FIX, DOOR_INSTALL
 from aipass.aipass.apps.handlers.sandbox_check.sandbox_checker import (
     check_broker_alive,
@@ -37,7 +33,6 @@ from aipass.aipass.apps.handlers.sandbox_check.sandbox_checker import (
     check_rg_present,
     check_sandbox_flag,
     check_srt_resolvable,
-    is_linux,
 )
 from aipass.aipass.apps.handlers.admin_lane import check_admin_lane
 from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
@@ -78,7 +73,6 @@ from aipass.aipass.apps.handlers.system_detect.system_detector import (
     detect_ram,
     detect_shell,
 )
-from aipass.aipass.apps.handlers.module_root import module_file
 from aipass.aipass.apps.handlers.ui.progress import (
     GLYPH_FAIL,
     GLYPH_PASS,
@@ -91,8 +85,7 @@ COMMAND = "doctor"
 
 AGENTS_MD_MIN_CLAUDE = (2, 1, 277)
 
-# module_file, not resolve(): import-time cwd read on Windows (module_root).
-_BRANCH_ROOT = module_file(__file__).parents[2]
+_BRANCH_ROOT = Path(__file__).resolve().parents[2]
 
 
 class CheckResult(NamedTuple):
@@ -442,12 +435,11 @@ def _find_manifest() -> Path | None:
 def check_provider_manifest(
     interactive: bool = False,
     settings_path: Optional[Path] = None,
-    os_name: Optional[str] = None,
 ) -> List[CheckResult]:
     """Check provider settings against manifest. Returns hook/env/permission results.
 
     Public: init_flow's report reads the manifest gaps through it. The --fix write lives in
-    fix_provider_settings. settings_path and os_name are test seams; product callers pass neither.
+    fix_provider_settings. settings_path is a test seam; product callers pass none.
     """
     if settings_path is None:
         settings_path = Path.home() / ".claude" / "settings.json"
@@ -486,8 +478,7 @@ def check_provider_manifest(
 
     missing_hooks = []
     for hook in manifest_hooks:
-        # Same OS transform provider_wire applies at write time, so verify agrees with write.
-        command = platform_bridge_command(hook.get("command", ""), os_name)
+        command = hook.get("command", "")
         event = hook.get("event", "")
         if not command or not event:
             continue
@@ -580,8 +571,8 @@ def check_provider_manifest(
             missing_settings,
             settings_path=settings_path,
         )
-        if wired:  # the re-read after a wire reads the same file, on the same platform
-            return check_provider_manifest(interactive=False, settings_path=settings_path, os_name=os_name)
+        if wired:  # the re-read after a wire reads the same file
+            return check_provider_manifest(interactive=False, settings_path=settings_path)
 
     return results
 
@@ -674,9 +665,7 @@ def _check_drone_systems() -> List[CheckResult]:
 
 
 def _home_venv_python(home: Path) -> Path:
-    """The home's venv interpreter: .venv/Scripts/python.exe on Windows, else .venv/bin/python."""
-    if os.name == "nt":
-        return home / ".venv" / "Scripts" / "python.exe"
+    """The home's venv interpreter: .venv/bin/python."""
     return home / ".venv" / "bin" / "python"
 
 
@@ -912,10 +901,6 @@ def _check_sandbox() -> List[CheckResult]:
         ]
 
     results: List[CheckResult] = []
-    if not is_linux():
-        results.append(CheckResult("sandbox", GLYPH_PASS, "kernel sandbox: Linux-only, not checked", ""))
-        return results
-
     results.append(CheckResult("sandbox flag", GLYPH_PASS, "AIPASS_SANDBOX_ENABLED=ON", ""))
 
     def _sev(ok: bool) -> str:
@@ -948,77 +933,6 @@ def _check_sandbox() -> List[CheckResult]:
     results.append(CheckResult("broker daemon", _sev(broker["alive"]), broker["detail"], ""))
 
     return results
-
-
-def run_cross_os(run_e2e: bool = False) -> int:
-    """Render only the cross-OS pre-flight group (`aipass doctor --cross-os`).
-
-    Returns the error (FAIL) count; warnings do not fail, matching run_doctor.
-    When ``run_e2e`` is set (``--cross-os --e2e``), the heavy e2e suite runs too.
-    """
-    console.print()
-    console.print("[bold cyan]aipass doctor --cross-os[/bold cyan]")
-    console.print("[dim]machine pre-flight (Layer-3-lite) — augments, never replaces, the human acceptance pass[/dim]")
-    if run_e2e:
-        console.print("[dim]--e2e: running the heavy Phase-2 e2e wiring suite (builds a wheel + fresh venv)…[/dim]")
-    console.print()
-
-    checks = check_cross_os(run_e2e=run_e2e)
-    pass_count = 0
-    warn_count = 0
-    error_count = 0
-
-    console.print("  [bold]Cross-OS[/bold]")
-    for check in checks:  # rows carry registry and probe text, never markup: escaped so brackets print as written
-        line = format_check(escape(check.label), check.glyph, escape(check.detail), escape(check.remediation))
-        console.print(line)
-        if check.glyph == GLYPH_PASS:
-            pass_count += 1
-        elif check.glyph == GLYPH_WARN:
-            warn_count += 1
-        else:
-            error_count += 1
-    console.print()
-
-    console.print("[dim]─────────────────────────────────[/dim]")
-    console.print(
-        f"  [green]✓ pass: {pass_count}[/green]  "
-        f"[yellow]! warnings: {warn_count}[/yellow]  "
-        f"[red]✗ errors: {error_count}[/red]"
-    )
-    console.print()
-
-    logger.info("[doctor] cross-os run — pass=%d warn=%d error=%d", pass_count, warn_count, error_count)
-    return error_count
-
-
-def run_cross_os_record(path: str | None = None, run_e2e: bool = False) -> int:
-    """Generate a machine pre-flight Run Record (`aipass doctor --cross-os --record`).
-
-    Returns 0 on success, 1 if the file could not be written (never crashes).
-    """
-    console.print()
-    console.print("[bold cyan]aipass doctor --cross-os --record[/bold cyan]")
-    console.print(
-        "[dim]machine pre-flight DRAFT — auto-fills what the machine can prove; "
-        "a human still runs the real Layer-3 pass[/dim]"
-    )
-    if run_e2e:
-        console.print("[dim]--e2e: running the heavy Phase-2 e2e suite (builds a wheel + fresh venv)…[/dim]")
-    console.print()
-
-    try:
-        written = generate_run_record(path, run_heavy_e2e=run_e2e)
-    except RunRecordError as exc:
-        cli_error(str(exc))
-        logger.error("[doctor] cross-os run record failed: %s", exc)
-        return 1
-
-    success(f"Run Record written: {written}")
-    console.print("[dim]Complete the '— human' rows and run the real Layer-3 acceptance pass before it counts.[/dim]")
-    console.print()
-    logger.info("[doctor] cross-os run record written to %s", written)
-    return 0
 
 
 def _check_tier0(root: Path, aipass_home: str | None, preview: str) -> List[CheckResult]:
@@ -1086,10 +1000,7 @@ def _check_shared_skills(root: Path) -> List[CheckResult]:
 
     state = bs.shared_skills_state(root)
     fix = f"Run: {_FIX_COMMAND}"
-    symlinks = (
-        "on Windows it needs 'git config core.symlinks true' and the right to make links; without "
-        f"them {_FIX_COMMAND} writes a copy that will not follow {bs.SKILLS_REL}"
-    )
+    symlinks = f"where the filesystem refuses links, {_FIX_COMMAND} writes a copy that will not follow {bs.SKILLS_REL}"
     rows: List[CheckResult] = []
     if not state["skills"]:
         rows.append(
@@ -1110,7 +1021,7 @@ def _check_shared_skills(root: Path) -> List[CheckResult]:
         rows.append(CheckResult("skills link", GLYPH_WARN, detail, f"{fix} ({symlinks})"))
     elif link == bs.LINK_STATE_COPY:
         detail = f"{bs.SKILLS_LINK_REL} is a copy, not a link: it will not follow {bs.SKILLS_REL}"
-        rows.append(CheckResult("skills link", GLYPH_WARN, detail, f"Make it the link: {symlinks}"))
+        rows.append(CheckResult("skills link", GLYPH_WARN, detail, f"Make it the link to ../{bs.SKILLS_REL}"))
     else:
         detail = f"{bs.SKILLS_LINK_REL} points at {state['link_to']}, not {bs.SKILLS_REL}"
         rows.append(CheckResult("skills link", GLYPH_WARN, detail, f"Point it at ../{bs.SKILLS_REL}"))
@@ -1407,12 +1318,6 @@ def print_help() -> None:
     )
     console.print("    [dim]--smoke spends one model turn per installed provider and needs each one's login;[/dim]")
     console.print("    [dim]not installed, no login, or a spent quota is a skip. Never part of --fix.[/dim]")
-    console.print("  [green]aipass doctor --cross-os[/green][dim]# OS-gap + routing/version/hooks pre-flight[/dim]")
-    console.print("  [green]aipass doctor --cross-os --e2e[/green][dim]# …also run the heavy e2e suite[/dim]")
-    console.print(
-        "  [green]aipass doctor --cross-os --record [PATH][/green]"
-        "[dim]# write a machine pre-flight Run Record draft (human completes it)[/dim]"
-    )
     console.print()
     console.print("[yellow]OUTPUT:[/yellow]  pass / warn / error (color-coded)")
     console.print("[yellow]EXIT:[/yellow]    0 = pass/warn  |  1 = errors found")
@@ -1430,21 +1335,6 @@ def handle_command(command: str, args: list[str]) -> bool:
 
     if args and args[0] == "--info":
         print_introspection()
-        return True
-
-    if "--cross-os" in args:
-        e2e = "--e2e" in args
-        if "--record" in args:
-            record_path = record_path_arg(args)
-            rc = run_cross_os_record(record_path, run_e2e=e2e)
-            json_handler.log_operation("doctor_cross_os_record", {"path": record_path, "e2e": e2e, "rc": rc})
-            if rc != 0:
-                raise SystemExit(1)
-            return True
-        error_count = run_cross_os(run_e2e=e2e)
-        json_handler.log_operation("doctor_cross_os", {"error_count": error_count, "e2e": e2e})
-        if error_count > 0:
-            raise SystemExit(1)
         return True
 
     verbose = "--verbose" in args or "-v" in args

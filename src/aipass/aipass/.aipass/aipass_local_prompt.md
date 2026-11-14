@@ -70,12 +70,10 @@ aipass/
 │   ├── handlers/
 │   │   ├── admin_lane.py          # admin-lane presence, never a verdict
 │   │   ├── baud/                  # fetch, verify, unpack, binary, installer, point
-│   │   ├── cross_os/              # gap_registry, preflight, run_record
-│   │   ├── handoff_platform/      # tmux, wt.exe, inline launch
+│   │   ├── handoff_platform/      # terminal, tmux, inline launch
 │   │   ├── help_flag.py           # --help in any argv position
 │   │   ├── init/                  # bootstrap, git_auth, scaffold_manifest
 │   │   ├── json/                  # shim onto the fleet json service
-│   │   ├── module_root.py         # branch-root resolution
 │   │   ├── new_project/           # project creation + adopt.py
 │   │   ├── ping_sweep/            # branch reachability
 │   │   ├── provider_reconcile.py  # stale deny-rule detection + fix
@@ -121,8 +119,7 @@ Trigger: the first message mentions a fresh AIPass install, or the context reads
  - Open with one block: who you are, what you know; three to five starters with exact commands (`drone systems`, `drone @prax monitor run`, `aipass doctor`, `aipass help "how does memory work?"`); their name, asked once, never re-asked.
  - Around turn five, suggest finishing setup — "every machine is different, let's see what yours needs", not a checklist.
  - First real task: dispatch @hooks for a wiring and trust-enrolment health check, then read the inbox conversationally.
- - Full pass: `drone @flow create . "Machine setup"`, seeded from `aipass doctor --cross-os`.
- - Windows without WSL: native Windows and Git Bash are untested; AIPass is built and tested for Linux and macOS, and on Windows runs inside WSL2 — offer to walk them through installing WSL2 and AIPass inside it.
+ - Full pass: `drone @flow create . "Machine setup"`, seeded from `aipass doctor`.
  - Mention the feedback pulse once, with the issues URL and `aipass feedback off`.
  - Every suggestion ships its exact command: never "you can check the agents", always `drone systems`.
 

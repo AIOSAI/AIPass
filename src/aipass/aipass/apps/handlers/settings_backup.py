@@ -95,8 +95,7 @@ def _ensure_folder(folder: Path) -> None:
     if folder.is_dir():
         return
     folder.mkdir(parents=True, exist_ok=True)
-    if os.name != "nt":
-        folder.chmod(_DIR_MODE)
+    folder.chmod(_DIR_MODE)
 
 
 def _reserve_backup_name(folder: Path, base: str) -> Path:
@@ -136,8 +135,7 @@ def backup_before_write(settings_path: Path, door: str, actor: Optional[str] = N
             backup = _reserve_backup_name(folder, target.name)
             target = backup
             shutil.copy2(settings_path, backup)
-            if os.name != "nt":
-                backup.chmod(_FILE_MODE)
+            backup.chmod(_FILE_MODE)
             before_sha256 = sha256_of(backup)
     except OSError as exc:
         logger.error("[settings_backup] backup failed at %s: %s", target, exc)

@@ -239,19 +239,6 @@ class TestInstallLock:
         assert "999999999" in lock.read_text(encoding="utf-8")
         assert "could not tell whether pid 999999999 is alive" in err.call_args[0][0]
 
-    def test_failed_windows_probe_answers_unknown(self) -> None:
-        """On Windows a tasklist that cannot run answers None (unknown), never alive or dead.
-
-        None is what the lock refuses to steal on (test_holder_of_unknown_liveness_is_never_stolen).
-        The platform and the runner are handed in, so nothing is patched process-wide.
-        Mutant: the tasklist failure answers False (dead) instead of None -> red.
-        Mutant: the tasklist failure answers True (the old guess) instead of None -> red.
-        """
-        run = MagicMock(side_effect=OSError("tasklist missing"))
-
-        assert _install._pid_alive(999999999, platform_name="win32", runner=run) is None
-        assert run.call_args[0][0] == ["tasklist", "/FI", "PID eq 999999999", "/NH"]
-
 
 class TestCloneRepo:
     """Fetching the framework into the home via git clone."""

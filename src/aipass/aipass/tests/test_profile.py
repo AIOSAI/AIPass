@@ -3,7 +3,7 @@
 # Description: Tests for aipass profile Phase 3
 # Version: 1.2.6
 # Created: 2026-04-16
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/profile.py and the handlers it drives."""
@@ -117,7 +117,7 @@ class TestWriteDurability:
         Through prax's package path: the fence refuses a foreign import of its handlers.
         """
         return patch(
-            "aipass.prax.json_handler.replace_with_retry",
+            "aipass.prax.json_handler.os.replace",
             side_effect=OSError("no space left on device"),
         )
 

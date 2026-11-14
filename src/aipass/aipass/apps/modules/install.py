@@ -18,7 +18,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict
+from typing import Callable, Dict
 from urllib.parse import urlsplit, urlunsplit
 
 from aipass.cli.apps.modules import console, error, success, warning
@@ -172,31 +172,8 @@ def acquire_install_lock(home: Path, _retry: bool = True) -> Path | None:
     return lock
 
 
-def _pid_alive(
-    pid: int,
-    platform_name: str | None = None,
-    runner: Callable[..., Any] | None = None,
-) -> bool | None:
-    """True when `pid` names a live process, False when it is gone, on POSIX and on Windows.
-
-    ``platform_name`` and ``runner`` are test seams, defaulting at call time.
-    None when the Windows probe fails: the caller must not steal the lock on it.
-    Never os.kill(pid, 0) on Windows: it terminates the target whatever the signal.
-    """
-    run = subprocess.run if runner is None else runner
-    if (platform_name is None and sys.platform == "win32") or platform_name == "win32":
-        try:
-            out = run(
-                ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            logger.warning("[install] tasklist probe for pid %s failed: %s", pid, exc)
-            return None  # unknown: the caller never steals on it
-        return str(pid) in out.stdout
-
+def _pid_alive(pid: int) -> bool:
+    """True when `pid` names a live process, False when it is gone."""
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

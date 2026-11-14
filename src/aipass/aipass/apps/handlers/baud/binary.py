@@ -34,7 +34,7 @@ _MACHINE_ALIASES = {"amd64": "x86_64", "x64": "x86_64"}
 
 
 def platform_slug(system: str | None = None, machine: str | None = None) -> str:
-    """This machine as <os>-<arch>, lowercase: linux-x86_64, darwin-arm64, windows-x86_64."""
+    """This machine as <os>-<arch>, lowercase: linux-x86_64."""
     os_name = (system or platform.system()).lower()
     arch = (machine or platform.machine()).lower()
     return f"{os_name}-{_MACHINE_ALIASES.get(arch, arch)}"

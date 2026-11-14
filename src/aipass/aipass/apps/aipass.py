@@ -10,21 +10,11 @@
 AIPASS Branch - Main Orchestrator
 """
 
-import os
 import sys
 import importlib
 import importlib.metadata
 from pathlib import Path
 from typing import List, Any
-
-# Windows streams default to cp1252 and cannot encode Rich's glyphs; PYTHONUTF8 only
-# reaches child interpreters, so the live streams are reconfigured too (as drone/cli.py).
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")  # for child subprocesses
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 from aipass.cli.apps.modules import console, error, resolve_exit, warning
 from aipass.prax import logger
@@ -189,7 +179,6 @@ def print_help(modules: List[Any] | None = None) -> None:
     )
     console.print("  [green]doctor --fix[/green]                 [dim]Remediation report with repair commands[/dim]")
     console.print("  [green]doctor --fix --json[/green]          [dim]The remediation report as JSON[/dim]")
-    console.print("  [green]doctor --cross-os[/green]            [dim]Cross-OS pre-flight check[/dim]")
     console.print(
         "  [green]feedback[/green] [dim]\\[on|off][/dim]            [dim]Toggle the feedback reminder pulse[/dim]"
     )

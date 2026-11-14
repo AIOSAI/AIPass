@@ -11,11 +11,6 @@
       "reason": "wants_help() is a pure predicate - no I/O, no JSON, no logging - called on EVERY command dispatch before any action runs. Importing json_handler would add a write path and a failure surface to the one function whose whole job is to stop a help probe becoming a write. Measured: the file performs zero JSON operations, so json_handler would be imported solely to satisfy the checker. Fleet-settled shape (DPLAN-0291 help_flag_safety round)."
     },
     {
-      "file": "apps/handlers/cross_os/doctor_rows.py",
-      "standard": "json_structure",
-      "reason": "Builds the rows of `aipass doctor --cross-os` from answers other handlers give and returns them; it opens no file and writes no JSON. The run is logged once where the command runs (doctor.handle_command, doctor_cross_os), gap_registry logs its own read, and preflight logs the e2e run (its three light probes log only a failure to run). Importing json_handler here would be for the checker alone. Split out of doctor.py 2026-09-29 (fleet green leg 5, aipass's decision); kept here, not moved into preflight.py, in leg 6 (aipass's decision): preflight runs probes and prints nothing, the rows need the gap registry and the screen glyphs, and there the checker would pass only on preflight's unrelated e2e log call. Devpulse's exception, compass 495."
-    },
-    {
       "file": "apps/modules/init_flow.py",
       "standard": "modules",
       "reason": "12-stage init flow requires this many lines; splitting would scatter cohesive stage logic across multiple files and break the resumable-progress contract. Re-measured 2026-09-07 (FPLAN-0492 wave 6) after the hand-rolled json writer was replaced by the fleet service: the file is still 1210 lines and the rule is LIVE IN BOTH LANES without this row (audit Modules 95%, checklist modules FAIL). The writer was never what this row was carrying."
@@ -152,7 +147,7 @@
     {
       "file": "apps/aipass.py",
       "standard": "logged_fallback",
-      "lines": [289, 314],
+      "lines": [278, 303],
       "reason": "main() returns a process exit code. 1 is the failure code at every return that carries it (crash, unknown command, @target, import failure); success is 0 through resolve_exit, and a refusal is 2. The caller is the shell, and it tells failure from success. The crash also goes to stderr through error() and its traceback to the log (_log_crash, which never raises from the log). Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-13."
     },
     {
@@ -164,13 +159,13 @@
     {
       "file": "apps/modules/install.py",
       "standard": "logged_fallback",
-      "lines": [127, 205, 624],
-      "reason": "127: _clear_stale_lock answers whether the lock is now free. FileNotFoundError means another process removed it first, so it IS free (True is the fact); an unlink that fails returns False and refuses (caller acquire, install.py:152). 205: _pid_alive on POSIX, a PermissionError from signal 0 means the process exists under another user, so True is the answer; an unknown is None. 623: run_install's Ctrl-C at home resolution returns 1, the documented code for nothing installed; handle_command passes it to sys.exit, and no caller branches on cancel versus failure. Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-13 after DPLAN-0408 moved them; again 2026-10-24 (FPLAN-0665 moved them 4 down)."
+      "lines": [127, 182, 601],
+      "reason": "127: _clear_stale_lock answers whether the lock is now free. FileNotFoundError means another process removed it first, so it IS free (True is the fact); an unlink that fails returns False and refuses (caller acquire, install.py:152). 182: _pid_alive, a PermissionError from signal 0 means the process exists under another user, so True is the answer. 623: run_install's Ctrl-C at home resolution returns 1, the documented code for nothing installed; handle_command passes it to sys.exit, and no caller branches on cancel versus failure. Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-13 after DPLAN-0408 moved them; again 2026-10-24 (FPLAN-0665 moved them 4 down)."
     },
     {
       "file": "apps/modules/doctor.py",
       "standard": "logged_fallback",
-      "lines": [189, 601],
+      "lines": [183, 593],
       "reason": "187: _configured_aipass_home's two callers read \"\" as no setting: _check_home_agreement (doctor.py:360) skips the comparison, and the pytest collect row (_check_pytest_collect) falls back to the env AIPASS_HOME, then says not set; an unreadable settings.json already shows as its own FAIL row from _check_global_aipass_home on the line above, so the failure is on screen and the comparison has nothing to compare. 612: _registry_citizen_names's one caller (drone row, doctor.py:667) compares only when names exist; an unreadable registry is the registry row's FAIL ('corrupt JSON', doctor.py:374). Re-read in fleet green leg 7 (aipass's decision); re-pinned 2026-10-15 (FPLAN-0645: one import and the door keyword moved both lines); again 2026-10-15 (FPLAN-0646: the --yes import and the fix orchestration moved them). Re-pinned 2026-10-21 (DPLAN-0418 wave 2: the claude code row and its constant moved both lines); 608 again 2026-10-24 (FPLAN-0665); both 2026-10-25 (FPLAN-0670: the codex hooks import and row); both 2026-10-26 (FPLAN-0704: the shadow import); both 2026-10-27 (FPLAN-0705: the gitignore coverage import); both 2026-10-28 (FPLAN-0732: the smoke import); FPLAN-0734 moved them."
     },
     {
@@ -182,30 +177,20 @@
     {
       "file": "apps/handlers/init/scaffold_manifest.py",
       "standard": "logged_fallback",
-      "lines": [167],
+      "lines": [165],
       "reason": "read_ignore: a .updateignore that does not exist means no ignore patterns, which is the answer []. A file that is there but unreadable raises UpdateIgnoreUnreadable on the next line (fleet green leg 5), so its callers (bootstrap.update_project:418, doctor scaffold group:1098) never read an unreadable file as an empty one. Re-read in fleet green leg 7 (aipass's decision). Re-pinned 2026-10-21 (DPLAN-0418 wave 2: docstring closings joined, the line moved up); 2026-10-27 (FPLAN-0705: trusted_hashes and the managed key moved it down)."
     },
     {
       "file": "apps/handlers/system_detect/system_detector.py",
       "standard": "logged_fallback",
-      "lines": [110],
-      "reason": "_shell_from_parent_proc is a probe: None is 'not detected', the same answer as non-POSIX or no /proc entry, and its one caller (detect_shell, system_detector.py:123) keeps its 'unknown' value on None as documented. Re-read in fleet green leg 7 (aipass's decision). Re-pinned 2026-10-21 (DPLAN-0418 wave 2: detect_claude_code above it)."
+      "lines": [107],
+      "reason": "_shell_from_parent_proc is a probe: None is 'not detected', the same answer as no /proc entry, and its one caller (detect_shell, system_detector.py:123) keeps its 'unknown' value on None as documented. Re-read in fleet green leg 7 (aipass's decision). Re-pinned 2026-10-21 (DPLAN-0418 wave 2: detect_claude_code above it)."
     },
     {
       "file": "apps/handlers/sandbox_check/sandbox_checker.py",
       "standard": "logged_fallback",
-      "lines": [114],
+      "lines": [113],
       "reason": "_find_srt_resolver is a probe: None is 'resolver not found', the same answer as a missing spec or file, and its one caller (check_srt_resolvable, sandbox_checker.py:166) reports the resolver as not found on None. Re-read in fleet green leg 7 (aipass's decision)."
-    },
-    {
-      "file": "tests/test_bootstrap_update.py",
-      "standard": "stdlib_patch",
-      "reason": "File-wide because the stdlib_patch checker passes no line (measured leg 7: a lines [511] rule left the line convicted). The one patch is at _windows_newline_world, line 94 (moved with it from test_bootstrap.py:511 in the 2026-10-08 split). _windows_newline_world manufactures the one platform behaviour Linux cannot produce: write_text translating LF to CRLF when newline is unset (PR #761's windows-setup red). Asserting on disk alone would pass on Linux whatever the writer does, so the pin needs the translation. A product seam would exist for this test alone (every writer goes through write_text_lf already). monkeypatch restores Path.write_text at teardown. Fleet green leg 7 (aipass's decision)."
-    },
-    {
-      "file": "tests/test_registry_case_sweep.py",
-      "standard": "stdlib_patch",
-      "reason": "File-wide because the stdlib_patch checker passes no line (measured leg 7: a lines [73] rule left the line convicted). The one patch is at case_insensitive_fs, line 44. case_insensitive_fs emulates a case-folding filesystem (Windows, default macOS) by widening Path.glob, which a Linux host cannot produce on disk; host_folds_case asks the real host as well, so both answers are pinned. A seam in registry_discovery would exist for the test alone: no product caller hands a glob in. monkeypatch restores Path.glob at teardown. Fleet green leg 7 (aipass's decision)."
     },
     {
       "file": "tests/test_new_project.py",
@@ -222,8 +207,8 @@
     {
       "file": "tests/test_install.py",
       "standard": "through_the_command",
-      "lines": [22, 252, 1364, 1396],
-      "reason": "Ruling (c), fleet green leg 7: run_install, the one public door, clones the repo (_clone_repo), runs setup.sh (_run_setup), fixes ownership (_check_and_fix_owner), fetches baud (_install_phone_face), runs doctor (_run_doctor_preflight) and launches the chat (_end_in_chat, which prompts _ask_permission_mode and builds _build_install_prompt); _resolve_home and _looks_like_aipass_tree prompt and probe before the clone; _registry_user_name and _print_next_steps sit behind the chat launch. Every helper is pinned with the far side stubbed (lines re-pinned 2026-10-15, DPLAN-0409 C3). _resolve_source (--source) is a pure check before the clone, also pinned through run_install. 252: _pid_alive's Windows tasklist branch is unreachable from acquire_install_lock on a POSIX host; it is handed platform and runner instead. Re-pinned 2026-10-24 (FPLAN-0665 moved 246/1322/1354; 1392 is a second _clone_repo pin)."
+      "lines": [22, 1351, 1383],
+      "reason": "Ruling (c), fleet green leg 7: run_install, the one public door, clones the repo (_clone_repo), runs setup.sh (_run_setup), fixes ownership (_check_and_fix_owner), fetches baud (_install_phone_face), runs doctor (_run_doctor_preflight) and launches the chat (_end_in_chat, which prompts _ask_permission_mode and builds _build_install_prompt); _resolve_home and _looks_like_aipass_tree prompt and probe before the clone; _registry_user_name and _print_next_steps sit behind the chat launch. Every helper is pinned with the far side stubbed (lines re-pinned 2026-10-15, DPLAN-0409 C3). _resolve_source (--source) is a pure check before the clone, also pinned through run_install. Re-pinned 2026-10-24 (FPLAN-0665 moved 246/1322/1354; 1392 is a second _clone_repo pin)."
     },
     {
       "file": "tests/test_doctor.py",

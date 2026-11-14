@@ -64,7 +64,7 @@ def _seat_home(tmp_path, monkeypatch, *, venv: bool = True, via: str = "settings
     """
     home = tmp_path / "home"
     home.mkdir()
-    venv_python = home / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    venv_python = home / ".venv" / "bin" / "python"
     if venv:
         venv_python.parent.mkdir(parents=True)
         venv_python.write_text("", encoding="utf-8")
@@ -304,7 +304,7 @@ class TestClaudeCodeRow:
         monkeypatch.setattr(f"{mod}.check_provider_manifest", lambda **_kw: [])
         # git sits beside claude so the System group carries no FAIL row and doctor exits 0.
         for name in ("git", "claude") if stdout is not None else ("git",):
-            stub = tmp_path / (f"{name}.exe" if os.name == "nt" else name)
+            stub = tmp_path / name
             stub.write_text("", encoding="utf-8")
             stub.chmod(0o755)
         monkeypatch.setenv("PATH", str(tmp_path))
@@ -519,30 +519,6 @@ class TestProviderManifest:
         assert hooks_result.glyph == GLYPH_WARN
         assert "Stop" in hooks_result.detail
 
-    def test_windows_scripts_path_command_recognized_as_wired(self, tmp_path) -> None:
-        """A Scripts-path (Windows-transformed) hook entry must not be flagged missing against
-        the POSIX-canonical manifest — write (platform_bridge_command) and verify must agree
-        (DPLAN-0234 Strand C)."""
-        posix_cmd = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/bridges/claude.py Stop"
-        manifest = tmp_path / ".claude" / "provider_manifest.json"
-        manifest.parent.mkdir(parents=True)
-        manifest.write_text(
-            json.dumps({"cli": {"claude": {"hooks": [{"command": posix_cmd, "event": "Stop"}]}}}),
-            encoding="utf-8",
-        )
-        windows_cmd = "$AIPASS_HOME/.venv/Scripts/python.exe $AIPASS_HOME/bridges/claude.py Stop"
-        provider_settings = tmp_path / ".claude" / "settings.json"
-        provider_settings.write_text(
-            json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": windows_cmd}]}]}}),
-            encoding="utf-8",
-        )
-        with patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest):
-            results = check_provider_manifest(settings_path=provider_settings, os_name="nt")
-        hooks_result = [r for r in results if r.label == "hooks"][0]
-        assert hooks_result.glyph == GLYPH_PASS
-        assert "1" in hooks_result.detail
-        assert "missing" not in hooks_result.detail
-
     def test_missing_hook_label_not_double_prefixed(self, tmp_path) -> None:
         """Command already shaped like 'event:label' must not get the event prefixed twice."""
         manifest = tmp_path / ".claude" / "provider_manifest.json"
@@ -663,7 +639,6 @@ class TestProviderManifest:
         Mutant: the walk-up reads the start directory only (no parents) -> red at the row assert.
         """
         monkeypatch.setenv("HOME", str(tmp_path / "home"))
-        monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
         manifest = tmp_path / ".claude" / "provider_manifest.json"
         manifest.parent.mkdir(parents=True)
         manifest.write_text("{}", encoding="utf-8")
@@ -760,20 +735,18 @@ class TestProviderSettingsScalars:
         assert rows == []
         assert written["includeGitInstructions"] is False
 
-    def test_the_pass_after_a_wire_reads_the_handed_file_on_the_handed_platform(self, tmp_path) -> None:
-        """After a wire, the re-read keeps settings_path and os_name: it never falls back to the home.
+    def test_the_pass_after_a_wire_reads_the_handed_file(self, tmp_path) -> None:
+        """After a wire, the re-read keeps settings_path: it never falls back to the home.
 
         The settings file lives outside HOME and HOME is an empty scratch dir, so a
-        re-read that drops either seam finds no key and no Windows hook, and says so.
+        re-read that drops the seam finds no key and no hook, and says so.
         Both wires are stubbed where doctor resolves them; the stub writes what a wire
         would into the handed file, and is asserted called before the re-read is read.
-        Red first (leg 6): the re-read handed on neither -> row WARN, not PASS.
+        Red first (leg 6): the re-read handed on nothing -> row WARN, not PASS.
         Mutant: the re-read drops settings_path -> red at the rows assert.
-        Mutant: the re-read drops os_name -> red at the rows assert.
         Mutant: check_settings_scalars not handed settings_path -> red at the rows assert.
         """
         posix_cmd = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/bridges/claude.py Stop"
-        windows_cmd = "$AIPASS_HOME/.venv/Scripts/python.exe $AIPASS_HOME/bridges/claude.py Stop"
         manifest = tmp_path / "project" / ".claude" / "provider_manifest.json"
         manifest.parent.mkdir(parents=True)
         manifest.write_text(
@@ -791,7 +764,7 @@ class TestProviderSettingsScalars:
         )
         settings = tmp_path / "handed" / "settings.json"
         settings.parent.mkdir()
-        wired = {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": windows_cmd}]}]}}
+        wired = {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": posix_cmd}]}]}}
         settings.write_text(json.dumps(wired), encoding="utf-8")
         empty_home = tmp_path / "home"
         empty_home.mkdir()
@@ -805,7 +778,7 @@ class TestProviderSettingsScalars:
             patch("aipass.aipass.apps.modules.doctor.prompt_auto_wire", side_effect=_wire) as prompt_wire,
             _home_at(empty_home),
         ):
-            results = check_provider_manifest(interactive=True, settings_path=settings, os_name="nt")
+            results = check_provider_manifest(interactive=True, settings_path=settings)
 
         assert prompt_wire.call_count == 1
         assert prompt_wire.call_args.kwargs["settings_path"] == settings

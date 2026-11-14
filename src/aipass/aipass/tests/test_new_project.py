@@ -427,7 +427,7 @@ def test_create_project_registry_before_scaffold(host_env, monkeypatch):
 _SPAWN_SUCCESS = {
     "success": True,
     "branch_name": "DEMO",
-    # The mock's payload, never touched; built from tempfile to stay portable (windows_compat).
+    # The mock's payload, never touched; built from tempfile.
     "path": str(Path(tempfile.gettempdir()) / "demo"),
     "files_copied": 12,
     "registry_updated": True,

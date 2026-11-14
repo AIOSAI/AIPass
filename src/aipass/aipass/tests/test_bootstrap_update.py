@@ -77,66 +77,6 @@ def test_update_project_return_dict_structure(tmp_path):
     assert isinstance(result["skipped_files"], list)
 
 
-def _windows_newline_world(monkeypatch):
-    """Make this Linux process translate newlines the way Windows does.
-
-    ``write_text`` with ``newline=None`` writes ``os.linesep``: a no-op here, ``\r\n`` on
-    Windows. The fake translates only when ``newline`` is unset, so a writer pinning
-    ``newline="\n"`` passes straight through.
-    """
-    real_write_text = Path.write_text
-
-    def windows_write_text(self, data, encoding=None, errors=None, newline=None):
-        if newline is None:
-            # newline="" then stops the real writer translating a second time.
-            return real_write_text(self, data.replace("\n", "\r\n"), encoding=encoding, errors=errors, newline="")
-        return real_write_text(self, data, encoding=encoding, errors=errors, newline=newline)
-
-    monkeypatch.setattr(Path, "write_text", windows_write_text)
-
-
-def test_managed_files_land_lf_even_where_the_platform_translates(tmp_path, monkeypatch):
-    """Every file init writes holds LF bytes, on a platform that would give CRLF.
-
-    The manifest hashes bytes on disk, the plan hashes the template string: they
-    agree only if what lands on disk IS the string.
-    """
-    _windows_newline_world(monkeypatch)
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="crlf")
-
-    for rel in read_manifest(target)["files"]:
-        path = target / rel
-        if path.is_file():
-            assert b"\r\n" not in path.read_bytes(), f"{rel} landed with CRLF"
-
-    prep = target / ".agents" / "skills" / "prep" / "SKILL.md"
-    manifest = json.loads((target / ".aipass" / "scaffold_manifest.json").read_text(encoding="utf-8"))
-    assert manifest["files"][".agents/skills/prep/SKILL.md"] == sc_sha256(sc.prep_skill_md())
-    assert prep.read_bytes() == sc.prep_skill_md().encode("utf-8")
-
-
-def test_update_after_init_is_clean_where_the_platform_translates(tmp_path, monkeypatch):
-    """Windows newlines, reproduced on Linux: a fresh project must be current, run after run."""
-    _windows_newline_world(monkeypatch)
-    monkeypatch.setattr(
-        "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
-        lambda home: home != _expected_aipass_home(),
-    )
-    target = tmp_path / "proj"
-    target.mkdir()
-    init_project(target, project_name="crlfupd")
-
-    first = update_project(target)
-    second = update_project(target)
-
-    assert first["updated_files"] == []
-    assert first["kept_files"] == []
-    assert second["updated_files"] == []
-    assert not (target / ".agents" / "skills" / "prep" / "SKILL.md.aipass-new").exists()
-
-
 def _age_the_stamp(target: Path) -> None:
     """Rewind a project's manifest to an older AIPass, leaving every file alone.
 

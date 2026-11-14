@@ -9,7 +9,7 @@
 """
 aipass handoff — pass the user to their chosen CLI in a new session
 
-Platform dispatch (tmux, wt.exe, printed fallback) lives in handlers/handoff_platform/.
+Launch (terminal, tmux, printed fallback) lives in handlers/handoff_platform/.
 """
 
 from __future__ import annotations
@@ -76,10 +76,10 @@ def print_introspection() -> None:
     profile = _get_stored_profile()
     console.print()
     console.print("[bold cyan]handoff Module[/bold cyan]")
-    console.print("Platform-dispatched CLI session launch")
+    console.print("CLI session launch")
     console.print()
     console.print(f"  stored CLI:    [cyan]{profile.get('cli', 'claude')}[/cyan]")
-    console.print("  platforms:     tmux (Linux/Mac), wt.exe (Windows), fallback")
+    console.print("  launchers:     terminal window, tmux, fallback")
     console.print()
     console.print("[dim]Use 'aipass handoff launch' to start a session.[/dim]")
     console.print()

@@ -18,13 +18,12 @@ _REGISTRY_GLOB = "*" + _REGISTRY_SUFFIX
 
 
 def registries_in(directory):
-    """Every ``*_REGISTRY.json`` in *directory*, exact-case, sorted."""
+    """Every ``*_REGISTRY.json`` in *directory*, sorted."""
     try:
         entries = list(directory.glob(_REGISTRY_GLOB))
     except (OSError, ValueError):
         return []
-    # Path.glob is case-insensitive on Windows/macOS; re-check the suffix, never the stem.
-    return sorted(p for p in entries if p.name.endswith(_REGISTRY_SUFFIX))
+    return sorted(entries)
 
 
 def _glob_registry(directory):

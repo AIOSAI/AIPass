@@ -57,9 +57,7 @@ def sha256_text(text: str) -> str:
 
 
 def write_text_lf(path: Path, content: str) -> None:
-    """Write a scaffold file with LF endings on every platform.
-
-    The one writer for managed files: Windows' default CRLF makes the manifest hash never match."""
+    """Write a scaffold file with LF endings: the one writer for managed files."""
     path.write_text(content, encoding="utf-8", newline="\n")
 
 

@@ -66,9 +66,6 @@ It observes presence only and never errors —
 | `doctor --fix --json` | That report as JSON, with the planned settings change under `provider_settings`; written only with `--yes`. `--json` alone falls through to the normal report |
 | `doctor --smoke` | Adds one Services row per provider from one live model turn each, through `drone @hooks smoke`: pass shows the time, skip the reason (not installed, no login, a spent quota), both ✓; fail is ✗ with hooks' reason. Spends one turn per installed provider; never runs with `--fix` |
 | `doctor --smoke --json` | hooks' result objects as given (`provider`, `status`, `why`, `session_id`, `elapsed_ms`), no other check. `--model provider=model,...` picks a model, either form |
-| `doctor --cross-os` | Cross-OS pre-flight — OS-gap cross-reference plus routing, versions and hook status |
-| `doctor --cross-os --e2e` | ...also runs the real e2e wiring suite. Heavy, opt-in |
-| `doctor --cross-os --record [PATH]` | Write a machine-filled Run Record for the human acceptance pass |
 | `doctor --info` | Module introspection, no checks |
 
 A non-zero exit means at least one row failed. Measure it with output
@@ -83,7 +80,7 @@ of the personal `~/.claude/settings.json`. It reads what AIPass wants from
 `settings` scalar slot — and merges additively: a key that is absent is set, a
 key that already carries your value is reported and **never** overwritten. The
 same merge, all four parts, runs from the installer's `refresh_provider_hooks`,
-so both doors agree; under Git Bash on Windows both also set `PYTHONUTF8=1`.
+so both doors agree.
 The one difference: install re-points `AIPASS_HOME` to the tree being installed,
 and says so; `doctor --fix` never does, so a fix from a second checkout cannot
 take the home from the first (the home-agreement row flags that split). The
@@ -169,8 +166,8 @@ the project holds every switch file: `.claude/commands/codex.md` (`/codex`) and
 and the cure is `aipass init update`, which writes them and records their hash.
 `doctor --fix` makes a missing link and renames an unedited legacy `prep.md` to
 `prep(disabled).md`, one `skills fix` row per change; it writes no switch file,
-and a copy, a foreign link and an edited `prep.md` are left for you. On Windows the link needs `git config core.symlinks true` and the
-right to make links; without them `--fix` writes a copy that will not follow
+and a copy, a foreign link and an edited `prep.md` are left for you. Where the
+filesystem refuses links, `--fix` writes a copy that will not follow
 `.agents/skills`, and the row says so.
 
 ## What it will not do
@@ -184,8 +181,7 @@ update: neither overwrites a file.
 Code: [`apps/modules/doctor.py`](../apps/modules/doctor.py), with the
 remediation report in [`apps/modules/_doctor_fix.py`](../apps/modules/_doctor_fix.py),
 the wiring rows in [`apps/modules/_doctor_wire.py`](../apps/modules/_doctor_wire.py),
-the live smoke rows in [`apps/modules/_doctor_smoke.py`](../apps/modules/_doctor_smoke.py),
-the cross-OS lane in [`apps/handlers/cross_os/`](../apps/handlers/cross_os) and
+the live smoke rows in [`apps/modules/_doctor_smoke.py`](../apps/modules/_doctor_smoke.py) and
 the admin-lane reader in [`apps/handlers/admin_lane.py`](../apps/handlers/admin_lane.py).
 
 ---

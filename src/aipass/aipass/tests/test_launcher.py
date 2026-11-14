@@ -16,12 +16,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
-
-import pytest
-
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="bash launcher requires Unix")
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 LAUNCHER = REPO_ROOT / "aipass"

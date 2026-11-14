@@ -673,7 +673,6 @@ class TestStages:
             detect_cpu=MagicMock(return_value={"count": 8}),
             detect_install_method=MagicMock(return_value="pip"),
             detect_tmux=MagicMock(return_value=True),
-            detect_wt=MagicMock(return_value=False),
         ):
             result = stage_2_system_detect()
         assert result["os"] == "Linux"
@@ -822,10 +821,7 @@ class TestStages:
         assert "ping_results" in result
 
     def test_stage_8_smoke_test_both_found(self, tmp_local_json, tools_on_path) -> None:
-        """smoke test reports where drone and aipass sit on PATH (stubs in a tmp directory).
-
-        Compared as Path objects, by parent and stem: Windows gives the stub a PATHEXT suffix.
-        """
+        """smoke test reports where drone and aipass sit on PATH (stubs in a tmp directory)."""
         bin_dir = tools_on_path("drone", "aipass")
         result = stage_8_smoke_test()
         for name in ("drone", "aipass"):

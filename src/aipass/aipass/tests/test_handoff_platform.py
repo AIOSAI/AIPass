@@ -10,11 +10,9 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that apps/handlers/handoff_platform/__init__.py parses and imports
-# sentry: no-test-needed(constant) — IS_WINDOWS, IS_MACOS, IS_LINUX read sys.platform once at import
 
 from __future__ import annotations
 
-import os
 import shlex
 import subprocess
 from unittest.mock import MagicMock, patch
@@ -28,7 +26,6 @@ from aipass.aipass.apps.handlers.handoff_platform import (
     launch_inline,
     launch_terminal,
     launch_tmux,
-    launch_wt,
     return_path_breadcrumb,
 )
 from aipass.aipass.apps.modules.handoff import INIT_PROMPT, handle_command
@@ -282,7 +279,7 @@ def _path_with(monkeypatch, tmp_path, *names: str) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     for name in names:
-        exe = bin_dir / (name + (".exe" if os.name == "nt" else ""))
+        exe = bin_dir / name
         exe.write_text("", encoding="utf-8")
         exe.chmod(0o755)
     monkeypatch.setenv("PATH", str(bin_dir))
@@ -339,45 +336,6 @@ class TestLaunchTmux:
             side_effect=[MagicMock(), subprocess.TimeoutExpired("tmux", 10)],
         ):
             assert launch_tmux("claude", "test", str(tmp_path)) is False
-
-
-class TestLaunchWt:
-    """Tests for launch_wt()."""
-
-    def test_returns_false_when_wt_not_found(self, tmp_path, monkeypatch) -> None:
-        """Returns False when wt.exe is not on PATH.
-
-        Mutant: `if not shutil.which("wt"):` -> `if False:` reddens this test.
-        """
-        _path_with(monkeypatch, tmp_path)
-        with patch("aipass.aipass.apps.handlers.handoff_platform.subprocess.run") as mock_run:
-            assert launch_wt("claude", "test", str(tmp_path)) is False
-        mock_run.assert_not_called()
-
-    def test_success_returns_true(self, tmp_path, monkeypatch) -> None:
-        """Returns True when wt.exe runs successfully."""
-        _path_with(monkeypatch, tmp_path, "wt")
-        with patch("aipass.aipass.apps.handlers.handoff_platform.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-            assert launch_wt("claude", "test", str(tmp_path)) is True
-
-    def test_called_process_error_returns_false(self, tmp_path, monkeypatch) -> None:
-        """Returns False when wt.exe fails."""
-        _path_with(monkeypatch, tmp_path, "wt")
-        with patch(
-            "aipass.aipass.apps.handlers.handoff_platform.subprocess.run",
-            side_effect=subprocess.CalledProcessError(1, "wt"),
-        ):
-            assert launch_wt("claude", "test", str(tmp_path)) is False
-
-    def test_timeout_returns_false(self, tmp_path, monkeypatch) -> None:
-        """Returns False when wt.exe times out."""
-        _path_with(monkeypatch, tmp_path, "wt")
-        with patch(
-            "aipass.aipass.apps.handlers.handoff_platform.subprocess.run",
-            side_effect=subprocess.TimeoutExpired("wt", 15),
-        ):
-            assert launch_wt("claude", "test", str(tmp_path)) is False
 
 
 def _inline_which(
@@ -500,7 +458,7 @@ class TestLaunchHandoff:
         """On unix, tries launch_terminal before launch_tmux."""
         with patch("aipass.aipass.apps.handlers.handoff_platform.launch_terminal", return_value=True) as mock_term:
             with patch("aipass.aipass.apps.handlers.handoff_platform.launch_tmux") as mock_tmux:
-                launched, cmd = launch_handoff("claude", "test", str(tmp_path), platform_override="unix")
+                launched, cmd = launch_handoff("claude", "test", str(tmp_path))
         assert launched is True
         mock_term.assert_called_once()
         mock_tmux.assert_not_called()
@@ -510,7 +468,7 @@ class TestLaunchHandoff:
         """On unix, falls back to tmux when terminal fails."""
         with patch("aipass.aipass.apps.handlers.handoff_platform.launch_terminal", return_value=False):
             with patch("aipass.aipass.apps.handlers.handoff_platform.launch_tmux", return_value=True) as mock_tmux:
-                launched, cmd = launch_handoff("claude", "test", str(tmp_path), platform_override="unix")
+                launched, cmd = launch_handoff("claude", "test", str(tmp_path))
         assert launched is True
         mock_tmux.assert_called_once()
 
@@ -518,21 +476,7 @@ class TestLaunchHandoff:
         """On unix, returns False when both terminal and tmux fail."""
         with patch("aipass.aipass.apps.handlers.handoff_platform.launch_terminal", return_value=False):
             with patch("aipass.aipass.apps.handlers.handoff_platform.launch_tmux", return_value=False):
-                launched, cmd = launch_handoff("claude", "test", str(tmp_path), platform_override="unix")
-        assert launched is False
-        assert "claude" in cmd
-
-    def test_windows_tries_wt(self, tmp_path) -> None:
-        """On windows, tries launch_wt."""
-        with patch("aipass.aipass.apps.handlers.handoff_platform.launch_wt", return_value=True) as mock_wt:
-            launched, cmd = launch_handoff("claude", "test", str(tmp_path), platform_override="windows")
-        assert launched is True
-        mock_wt.assert_called_once()
-
-    def test_windows_fallback(self, tmp_path) -> None:
-        """On windows, returns False when wt fails."""
-        with patch("aipass.aipass.apps.handlers.handoff_platform.launch_wt", return_value=False):
-            launched, cmd = launch_handoff("claude", "test", str(tmp_path), platform_override="windows")
+                launched, cmd = launch_handoff("claude", "test", str(tmp_path))
         assert launched is False
         assert "claude" in cmd
 
@@ -541,7 +485,7 @@ class TestLaunchHandoff:
         home = str(tmp_path)
         with patch("aipass.aipass.apps.handlers.handoff_platform.launch_terminal", return_value=False):
             with patch("aipass.aipass.apps.handlers.handoff_platform.launch_tmux", return_value=False):
-                _, cmd = launch_handoff("claude", "start", home, platform_override="unix")
+                _, cmd = launch_handoff("claude", "start", home)
         assert f"cd {home}" in cmd
         assert "claude" in cmd
         assert "start" in cmd

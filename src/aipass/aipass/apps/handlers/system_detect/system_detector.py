@@ -82,7 +82,6 @@ def detect_claude_code() -> Dict[str, Any]:
 
     raw = ""
     try:
-        # The resolved path, not "claude": on Windows it is claude.cmd, which a bare name misses.
         result = subprocess.run([claude_path, "--version"], capture_output=True, text=True, timeout=10)
         raw = result.stdout.strip()
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -93,13 +92,11 @@ def detect_claude_code() -> Dict[str, Any]:
     return {"found": True, "raw": raw, "version": version}
 
 
-def _shell_from_parent_proc(os_name: str = os.name, getppid: Callable[[], int] = os.getppid) -> str | None:
-    """POSIX fallback: read the invoking parent process's command name via /proc.
+def _shell_from_parent_proc(getppid: Callable[[], int] = os.getppid) -> str | None:
+    """Fallback: read the invoking parent process's command name via /proc.
 
     Containers and CI runners often run a real shell without exporting $SHELL.
     """
-    if os_name != "posix":
-        return None
     try:
         comm_path = Path(f"/proc/{getppid()}/comm")
         if not comm_path.is_file():
@@ -111,16 +108,16 @@ def _shell_from_parent_proc(os_name: str = os.name, getppid: Callable[[], int] =
     return name or None
 
 
-def detect_shell(os_name: str = os.name, getppid: Callable[[], int] = os.getppid) -> Dict[str, Any]:
+def detect_shell(getppid: Callable[[], int] = os.getppid) -> Dict[str, Any]:
     """Return shell name and path.
 
-    os_name and getppid are test seams; product callers pass nothing.
+    getppid is a test seam; product callers pass nothing.
     """
     shell_path = os.environ.get("SHELL", "")
     if shell_path:
         return {"name": Path(shell_path).name, "path": shell_path}
 
-    name = _shell_from_parent_proc(os_name, getppid)
+    name = _shell_from_parent_proc(getppid)
     if name:
         resolved = shutil.which(name)
         if resolved:
@@ -205,11 +202,6 @@ def detect_install_method() -> str:
 def detect_tmux() -> bool:
     """True if tmux is available on PATH."""
     return shutil.which("tmux") is not None
-
-
-def detect_wt() -> bool:
-    """True if Windows Terminal (wt.exe) is available on PATH."""
-    return shutil.which("wt.exe") is not None
 
 
 def detect_docker() -> bool:

@@ -11,7 +11,6 @@ from aipass.aipass.apps.handlers.system_detect.system_detector import (
     detect_ram,
     detect_shell,
     detect_tmux,
-    detect_wt,
 )
 
 __all__ = [
@@ -25,5 +24,4 @@ __all__ = [
     "detect_ram",
     "detect_shell",
     "detect_tmux",
-    "detect_wt",
 ]

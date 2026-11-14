@@ -59,19 +59,15 @@ def isolate_profile_store(tmp_path_factory) -> Generator[Path, None, None]:
 
 @pytest.fixture
 def tools_on_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Set PATH to one tmp directory holding an executable stub per name given.
-
-    shutil.which answers for real; under PATHEXT (Windows) each stub takes its first extension."""
+    """Set PATH to one tmp directory holding an executable stub per name given; shutil.which answers for real."""
 
     def put(*names: str) -> Path:
         bin_dir = tmp_path / "path_bin"
         bin_dir.mkdir(exist_ok=True)
-        pathext = os.environ.get("PATHEXT", "")
-        suffix = pathext.split(os.pathsep)[0].lower() if pathext else ""
         for name in names:
-            stub = bin_dir / f"{name}{suffix}"
+            stub = bin_dir / name
             stub.write_text("", encoding="utf-8")
-            stub.chmod(stub.stat().st_mode | 0o111)  # no effect where the platform has no mode bit
+            stub.chmod(stub.stat().st_mode | 0o111)
         monkeypatch.setenv("PATH", str(bin_dir))
         return bin_dir
 
@@ -80,8 +76,8 @@ def tools_on_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
-    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
-    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    """Rich sizes an unpinned console on every print: 80 under pytest's capture,
+    the terminal's width under -s, COLUMNS when exported."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
 

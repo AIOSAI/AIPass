@@ -625,8 +625,8 @@ class TestMain:
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[mod]):
                 result = main()
         _out, err = capsys.readouterr()
-        # Rich wraps a long line at a space, and the tmp path's length differs by OS (PR #787,
-        # Windows and macOS red): compare with whitespace collapsed, and stop before the path.
+        # Rich wraps a long line at a space, and the tmp path's length varies (PR #787):
+        # compare with whitespace collapsed, and stop before the path.
         said = " ".join(err.split())
         assert result == 1
         assert "'install' crashed: git clone exited 128" in said

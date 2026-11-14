@@ -101,11 +101,11 @@ Under them, `apps/handlers/` holds the implementation groups: `system_detect/`,
 `structure_scan/`, `sandbox_check/` and `admin_lane.py` for what doctor reads;
 `init/` for scaffolding and `new_project/` for project creation;
 `readme_map/` for live documentation reads; `baud/` for fetch, verify, unpack,
-binary, install and point; `cross_os/` for the pre-flight lane;
-`handoff_platform/` for the OS-dispatched session launch; `provider_wire.py`
+binary, install and point;
+`handoff_platform/` for the session launch; `provider_wire.py`
 and `provider_reconcile.py` for the provider settings, with `settings_backup.py`
 for the backup and receipt each of their writes takes first; `ping_sweep/` for
-reachability; `help_flag.py`, `module_root.py`, `json/` and `ui/` for the
+reachability; `help_flag.py`, `json/` and `ui/` for the
 plumbing. `shared/` is a separate contract — stdlib-only, because other
 branches import it.
 
@@ -138,7 +138,7 @@ Depth lives in [docs/](docs/), one page per command group:
 - `@spawn` — agent creation (`init run`, `init agent`, `new`), registry sync
   during `install`, and doctor's owner/identity check and repair
 - `@hooks` — `feedback` delegates to it outright; the trusted-project registry
-  is its module; doctor and the cross-OS pre-flight read its status
+  is its module; doctor reads its status
 - `@ai_mail` — test-convention ping emails (`ping_sweep`)
 - `@prax` — logging, imported by nearly every module and handler
 - `@trigger` — soft dependency: a fire on write-failure cleanup, wrapped so it

@@ -16,7 +16,6 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that every module this file imports parses and imports
 
-import functools
 import hashlib
 import json
 import os
@@ -52,7 +51,6 @@ from aipass.aipass.apps.handlers.provider_wire import (
     set_codex_pins,
     manifest_settings,
     plan_wire_provider,
-    platform_bridge_command,
     refresh_provider_hooks,
     settings_gaps,
 )
@@ -96,54 +94,6 @@ def _write_world(tmp_path, manifest_hooks: list, existing_hooks: dict):
 
 
 # =============================================================================
-# TestPlatformBridgeCommand
-# =============================================================================
-
-
-class TestPlatformBridgeCommand:
-    """Tests for platform_bridge_command — write-time OS transform (DPLAN-0234 Strand C)."""
-
-    def test_windows_rewrites_venv_interpreter_path(self) -> None:
-        """os.name == 'nt' swaps the POSIX venv interpreter path for the Windows one."""
-        posix_cmd = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/bridges/claude.py Stop"
-        result = platform_bridge_command(posix_cmd, os_name="nt")
-        assert result == "$AIPASS_HOME/.venv/Scripts/python.exe $AIPASS_HOME/bridges/claude.py Stop"
-
-    def test_posix_leaves_command_unchanged(self) -> None:
-        """Non-Windows os.name leaves the manifest's POSIX-canonical command untouched."""
-        posix_cmd = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/bridges/claude.py Stop"
-        result = platform_bridge_command(posix_cmd, os_name="posix")
-        assert result == posix_cmd
-
-    def test_windows_leaves_command_without_marker_unchanged(self) -> None:
-        """Command that doesn't contain the venv interpreter substring is a no-op either way."""
-        other_cmd = "some-other-tool --flag"
-        result = platform_bridge_command(other_cmd, os_name="nt")
-        assert result == other_cmd
-
-    @pytest.mark.parametrize("door", ["refresh_provider_hooks", "plan_and_apply"])
-    def test_both_wire_doors_write_the_windows_command(self, tmp_path, monkeypatch, door) -> None:
-        """End to end: each public door writes the Windows interpreter into a settings file under tmp_path.
-
-        The transform is bound to the Windows answer through its os_name seam, rather than
-        os.name patched process-wide; no public door needs an os_name of its own (fleet green leg 4).
-        Mutant: _build_manifest_hook_entries writes the manifest command without the transform -> red.
-        """
-        posix_cmd = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/bridges/claude.py Stop"
-        manifest, settings_path = _write_world(tmp_path, [{"command": posix_cmd, "event": "Stop"}], {})
-        monkeypatch.setattr(
-            provider_wire, "platform_bridge_command", functools.partial(platform_bridge_command, os_name="nt")
-        )
-        if door == "refresh_provider_hooks":
-            refresh_provider_hooks(manifest, settings_path=settings_path)
-        else:
-            _wire(manifest, settings_path)
-        written = json.loads(settings_path.read_text(encoding="utf-8"))
-        written_cmd = written["hooks"]["Stop"][0]["hooks"][0]["command"]
-        assert written_cmd == "$AIPASS_HOME/.venv/Scripts/python.exe $AIPASS_HOME/bridges/claude.py Stop"
-
-
-# =============================================================================
 # TestStripAndReaddHooks
 # =============================================================================
 
@@ -170,9 +120,7 @@ class TestStripAndReaddHooks:
         assert len(merged["Stop"]) == 1
         stop_dump = json.dumps(merged["Stop"])
         assert old_cmd not in stop_dump
-        # expected through the write-time OS transform — on Windows the fresh
-        # entry is written with Scripts/python.exe, by design
-        assert platform_bridge_command(new_cmd) in stop_dump
+        assert new_cmd in stop_dump
         assert any("Refreshed Stop" in action for action in actions)
 
     def test_user_wired_hook_preserved(self, tmp_path) -> None:
@@ -224,7 +172,7 @@ class TestRefreshProviderHooks:
         updated = json.loads(settings_path.read_text(encoding="utf-8"))
         stop_dump = json.dumps(updated["hooks"]["Stop"])
         assert old_cmd not in stop_dump
-        assert platform_bridge_command(new_cmd) in stop_dump
+        assert new_cmd in stop_dump
 
     def test_install_door_sets_the_manifest_settings_scalar(self, tmp_path) -> None:
         """The scalars land at INSTALL, not one doctor run later (setup.sh's only wire door)."""
@@ -309,7 +257,7 @@ class TestAutoWireProviderHooks:
         updated = json.loads(settings_path.read_text(encoding="utf-8"))
         stop_dump = json.dumps(updated["hooks"]["Stop"])
         assert old_cmd not in stop_dump
-        assert platform_bridge_command(new_cmd) in stop_dump
+        assert new_cmd in stop_dump
 
     def test_env_and_permissions_remain_additive(self, tmp_path) -> None:
         """Env vars and permission rules are added, never removed/overwritten — unchanged behavior."""
@@ -540,9 +488,8 @@ class TestSettingsBackup:
         assert f"Backed up settings to {_folder(settings_path) / name}" in actions
         assert f"Receipt: {_folder(settings_path) / 'receipts.jsonl'}" in actions
         assert not list(settings_path.parent.glob("settings.json.bak.*"))
-        if os.name != "nt":  # permission bits are POSIX-only
-            assert (_folder(settings_path) / name).stat().st_mode & 0o777 == 0o600
-            assert _folder(settings_path).stat().st_mode & 0o777 == 0o700
+        assert (_folder(settings_path) / name).stat().st_mode & 0o777 == 0o600
+        assert _folder(settings_path).stat().st_mode & 0o777 == 0o700
 
     def test_two_writes_in_one_second_stack_two_backups_and_overwrite_neither(self, tmp_path) -> None:
         manifest, settings_path = _backup_world(tmp_path, {"env": {}})
@@ -572,9 +519,7 @@ class TestSettingsBackup:
         assert receipt["after_sha256"] == _sha(settings_path.read_bytes())
         assert "No settings file yet — nothing to back up" in actions
 
-    @pytest.mark.skipif(
-        os.name == "nt" or _is_root(), reason="a read-only directory needs POSIX bits and a non-root user"
-    )
+    @pytest.mark.skipif(_is_root(), reason="a read-only directory needs a non-root user")
     @pytest.mark.parametrize("receipt_exists", [False, True], ids=["receipt-refused", "backup-copy-refused"])
     def test_an_unwritable_backup_folder_refuses_and_leaves_the_settings_bytes_unchanged(
         self, tmp_path, receipt_exists
@@ -625,7 +570,6 @@ class TestSettingsBackup:
         self, tmp_path, monkeypatch, door
     ) -> None:
         monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         manifest, settings_path = _backup_world(tmp_path, {"permissions": {"deny": ["Bash(rm -rf*)", "Bash(keep*)"]}})
         original = settings_path.read_bytes()
 
@@ -682,7 +626,6 @@ class TestSettingsBackup:
 
         assert settings_path.read_bytes() == original
 
-    @pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
     def test_a_symlinked_settings_file_stays_a_symlink_after_the_wire(self, tmp_path) -> None:
         manifest, real = _backup_world(tmp_path, {"env": {}})
         link = tmp_path / "link" / "settings.json"
@@ -714,11 +657,6 @@ class TestSettingsBackup:
 
 class TestInstallDoorEnvAndPermissions:
     """refresh_provider_hooks merges manifest env and permissions too, through auto_wire's helpers."""
-
-    @pytest.fixture(autouse=True)
-    def _not_msys(self, monkeypatch) -> None:
-        monkeypatch.delenv("MSYSTEM", raising=False)
-        monkeypatch.delenv("OSTYPE", raising=False)
 
     _EXTRA = {
         "env": {"AIPASS_HOME": "{{REPO_ROOT}}", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"},
@@ -752,23 +690,6 @@ class TestInstallDoorEnvAndPermissions:
         assert updated["env"]["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "0"
         assert updated["permissions"]["deny"] == ["Bash(git push*)", "Read(~/.secrets/**)"]
         assert not [a for a in actions if "CLAUDE_CODE_DISABLE_AUTO_MEMORY" in a or "Bash(git push*)" in a]
-
-    @pytest.mark.parametrize(
-        ("var", "value", "lands"),
-        [("MSYSTEM", "MINGW64", True), ("MSYSTEM", "MSYS", True), ("OSTYPE", "msys", True), (None, None, False)],
-        ids=["git-bash-mingw64", "msys", "ostype-msys", "not-msys"],
-    )
-    def test_pythonutf8_lands_only_under_an_msys_shell(self, tmp_path, monkeypatch, var, value, lands) -> None:
-        if var:
-            monkeypatch.setenv(var, value)
-        manifest, settings_path = _backup_world(tmp_path, {"env": {}}, self._EXTRA)
-
-        refresh_provider_hooks(manifest, settings_path=settings_path)
-
-        env = json.loads(settings_path.read_text(encoding="utf-8"))["env"]
-        assert ("PYTHONUTF8" in env) is lands
-        if lands:
-            assert env["PYTHONUTF8"] == "1"
 
 
 # =============================================================================
