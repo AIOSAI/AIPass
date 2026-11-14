@@ -22,12 +22,6 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 MAX_EMAILS = 10
 

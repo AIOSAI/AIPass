@@ -886,17 +886,7 @@ def test_main_lock_left_for_successor_monitor(monkeypatch, main_argv, tmp_path):
 
 
 def test_spawn_path_is_joined_with_the_separator_handed_in():
-    """The spawn PATH joins with the host's separator, never a literal colon.
-
-    The other host's separator is handed in, so the Windows answer is pinned on any
-    host; the string is asserted and nothing is started. Red first by the mutant that
-    restores the old literal ":" join (leg 3).
-    """
-    windows_path = "C:\\Windows;C:\\Tools"
-
-    assert mod.prepend_to_path(windows_path, "C:\\repo\\.venv\\bin", sep=";") == (
-        "C:\\repo\\.venv\\bin;C:\\Windows;C:\\Tools"
-    )
+    """The spawn PATH joins with the separator handed in; the string is asserted and nothing is started."""
     assert mod.prepend_to_path("usr_bin", "venv_bin", sep=":") == "venv_bin:usr_bin"
     assert mod.prepend_to_path("", "venv_bin", sep=":") == "venv_bin"
 
@@ -940,11 +930,10 @@ def test_env_vars_set_correctly(monkeypatch, main_argv, tmp_path):
     assert "AIPASS_BOT_ID" not in captured_env
     assert "AIPASS_CALLER_BRANCH" not in captured_env
     assert "AIPASS_CALLER_CWD" not in captured_env
-    # Venv bin should be on PATH (platform-aware: Scripts on Windows, bin elsewhere)
+    # Venv bin should be on PATH
     import os
-    import sys
 
-    venv_dir = "Scripts" if sys.platform == "win32" else "bin"
+    venv_dir = "bin"
     path_entries = captured_env.get("PATH", "").split(os.pathsep)
     venv_in_path = any(
         entry.endswith(os.sep + ".venv" + os.sep + venv_dir) or entry.endswith("/.venv/" + venv_dir)
@@ -1141,11 +1130,10 @@ def test_env_vars_setup(monkeypatch, main_argv, tmp_path):
     assert "AIPASS_BOT_ID" not in captured_env
     assert "AIPASS_CALLER_BRANCH" not in captured_env
     assert "AIPASS_CALLER_CWD" not in captured_env
-    # Venv bin should be on PATH (platform-aware: Scripts on Windows, bin elsewhere)
+    # Venv bin should be on PATH
     import os
-    import sys
 
-    venv_dir = "Scripts" if sys.platform == "win32" else "bin"
+    venv_dir = "bin"
     path_entries = captured_env.get("PATH", "").split(os.pathsep)
     venv_in_path = any(
         entry.endswith(os.sep + ".venv" + os.sep + venv_dir) or entry.endswith("/.venv/" + venv_dir)

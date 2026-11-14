@@ -50,7 +50,7 @@ apps/
       send_args.py            # Hand-rolled argument parsing (never argparse)
       inbox_ops.py            # Inbox loading + v1→v2 migration
       inbox_cleanup.py        # Mark opened/closed + archive
-      inbox_lock.py           # File locking (fcntl POSIX / msvcrt Windows)
+      inbox_lock.py           # File locking (fcntl)
       inbox_resolve.py        # Resolve inbox path from args or caller detection
       reply.py                # Reply + auto-close original
       close_ops.py            # Batch close

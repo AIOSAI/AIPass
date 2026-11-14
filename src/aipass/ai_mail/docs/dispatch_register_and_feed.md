@@ -159,8 +159,8 @@ trade of detection latency for zero idle cost. `drone @ai_mail dispatch register
 lists what is open and flags what is overdue.
 
 **The two-hour latency is the fallback, not the only signal.** Rows carrying a
-`monitor_pid` also expose `monitor_alive` on read — the process is checked (Linux
-reads `/proc`, Windows `OpenProcess`) at the moment someone looks, never stored, because a stored liveness is
+`monitor_pid` also expose `monitor_alive` on read — the process is checked (`/proc`
+is read) at the moment someone looks, never stored, because a stored liveness is
 stale the instant it is written. A dead monitor is therefore visible on the next
 watchdog pass (five minutes) instead of at `expected_by`.
 

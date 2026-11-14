@@ -925,10 +925,7 @@ def _final_result_json(stdout_log: str, provider: str) -> dict:
 
 
 def prepend_to_path(path_value: str, entry: str, sep: str = os.pathsep) -> str:
-    """Return PATH with entry first, joined by the host's separator.
-
-    Never a literal ":": it follows every Windows drive letter. sep is a parameter for tests.
-    """
+    """Return PATH with entry first, joined by the host's separator. sep is a parameter for tests."""
     return sep.join([entry, path_value]) if path_value else entry
 
 

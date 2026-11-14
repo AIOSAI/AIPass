@@ -10,9 +10,6 @@
 
 # The identity chain is ai_mail's most critical and most fragile path.
 
-# The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(stdlib) — os.environ.setdefault on the win32 import-time branch, unreachable on POSIX
-
 import json
 import os
 import pytest

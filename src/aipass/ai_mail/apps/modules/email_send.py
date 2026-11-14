@@ -12,7 +12,6 @@ Email Send Orchestration
 Direct, interactive and broadcast send, plus the dispatch trigger.
 """
 
-import os
 import sys
 from pathlib import Path
 from typing import List
@@ -43,12 +42,6 @@ from aipass.ai_mail.apps.handlers.email.error_dispatch import dispatch_send_erro
 from aipass.ai_mail.apps.handlers.email.send_args import parse_send_args, resolve_dispatch_target
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 _AI_MAIL_DIR = Path(__file__).resolve().parents[2]
 _REPO_ROOT = find_repo_root()

@@ -10,18 +10,12 @@
 Inbox File Lock Handler
 """
 
-import sys
+import fcntl
 from pathlib import Path
 from contextlib import contextmanager
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
-
-
-if sys.platform == "win32":
-    import msvcrt
-else:
-    import fcntl
 
 
 @contextmanager
@@ -37,19 +31,13 @@ def inbox_lock(inbox_file: Path):
     try:
         lock_fd = open(lock_file, "w", encoding="utf-8")
 
-        if sys.platform == "win32":
-            msvcrt.locking(lock_fd.fileno(), msvcrt.LK_LOCK, 1)
-        else:
-            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
         yield
 
     finally:
         if lock_fd is not None:
             try:
-                if sys.platform == "win32":
-                    msvcrt.locking(lock_fd.fileno(), msvcrt.LK_UNLCK, 1)
-                else:
-                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
                 lock_fd.close()
             except Exception as e:
                 logger.warning("[lock] lock release failed: %s", e)

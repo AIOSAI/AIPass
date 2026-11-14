@@ -17,41 +17,12 @@ Their public names are the interface wake.py imports.
 
 import json
 import os
-import sys
 import subprocess
 import time
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 from aipass.prax.apps.modules.logger import system_logger as logger
-
-
-def _pid_alive_windows(pid: int) -> bool:
-    """Windows-safe liveness check via OpenProcess + GetExitCodeProcess."""
-    import ctypes
-    from ctypes import wintypes
-
-    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    STILL_ACTIVE = 259
-
-    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
-    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel32.CloseHandle.restype = wintypes.BOOL
-
-    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-    if not handle:
-        return False
-    try:
-        exit_code = wintypes.DWORD()
-        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
-            return False
-        return exit_code.value == STILL_ACTIVE
-    finally:
-        kernel32.CloseHandle(handle)
 
 
 # acquire_lock creates the lock empty (O_CREAT|O_EXCL) and fills it with one
@@ -119,73 +90,24 @@ def acquire_lock(branch_path: Path, pid: int) -> Tuple[bool, str]:
 
 
 def _get_pid_cwd(pid_str: str) -> Optional[str]:
-    """Get the cwd of a process. Cross-platform: Linux /proc, macOS lsof."""
-    if sys.platform == "linux":
-        try:
-            return os.readlink(f"/proc/{pid_str}/cwd")
-        except (OSError, PermissionError):
-            logger.info("[wake] Cannot read cwd for PID %s", pid_str)
-            return None
-    if sys.platform == "darwin":
-        return _get_pid_cwd_darwin(pid_str)
-    logger.info("[wake] Cannot determine cwd for PID %s on %s", pid_str, sys.platform)
-    return None
-
-
-def _get_pid_cwd_darwin(pid_str: str) -> Optional[str]:
-    """macOS: get process cwd via lsof."""
+    """Get the cwd of a process from /proc."""
     try:
-        result = subprocess.run(
-            ["lsof", "-a", "-p", pid_str, "-d", "cwd", "-Fn"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (subprocess.SubprocessError, OSError):
-        logger.info("[wake] Cannot read cwd for PID %s on macOS", pid_str)
+        return os.readlink(f"/proc/{pid_str}/cwd")
+    except (OSError, PermissionError):
+        logger.info("[wake] Cannot read cwd for PID %s", pid_str)
         return None
-    if result.returncode != 0:
-        return None
-    for line in result.stdout.strip().split("\n"):
-        if line.startswith("n/"):
-            return line[1:]
-    return None
 
 
 def _read_session_type(pid_str: str) -> str:
     """Read AIPASS_SESSION_TYPE from process environment. Returns 'interactive' if unset."""
-    if sys.platform == "linux":
-        try:
-            with open(f"/proc/{pid_str}/environ", "rb") as f:
-                data = f.read()
-            for entry in data.split(b"\0"):
-                if entry.startswith(b"AIPASS_SESSION_TYPE="):
-                    return entry.split(b"=", 1)[1].decode("utf-8")
-        except (OSError, PermissionError):
-            logger.info("[wake] Cannot read session type for PID %s", pid_str)
-        return "interactive"
-    if sys.platform == "darwin":
-        return _read_session_type_darwin(pid_str)
-    return "interactive"
-
-
-def _read_session_type_darwin(pid_str: str) -> str:
-    """macOS: read AIPASS_SESSION_TYPE from ps environment output."""
     try:
-        result = subprocess.run(
-            ["ps", "-p", pid_str, "-wwE", "-o", "command="],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (subprocess.SubprocessError, OSError):
-        logger.info("[wake] Cannot read session type for PID %s on macOS", pid_str)
-        return "interactive"
-    if result.returncode != 0:
-        return "interactive"
-    for token in result.stdout.split():
-        if token.startswith("AIPASS_SESSION_TYPE="):
-            return token.split("=", 1)[1]
+        with open(f"/proc/{pid_str}/environ", "rb") as f:
+            data = f.read()
+        for entry in data.split(b"\0"):
+            if entry.startswith(b"AIPASS_SESSION_TYPE="):
+                return entry.split(b"=", 1)[1].decode("utf-8")
+    except (OSError, PermissionError):
+        logger.info("[wake] Cannot read session type for PID %s", pid_str)
     return "interactive"
 
 
@@ -205,22 +127,10 @@ OPENCODE_NON_SESSION_SERVE_FLAGS = frozenset({"--service", "--stdio"})
 
 
 def _read_argv(pid_str: str) -> List[str]:
-    """A process's argv. Raises OSError when it cannot be read (gone, foreign, or no reader on this OS)."""
-    if sys.platform == "linux":
-        with open(f"/proc/{pid_str}/cmdline", "rb") as f:
-            raw = f.read()
-        return [part.decode("utf-8", "replace") for part in raw.split(b"\0") if part]
-    if sys.platform == "darwin":
-        try:
-            result = subprocess.run(
-                ["ps", "-p", pid_str, "-ww", "-o", "command="], capture_output=True, text=True, timeout=5
-            )
-        except subprocess.SubprocessError as e:
-            raise OSError(f"ps could not read PID {pid_str}: {e}") from e
-        if result.returncode != 0:
-            raise OSError(f"ps found no PID {pid_str}")
-        return result.stdout.split()
-    raise OSError(f"no argv reader on {sys.platform}")
+    """A process's argv. Raises OSError when it cannot be read (gone or foreign)."""
+    with open(f"/proc/{pid_str}/cmdline", "rb") as f:
+        raw = f.read()
+    return [part.decode("utf-8", "replace") for part in raw.split(b"\0") if part]
 
 
 def _is_codex_non_session(pid_str: str) -> bool:
@@ -292,12 +202,6 @@ def clean_zombies() -> int:
 
 def check_pid_alive(pid: int) -> bool:
     """Check if a process is alive (not zombie)."""
-    if sys.platform == "win32":
-        try:
-            return _pid_alive_windows(pid)
-        except Exception as exc:
-            logger.info("[wake] PID %s Windows check failed (assuming alive): %s", pid, exc)
-            return True
     try:
         os.kill(pid, 0)
     except ProcessLookupError as exc:
@@ -309,19 +213,7 @@ def check_pid_alive(pid: int) -> bool:
     except OSError as exc:
         logger.warning("[wake] PID %s os.kill error (assuming dead): %s", pid, exc)
         return False
-    if sys.platform == "linux":
-        return not _is_zombie_linux(pid)
-    return not _is_zombie_ps(pid)
-
-
-def _is_zombie_ps(pid: int) -> bool:
-    """Return True if ps reports PID as a zombie: macOS has no /proc, and a signal reaches a zombie there."""
-    try:
-        result = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, timeout=5)
-    except (OSError, subprocess.SubprocessError) as exc:
-        logger.warning("[wake] PID %s state unreadable by ps (assuming alive): %s", pid, exc)
-        return False
-    return result.stdout.strip().startswith("Z")
+    return not _is_zombie_linux(pid)
 
 
 def _is_zombie_linux(pid: int) -> bool:

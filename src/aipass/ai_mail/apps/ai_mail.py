@@ -12,7 +12,6 @@ ai_mail Branch - Main Orchestrator
 Main handles routing; auto-discovered modules implement functionality.
 """
 
-import os
 import sys
 import importlib
 import signal
@@ -25,12 +24,6 @@ from aipass.cli.apps.modules import console, error, reset_command_state, resolve
 
 _UPDATE_SECTION = None  # type: ignore
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 MODULE_ROOT = Path(__file__).parent
 
@@ -220,6 +213,5 @@ def main():
 
 if __name__ == "__main__":
     # Set SIGPIPE here, never at import: an importer (a pytest worker) would die silently on its first EPIPE.
-    if hasattr(signal, "SIGPIPE"):
-        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     sys.exit(main())

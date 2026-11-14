@@ -17,7 +17,6 @@
 import io
 
 import pytest
-from pathlib import PureWindowsPath
 from unittest.mock import patch, MagicMock
 
 from aipass.ai_mail.apps.handlers.email.send import (
@@ -416,17 +415,6 @@ def test_resolve_dispatch_target_tilde_path():
     result = resolve_dispatch_target("~/Projects/flow", True, get_branch_info_fn=None)
 
     assert result == "@flow"
-
-
-def test_resolve_dispatch_target_knows_a_windows_drive_path():
-    """A drive-letter path is a path, not an address (mutant: drop the PureWindowsPath test)."""
-    windows_path = str(PureWindowsPath("C:\\") / "work" / "src" / "ai_mail")
-    looked_up = []
-
-    result = resolve_dispatch_target(windows_path, True, get_branch_info_fn=looked_up.append)
-
-    assert result == "@ai_mail"
-    assert len(looked_up) == 1
 
 
 def test_parse_send_args_joins_split_message():

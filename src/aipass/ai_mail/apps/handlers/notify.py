@@ -12,9 +12,9 @@ Notification Feed Writer
 Append-only JSONL feed BAUD's bell reads; desktop toasts are retired. Reference: docs/dispatch_register_and_feed.md
 """
 
+import fcntl
 import json
 import os
-import sys
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -23,17 +23,6 @@ from typing import Callable, Dict, Optional
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
-
-if sys.platform == "win32":
-    import msvcrt
-
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-else:
-    import fcntl
 
 NOTIFICATION_KINDS = ("mail", "wake", "dispatch", "system")
 DEFAULT_KIND = "system"
@@ -184,18 +173,12 @@ def _jsonl_lock(path: Path, lock_name: str):
 
     try:
         lock_fd = open(lock_file, "w", encoding="utf-8")
-        if sys.platform == "win32":
-            msvcrt.locking(lock_fd.fileno(), msvcrt.LK_LOCK, 1)
-        else:
-            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
         yield
     finally:
         if lock_fd is not None:
             try:
-                if sys.platform == "win32":
-                    msvcrt.locking(lock_fd.fileno(), msvcrt.LK_UNLCK, 1)
-                else:
-                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
             except OSError as e:
                 logger.warning("[notify] feed lock release failed: %s", e)
             finally:

@@ -11,9 +11,6 @@
 # AIPASS_CALLER_CWD is the evidence of where the caller stood: set and outside any branch,
 # every verb refuses, and a claim in AIPASS_CALLER_BRANCH cannot outvote it.
 
-# The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(windows_compat) — the sys.platform == "win32" stdout/stderr reconfigure block
-
 from pathlib import Path
 
 import json
@@ -145,7 +142,7 @@ class TestEveryVerbIsFenced:
         assert entry.main() != 0
 
     def test_help_still_works_from_anywhere(self, tmp_path, monkeypatch):
-        """Help is never fenced: a cross-OS preflight runs `drone @ai_mail --help` as a routing probe."""
+        """Help is never fenced: a preflight runs `drone @ai_mail --help` as a routing probe."""
 
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "aipass")
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(_non_branch_dir(tmp_path)))

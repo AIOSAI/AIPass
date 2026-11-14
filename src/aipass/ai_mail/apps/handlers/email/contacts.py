@@ -12,8 +12,6 @@ Contacts Address Book Handler
 Resolves callers from external projects where CWD-walking cannot identify them.
 """
 
-import os
-import sys
 from datetime import datetime
 from typing import Dict, Optional
 
@@ -21,12 +19,6 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 CONTACTS_FILE = find_repo_root() / "src/aipass/ai_mail/.ai_mail.local/contacts.json"
 

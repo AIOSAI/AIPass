@@ -10,20 +10,11 @@
 Shared path utilities for ai_mail handlers.
 """
 
-import os
-import sys
 from pathlib import Path
 from typing import Optional
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 
 _CWD_FALLBACK_WARNED = False
@@ -38,7 +29,7 @@ REGISTRY_GLOB = f"*{REGISTRY_SUFFIX}"
 def registries_in(directory: Path, pattern: str = REGISTRY_GLOB) -> list:
     """Registry files under *directory*, with the NAME re-checked case-sensitively.
 
-    pathlib glob folds case on Windows, so ``*_registry.json`` counters would pass as identity-bearing registries.
+    pathlib glob folds case on a case-insensitive filesystem, so ``*_registry.json`` counters would pass as identity-bearing registries.
     """
     try:
         found = list(directory.glob(pattern))

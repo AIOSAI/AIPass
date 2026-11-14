@@ -17,7 +17,6 @@
 
 import json
 import subprocess
-import sys
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -341,9 +340,7 @@ def test_a_lock_gone_before_cleanup_is_not_recreated(monkeypatch, main_argv, tmp
     assert list(lock_file.parent.glob("*.lock")) == []
 
 
-# POSIX only: the route is a stderr log removed while the monitor holds it open,
-# and Windows refuses to remove an open file.
-@pytest.mark.skipif(sys.platform == "win32", reason="Windows refuses to remove a file the monitor holds open")
+# The route is a stderr log removed while the monitor holds it open.
 def test_a_stderr_log_removed_mid_attempt_is_no_background_task_marker(monkeypatch, main_argv, tmp_path):
     argv, _, stderr_log = main_argv
     bounce = MagicMock()

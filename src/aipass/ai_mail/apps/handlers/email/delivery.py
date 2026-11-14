@@ -14,7 +14,6 @@ Reference: docs/sending_and_delivery.md
 
 import json
 import os
-import sys
 import uuid
 from pathlib import Path
 from typing import Dict, Tuple, List, Optional, Callable
@@ -24,13 +23,6 @@ from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import REGISTRY_SUFFIX, find_repo_root, find_project_root, registries_in
 from aipass.ai_mail.apps.handlers.registry.read import get_all_branches
 from aipass.ai_mail.apps.handlers.email.inbox_ops import count_new, migrate_inbox_format
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 
 _REPO_ROOT = find_repo_root()

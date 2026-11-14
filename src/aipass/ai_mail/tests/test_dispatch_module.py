@@ -1326,8 +1326,6 @@ class TestADispatchCarriesAGrant:
 # dispatch stop
 # ===========================================================================
 
-# Real processes in their own session, real signals and ps: POSIX only.
-_posix_only = pytest.mark.skipif(sys.platform == "win32", reason="process groups, signals and ps are POSIX")
 # The stand-in monitor starts its own agent child in its group and prints the child's pid.
 _SLEEPER = (
     "import signal, subprocess, sys, time\n"
@@ -1351,36 +1349,35 @@ def running_dispatch(tmp_path, monkeypatch):
     procs = []
 
     def start(mode="polite", mark="dispatch_monitor"):
-        if sys.platform != "win32":
-            proc = subprocess.Popen(
-                [sys.executable, "-c", _SLEEPER, mode, mark],
-                start_new_session=True,
-                stdout=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
+        proc = subprocess.Popen(
+            [sys.executable, "-c", _SLEEPER, mode, mark],
+            start_new_session=True,
+            stdout=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        assert proc.stdout is not None
+        proc.agent_pid = int(proc.stdout.readline())  # pyright: ignore[reportAttributeAccessIssue]
+        threading.Thread(target=proc.wait, daemon=True).start()
+        procs.append(proc)
+        # Returned only once the product's own checks see the stand-in; a slow runner otherwise raced them.
+        deadline = time.monotonic() + 10
+        while not (check_pid_alive(proc.pid) and stop_mod.is_monitor(proc.pid) == (mark == "dispatch_monitor")):
+            assert time.monotonic() < deadline, f"the stand-in PID {proc.pid} never became visible to ps"
+            with suppress(subprocess.TimeoutExpired):
+                proc.wait(timeout=0.05)
+            assert proc.returncode is None, (
+                f"the stand-in monitor exited before the stop: returncode {proc.returncode}"
             )
-            assert proc.stdout is not None
-            proc.agent_pid = int(proc.stdout.readline())  # pyright: ignore[reportAttributeAccessIssue]
-            threading.Thread(target=proc.wait, daemon=True).start()
-            procs.append(proc)
-            # Returned only once the product's own checks see the stand-in; a slow runner otherwise raced them.
-            deadline = time.monotonic() + 10
-            while not (check_pid_alive(proc.pid) and stop_mod.is_monitor(proc.pid) == (mark == "dispatch_monitor")):
-                assert time.monotonic() < deadline, f"the stand-in PID {proc.pid} never became visible to ps"
-                with suppress(subprocess.TimeoutExpired):
-                    proc.wait(timeout=0.05)
-                assert proc.returncode is None, (
-                    f"the stand-in monitor exited before the stop: returncode {proc.returncode}"
-                )
-            (branch / ".ai_mail.local" / ".dispatch.lock").write_text(json.dumps({"pid": proc.pid}), encoding="utf-8")
-            return proc
+        (branch / ".ai_mail.local" / ".dispatch.lock").write_text(json.dumps({"pid": proc.pid}), encoding="utf-8")
+        return proc
 
     dispatch_id = register.open_dispatch(sender="@boss", target="@worker", subject="Build it", expected_seconds=600)
     session_pointer.write_pointer(branch, "sess-1", "wake-fresh")
     yield branch, dispatch_id, start, mails
     for proc in procs:
         proc.kill()
-        if sys.platform != "win32" and check_pid_alive(proc.agent_pid):
+        if check_pid_alive(proc.agent_pid):
             os.kill(proc.agent_pid, signal.SIGKILL)
         proc.stdout.close()
 
@@ -1389,7 +1386,6 @@ def _stop(*args):
     return handle_command("dispatch", ["stop", *args])
 
 
-@_posix_only
 class TestDispatchStop:
     def test_a_stop_ends_the_monitor_closes_the_row_stopped_and_mails_the_dispatcher(self, running_dispatch, capsys):
         branch, dispatch_id, start, mails = running_dispatch
@@ -1521,7 +1517,6 @@ class TestDispatchClose:
         assert display.command_failed()
         assert [e["dispatch_id"] for e in register.outstanding()] == [dispatch_id]
 
-    @_posix_only
     def test_a_row_still_running_is_refused_and_points_at_stop(self, running_dispatch, monkeypatch, capsys):
         _, dispatch_id, start, _ = running_dispatch
         proc = start()

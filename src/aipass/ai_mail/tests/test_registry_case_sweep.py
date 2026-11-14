@@ -8,20 +8,13 @@
 
 """Tests for apps/handlers/paths.py's registry glob readers on a case-insensitive filesystem."""
 
-# On Windows the pathlib glob matcher folds case, so ``*_REGISTRY.json`` also matches lowercase
-# ``*_registry.json`` counter files; these sites are identity-bearing. The fixtures below emulate
-# the Windows matcher and the macOS volume on Linux, with positive and negative controls.
-
-# The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(windows_compat) — the real Windows/macOS case-folding behavior; emulated here, not run there
+# A glob matcher that folds case lets ``*_REGISTRY.json`` also match lowercase
+# ``*_registry.json`` counter files; these sites are identity-bearing. The fixture below emulates
+# a folding matcher, with positive and negative controls.
 
 import ast
-import fnmatch
 import json
-import os
-import re
-import sys
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -55,35 +48,9 @@ def _reply_along(tmp_path: Path, reply_path: Path):
 REAL_GLOB = Path.glob
 
 
-# Volume folding and matcher folding are separate facts (macOS: volume folds, matcher does not).
-# Keyed on sys.platform, not os.name: os.name collapses darwin into "posix".
-_VOLUME_FOLDS_BY_PLATFORM = {
-    "linux": False,
-    "win32": True,
-    "darwin": None,
-}
-
-_MATCHER_FOLDS_BY_PLATFORM = {
-    "linux": False,
-    "win32": True,
-    "darwin": False,
-}
-
-_MATCHER_FLAVOUR_BY_PLATFORM = {
-    "linux": PurePosixPath,
-    "win32": PureWindowsPath,
-    "darwin": PurePosixPath,
-}
-
-
-def _expected(table: dict):
-    """The table's row for this host, or None where no fixed answer is honest."""
-    return table.get(sys.platform, None)
-
-
 @pytest.fixture
 def case_insensitive_fs(monkeypatch):
-    """Make ``Path.glob`` match the way the Windows matcher does."""
+    """Make ``Path.glob`` match the way a case-folding matcher does."""
 
     def _folded(self, pattern, *args, **kwargs):
         seen = []
@@ -98,81 +65,6 @@ def case_insensitive_fs(monkeypatch):
     return _folded
 
 
-_GLOB_MAGIC = re.compile(r"[*?[]")
-
-
-@pytest.fixture
-def folding_volume(monkeypatch):
-    """Make the VOLUME fold case, leaving the glob MATCHER as it was.
-
-    After ``posix_matcher`` it is macOS; after ``case_insensitive_fs`` it is Windows; alone it inherits the host matcher.
-    """
-    real_exists = Path.exists
-    prior_glob = Path.glob
-
-    def _folded_twin(path):
-        try:
-            siblings = list(path.parent.iterdir())
-        except OSError:
-            return None
-        return next((s for s in siblings if s.name.lower() == path.name.lower()), None)
-
-    def _exists(self, *args, **kwargs):
-        return real_exists(self, *args, **kwargs) or _folded_twin(self) is not None
-
-    def _glob(self, pattern, *args, **kwargs):
-        if _GLOB_MAGIC.search(pattern) or "/" in pattern:
-            yield from prior_glob(self, pattern, *args, **kwargs)
-            return
-        if _exists(self / pattern):
-            yield self / pattern
-
-    monkeypatch.setattr(Path, "exists", _exists)
-    monkeypatch.setattr(Path, "glob", _glob)
-
-
-@pytest.fixture
-def posix_matcher(monkeypatch):
-    """Install the posix flavour's case-sensitive wildcard matcher on ANY host.
-
-    ``WindowsPath.glob`` folds, so a Mac world needs this on a Windows host. ``**`` is refused, not emulated.
-    """
-
-    def _glob(self, pattern, *args, **kwargs):
-        if "**" in pattern:
-            raise NotImplementedError("posix_matcher matches one level per component, not **")
-        found = [self]
-        for part in pattern.split("/"):
-            found = [
-                child
-                for parent in found
-                if parent.is_dir()
-                for child in parent.iterdir()
-                if fnmatch.fnmatchcase(child.name, part)
-            ]
-        yield from found
-
-    monkeypatch.setattr(Path, "glob", _glob)
-
-
-@pytest.fixture
-def mac_world(posix_matcher, folding_volume):
-    """CPython 3.13 on a default macOS volume, complete on any host: posix matcher first, folding volume over it."""
-
-
-def _volume_folds_case(directory: Path) -> bool:
-    """Does THIS VOLUME find a file by a name spelled in another case? Measured.
-
-    A lookup, never a glob (3.13 answers a wildcard-free glob by lookup, 3.12 by matching). Never skipif.
-    """
-    marker = directory / "aipass_case_probe"
-    marker.write_text("", encoding="utf-8")
-    try:
-        return (directory / "AIPASS_CASE_PROBE").exists()
-    finally:
-        marker.unlink()
-
-
 def _matcher_folds_case(directory: Path) -> bool:
     """Does the glob MATCHER fold case? The fact every registry walk depends on."""
     marker = directory / "aipass_case_probe"
@@ -181,21 +73,6 @@ def _matcher_folds_case(directory: Path) -> bool:
         return bool(list(directory.glob("*_CASE_PROBE")))
     finally:
         marker.unlink()
-
-
-def test_the_volume_probe_agrees_with_a_direct_stat(tmp_path):
-    """The volume probe's own control: ``Path.exists`` and ``os.path.exists`` must agree."""
-    marker = tmp_path / "aipass_case_probe"
-    marker.write_text("", encoding="utf-8")
-    by_stat = os.path.exists(tmp_path / "AIPASS_CASE_PROBE")
-    marker.unlink()
-    assert _volume_folds_case(tmp_path) is by_stat
-
-
-def test_the_two_probes_ask_different_questions(tmp_path, mac_world):
-    """A folding volume under a case-sensitive matcher: neither probe may stand in for the other."""
-    assert _volume_folds_case(tmp_path) is True
-    assert _matcher_folds_case(tmp_path) is False
 
 
 def _decoy(directory: Path, name: str = "wrong_registry.json") -> Path:
@@ -225,7 +102,7 @@ def _real_registry(directory: Path, name: str = "PROJECT_REGISTRY.json") -> Path
 
 
 def _claims_of_the_negative_control(directory: Path) -> None:
-    """The negative control's claims, run on the host and in every emulated world."""
+    """The negative control's claims, run on the host."""
     decoy = _decoy(directory)
 
     if _matcher_folds_case(directory):
@@ -242,15 +119,6 @@ def _claims_of_the_negative_control(directory: Path) -> None:
     )
 
 
-def _claims_of_the_link(directory: Path) -> None:
-    """The link's claims: the raw glob follows the MATCHER probe, the reader refuses either way."""
-    folds = _matcher_folds_case(directory)
-    decoy = _decoy(directory)
-
-    assert (decoy in list(directory.glob("*_REGISTRY.json"))) is folds
-    assert registries_in(directory) == [], "the reader refuses the counter on any filesystem"
-
-
 class TestTheInstrumentIsHonest:
     """Controls: a widening emulator that never widens turns every pin below green for the wrong reason."""
 
@@ -265,79 +133,17 @@ class TestTheInstrumentIsHonest:
     def test_negative_control_the_instrument_can_say_no(self, tmp_path):
         """Same fixture tree, instrument NOT installed.
 
-        The host's MATCHER is probed, never assumed and never skipif'd: on Windows the raw glob sees the decoy.
+        The host's MATCHER is probed, never assumed and never skipif'd.
         """
         _claims_of_the_negative_control(tmp_path)
 
     def test_the_probe_reports_folding_when_the_host_folds(self, tmp_path, case_insensitive_fs):
-        """The Windows branch of the control above, driven on Linux through the emulator."""
+        """The folding branch of the control above, driven through the emulator."""
         assert _matcher_folds_case(tmp_path) is True
 
         decoy = _decoy(tmp_path)
         assert decoy in list(tmp_path.glob("*_REGISTRY.json"))
         assert registries_in(tmp_path) == []
-
-    def test_cause_the_volume_folds_exactly_as_its_platform_row_says(self, tmp_path):
-        """CAUSE, volume half. What this filesystem does, against the table."""
-        expected = _expected(_VOLUME_FOLDS_BY_PLATFORM)
-        if expected is None:
-            pytest.skip(f"{sys.platform}: volume case-folding is configurable — the matcher pins still run")
-        assert _volume_folds_case(tmp_path) is expected
-
-    def test_cause_the_matcher_folds_exactly_as_its_platform_row_says(self, tmp_path):
-        """CAUSE, matcher half, the one the registry walks depend on; darwin's row follows CPython's flavour."""
-        expected = _expected(_MATCHER_FOLDS_BY_PLATFORM)
-        if expected is None:
-            pytest.skip(f"{sys.platform}: no matcher row for this platform — see the LINK pin")
-        assert _matcher_folds_case(tmp_path) is expected
-
-    def test_outcome_the_raw_glob_sees_the_decoy_exactly_when_the_matcher_row_says_so(self, tmp_path):
-        """OUTCOME. Whether an uppercase pattern reaches the lowercase counter, predicted from the MATCHER row."""
-        expected = _expected(_MATCHER_FOLDS_BY_PLATFORM)
-        if expected is None:
-            pytest.skip(f"{sys.platform}: no matcher row for this platform — see the LINK pin")
-        decoy = _decoy(tmp_path)
-        assert (decoy in list(tmp_path.glob("*_REGISTRY.json"))) is expected
-
-    @pytest.mark.parametrize("platform", sorted(_MATCHER_FOLDS_BY_PLATFORM))
-    def test_the_matcher_row_is_what_that_platforms_path_flavour_does(self, platform):
-        """ORACLE. Both path flavours ship on every host, so each platform's matcher row runs here."""
-        flavour = _MATCHER_FLAVOUR_BY_PLATFORM[platform]
-        assert flavour("wrong_registry.json").match("*_REGISTRY.json") is _MATCHER_FOLDS_BY_PLATFORM[platform]
-
-    def test_link_the_outcome_follows_from_the_cause_on_every_platform(self, tmp_path):
-        """LINK. Holds with NO platform row: the glob follows the MATCHER probe, and the reader refuses either way."""
-        _claims_of_the_link(tmp_path)
-
-    def test_the_windows_row_is_driven_here_so_it_cannot_rot(self, tmp_path, case_insensitive_fs, folding_volume):
-        """The win32 rows are derived, so they are driven here through both stacked emulators."""
-        assert _VOLUME_FOLDS_BY_PLATFORM["win32"] is True
-        assert _MATCHER_FOLDS_BY_PLATFORM["win32"] is True
-
-        assert _volume_folds_case(tmp_path) is True, "emulated Windows must present a folding volume"
-        assert _matcher_folds_case(tmp_path) is True, "emulated Windows must present a folding matcher"
-
-        _claims_of_the_negative_control(tmp_path)
-        _claims_of_the_link(tmp_path)
-
-    def test_the_mac_row_is_driven_here_so_it_cannot_rot(self, tmp_path, mac_world):
-        """The two macOS reds, reproduced on Linux: a folding volume under a case-sensitive matcher."""
-        assert _MATCHER_FOLDS_BY_PLATFORM["darwin"] is False
-
-        assert _volume_folds_case(tmp_path) is True, "emulated macOS must present a folding volume"
-        assert _matcher_folds_case(tmp_path) is False, "emulated macOS must present a case-sensitive matcher"
-
-        _claims_of_the_negative_control(tmp_path)
-        _claims_of_the_link(tmp_path)
-
-    def test_darwin_is_deliberately_unfixed_not_forgotten(self, tmp_path):
-        """A None row looks like an omission, so it is pinned as a decision.
-
-        macOS volumes are formattable either way; the matcher row is fixed False (CPython's posix flavour).
-        """
-        assert _VOLUME_FOLDS_BY_PLATFORM["darwin"] is None
-        assert "darwin" in _VOLUME_FOLDS_BY_PLATFORM, "an absent key and a None row read the same at runtime"
-        assert _MATCHER_FOLDS_BY_PLATFORM["darwin"] is False
 
     def test_the_fixtures_never_write_case_twins(self, tmp_path):
         """A case-twin decoy OVERWRITES on a folding filesystem, so fixtures never write twins."""

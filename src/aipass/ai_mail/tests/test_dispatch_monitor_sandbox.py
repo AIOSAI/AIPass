@@ -585,7 +585,6 @@ class TestBrokerFdHandshake:
         bounce.assert_not_called()
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="AF_UNIX broker daemon is Linux-only")
 class TestBrokerRealE2E:
     """Real multi-process e2e: broker daemon, identified connection, child reads fd."""
 

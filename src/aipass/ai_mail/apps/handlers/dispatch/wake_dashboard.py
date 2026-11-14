@@ -8,8 +8,6 @@
 
 """Refresh the recipient's dashboard on the way into a wake."""
 
-import os
-import sys
 import threading
 import time
 from pathlib import Path
@@ -17,13 +15,6 @@ from typing import TYPE_CHECKING
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 
 if TYPE_CHECKING:  # pragma: no cover — import-cycle-free typing only

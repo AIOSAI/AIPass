@@ -11,9 +11,6 @@
 # notify.py imports prax's logger, so the door is a function and FEED_PATH resolves lazily
 # through PEP 562 __getattr__; feed_path() is the one construction site for the path.
 
-# The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(windows_compat) — monitor_alive()'s Windows OpenProcess leg (_monitor_alive_windows)
-
 import json
 import subprocess
 import sys

@@ -11,9 +11,6 @@
 # ``--from`` / ``--sender`` are unauthenticated strings; identity that gates a privilege
 # may only come from the env drone stamps from real process ancestry.
 
-# The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(windows_compat) — the win32 console re-encoding guard at import time
-
 import re
 from pathlib import Path
 

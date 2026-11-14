@@ -265,7 +265,6 @@ def test_main_resets_failure_flag_between_runs(monkeypatch):
 # SIGPIPE belongs to the program, never to an importer. Each runs in a fresh interpreter: this process imported the module at collection.
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no SIGPIPE")
 def test_importing_ai_mail_leaves_sigpipe_as_it_was():
     probe = (
         "import signal\n"
@@ -281,7 +280,6 @@ def test_importing_ai_mail_leaves_sigpipe_as_it_was():
     assert result.stdout.startswith("True "), result.stdout
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no SIGPIPE")
 def test_ai_mail_run_as_a_program_ends_quietly_on_a_closed_pipe():
     read_end, write_end = os.pipe()
     os.close(read_end)

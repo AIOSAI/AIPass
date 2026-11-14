@@ -147,7 +147,7 @@ new → opened → closed
 - **opened** — Viewed by recipient, awaiting action
 - **closed** — Replied or dismissed, archived automatically
 
-Each branch's mailbox lives at `<branch_path>/.ai_mail.local/inbox.json`. Sent copies go to `.ai_mail.local/sent/`. File locking (`fcntl`/`msvcrt`) protects concurrent inbox writes.
+Each branch's mailbox lives at `<branch_path>/.ai_mail.local/inbox.json`. Sent copies go to `.ai_mail.local/sent/`. File locking (`fcntl`) protects concurrent inbox writes.
 
 
 ## Related

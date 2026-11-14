@@ -10,7 +10,7 @@
 Email Send Argument Parsing Handler
 """
 
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from typing import List, Dict, Optional, Any
 
 from aipass.ai_mail.apps.handlers.json import json_handler
@@ -134,11 +134,8 @@ def resolve_dispatch_target(
     if not auto_execute:
         return None
 
-    # A Windows path starts with a drive, not a slash: PureWindowsPath knows it
-    # on every host, where Path.is_absolute only knows the host's own form.
-    windows_absolute = PureWindowsPath(branch).is_absolute()
-    if branch.startswith("/") or branch.startswith("~") or windows_absolute:
-        name = (PureWindowsPath(branch) if windows_absolute else Path(branch)).name.lower()
+    if branch.startswith("/") or branch.startswith("~"):
+        name = Path(branch).name.lower()
         if get_branch_info_fn:
             branch_info = get_branch_info_fn(Path(branch))
             if branch_info:

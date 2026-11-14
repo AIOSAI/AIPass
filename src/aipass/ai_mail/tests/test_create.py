@@ -8,9 +8,6 @@
 
 """Tests for apps/handlers/email/create.py."""
 
-# The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(windows_compat) — the sys.platform == "win32" stdout/stderr reconfigure block
-
 import json
 
 import pytest

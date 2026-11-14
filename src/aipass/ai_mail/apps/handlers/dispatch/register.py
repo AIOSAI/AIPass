@@ -15,7 +15,6 @@ Reference: docs/dispatch_register_and_feed.md
 from __future__ import annotations
 
 import os
-import sys
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -44,67 +43,6 @@ STATUS_REPLIED = "completed (replied)"
 MONITOR_PID_KEY = "monitor_pid"
 GRANT_KEY = "grant"
 
-_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-_STILL_ACTIVE = 259
-_ERROR_ACCESS_DENIED = 5
-_ERROR_INVALID_PARAMETER = 87
-
-
-def _kernel32():
-    """The Win32 kernel handle with its signatures set.
-
-    Separate so a test can fake it: a fake object's bound methods cannot carry ``argtypes``.
-    """
-    import ctypes
-    from ctypes import wintypes
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
-    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel32.CloseHandle.restype = wintypes.BOOL
-    return kernel32
-
-
-def _last_win32_error() -> int:
-    """The error the last Win32 call left, read the way ctypes recommends."""
-    import ctypes
-
-    return ctypes.get_last_error()  # type: ignore[attr-defined]
-
-
-def _monitor_alive_windows(pid: int) -> Optional[bool]:
-    """The Windows leg of ``monitor_alive``: OpenProcess, never a signal.
-
-    os.kill(pid, 0) on Windows is TerminateProcess. Access denied means the process exists.
-    """
-    import ctypes
-    from ctypes import wintypes
-
-    kernel32 = _kernel32()
-    handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-    if not handle:
-        err = _last_win32_error()
-        if err == _ERROR_INVALID_PARAMETER:
-            return False
-        if err == _ERROR_ACCESS_DENIED:
-            return True
-        logger.warning("[register] could not probe monitor pid %s: win32 error %s", pid, err)
-        return None
-    try:
-        exit_code = wintypes.DWORD()
-        if not kernel32.GetExitCodeProcess(handle, ctypes.pointer(exit_code)):
-            logger.warning(
-                "[register] could not read monitor pid %s exit state: win32 error %s", pid, _last_win32_error()
-            )
-            return None
-        return exit_code.value == _STILL_ACTIVE
-    finally:
-        kernel32.CloseHandle(handle)
-
-
 def monitor_alive(pid: Optional[int]) -> Optional[bool]:
     """Whether the monitor process *pid* still exists. None when it cannot be told.
 
@@ -113,22 +51,7 @@ def monitor_alive(pid: Optional[int]) -> Optional[bool]:
     if not isinstance(pid, int) or pid <= 0:
         return None
 
-    if sys.platform.startswith("linux"):
-        return Path("/proc", str(pid)).exists()
-
-    if sys.platform == "win32":
-        return _monitor_alive_windows(pid)
-
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError as exc:
-        logger.warning("[register] could not probe monitor pid %s: %s", pid, exc)
-        return None
-    return True
+    return Path("/proc", str(pid)).exists()
 
 
 def register_file(repo_root: Optional[Path] = None) -> Path:

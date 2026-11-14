@@ -13,8 +13,6 @@ Lists the scoped write grants open on the dispatch register. Granting happens on
 dispatch verb (--grant-root, --grant); a gate decides a write through door_dispatch_grant.
 """
 
-import os
-import sys
 from typing import List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
@@ -24,12 +22,6 @@ from aipass.ai_mail.apps.handlers.dispatch import register
 from aipass.ai_mail.apps.handlers.dispatch.grant import GrantRefused, open_grants
 from aipass.ai_mail.apps.handlers.json import json_handler
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 _LIVENESS = {True: "monitor alive", False: "monitor GONE", None: "monitor unknown"}
 

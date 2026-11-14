@@ -13,8 +13,6 @@ Reference: docs/identity_and_boundaries.md
 """
 
 import json
-import os
-import sys
 import time
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
@@ -23,13 +21,6 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.memory.apps.modules.door_registry_scope import fleet_branches
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root, registries_in
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 
 MODULE_NAME = "registry.read"
