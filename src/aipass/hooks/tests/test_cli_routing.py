@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for hooks's entry point routing, help and introspection
-# Version: 1.2.3
+# Version: 1.2.4
 # Created: 2026-09-03
-# Modified: 2026-11-02
+# Modified: 2026-11-13
 # =============================================
 
 """Tests for apps/hooks.py, the branch's CLI entry point."""
@@ -163,6 +163,26 @@ def test_route_command_survives_a_raising_module(entry_logger):
 
     assert result is False
     assert any(level == "error" for level, _ in entry_logger)
+
+
+def test_a_crashing_module_names_its_error_on_stderr_and_exits_nonzero(monkeypatch, capsys):
+    """Pins the defect: a module crash printed only 'Unknown command'."""
+
+    class _Exploding:
+        __name__ = "exploding"
+
+        def handle_command(self, command, args):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(branch_entry, "discover_modules", lambda: [_Exploding()])
+
+    result = _run(monkeypatch, ["probe"])
+
+    out, err = capsys.readouterr()
+    assert result == 1
+    assert "exploding" in err
+    assert "boom" in err
+    assert "boom" not in out
 
 
 def test_known_command_exits_zero(monkeypatch, stub_module):

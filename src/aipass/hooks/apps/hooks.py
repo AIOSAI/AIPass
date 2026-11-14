@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: apps
 # Created: 2026-05-18
-# Modified: 2026-10-17
+# Modified: 2026-11-13
 # =============================================
 
 """
@@ -170,6 +170,7 @@ def route_command(command: str, args: list[str], modules: list[Any]) -> bool:
                 return True
         except Exception as e:
             logger.error("[HOOKS] Module %s error: %s", module.__name__, e)
+            err_console.print(f"Module {module.__name__} error: {e}", markup=False)
     return False
 
 
