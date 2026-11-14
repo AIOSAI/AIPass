@@ -8,7 +8,7 @@
 
 """One guarded spelling for module-level __file__ resolution.
 
-On Windows Path.resolve() reads os.getcwd() unconditionally, so a deleted cwd would make every import fail.
+Path.resolve() of a relative path reads os.getcwd(), so a deleted cwd would make that import fail.
 """
 
 import sys

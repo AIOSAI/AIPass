@@ -11,7 +11,6 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that every file in apps/modules/ parses and imports
 # sentry: no-test-needed(constant) — the Rich colour tags print_help and print_introspection emit
-# sentry: no-test-needed(stdlib) — the win32 preamble's os.environ.setdefault and stream reconfigure
 
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock

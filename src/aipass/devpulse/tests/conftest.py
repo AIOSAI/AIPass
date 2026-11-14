@@ -9,7 +9,6 @@
 """Shared pytest fixtures for devpulse tests."""
 
 import os
-import sys
 import tempfile
 
 # Before any import of the json shim: the only redirect a suite needs.
@@ -42,26 +41,6 @@ def sealed_watchdog_store(request: pytest.FixtureRequest, tmp_path: Path, monkey
     store = tmp_path / "_sealed_watchdog"
     monkeypatch.setattr(watch_registry, "default_storage_path", lambda: store / "watchdog_active.json")
     monkeypatch.setattr(watch_timer, "default_storage_path", lambda: store / "watchdog_timers.json")
-
-
-class _SysAs:
-    """One module's ``sys``: a pretended ``platform``, every other attribute the real ``sys``."""
-
-    def __init__(self, platform: str) -> None:
-        self.platform = platform
-
-    def __getattr__(self, name: str):
-        return getattr(sys, name)
-
-
-@pytest.fixture
-def pretend_platform(monkeypatch: pytest.MonkeyPatch):
-    """Make ONE module see another ``sys.platform``; setting sys.platform itself is process-wide."""
-
-    def _pretend(module, platform: str) -> None:
-        monkeypatch.setattr(module, "sys", _SysAs(platform))
-
-    return _pretend
 
 
 @pytest.fixture(autouse=True, scope="session")

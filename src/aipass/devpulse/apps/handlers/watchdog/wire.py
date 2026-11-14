@@ -14,7 +14,6 @@
 import json
 import os
 import signal
-import subprocess
 import sys
 import tempfile
 import time
@@ -50,10 +49,6 @@ _WIRE_KIND = "baseline_wire"
 
 _REGISTRY_FILENAME = "AIPASS_REGISTRY.json"
 
-# A wedged ps or lsof costs a tick, not the wire.
-_PROBE_TIMEOUT_SECONDS = 5.0
-
-
 def _stderr(msg: str) -> None:
     """Arm-time/diagnostic channel — never a wake event."""
     sys.stderr.write(msg + "\n")
@@ -80,36 +75,11 @@ def _touch_heartbeat() -> None:
         logger.warning("[watchdog.wire] heartbeat touch failed %s: %s", HEARTBEAT_FILE, exc)
 
 
-def _stdout_target_via_lsof(pid: int) -> Path | None:
-    """``lsof -p <pid> -a -d 1 -Fn`` — the portable half of ``stdout_target``.
-
-    None on any failure: a wrong path would be read as a wrapper identity.
-    """
-    stdout = ""
-    try:
-        stdout = subprocess.run(
-            ["lsof", "-p", str(pid), "-a", "-d", "1", "-Fn"],
-            capture_output=True,
-            text=True,
-            timeout=_PROBE_TIMEOUT_SECONDS,
-            check=False,
-        ).stdout
-    except (OSError, subprocess.SubprocessError) as exc:
-        logger.info("[watchdog.wire] lsof unusable for pid=%s: %s", pid, exc)
-    for line in stdout.splitlines():
-        if line.startswith("n") and len(line) > 1:
-            return Path(line[1:])
-    logger.info("[watchdog.wire] lsof named no fd/1 for pid=%s", pid)
-    return None
-
-
 def stdout_target(pid: int | None = None) -> Path | None:
     """Where a process's stdout actually goes — the wire-identity primitive.
 
     None when the pid is gone or fd/1 is unreadable: the target is unknown.
     """
-    if sys.platform != "linux":
-        return _stdout_target_via_lsof(os.getpid() if pid is None else pid)
     who = "self" if pid is None else str(pid)
     try:
         return Path(os.readlink(f"/proc/{who}/fd/1"))
@@ -145,26 +115,8 @@ def _wrapper_of(target: Path | None) -> str:
     return WRAPPER_FOREGROUND
 
 
-def _cmdline_via_ps(pid: int) -> str:
-    """``ps -p <pid> -o command=`` — the portable half of ``cmdline``."""
-    try:
-        done = subprocess.run(
-            ["ps", "-p", str(pid), "-o", "command="],
-            capture_output=True,
-            text=True,
-            timeout=_PROBE_TIMEOUT_SECONDS,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        logger.info("[watchdog.wire] ps unusable for pid=%s: %s", pid, exc)
-        return ""
-    return done.stdout.strip()
-
-
 def cmdline(pid: int) -> str:
     """A process's cmdline, NUL-separated fields joined with spaces. "" on error."""
-    if sys.platform != "linux":
-        return _cmdline_via_ps(pid)
     try:
         raw = Path(f"/proc/{pid}/cmdline").read_bytes()
     except OSError as exc:

@@ -13,7 +13,6 @@
 # sentry: no-test-needed(stdlib) — hmac's digest arithmetic and secrets.token_hex's randomness
 
 import json
-import os
 import stat
 
 import pytest
@@ -87,11 +86,8 @@ def test_keygen_creates_600_hex_key(world):
     content = world["key"].read_text(encoding="utf-8").strip()
     assert len(content) == 64
     bytes.fromhex(content)  # valid hex or raises
-    if os.name == "posix":
-        # Windows chmod only drives the read-only bit — st_mode reads 0o666
-        # there no matter what keygen asks for, so 600 is a POSIX-only promise.
-        mode = stat.S_IMODE(world["key"].stat().st_mode)
-        assert mode == 0o600
+    mode = stat.S_IMODE(world["key"].stat().st_mode)
+    assert mode == 0o600
     assert content not in msg  # key material never surfaces in messages
 
 

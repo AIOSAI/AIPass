@@ -18,11 +18,6 @@
       "reason": "Pins a cache guarantee no public answer shows: an unchanged transcript is parsed once, then every tick reuses the verdict. The counter wraps the real _tail_lines and returns its answer, so the verdicts asserted are the product's."
     },
     {
-      "standard": "stdlib_patch",
-      "file": "tests/test_watchdog_agent.py",
-      "reason": "File-wide because the stdlib_patch checker passes no line; the one patch it covers is _case_insensitive_glob. Every other stdlib name in this file is swapped on the module under test only (pretend_platform). It emulates a case-insensitive (Windows) directory listing so the exact-case *_REGISTRY.json filter can be shown load-bearing from Linux, where the effect cannot occur on disk. The wrapper widens the real glob and monkeypatch restores it; a product seam per glob would be a door for tests alone. Same reason as memory's case-fold fixtures (leg 11)."
-    },
-    {
       "standard": "through_the_command",
       "file": "tests/test_watchdog_dispatches.py",
       "lines": [91],

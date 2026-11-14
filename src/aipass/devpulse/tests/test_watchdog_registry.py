@@ -25,7 +25,6 @@ from unittest.mock import patch
 
 import pytest
 
-from aipass.devpulse.apps.handlers import file_lock
 from aipass.devpulse.apps.handlers.watchdog import agent as agent_handler
 from aipass.devpulse.apps.handlers.watchdog import registry as reg
 from aipass.devpulse.apps.handlers.watchdog import registry as watch_registry
@@ -149,7 +148,6 @@ def test_list_active_keeps_stale_when_prune_false(store_path):
     assert len(raw["watches"]) == 1  # still on disk
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only process API (os.kill sig-0)")
 def test_list_active_selective_prune(store_path):
     """Only entries with dead pids should be pruned."""
     h_alive = watch_registry.register("agent", {"label": "alive"}, storage_path=store_path)
@@ -171,7 +169,6 @@ def test_is_pid_alive_current_process():
     assert watch_registry.is_pid_alive(os.getpid()) is True
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only process API (os.kill sig-0)")
 def test_is_pid_alive_impossible_pid():
     assert watch_registry.is_pid_alive(999999) is False
 
@@ -180,84 +177,6 @@ def test_is_pid_alive_rejects_invalid_input():
     assert watch_registry.is_pid_alive(-1) is False
     assert watch_registry.is_pid_alive(0) is False
     assert watch_registry.is_pid_alive("1234") is False  # type: ignore[arg-type]
-
-
-# os.kill(pid, 0) SUCCEEDS for a zombie, so off Linux only ps can say a pid is a corpse.
-# These pretend darwin here, with subprocess.run answering in real `ps -o state=` shape.
-
-
-def _fake_ps(stdout: str, argv_seen: list | None = None):
-    """A subprocess.run stand-in that prints ``stdout`` and records its argv."""
-
-    def _run(argv, **kwargs):
-        if argv_seen is not None:
-            argv_seen.append(argv)
-        return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
-
-    return _run
-
-
-def test_is_zombie_off_linux_reads_the_ps_state(monkeypatch, pretend_platform):
-    argv_seen: list = []
-    pretend_platform(watch_registry, "darwin")
-    monkeypatch.setattr(subprocess, "run", _fake_ps("Z+\n", argv_seen))
-
-    assert watch_registry.is_zombie(4242) is True
-    assert argv_seen == [["ps", "-o", "state=", "-p", "4242"]]
-
-
-def test_a_running_state_off_linux_is_not_a_zombie(monkeypatch, pretend_platform):
-    pretend_platform(watch_registry, "darwin")
-    monkeypatch.setattr(subprocess, "run", _fake_ps("S\n"))
-
-    assert watch_registry.is_zombie(4242) is False
-
-
-def test_is_zombie_off_linux_is_false_when_ps_cannot_run(monkeypatch, pretend_platform):
-    pretend_platform(watch_registry, "darwin")
-
-    def _explode(argv, **kwargs):
-        raise FileNotFoundError(2, "No such file or directory", "ps")
-
-    monkeypatch.setattr(subprocess, "run", _explode)
-    assert watch_registry.is_zombie(4242) is False
-
-
-def test_a_zombie_is_not_alive_off_linux(monkeypatch, pretend_platform):
-    """This pid answers os.kill(pid, 0); the ps state is the ONLY thing that can say it is a corpse."""
-    pretend_platform(watch_registry, "darwin")
-    monkeypatch.setattr(subprocess, "run", _fake_ps("Z+\n"))
-
-    assert watch_registry.is_pid_alive(os.getpid()) is False
-
-
-def test_a_live_pid_off_linux_is_still_alive(monkeypatch, pretend_platform):
-    """The other half: the portable probe must not bury the living."""
-    pretend_platform(watch_registry, "darwin")
-    monkeypatch.setattr(subprocess, "run", _fake_ps("S+\n"))
-
-    assert watch_registry.is_pid_alive(os.getpid()) is True
-
-
-def test_a_zombie_watch_is_pruned_off_linux(store_path, monkeypatch, pretend_platform):
-    """A zombie watch must not stay listed forever; runs on every host, as the lock reads fcntl, not the platform."""
-    watch_registry.register("agent", {"label": "reaped"}, storage_path=store_path)
-    pretend_platform(watch_registry, "darwin")
-    monkeypatch.setattr(subprocess, "run", _fake_ps("Z+\n"))
-
-    assert watch_registry.list_active(storage_path=store_path, prune_stale=True) == []
-
-
-def test_the_lock_is_a_no_op_where_fcntl_is_absent(store_path, monkeypatch, pretend_platform):
-    """The lock reads the fcntl binding, not sys.platform: pretended darwin without fcntl neither imports nor locks."""
-    monkeypatch.setattr(file_lock, "fcntl", None)
-    pretend_platform(watch_registry, "darwin")
-
-    handle = watch_registry.register("agent", {"label": "unlocked"}, storage_path=store_path)
-
-    assert handle.startswith("agent-")
-    assert store_path.exists()
-    assert not store_path.with_suffix(store_path.suffix + ".lock").exists()
 
 
 def test_kill_watch_handle_not_found(store_path):
@@ -270,7 +189,6 @@ def test_kill_watch_handle_not_found(store_path):
     }
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only process API (os.kill sig-0)")
 def test_kill_watch_already_dead_pid(store_path):
     """Handle for a dead pid should still be deregistered cleanly."""
     handle = watch_registry.register("timer", {}, storage_path=store_path)
@@ -331,7 +249,6 @@ def test_kill_watch_leaves_a_non_watchdog_pid_alone(store_path, monkeypatch):
         proc.wait(timeout=5)
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only signal semantics (SIG_IGN)")
 def test_kill_watch_reports_failure_when_pid_survives_sigterm(store_path):
     """A pid that ignores SIGTERM must come back killed=False, not a KILLED lie; the handle is still freed."""
     proc = subprocess.Popen(
@@ -368,7 +285,6 @@ def test_kill_watch_reports_failure_when_pid_survives_sigterm(store_path):
         proc.wait(timeout=5)
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only process API (os.kill sig-0)")
 def test_kill_all_multiple_watches(store_path):
     h1 = watch_registry.register("timer", {}, storage_path=store_path)
     h2 = watch_registry.register("schedule", {}, storage_path=store_path)

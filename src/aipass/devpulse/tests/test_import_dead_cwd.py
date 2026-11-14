@@ -8,64 +8,11 @@
 
 """Tests for apps/handlers/__init__.py and apps/handlers/module_root.py with no readable working directory."""
 
-# The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(stdlib) — ntpath's own realpath; the world injects its cwd read as a condition
-
 import subprocess
 import sys
 from pathlib import Path
 
 from aipass.devpulse.apps.handlers import module_root
-
-# ntpath.realpath reads os.getcwd() for every path, and Path.resolve() routes through it.
-WORLD = r"""
-# Other branches' import-time code is held CONSTANT: preloaded in the healthy
-# world, before the denial. Their dead-cwd cure is their own build (fleet
-# rollout in flight, 2026-08-31); this pin measures devpulse's sites only.
-# When the fleet is cured these preloads can drop.
-from aipass.prax import logger  # noqa: F401
-import aipass.prax.apps.modules.logger  # noqa: F401
-import aipass.cli.apps.modules  # noqa: F401
-
-import os
-
-_real_realpath = os.path.realpath
-
-
-def _ntpath_condition(path, **kw):
-    os.getcwd()  # ntpath.realpath reads cwd before checking absoluteness
-    return _real_realpath(path, **kw)
-
-
-os.path.realpath = _ntpath_condition
-
-
-def _dead_getcwd():
-    raise FileNotFoundError(2, "cwd deleted", "")
-
-
-os.getcwd = _dead_getcwd
-
-# Probe the instrument: does THIS interpreter's resolve() reach the denied
-# call for an absolute path? 3.11+ routes through os.path.realpath; 3.10
-# resolves absolute paths without cwd, so the denial cannot fire there.
-import pathlib
-
-try:
-    pathlib.Path(pathlib.__file__).resolve()
-    print("PROBE_VACUOUS")
-except FileNotFoundError:
-    print("PROBE_ARMED")
-
-import aipass.devpulse.apps.handlers.owner.admin_grant  # noqa: F401
-import aipass.devpulse.apps.handlers.feedback.storage  # noqa: F401
-import aipass.devpulse.apps.handlers.feedback.compose  # noqa: F401
-import aipass.devpulse.apps.handlers.json.json_handler  # noqa: F401
-import aipass.devpulse.apps.handlers.compass.store  # noqa: F401
-
-print("IMPORTED")
-"""
-
 
 def _inspect_stack_calls(source: str) -> list[int]:
     """Line numbers of every inspect.stack() call in *source*, by parse: prose naming it is not a call."""
@@ -88,8 +35,8 @@ def test_the_guard_never_calls_inspect_stack():
     guard = (Path(__file__).resolve().parents[1] / "apps" / "handlers" / "__init__.py").read_text(encoding="utf-8")
 
     assert _inspect_stack_calls(guard) == [], (
-        "inspect.stack() is back in the guard - it needs a readable cwd on "
-        "Windows before any of the guard's own code runs (getmodule's "
+        "inspect.stack() is back in the guard - it needs a readable cwd "
+        "before any of the guard's own code runs (getmodule's "
         "os.path.realpath sits outside any try)"
     )
     assert "import inspect" not in [line.strip() for line in guard.splitlines()], (
@@ -185,25 +132,3 @@ def test_the_fence_survives_a_denied_resolve_from_a_file_less_seat():
     if sys.version_info >= (3, 11):
         assert "RESOLVE_DENIED" in out, f"resolve() never reached the denial - the fence's arm is untouched:\n{out}"
     assert "GUARD_RETURNED" in out, f"the fence died walking the stack under a denied resolve:\n{out}\n{result.stderr}"
-
-
-def test_handlers_import_with_dead_cwd():
-    result = subprocess.run(
-        [sys.executable, "-c", WORLD],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=60,
-    )
-    out = result.stdout
-    assert "IMPORTED" in out, f"import died under the dead-cwd world:\nstdout={out}\nstderr={result.stderr}"
-    if "PROBE_VACUOUS" in out:
-        # Allowed only where it is the interpreter's truth (pre-3.11 pathlib
-        # never routes an absolute resolve through os.path.realpath).
-        assert sys.version_info < (3, 11), (
-            "resolve() survived the denial on an interpreter that routes "
-            "through os.path.realpath - the instrument is broken, not the world"
-        )
-    else:
-        assert "PROBE_ARMED" in out

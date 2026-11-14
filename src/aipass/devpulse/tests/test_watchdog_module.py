@@ -543,7 +543,7 @@ def test_agent_subcommand_emits_next_action_breadcrumb(capsys, monkeypatch):
 
     captured = capsys.readouterr()
     combined = captured.out + captured.err
-    # Rich wraps differently across terminal widths (narrower on Windows CI).
+    # Rich wraps differently across terminal widths.
     normalized = " ".join(combined.split())
     assert "Next: drone @ai_mail dispatch @drone" in normalized
     assert "state=completed" in normalized

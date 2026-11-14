@@ -16,7 +16,6 @@
 import json
 import os
 import sqlite3
-import subprocess
 import sys
 import time
 from collections.abc import Callable
@@ -67,11 +66,10 @@ def _pin_home(monkeypatch, home: Path, caller_cwd: str = "") -> None:
     """Pin the caller cwd and point HOME at a test-owned place, so no ~/Projects census can answer.
 
     External roots are the caller cwd and the repo's declared roots (``_declare_roots``).
-    Through the environment Path.home() reads (HOME on POSIX, USERPROFILE on Windows).
+    Through the environment Path.home() reads (HOME).
     """
     monkeypatch.setenv("AIPASS_CALLER_CWD", caller_cwd)
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("USERPROFILE", str(home))
 
 
 def _declare_roots(repo: Path, *roots: Path) -> None:
@@ -704,10 +702,7 @@ def test_scanner_discovers_new_subagent_file_on_refresh(tmp_path):
     assert s.tick(2.0 + agent_handler.TranscriptScanner.REFRESH_INTERVAL) is True
 
 
-@pytest.mark.skipif(
-    os.name == "nt" or getattr(os, "geteuid", lambda: -1)() == 0,
-    reason="an unlistable directory needs POSIX modes and a non-root reader",
-)
+@pytest.mark.skipif(os.geteuid() == 0, reason="an unlistable directory needs a non-root reader")
 def test_scanner_records_a_directory_it_cannot_list_and_keeps_walking(tmp_path):
     """A subtree the walk cannot list is named in ``unreadable``; the rest is still scanned."""
     proj = tmp_path / "proj"
@@ -830,112 +825,11 @@ def test_watch_agent_live_dispatch_timeout_path():
     assert result["agent_state"] == "timeout"
 
 
-def _case_insensitive_glob(monkeypatch):
-    """Emulate NTFS's case-folded glob, so agent.py's exact-case filter is provably load-bearing from Linux."""
-    real_glob = agent_handler.Path.glob
-
-    def widened(self, pattern):
-        if pattern.endswith("_REGISTRY.json"):
-            folded = pattern[: -len("_REGISTRY.json")] + "_registry.json"
-            yield from real_glob(self, folded)
-        yield from real_glob(self, pattern)
-
-    monkeypatch.setattr(agent_handler.Path, "glob", widened)
-
-
-def test_lowercase_counter_never_answers_a_projects_resolve(monkeypatch, tmp_path):
-    """A lowercase *_registry.json is never a trust anchor; the decoy sorts FIRST, so without the check it wins."""
-    (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": []}), encoding="utf-8")
-    wrong_dir = tmp_path / "projects" / "aaa" / "wrong"
-    wrong_dir.mkdir(parents=True)
-    (tmp_path / "projects" / "aaa" / "aaa_registry.json").write_text(
-        json.dumps({"branches": [{"name": "AAA", "email": "@baud", "path": "wrong"}]}),
-        encoding="utf-8",
-    )
-    right_dir = tmp_path / "projects" / "baud" / "home"
-    right_dir.mkdir(parents=True)
-    (tmp_path / "projects" / "baud" / "BAUD_REGISTRY.json").write_text(
-        json.dumps({"branches": [{"name": "BAUD", "email": "@baud", "path": "home"}]}),
-        encoding="utf-8",
-    )
-
-    _case_insensitive_glob(monkeypatch)
-    widened = [p.name for p in (tmp_path / "projects").glob("*/*_REGISTRY.json")]
-    assert "aaa_registry.json" in widened, "emulation is blind — this test proves nothing"
-
-    monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
-    _pin_home(monkeypatch, tmp_path / "nohome")
-    _mark_resolved(right_dir)
-
-    result = agent_handler.watch_agent("@baud", timeout_seconds=5)
-    assert (result["agent_state"], result["exit_code"]) == ("crashed", 7)
-
-
-def test_lowercase_counter_never_answers_an_external_resolve(monkeypatch, tmp_path):
-    """The external-roots walk: a lowercase counter must not resolve a branch at all."""
-    ext = tmp_path / "ext"
-    (ext / "somewhere").mkdir(parents=True)
-    (ext / "ext_registry.json").write_text(
-        json.dumps({"branches": [{"name": "EXT", "email": "@ext", "path": "somewhere"}]}),
-        encoding="utf-8",
-    )
-
-    _case_insensitive_glob(monkeypatch)
-    widened = [p.name for p in ext.glob("*_REGISTRY.json")]
-    assert "ext_registry.json" in widened, "emulation is blind — this test proves nothing"
-
-    asked: list = []
-    monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: asked.append(a) or None)
-    _pin_home(monkeypatch, tmp_path / "nohome", caller_cwd=str(ext))
-
-    result = agent_handler.watch_agent("@ext", timeout_seconds=5)
-    assert result["reason"] == "agent not found"
-    assert asked == [()]
-
-
-# The zombie rule lives once, in registry.py; these pretend darwin here.
-
-
-def _watch_this_pid_as_darwin(monkeypatch, pretend_platform, tmp_path, ps_state: str) -> dict:
-    """watch_agent on a lock holding THIS pid, with agent and registry both seeing darwin."""
-    branch_path = _build_fake_branch(tmp_path)
-    lock_file = _write_lock(branch_path, pid=os.getpid())
-    monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
-    pretend_platform(agent_handler, "darwin")
-    pretend_platform(watch_registry, "darwin")
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda argv, **kw: subprocess.CompletedProcess(argv, 0, stdout=ps_state, stderr=""),
-    )
-    _exit_during_first_poll(monkeypatch, lambda: lock_file.unlink(missing_ok=True))
-    return agent_handler.watch_agent("@fakebranch", timeout_seconds=5, poll_interval=0.01)
-
-
-def test_a_zombie_agent_is_not_alive_off_linux(monkeypatch, pretend_platform, tmp_path):
-    """This pid answers os.kill(pid, 0); only the ps state can call it a corpse."""
-    result = _watch_this_pid_as_darwin(monkeypatch, pretend_platform, tmp_path, "Z+\n")
-    assert "dead, lock still present" in result["reason"]
-
-
-def test_a_live_agent_off_linux_is_still_alive(monkeypatch, pretend_platform, tmp_path):
-    """The portable probe must not bury a working agent: the watch runs on until the lock goes."""
-    result = _watch_this_pid_as_darwin(monkeypatch, pretend_platform, tmp_path, "S+\n")
-    assert result["reason"].endswith("(lock removed)")
-
-
 def test_the_zombie_rule_is_not_duplicated_in_this_module():
     """One implementation, in registry.py: a drifted private copy lets a dead watch pass for live. Runs everywhere."""
     assert not hasattr(agent_handler, "_is_zombie_linux")
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="Windows has no zombie state, so the rule is not duplicated there — it is ABSENT by design: "
-    "_pid_alive answers from OpenProcess/GetExitCodeProcess and never asks registry.is_zombie at all. "
-    "A call-through pin cannot see a call that correctly never happens. The no-second-copy half above "
-    "still runs on this host.",
-)
 def test_pid_alive_asks_the_registry_for_the_zombie_rule(monkeypatch, tmp_path):
     """The single implementation is actually REACHED: the registry's zombie verdict ends the watch as a crash."""
     branch_path = _build_fake_branch(tmp_path)
