@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_scheduler_bot.py
 # Description: Tests for TDPLAN-0008 Phase 1 — scheduler bot daemon layer
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-06-25
-# Modified: 2026-11-02
+# Modified: 2026-11-10
 # =============================================
 
 """Tests for apps/modules/queue.py, apps/modules/run.py and handlers/schedule/ — TDPLAN-0008 Phase 1."""
@@ -152,6 +152,19 @@ class TestQueueJsonSchema:
         assert "count" in output
         assert isinstance(output["jobs"], list)
         assert output["count"] == len(output["jobs"])
+
+    def test_queue_json_in_a_colour_terminal_parses_with_no_escapes_or_wraps(
+        self, interval_job, colour_terminal, monkeypatch, capsys
+    ):
+        """Shipped defect: Rich highlighted the frozen JSON under a terminal."""
+        long_id = "x" * 300
+        monkeypatch.setattr(queue_mod, "discover_jobs", lambda: [{**interval_job, "id": long_id}])
+        monkeypatch.setattr(queue_mod, "load_runstate", lambda: {"jobs": {}})
+        handle_command("queue", ["--json"])
+
+        out = capsys.readouterr().out
+        assert "\x1b" not in out
+        assert json.loads(out)["jobs"][0]["id"] == long_id
 
     def test_job_fields(self, interval_job, monkeypatch, capsys):
         """Each job in output has all frozen-schema fields."""

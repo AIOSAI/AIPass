@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_activity_report.py
 # Description: Tests for the activity_report CLI module
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-04-03
-# Modified: 2026-11-09
+# Modified: 2026-11-10
 # =============================================
 
 """Tests for apps/modules/activity_report.py — activity, activity-report, branch-health."""
@@ -89,6 +89,16 @@ class TestActivityReportCommand:
         assert result is True
         mock_json.assert_called_once_with(24.0)
         assert '"branches": []' in capsys.readouterr().out
+
+    def test_activity_report_json_parses_in_a_colour_terminal_with_no_escapes_or_wraps(self, colour_terminal, capsys):
+        """Shipped defect: Rich highlighted the JSON and hard-wrapped long strings, so json.loads failed."""
+        data = {"branches": ["x" * 300]}
+        with patch(f"{MODULE}.get_json_report", return_value=data):
+            handle_command("activity-report", ["--json"])
+
+        out = capsys.readouterr().out
+        assert "\x1b" not in out
+        assert json.loads(out) == data
 
     def test_activity_report_json_short_flag(self):
         with patch(f"{MODULE}.get_json_report", return_value={}) as mock_json:

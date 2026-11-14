@@ -2,16 +2,16 @@
 # META DATA HEADER
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for daemon tests - host-state seals, sentinels, console pin
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-07
-# Modified: 2026-11-02
+# Modified: 2026-11-10
 # Category: daemon/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.4.0 (2026-11-10): colour_terminal - the product console as a colour terminal sees it
 #   - v1.3.0 (2026-10-10): temp_test_dir, sample_test_data retired - requested only by the .archive scaffold (PR #774)
 #   - v1.2.0 (2026-10-06): timer seal keeps the real systemctl wrapper behind an empty PATH for systemctl_on_path
 #   - v1.1.0 (2026-09-27): Console width pin + command-state reset (item 20); catches log; unused fixtures removed
-#   - v1.0.0 (2025-11-08): Initial implementation - Shared pytest fixtures
 #
 # CODE STANDARDS:
 #   - Error handling: Use error handler system (apps/handlers/error/)
@@ -269,6 +269,13 @@ def pinned_console_width() -> None:
     """
     for product_console in (console, err_console):
         product_console.width = 200
+
+
+@pytest.fixture
+def colour_terminal(monkeypatch) -> None:
+    """The product console as a colour terminal sees it, still captured by capsys."""
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setattr(console, "_force_terminal", True)
 
 
 @pytest.fixture(autouse=True)

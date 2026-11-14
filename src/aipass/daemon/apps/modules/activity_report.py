@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: activity_report.py
 # Description: Branch Activity Report Generator Module
-# Version: 0.5.0
+# Version: 0.5.1
 # Created: 2026-01-30
-# Modified: 2026-11-02
+# Modified: 2026-11-10
 # =============================================
 
 """
@@ -267,7 +267,7 @@ def handle_command(command: str, args: List[str]) -> bool:
             import json
 
             data = get_json_report(hours)
-            console.print(json.dumps(data, indent=2))
+            console.print(json.dumps(data, indent=2), soft_wrap=True, markup=False, highlight=False)
         else:
             report = generate_activity_report(since_hours=hours, verbosity="detailed")
             console.print(report)
@@ -363,7 +363,7 @@ def main() -> None:
         import json
 
         data = get_json_report(args.hours)
-        console.print(json.dumps(data, indent=2))
+        console.print(json.dumps(data, indent=2), soft_wrap=True, markup=False, highlight=False)
     elif args.branch:
         report = generate_branch_report(args.branch, args.hours)
         console.print(report)

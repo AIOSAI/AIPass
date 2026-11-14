@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: queue.py
 # Description: Unified job queue view (drone @daemon queue)
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-06-25
-# Modified: 2026-10-24
+# Modified: 2026-11-10
 # =============================================
 
 """
@@ -254,10 +254,8 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     if "--json" in args:
         output = _build_json_output(entries, runstate)
-        # soft_wrap=True + markup=False — default console.print forces width-80
-        # wrapping on non-TTY and parses [] markup, injecting newlines mid-string
-        # that corrupt machine output. These flags emit clean, parseable JSON.
-        console.print(json.dumps(output, indent=2), soft_wrap=True, markup=False)
+        # Rich would wrap at the console width, parse [] as markup and colour the JSON; each corrupts machine output.
+        console.print(json.dumps(output, indent=2), soft_wrap=True, markup=False, highlight=False)
     else:
         _print_rich_table(entries)
         _print_catch_up_queue(runstate)
