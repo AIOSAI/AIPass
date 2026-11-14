@@ -435,11 +435,6 @@ def _run_with_lock(dry_run: bool = False) -> int:
     """
     tick_lock.prepare(LOCK_FILE)
 
-    if not tick_lock.available():
-        _log("fcntl not available (non-Unix), running without lock.")
-        results = run_tick(dry_run)
-        return 1 if results["failed"] > 0 else 0
-
     handle = tick_lock.acquire(LOCK_FILE)
     if handle is None:
         _log("Another scheduler instance is running, skipping.")

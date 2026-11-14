@@ -99,13 +99,6 @@ if said:
 sys.exit(code)
 """
 
-# Windows CreateProcess finds a bare name on PATH only as name.exe, so no stub here can run there.
-_NEEDS_A_STUB_ON_PATH = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="systemd does not exist on Windows; the verb's answer there is pinned by test_systemctl_not_found",
-)
-
-
 @pytest.fixture
 def systemctl_on_path(tmp_path, monkeypatch):
     """Lay a systemctl stub as the only one on PATH; answer the path of the log of every argv it receives.
@@ -130,7 +123,7 @@ def systemctl_on_path(tmp_path, monkeypatch):
         try:
             subprocess.run(["systemctl", "--user", "probe"], capture_output=True, encoding="utf-8", timeout=15)
         except OSError as refused:
-            pytest.fail(f"a systemctl stub cannot run from PATH on this host ({sys.platform}): {refused}")
+            pytest.fail(f"a systemctl stub cannot run from PATH on this host: {refused}")
         log.write_text("", encoding="utf-8")
         return log
 
@@ -157,7 +150,6 @@ class TestTheCommandsReadSystemctlsAnswers:
         with patch(f"{TI}._DAEMON_ROOT", root):
             yield
 
-    @_NEEDS_A_STUB_ON_PATH
     def test_success_runs_reload_enable_start_in_that_order(self, systemctl_on_path):
         """Every step exits 0: install-timer answers True and systemctl saw daemon-reload, enable, start."""
         log = systemctl_on_path({})
@@ -168,7 +160,6 @@ class TestTheCommandsReadSystemctlsAnswers:
             "--user start daemon-tick.timer",
         ]
 
-    @_NEEDS_A_STUB_ON_PATH
     def test_a_non_zero_exit_fails_the_install_and_prints_why(self, systemctl_on_path, capsys):
         """daemon-reload exits 1 with a stderr line: both print, install exits 1, nothing more is asked."""
         log = systemctl_on_path({"daemon-reload": [1, "Failed to connect to bus"]})
@@ -178,7 +169,6 @@ class TestTheCommandsReadSystemctlsAnswers:
         assert "Failed to connect to bus" in said, said
         assert _argv(log) == ["--user daemon-reload"]
 
-    @_NEEDS_A_STUB_ON_PATH
     def test_not_loaded_on_a_stop_is_nothing_to_stop(self, systemctl_on_path, tmp_path, capsys):
         """stop exits 5 (not loaded): uninstall-timer goes on to disable, removes the files and exits 0, with no FAIL.
 
@@ -198,7 +188,6 @@ class TestTheCommandsReadSystemctlsAnswers:
         assert not service.exists() and not timer.exists()
         assert "FAIL" not in "".join(capsys.readouterr()), "not loaded is nothing to stop, never a failure"
 
-    @_NEEDS_A_STUB_ON_PATH
     def test_a_stop_refused_for_another_reason_fails_the_uninstall(self, systemctl_on_path, tmp_path):
         """stop exits 1: not loaded is exit 5 only, so the uninstall names the stop, exits 1 and keeps the files."""
         unit_dir = tmp_path / "_sealed_unit_dir"
@@ -209,7 +198,6 @@ class TestTheCommandsReadSystemctlsAnswers:
         assert _argv(log) == ["--user stop daemon-tick.timer"]
         assert service.exists() and timer.exists()
 
-    @_NEEDS_A_STUB_ON_PATH
     def test_not_loaded_anywhere_but_a_stop_is_a_failure(self, systemctl_on_path, capsys):
         """enable exits 5: install-timer passes no not_loaded_ok, so the install fails at enable and never starts."""
         log = systemctl_on_path({"enable": [5, "Unit daemon-tick.timer not loaded."]})

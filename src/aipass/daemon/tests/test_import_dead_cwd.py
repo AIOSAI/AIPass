@@ -13,7 +13,6 @@
 # sentry: no-test-needed(ruff) — that each swept file parses; the sweeps ast.parse every one and would raise first
 
 import ast
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -28,9 +27,8 @@ from aipass.daemon.apps.handlers.module_root import module_file
 # Named here, not sentry's list: sentry's handlers refuse a caller from another branch.
 SWEEP_SKIP_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
 
-# On Windows ntpath.realpath reads the cwd unconditionally, so module-level Path(__file__).resolve() and
-# inspect.stack() (getmodule's unguarded realpath) die at import when the cwd is gone. World A emulates ntpath;
-# world B denies realpath outright. Both are needed: only B convicts inspect.stack() on every platform.
+# Module-level Path(__file__).resolve() and inspect.stack() (getmodule's unguarded realpath) die at import when
+# realpath cannot run. World B denies realpath outright.
 # The child runs as python -c: linecache caches <stdin>, so a <stdin> probe reads green on unfixed code.
 
 # Other branches' import-time code is preloaded in the healthy world: this pin measures daemon's sites only.
@@ -39,28 +37,6 @@ from aipass.prax import logger  # noqa: F401
 import aipass.prax.apps.modules.logger  # noqa: F401
 import aipass.cli.apps.modules  # noqa: F401
 import aipass.cli.apps.modules.display  # noqa: F401
-"""
-
-# The denial, world A: what ntpath.realpath does on Windows.
-WORLD_A = """
-import os
-
-_real_realpath = os.path.realpath
-
-
-def _ntpath_condition(path, **kw):
-    os.getcwd()  # ntpath.realpath reads cwd before checking absoluteness
-    return _real_realpath(path, **kw)
-
-
-os.path.realpath = _ntpath_condition
-
-
-def _dead_getcwd():
-    raise FileNotFoundError(2, "cwd deleted", "")
-
-
-os.getcwd = _dead_getcwd
 """
 
 # The denial, world B: realpath itself is gone, abspath still works.
@@ -75,7 +51,7 @@ def _denied_realpath(*args, **kwargs):
 os.path.realpath = _denied_realpath
 """
 
-# Appended to both worlds: <=3.10 pathlib captured os.path.realpath in _NormalAccessor, out of the rebind's
+# Appended to the world: <=3.10 pathlib captured os.path.realpath in _NormalAccessor, out of the rebind's
 # reach. The class binding is the one resolve() reads; 3.11+ has no such class.
 ARM_PATHLIB_ACCESSOR = """
 import os
@@ -142,13 +118,6 @@ import aipass.daemon.apps.daemon  # noqa: F401
 sys.stdout.write("IMPORTED\\n")
 """
 
-# Keyed on os.name, which picks the abspath that decides it. "posix" is measured live here; "nt" is derived
-# from a Windows CI failure and becomes measured the first time this file runs green on Windows.
-STACK_IN_WORLD_A = {
-    "posix": "STACK_LIVES",
-    "nt": "STACK_DIES",
-}
-
 _BRANCH = Path(__file__).resolve().parents[1]
 APPS = _BRANCH / "apps"
 
@@ -192,7 +161,7 @@ def _assert_world(result: subprocess.CompletedProcess, label: str, *, expect_sta
         f"world {label}: resolve() survived the denial - the instrument went blind, "
         "not the world safe. Every interpreter this fleet runs on reaches realpath "
         "from resolve(): 3.11+ through the live os.path.realpath, 3.10 through "
-        "_NormalAccessor, and both worlds rebind each. Measured 2026-09-03."
+        "_NormalAccessor, and the world rebinds each. Measured 2026-09-03."
     )
 
     assert "PROBE_ARMED" in out, f"world {label}: probe reported neither outcome: {out}"
@@ -200,36 +169,18 @@ def _assert_world(result: subprocess.CompletedProcess, label: str, *, expect_sta
     observed = "STACK_DIES" if "STACK_DIES" in out else "STACK_LIVES" if "STACK_LIVES" in out else None
     assert observed is not None, f"world {label}: the stack probe reported neither outcome:\n{out}"
     assert observed == expect_stack, (
-        f"world {label} on os.name={os.name!r}: inspect.stack() {observed}, table "
+        f"world {label}: inspect.stack() {observed}, table "
         f"says {expect_stack}. If {expect_stack} was STACK_DIES, this world can no "
         "longer convict the cured shape and the import assertions above are "
         "vacuous; if it was STACK_LIVES, the world got more hostile than measured. "
-        "Either way: re-measure both worlds on this platform before trusting either."
+        "Either way: re-measure the world before trusting either."
     )
     return out
 
 
-def test_daemon_imports_survive_world_a_ntpath_emulation():
-    """The resolve half: every module-level Path(__file__).resolve() is denied."""
-    _assert_world(_run_world(WORLD_A), "A", expect_stack=STACK_IN_WORLD_A[os.name])
-
-
 def test_daemon_imports_survive_world_b_realpath_denied():
-    """The stack half, and the one world that convicts it on EVERY platform."""
+    """Every module-level Path(__file__).resolve() and inspect.stack() is denied."""
     _assert_world(_run_world(WORLD_B), "B", expect_stack="STACK_DIES")
-
-
-def test_world_a_stack_outcome_matches_the_platform_table():
-    """Pin world A's stack outcome to the table, so the two worlds stay distinct."""
-    # A table with a hole would read green by skipping, so the hole is a failure here.
-    assert set(STACK_IN_WORLD_A) == {"posix", "nt"}, STACK_IN_WORLD_A
-    assert set(STACK_IN_WORLD_A.values()) <= {"STACK_LIVES", "STACK_DIES"}, STACK_IN_WORLD_A
-    assert os.name in STACK_IN_WORLD_A, (
-        f"this machine is os.name={os.name!r} and the table has no entry - the pin is skipping rather than measuring"
-    )
-    expected = STACK_IN_WORLD_A[os.name]
-
-    _assert_world(_run_world(WORLD_A), "A", expect_stack=expected)
 
 
 # Only a parse convicts inspect.stack(): the caller-is-None branch it sat in is unreachable from any import world.
@@ -258,7 +209,7 @@ class TestTheGuardNeverCallsInspectStack:
 
         assert _inspect_stack_calls(guard) == [], (
             "inspect.stack() is back in the guard - it needs a readable working "
-            "directory on Windows before any of the guard's own code runs "
+            "directory before any of the guard's own code runs "
             "(getmodule's os.path.realpath sits outside any try)"
         )
         assert "import inspect" not in [line.strip() for line in guard.splitlines()], (
@@ -271,7 +222,7 @@ class TestTheGuardNeverCallsInspectStack:
 
         assert _inspect_stack_calls(handler) == [], (
             "inspect.stack() is back in _get_caller_module_name - the audit line "
-            "would take its own caller down on a Windows box with no working directory"
+            "would take its own caller down on a box with no working directory"
         )
 
     def test_no_daemon_module_calls_inspect_stack(self):

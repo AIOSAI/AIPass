@@ -12,23 +12,13 @@ Reference: docs/scheduler_tick.md
 """
 
 import errno
+import fcntl
 from typing import Optional
 
 from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
 
-try:
-    import fcntl
-except ImportError:
-    fcntl = None  # type: ignore[assignment]
-    logger.info("[tick_lock] fcntl unavailable (Windows) — ticks run unlocked")
-
 _CONTENDED = frozenset({errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES})
-
-
-def available() -> bool:
-    """Can this host hold the lock at all? False on Windows."""
-    return fcntl is not None
 
 
 def prepare(lock_path) -> None:
@@ -41,9 +31,6 @@ def acquire(lock_path) -> Optional[object]:
 
     Raises OSError on a non-contention flock failure: None there would report a running tick forever.
     """
-    if fcntl is None:
-        return None
-
     handle = open(lock_path, "w", encoding="utf-8")
     try:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -64,8 +51,7 @@ def release(handle) -> None:
     if handle is None:
         return
     try:
-        if fcntl is not None:
-            fcntl.flock(handle, fcntl.LOCK_UN)
+        fcntl.flock(handle, fcntl.LOCK_UN)
     except OSError as e:
         logger.warning("[tick_lock] could not unlock cleanly: %s", e)
     finally:

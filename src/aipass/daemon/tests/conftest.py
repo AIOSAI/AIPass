@@ -265,7 +265,7 @@ def _host_state_sentinel():
 def pinned_console_width() -> None:
     """Pin the product's consoles to one width for the whole run.
 
-    Unpinned, Rich wraps at 80 on POSIX and 79 on Windows, so substring asserts differ by OS.
+    Unpinned, Rich wraps at the host terminal's width, so substring asserts differ by host.
     """
     for product_console in (console, err_console):
         product_console.width = 200

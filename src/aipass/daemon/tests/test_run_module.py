@@ -12,7 +12,6 @@
 # sentry: no-test-needed(stdlib) — fcntl's exclusive lock under tick_lock; its use is pinned in the blocked contract
 # sentry: no-test-needed(ruff) — that run.py parses and imports; every test here imports it first
 
-import errno
 import json
 import os
 import re
@@ -618,61 +617,33 @@ def command_job_dict(branch_dir, command="drone @daemon --help", **extra) -> dic
 def pid_gone(pid: int, within: float = 5.0) -> bool:
     """True once *pid* has exited (a zombie waiting for its new parent to reap it counts).
 
-    Waits on the exit itself, not on a clock: a pidfd (Linux) or a kqueue NOTE_EXIT
-    (BSD, macOS) turns readable the moment the process ends, and the wait gives up
-    at *within*. Linux and macOS only (its one caller is skipped elsewhere); any
-    other platform raises rather than answering from a guess.
+    Waits on the exit itself, not on a clock: a pidfd turns readable the moment
+    the process ends, and the wait gives up at *within*.
     """
-    if sys.platform == "linux":
-        try:
-            fd = os.pidfd_open(pid)
-        except ProcessLookupError:
-            return True
-        try:
-            ready, _, _ = select.select([fd], [], [], within)
-            return bool(ready)
-        finally:
-            os.close(fd)
-    if sys.platform == "darwin":
-        queue = select.kqueue()
-        try:
-            watch = select.kevent(
-                pid,
-                filter=select.KQ_FILTER_PROC,
-                flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
-                fflags=select.KQ_NOTE_EXIT,
-            )
-            try:
-                events = queue.control([watch], 1, within)
-            except ProcessLookupError:
-                return True
-            # A registration error comes back as an EV_ERROR event, not a raise:
-            # ESRCH means the process was already gone; anything else is a real error.
-            if events and events[0].flags & select.KQ_EV_ERROR:
-                if events[0].data == errno.ESRCH:
-                    return True
-                raise OSError(events[0].data, "kevent registration failed")
-            return bool(events)
-        finally:
-            queue.close()
-    raise RuntimeError(f"pid_gone has no exit notifier on {sys.platform}")
+    try:
+        fd = os.pidfd_open(pid)
+    except ProcessLookupError:
+        return True
+    try:
+        ready, _, _ = select.select([fd], [], [], within)
+        return bool(ready)
+    finally:
+        os.close(fd)
 
 
 def leader_reaped(pid: int) -> bool:
     """True once this process's child *pid* has been reaped; an exited, unreaped zombie is False."""
-    if hasattr(os, "waitid"):
-        try:
-            os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
-        except ChildProcessError:
-            return True
-        return False
-    raise RuntimeError(f"leader_reaped has no non-reaping wait on {sys.platform}")
+    try:
+        os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+    except ChildProcessError:
+        return True
+    return False
 
 
 def kill_quietly(pid: int) -> None:
     """Teardown for a test that started a background process. Already gone is fine, and said."""
     try:
-        os.kill(pid, signal.SIGTERM)  # TerminateProcess on Windows, SIGTERM on POSIX
+        os.kill(pid, signal.SIGTERM)
     except OSError as e:
         print(f"background pid {pid} already gone at teardown: {e}")
 
@@ -753,7 +724,6 @@ class TestRunCommand:
         assert result.duration < 10, f"a 1s timeout took {result.duration:.1f}s to come back"
         assert result.tail == "started", "output written before the overrun must survive into the tail"
 
-    @pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX; Windows stops the direct child only")
     def test_an_overrun_stops_the_grandchild_too(self, tmp_path, monkeypatch):
         # Drone runs every @branch verb in a child of its own, so killing drone
         # alone would orphan exactly the work that overran.
@@ -773,7 +743,6 @@ class TestRunCommand:
         finally:
             kill_quietly(grandchild)
 
-    @pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX; Windows stops the direct child only")
     @pytest.mark.parametrize("leader_on_term", ["exits", "ignores"])
     def test_a_grandchild_that_ignores_sigterm_is_killed_with_its_group(self, tmp_path, monkeypatch, leader_on_term):
         pidfile = tmp_path / "stubborn.pid"
@@ -799,12 +768,11 @@ class TestRunCommand:
         finally:
             kill_quietly(grandchild)
 
-    @pytest.mark.skipif(not hasattr(os, "waitid"), reason="the reap check reads waitid's WNOWAIT")
     def test_the_sigkill_never_reaches_a_pgid_reissued_after_the_leader_is_reaped(self, tmp_path, monkeypatch):
         # The kernel reissues a reaped pid at will, so the reuse is modelled: a
         # group signal sent once the leader is reaped lands on the test's sentinel.
         sleeper = [sys.executable, "-c", "import time; time.sleep(60)"]
-        sentinel = subprocess.Popen(sleeper, start_new_session=os.name == "posix")
+        sentinel = subprocess.Popen(sleeper, start_new_session=True)
         real_signal_group = command_job.signal_group
         sent = []
 

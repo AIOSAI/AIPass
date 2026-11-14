@@ -28,7 +28,7 @@ def _retain(what: str, exc: BaseException) -> None:
 def module_file(file: str) -> Path:
     """A module's own path, absolute, resolved when the filesystem allows.
 
-    Windows resolve() reads the cwd, so a dead cwd falls back to the absolute __file__ unresolved.
+    resolve() of a relative path reads the cwd, so a dead cwd falls back to the __file__ unresolved.
     """
     path = Path(file)
     try:
