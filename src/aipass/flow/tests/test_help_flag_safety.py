@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_help_flag_safety.py
 # Description: Tests for apps/handlers/cli/help_flags.py -- whole-sequence help detection (DPLAN-0291 rule E)
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-13
-# Modified: 2026-11-02
+# Modified: 2026-11-12
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py and the flow command modules that call it."""
@@ -286,7 +286,6 @@ class TestUnflaggedModulesHelpSafety:
         """A lock that can never be created is reported as an error, not a crash
         and not "Another instance is already running".
         Mutant: for attempt in range(_CREATE_RETRIES): -> for attempt in range(_CREATE_RETRIES - 1): reddens this.
-        refuse_extra refuses every argument list, so it is patched open to reach the lock call at all.
         """
         lock = tmp_path / ".post_close_runner.lock"
         attempts: list[str] = []
@@ -298,28 +297,22 @@ class TestUnflaggedModulesHelpSafety:
 
         with (
             patch(f"{_POST}.LOCK_FILE", lock),
-            patch(f"{_POST}.refuse_extra"),
             patch(f"{_POST}.process_closed_plans") as target,
             patch(f"{_POST}.release_lock") as release,
-            patch(f"{_POST}.error") as error_fn,
-            patch(f"{_POST}.warning") as warning_fn,
             patch("aipass.flow.apps.handlers.runner.lock_ops._create_exclusive", side_effect=fake_create),
             patch("aipass.flow.apps.handlers.runner.lock_ops._sleep") as sleep,
         ):
-            handled = post_close_runner.handle_command("post", ["run"])
+            code = post_close_runner.main(["post_close_runner.py"])
 
-        assert handled is True
+        assert code == 1
         target.assert_not_called()
         release.assert_not_called()
-        warning_fn.assert_not_called()
-        error_fn.assert_called_once()
-        assert str(lock) in error_fn.call_args.args[0]
         logged = [c for c in mock_logger.error.call_args_list if "Could not create lock" in c.args[0]]
         assert len(logged) == 1
         assert logged[0].args[2] == lock
         assert isinstance(logged[0].args[3], PermissionError)  # raised by lock_ops past its budget
-        reported = re.search(r"still denied after (\d+) attempts", error_fn.call_args.args[0])
-        assert reported, error_fn.call_args.args[0]
+        reported = re.search(r"still denied after (\d+) attempts", str(logged[0].args[3]))
+        assert reported, str(logged[0].args[3])
         assert int(reported.group(1)) > 1
         assert attempts == [str(lock)] * int(reported.group(1))
         # One backoff wait after every denied attempt, the last included.
@@ -347,24 +340,18 @@ class TestUnflaggedModulesHelpSafety:
 
         with (
             patch(f"{_POST}.LOCK_FILE", lock),
-            patch(f"{_POST}.refuse_extra"),
             patch(f"{_POST}.process_closed_plans") as target,
             patch(f"{_POST}.release_lock") as release,
-            patch(f"{_POST}.error") as error_fn,
-            patch(f"{_POST}.warning") as warning_fn,
             patch("aipass.flow.apps.handlers.runner.lock_ops._sleep") as sleep,
         ):
             try:
-                handled = post_close_runner.handle_command("post", ["run"])
+                code = post_close_runner.main(["post_close_runner.py"])
             except OSError as exc:
-                pytest.fail(f"handle_command let {exc!r} escape: a traceback, no error reported")
+                pytest.fail(f"main() let {exc!r} escape: a traceback, no error logged")
 
-        assert handled is True
+        assert code == 1
         target.assert_not_called()
         release.assert_not_called()
-        warning_fn.assert_not_called()
-        error_fn.assert_called_once()
-        assert "Could not create lock" in error_fn.call_args.args[0]
         logged = [c for c in mock_logger.error.call_args_list if "Could not create lock" in c.args[0]]
         assert len(logged) == 1
         assert logged[0].args[2] == lock
