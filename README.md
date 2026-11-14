@@ -170,7 +170,7 @@ The installer writes a layer outside the project. Remove all of it to erase AIPa
 - Only if an `opencode` binary was on PATH (or in `~/.opencode/bin`) at install: the AIPass plugin is copied to `~/.config/opencode/plugins/aipass.ts`, after a backup and with a receipt. It runs the same hooks and gates on OpenCode.
 - Only if you ran `drone @daemon install-timer`: a systemd user timer, with its `daemon-tick.log` under `~/.aipass/`, removed by `drone @daemon uninstall-timer`.
 - Unless you pass `--no-baud`, `aipass install` sets up the host API (the `./aipass install` clone route skips this step): its bind, token and pairings as keyring entries (pairing codes are stored as hashes once one is minted), its write lock and pairing receipts under `~/.secrets/aipass/`, and the `aipass-host-api.service` user unit under `~/.config/systemd/user/` (`systemctl --user disable --now aipass-host-api.service` removes it from boot).
-- macOS only, when no Python 3.10+ is found and an existing Homebrew cannot provide one: a `uv`-managed interpreter under `~/.local/`. Linux with no Python 3.10+ stops the install and says so.
+- Linux with no Python 3.10+ stops the install and says so; nothing is installed to provide one.
 
 No cloud accounts, no external services — everything to clean up is on your machine.
 
@@ -252,9 +252,9 @@ Linux is the platform: the daily driver, the one CI proves. On Windows, AIPass r
 - [Claude Code](https://code.claude.com/docs) on a Claude plan that includes it (Pro, Max, Team or Enterprise)
 - [Codex](https://github.com/openai/codex) optional: with its binary on PATH, install wires it as a second CLI for the same agents (`/codex` and `$claude` switch a seat between the two)
 - [OpenCode](https://opencode.ai) optional: with its binary on PATH, install adds the AIPass plugin so the same agents run on it (`/opencode` from Claude Code, `$opencode` from Codex, `/claude` and `/codex` back); signed out, it runs on OpenCode's free models
-- Linux (the only platform CI tests). On Windows, use [WSL2](https://learn.microsoft.com/windows/wsl/install) and install inside it: AIPass then runs as the Linux program CI tests. macOS, native Windows and Git Bash are not tested; the code keeps their paths but nothing proves them.
-- `sudo` access optional (Linux uses it for `/usr/local/bin` symlinks — falls back to `~/.local/bin` without it; macOS never asks)
-- Node.js + npm optional (on Linux, install uses them to add the `@anthropic-ai/sandbox-runtime` kernel sandbox; without them the sandbox is reported as optional and not set up, AIPass runs without it, and `aipass doctor` says how to add it later; macOS skips the sandbox)
+- Linux (the only platform CI tests). On Windows, use [WSL2](https://learn.microsoft.com/windows/wsl/install) and install inside it: AIPass then runs as the Linux program CI tests.
+- `sudo` access optional (used for `/usr/local/bin` symlinks — falls back to `~/.local/bin` without it)
+- Node.js + npm optional (install uses them to add the `@anthropic-ai/sandbox-runtime` kernel sandbox; without them the sandbox is reported as optional and not set up, AIPass runs without it, and `aipass doctor` says how to add it later)
 - API keys / OAuth optional (OpenRouter, Google — only for optional add-on integrations)
 
 </details>

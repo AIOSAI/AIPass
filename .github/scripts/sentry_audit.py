@@ -48,7 +48,8 @@ NAME_RATCHET_GATES = False
 # scores 0 and is still counted. Only a standard that VANISHES trips this - the
 # first board with the tripwire caught exactly the not_applicable case, which
 # is why the count reads results, not scores.
-EXPECTED_STANDARDS = 84  # +1 on 2026-10-26: host_coupled_oracle (tests only), sentry's checker for PR #807's
+EXPECTED_STANDARDS = 83  # -1 on 2026-11-14: windows_compat retired with the move to Linux only.
+#                          +1 on 2026-10-26: host_coupled_oracle (tests only), sentry's checker for PR #807's
 #                          clone-only reds (xdist retitles its workers; macOS reads args through ps).
 #                          +1 on 2026-10-13: rendered_path_oracle (advisory, tests only), sentry's checker for the
 #                          species that went red on PR #787 round one (Windows and macOS): an assert whose needle

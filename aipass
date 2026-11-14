@@ -19,12 +19,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -x "$SCRIPT_DIR/.venv/bin/aipass" ]]; then
     exec "$SCRIPT_DIR/.venv/bin/aipass" "$@"
 fi
-if [[ -x "$SCRIPT_DIR/.venv/Scripts/aipass.exe" ]]; then
-    exec "$SCRIPT_DIR/.venv/Scripts/aipass.exe" "$@"
-fi
-if [[ -x "$SCRIPT_DIR/.venv/Scripts/aipass" ]]; then
-    exec "$SCRIPT_DIR/.venv/Scripts/aipass" "$@"
-fi
 
 # --- Pre-setup: only 'install' works ---
 if [[ "${1:-}" == "install" ]]; then
