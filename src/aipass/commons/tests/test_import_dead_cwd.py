@@ -11,7 +11,6 @@
 """Tests for apps/commons.py and every module under apps/: each imports without a readable working directory."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(stdlib) — ntpath.realpath's getcwd read; injected as a condition here, Windows CI measures it
 
 import ast
 import os
@@ -26,11 +25,9 @@ from aipass.commons.tests import support_fence
 
 KIN_PROBE = Path(support_fence.__file__)
 
-# ntpath.realpath reads os.getcwd() unconditionally and Path.resolve() routes through it, so on
-# Windows every resolve() reached at import dies under a deleted cwd. The worlds inject that as a
-# condition (realpath wrapped to read cwd, getcwd denied); other branches are preloaded healthy so
-# only commons' own sites are measured. Below 3.11 pathlib caches realpath at its own import, so the
-# denial cannot fire there: the probe reports it (never a skipif), asserted to happen only below 3.11.
+# The worlds deny getcwd; other branches are preloaded healthy so only commons' own sites are
+# measured. Below 3.11 pathlib caches its accessor at its own import, so the denial cannot fire
+# there: the probe reports it (never a skipif), asserted to happen only below 3.11.
 
 # Shared by every world below, with its arming probe, so no world can go quietly vacuous.
 _PREAMBLE = r"""
@@ -45,16 +42,6 @@ import linecache  # noqa: F401
 
 import os
 
-_real_realpath = os.path.realpath
-
-
-def _ntpath_condition(path, **kw):
-    os.getcwd()  # ntpath.realpath reads cwd before checking absoluteness
-    return _real_realpath(path, **kw)
-
-
-os.path.realpath = _ntpath_condition
-
 
 def _dead_getcwd():
     raise FileNotFoundError(2, "cwd deleted", "")
@@ -62,14 +49,13 @@ def _dead_getcwd():
 
 os.getcwd = _dead_getcwd
 
-# Probe the instrument: does THIS interpreter's resolve() reach the denied
-# call at all? 3.11+ looks up os.path.realpath live; pre-3.11 pathlib already
-# cached the original in _NormalAccessor.realpath at its own import, so the
-# rebind above cannot reach it and the denial cannot fire there.
+# Probe the instrument: does THIS interpreter's resolve() of a relative path reach
+# the denied call at all? Pre-3.11 pathlib already cached the original in its
+# _NormalAccessor at its own import, so the rebind above cannot reach it there.
 import pathlib
 
 try:
-    pathlib.Path(pathlib.__file__).resolve()
+    pathlib.Path("relative").resolve()
     print("PROBE_VACUOUS")
 except FileNotFoundError:
     print("PROBE_ARMED")
@@ -104,67 +90,6 @@ def _fence_world(seat: Path, shape: str) -> str:
     return _PREAMBLE + _FENCE_PROBE_BODY.format(seat=str(seat), shape=shape)
 
 
-# The same denial shaped like ntpath. On POSIX getmodule()'s abspath raises FileNotFoundError for
-# "<frozen ...>" frames and getmodule() catches it, so the realpath an inspect.stack() walk dies on
-# under Windows is never reached and a posix-shaped pin passes against a reintroduced walk. Here
-# abspath falls back like ntpath while realpath still reads cwd: the denial hits the defect's own call.
-_NTPATH_PREAMBLE = r"""
-import aipass.prax  # noqa: F401
-import aipass.prax.apps.modules.logger  # noqa: F401
-import aipass.cli.apps.modules  # noqa: F401
-import rich.console  # noqa: F401
-import inspect  # noqa: F401
-import linecache  # noqa: F401
-
-import os
-
-_real_realpath = os.path.realpath
-_real_abspath = os.path.abspath
-
-
-def _ntpath_realpath(path, **kw):
-    os.getcwd()  # ntpath.realpath reads cwd before checking absoluteness
-    return _real_realpath(path, **kw)
-
-
-def _ntpath_abspath(path):
-    # ntpath.abspath falls back rather than raising the way posixpath does.
-    try:
-        return _real_abspath(path)
-    except OSError:
-        return path
-
-
-os.path.realpath = _ntpath_realpath
-os.path.abspath = _ntpath_abspath
-
-
-def _dead_getcwd():
-    raise FileNotFoundError(2, "cwd deleted", "")
-
-
-os.getcwd = _dead_getcwd
-
-# Probe the instrument against the defect ITSELF, not against a proxy: does
-# inspect.stack() die in this world? If it does not, this pin proves nothing.
-try:
-    inspect.stack()
-    print("STACK_SURVIVES")
-except FileNotFoundError:
-    print("STACK_DIES")
-"""
-
-# The guard, under the world its old implementation actually died in.
-NTPATH_GUARD_WORLD = (
-    _NTPATH_PREAMBLE
-    + r"""
-import aipass.commons.apps.handlers  # noqa: F401
-
-print("IMPORTED")
-"""
-)
-
-
 def _run(world: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-c", world],
@@ -179,10 +104,10 @@ def _run(world: str) -> subprocess.CompletedProcess:
 def _assert_probe_armed(out: str) -> None:
     """The instrument must be able to fire, or the pin proves nothing."""
     if "PROBE_VACUOUS" in out:
-        # Legal only below 3.11, where pathlib cached realpath before the rebind ran.
+        # Legal only below 3.11, where pathlib cached its accessor before the rebind ran.
         assert sys.version_info < (3, 11), (
-            "resolve() survived the denial on an interpreter that routes "
-            "through os.path.realpath - the instrument is broken, not the world"
+            "resolve() survived the denial on an interpreter that reads "
+            "os.getcwd live - the instrument is broken, not the world"
         )
     else:
         assert "PROBE_ARMED" in out, f"probe printed neither outcome:\n{out}"
@@ -276,31 +201,15 @@ print("IMPORTED")
     )
 
 
-def test_handlers_guard_survives_the_ntpath_shaped_denial():
-    """The guard must not walk inspect.stack(): red against a stack walk, green against sys._getframe."""
-    result = _run(NTPATH_GUARD_WORLD)
-    out = result.stdout
-
-    assert "STACK_DIES" in out, (
-        "inspect.stack() survived the ntpath-shaped denial - the instrument no "
-        f"longer reaches the defect and this pin is vacuous:\n{out}"
-    )
-    assert "IMPORTED" in out, (
-        f"the handlers guard still depends on a readable cwd:\nstdout={out}\nstderr={result.stderr}"
-    )
-
-
 # The entry point's sys.path repair. Through a symlinked directory sys.path[0] may be the real
 # directory while __file__ keeps the link, so commons.py removes BOTH spellings. Pinned as CAUSE
 # (two spellings exist), OUTCOME (sys.path[0] is one of them) and LINK (commons.py removes both),
-# so a red names its own mechanism; which spelling a host uses is per platform, never a law.
+# so a red names its own mechanism.
 
 
-# sys.path[0] through a symlinked directory: "resolved", "unresolved", or None = not measured live.
-# nt is None on purpose: Windows CI proved only that it is not always "resolved".
+# sys.path[0] through a symlinked directory: "resolved" or "unresolved".
 _SYS_PATH0_SPELLING = {
     "posix": "resolved",
-    "nt": None,
 }
 
 
@@ -314,13 +223,11 @@ def _spellings_matching(path0: str, unresolved: str, resolved: str) -> list:
 
 
 def _assert_matches_table(platform: str, matched: list, path0: str = "") -> None:
-    """Hold a run against the recorded expectation for its platform; a None entry asserts nothing.
+    """Hold a run against the recorded expectation for its platform.
 
     Extracted so the disagreeing case is reachable: a live probe always agrees with its own row.
     """
     expected = _SYS_PATH0_SPELLING[platform]
-    if expected is None:
-        return
     assert expected in matched, (
         f"on {platform} sys.path[0] was recorded as {expected!r} but this run "
         f"matched {matched} — the table is now wrong, and the repair may be "
@@ -332,10 +239,7 @@ def _assert_probe_is_usable(probe: dict) -> None:
     """Judge a probe result. Synthetic-testable for the same reason as above."""
     if not probe["built"]:
         assert probe["reason"], "the world failed to build and did not say why"
-        assert os.name == "nt", (
-            f"a POSIX host could not build a symlink world: {probe['reason']} — "
-            "that is a broken machine, not a platform difference"
-        )
+        raise AssertionError(f"the host could not build a symlink world: {probe['reason']} — that is a broken machine")
     else:
         assert probe["path0"] and probe["unresolved"] and probe["resolved"], (
             f"the probe reported success with an empty field: {probe}"
@@ -353,10 +257,7 @@ def _symlink_spelling_probe(tmp_path) -> dict:
         encoding="utf-8",
     )
     link = tmp_path / "link"
-    try:
-        link.symlink_to(real, target_is_directory=True)
-    except (OSError, NotImplementedError) as exc:  # Windows without the privilege
-        return {"built": False, "reason": f"{type(exc).__name__}: {exc}"}
+    link.symlink_to(real, target_is_directory=True)
 
     result = subprocess.run(
         [sys.executable, str(link / "probe.py")],
@@ -392,7 +293,7 @@ def test_cause_a_symlinked_invocation_yields_two_spellings(tmp_path):
 
 
 def test_outcome_sys_path0_is_one_of_the_two_spellings_commons_removes(tmp_path):
-    """OUTCOME — the claim production actually depends on, on every platform."""
+    """OUTCOME — the claim production actually depends on."""
     probe = _symlink_spelling_probe(tmp_path)
     if not probe["built"]:
         return
@@ -412,7 +313,7 @@ def test_outcome_sys_path0_is_one_of_the_two_spellings_commons_removes(tmp_path)
 
 
 def test_link_commons_removes_both_spellings(tmp_path):
-    """LINK — commons.py collects and removes both spellings; source-level, so no platform can fail it."""
+    """LINK — commons.py collects and removes both spellings; source-level."""
     entry = Path(__file__).resolve().parent.parent / "apps" / "commons.py"
     source = entry.read_text(encoding="utf-8")
 
@@ -426,8 +327,7 @@ def test_link_commons_removes_both_spellings(tmp_path):
     assert "sys.path.remove(_script_dir)" in source, "neither spelling is being removed from sys.path"
 
 
-# log_operation's caller auto-detect (it names each module's log file) under the ntpath world. The
-# entry frame is "<string>" so the denial can fire (a frame on disk short-circuits getsourcefile); the
+# log_operation's caller auto-detect (it names each module's log file) under a denied cwd. The
 # frame doing the lookup is a real compiled probe_caller.py, so the pin asserts the answer, not only
 # the absence of a crash.
 
@@ -468,28 +368,8 @@ import aipass.prax  # noqa: F401
 import aipass.prax.apps.modules.logger  # noqa: F401
 import aipass.cli.apps.modules  # noqa: F401
 import rich.console  # noqa: F401
-import inspect
 import linecache  # noqa: F401
 import probe_caller
-
-_real_realpath = os.path.realpath
-_real_abspath = os.path.abspath
-
-
-def _ntpath_realpath(path, **kw):
-    os.getcwd()
-    return _real_realpath(path, **kw)
-
-
-def _ntpath_abspath(path):
-    try:
-        return _real_abspath(path)
-    except OSError:
-        return path
-
-
-os.path.realpath = _ntpath_realpath
-os.path.abspath = _ntpath_abspath
 
 
 def _dead_getcwd():
@@ -497,12 +377,6 @@ def _dead_getcwd():
 
 
 os.getcwd = _dead_getcwd
-
-try:
-    inspect.stack()
-    print("STACK_SURVIVES")
-except FileNotFoundError:
-    print("STACK_DIES")
 
 try:
     print("NAME:" + probe_caller.ask())
@@ -516,130 +390,14 @@ def test_caller_module_autodetect_survives_and_answers_under_a_dead_cwd(tmp_path
     result = _run(_CALLER_PROBE_WORLD.format(probe_dir=str(tmp_path)))
     out = result.stdout
 
-    assert "STACK_DIES" in out, f"the ntpath world did not arm - this pin would pass vacuously:\n{out}\n{result.stderr}"
     assert "NAME:probe_caller" in out, (
         "the auto-detect either raised or named the wrong module under a dead "
         f"cwd:\nstdout={out}\nstderr={result.stderr}"
     )
 
 
-# Structural ban: no inspect.stack() call anywhere in apps/. A walk regrown in a branch the import
-# pins never take would leave them green. A parse-tree ban, never a spelling ban: prose naming
-# inspect.stack, this file's own included, must not convict.
-
-
-def _inspect_stack_call_lines(source: str, filename: str) -> list:
-    """Line numbers of every `inspect.stack(...)` CALL in source; prose, imports and other .stack are invisible."""
-    tree = ast.parse(source, filename=filename)
-    hits = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        if (
-            isinstance(func, ast.Attribute)
-            and func.attr == "stack"
-            and isinstance(func.value, ast.Name)
-            and func.value.id == "inspect"
-        ):
-            hits.append(node.lineno)
-    return hits
-
-
-#: dropbox and .archive are sandboxes: nothing looks into them and no process runs out of them.
-_WALK_SKIPS = {"dropbox", ".archive", "__pycache__"}
-
-
-def _apps_modules(root: Path | None = None) -> list:
-    """Every .py under root (default: apps/), skipping dropbox, .archive and __pycache__ below root."""
-    apps = root if root is not None else Path(__file__).resolve().parent.parent / "apps"
-    return sorted(p for p in apps.rglob("*.py") if not _WALK_SKIPS & set(p.relative_to(apps).parts))
-
-
-def test_apps_modules_walk_skips_the_three_names_below_its_root_only(tmp_path):
-    """The root stands inside a dropbox/, so only the parts below the root are judged."""
-    root = tmp_path / "dropbox" / "apps"
-    for skipped in ("dropbox", ".archive", "__pycache__"):
-        (root / skipped).mkdir(parents=True)
-        (root / skipped / "x.py").write_text("# skipped\n", encoding="utf-8")
-    (root / "a.py").write_text("# real\n", encoding="utf-8")
-
-    modules = _apps_modules(root)
-
-    assert modules == [root / "a.py"]
-
-
-def test_no_inspect_stack_call_anywhere_in_apps():
-    """Tree-wide: nothing in apps/ needs a FrameInfo per frame, so the ban costs nothing."""
-    modules = _apps_modules()
-
-    # Control: a blinded walk that finds no files would otherwise read as a clean tree.
-    assert len(modules) > 60, f"the walk found only {len(modules)} modules — it is not seeing apps/"
-
-    offenders = {}
-    for path in modules:
-        source = path.read_text(encoding="utf-8")
-        try:
-            lines = _inspect_stack_call_lines(source, str(path))
-        except SyntaxError as exc:
-            raise AssertionError(f"{path} could not be parsed, so it cannot be cleared: {exc}") from exc
-        if lines:
-            offenders[str(path.relative_to(path.parents[2]))] = lines
-
-    assert offenders == {}, (
-        f"inspect.stack() is back in apps/: {offenders}. It builds a FrameInfo "
-        "per frame and reads os.getcwd() on Windows; use sys._getframe."
-    )
-
-
-def test_the_guard_specifically_carries_no_stack_walk():
-    """Named separately from the tree-wide sweep so the failure reads plainly."""
-    guard = Path(__file__).resolve().parent.parent / "apps" / "handlers" / "__init__.py"
-    source = guard.read_text(encoding="utf-8")
-
-    assert "sys._getframe(" in source, (
-        "the fence no longer walks with sys._getframe - if the walk moved, this "
-        "pin's positive control is worth re-reading"
-    )
-    assert _inspect_stack_call_lines(source, str(guard)) == [], (
-        "the handlers fence walks inspect.stack() again, which reads os.getcwd() on Windows; walk with sys._getframe"
-    )
-
-
-# Controls go through the real matcher, never a re-implementation.
-
-
-def test_the_matcher_convicts_a_planted_call_at_the_right_line():
-    """POSITIVE CONTROL — without this the ban above proves nothing."""
-    source = "import inspect\n\n\ndef f():\n    return inspect.stack()\n"
-
-    assert _inspect_stack_call_lines(source, "<planted>") == [5]
-
-
-def test_the_matcher_ignores_prose_naming_inspect_stack():
-    """A spelling ban would convict this file's own docstrings, and the guard's."""
-    source = '"""We do not use inspect.stack() here."""\n# inspect.stack() is banned\nx = 1\n'
-
-    assert _inspect_stack_call_lines(source, "<prose>") == []
-
-
-@pytest.mark.parametrize(
-    "source, why",
-    [
-        ("import numpy\nnumpy.stack([1, 2])\n", "a different module's stack()"),
-        ("import traceback\ntraceback.stack()\n", "traceback, not inspect"),
-        ("self.stack()\n", "an attribute on self"),
-        ("import inspect\ninspect.currentframe()\n", "currentframe is sys._getframe by another name"),
-        ("import inspect\nstack = inspect.stack\n", "a reference, not a call"),
-    ],
-)
-def test_the_matcher_leaves_legitimate_code_alone(source, why):
-    """NEGATIVE CONTROLS — inspect.currentframe() is legal: sys._getframe by another name, no filesystem."""
-    assert _inspect_stack_call_lines(source, "<negative>") == [], f"matcher over-convicted: {why}"
-
-
-# The judgements above, fed synthetic input: their failing branches (nt row, third spelling,
-# unbuildable world) are unreachable from a live probe on any single platform.
+# The judgements above, fed synthetic input: their failing branches (third spelling,
+# unbuildable world) are unreachable from a live probe.
 
 
 @pytest.mark.parametrize(
@@ -652,7 +410,7 @@ def test_the_matcher_leaves_legitimate_code_alone(source, why):
     ],
 )
 def test_the_spelling_matcher_answers_each_world(path0, unresolved, resolved, expected, why):
-    """The third-spelling row is the only input for which the outcome pin must FAIL, and no platform reaches it."""
+    """The third-spelling row is the only input for which the outcome pin must FAIL, and no live run reaches it."""
     assert _spellings_matching(path0, unresolved, resolved) == expected, why
 
 
@@ -680,8 +438,6 @@ def test_a_usable_probe_passes_the_same_judgement():
         ("posix", ["resolved", "unresolved"], False, "both spellings coincide — still contains the record"),
         ("posix", ["unresolved"], True, "POSIX stopped using the resolved spelling — the table is stale"),
         ("posix", [], True, "a third spelling — the record cannot be satisfied"),
-        ("nt", ["unresolved"], False, "nt is recorded None: unknown, so nothing to contradict"),
-        ("nt", [], False, "nt asserts nothing here; the outcome pin already refused this"),
     ],
 )
 def test_the_table_crosscheck_only_fires_where_something_was_recorded(platform, matched, raises, why):

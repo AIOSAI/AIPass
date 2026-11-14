@@ -357,9 +357,6 @@ def test_discover_modules_returns_every_public_router_in_modules_dir():
     assert all(callable(m.handle_command) for m in found)
 
 
-_NO_SIGPIPE = "this platform has no SIGPIPE, and commons.py sets nothing where it is missing"
-
-
 def _child(code: str, tmp_path: Path) -> subprocess.CompletedProcess[str]:
     """Run code in a fresh interpreter: this process imported commons.py at collection."""
     return subprocess.run(
@@ -373,7 +370,6 @@ def _child(code: str, tmp_path: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-@pytest.mark.skipif(not hasattr(signal, "SIGPIPE"), reason=_NO_SIGPIPE)
 def test_importing_the_entry_leaves_sigpipe_as_the_interpreter_set_it(tmp_path):
     """An import must not set SIG_DFL: in an xdist worker the first EPIPE would kill it silently."""
     code = (
@@ -390,7 +386,6 @@ def test_importing_the_entry_leaves_sigpipe_as_the_interpreter_set_it(tmp_path):
     assert after == before
 
 
-@pytest.mark.skipif(not hasattr(signal, "SIGPIPE"), reason=_NO_SIGPIPE)
 def test_the_started_program_restores_the_kernel_default(tmp_path):
     """Run as a program, commons still ends quietly on a pipe to head; the database init is stubbed."""
     code = (

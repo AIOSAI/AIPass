@@ -686,7 +686,7 @@ def test_get_caller_branch_refuses_an_unusable_caller_cwd_instead_of_serving_the
     mock_json.log_operation.assert_not_called()
 
 
-# On case-insensitive filesystems (Windows, default macOS) "*_REGISTRY.json" also lists
+# On case-insensitive filesystems "*_REGISTRY.json" also lists
 # "*_registry.json" bait such as .spawn/.template_registry.json; the widening is emulated here.
 
 

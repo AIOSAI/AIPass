@@ -29,8 +29,7 @@ def _find_branch_registry_path() -> Path:
         if candidate.exists():
             return candidate
 
-    # module_file(), not a bare .resolve(): this runs at module scope, and on
-    # Windows a bare resolve would read cwd at import time.
+    # module_file(), not a bare .resolve(): this runs at module scope.
     current = module_file(__file__).parent
     for _ in range(10):
         candidate = current / "AIPASS_REGISTRY.json"

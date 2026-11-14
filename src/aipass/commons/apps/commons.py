@@ -19,13 +19,6 @@ import sys
 from pathlib import Path
 from typing import List, Any
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
 # Run as a script, apps/ is sys.path[0] and this file shadows the commons package.
 # Both spellings go: through a symlinked checkout sys.path[0] is the REAL dir while
 # __file__ keeps the link. The guard is inline (not handlers.module_root) because
@@ -334,8 +327,7 @@ def main() -> int:
 if __name__ == "__main__":
     # SIGPIPE default here, never at import: set at import it kills pytest workers
     # silently on the first EPIPE.
-    if hasattr(signal, "SIGPIPE"):
-        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     try:
         sys.exit(main())
     except BrokenPipeError:

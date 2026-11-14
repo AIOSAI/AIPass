@@ -23,7 +23,7 @@ from aipass.memory.apps.modules.door_registry_scope import fleet_branches
 def find_branch_root(start_path: Optional[Path] = None) -> Optional[Path]:
     """Walk up from a starting path to find the commons branch root."""
     # .aipass/ is git-tracked (.trinity/ is not): it is what resolves a fresh clone.
-    # module_file(), not .resolve(): DB_PATH calls this at import, where Windows resolve reads cwd.
+    # module_file(), not .resolve(): DB_PATH calls this at import.
     current = start_path if start_path is not None else module_file(__file__).parent
     for _ in range(10):
         if (current / ".trinity").is_dir() or (current / ".aipass").is_dir():
