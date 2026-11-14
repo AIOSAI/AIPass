@@ -234,7 +234,7 @@ def _branch_relative(target: Path, branch_root: Path) -> str:
 
 
 def reported_path(path: PurePath, root: PurePath) -> str:
-    """The path from root as the finding prints it: ``handlers/x.py``, forward slashes on every host.
+    """The path from root as the finding prints it: ``handlers/x.py``.
 
     Raises:
         ValueError: path is not below root.

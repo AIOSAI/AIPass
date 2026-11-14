@@ -185,20 +185,14 @@ def current_stamp(branch_path: Path, pack_path: Path, diag_path: Path | None = N
     return hashlib.sha1(combined.encode("utf-8")).hexdigest()
 
 
-#: Cache keys hold "::" and "="; ":" is illegal in Windows filenames.
+#: Cache keys hold "::" and "="; a filename keeps the plain characters only.
 _UNSAFE_IN_FILENAME = re.compile(r"[^A-Za-z0-9._-]")
-
-_WINDOWS_RESERVED_STEMS: frozenset[str] = frozenset(
-    {"CON", "PRN", "AUX", "NUL"} | {f"COM{n}" for n in range(1, 10)} | {f"LPT{n}" for n in range(1, 10)}
-)
 
 
 def entry_filename(cache_key: str) -> str:
-    """The file one cache key lives in, spelled safely for every host."""
-    # The exact-key digest separates "a::b"/"a=b" and "BACKUP"/"backup" (case-insensitive hosts).
+    """The file one cache key lives in, spelled safely."""
+    # The exact-key digest separates "a::b"/"a=b", which flatten to one stem.
     stem = _UNSAFE_IN_FILENAME.sub("_", cache_key)
-    if stem.split(".")[0].upper() in _WINDOWS_RESERVED_STEMS:
-        stem = f"_{stem}"
     return f"{stem}.{hashlib.sha1(cache_key.encode('utf-8')).hexdigest()[:10]}.json"
 
 

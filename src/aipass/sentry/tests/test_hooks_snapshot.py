@@ -15,7 +15,6 @@
 
 import json
 import re
-import sys
 from pathlib import Path
 
 import pytest
@@ -90,9 +89,9 @@ class TestProviderHooksSnapshot:
 
     @pytest.fixture(autouse=True)
     def _provider_settings_present(self):
-        """Skip where there is no provider settings.json (CI environment) or on Windows CI."""
-        if sys.platform == "win32" or not (Path.home() / ".claude" / "settings.json").exists():
-            pytest.skip("No provider settings.json (CI environment) or Windows CI")
+        """Skip where there is no provider settings.json (CI environment)."""
+        if not (Path.home() / ".claude" / "settings.json").exists():
+            pytest.skip("No provider settings.json (CI environment)")
 
     @pytest.fixture()
     def baseline(self):

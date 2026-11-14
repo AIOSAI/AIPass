@@ -239,39 +239,10 @@
       "reason": "The standard's own inputs, not anybody's home: the developer_home classes (L1601 on) write each home spelling with an invented login into tmp_path files for the checker, the tree runner, the checklist and the verb to convict. The list is developer_home's own scan_text answer for the file, computed by calling it (2026-10-04, dispatch 79b012ed item 4)."
     },
     {
-      "file": "tests/test_checkers_batch10.py",
-      "standard": "windows_compat",
-      "lines": [1333],
-      "reason": "A control, not a path the test touches: '/tmp/pytest-of-.../x' is a string written into a tmp_path file to pin that a pytest temp path is not a home path (developer_home, 2026-10-04); nothing opens it."
-    },
-    {
       "file": "tests/test_checkers_batch8.py",
       "standard": "permission_flags",
       "lines": [1039, 1052, 1066, 1078, 1091, 1097, 1103],
       "reason": "Test input (fleet green leg 15; re-pinned 10-08 from 1182/1209/1221, the file grew above them): 'cmd = \"--dangerously-skip-permissions\"' and its sibling are strings written into tmp files as the permission_flags checker's own input; no command is ever built from them. Extended 2026-10-18: 1052 and the prose-lines pins' inputs (1091, 1097, 1103) are line-list fixtures, code once a docstring toggle stopped hiding them."
-    },
-    {
-      "file": "tests/test_host_portability_check.py",
-      "standard": "windows_compat",
-      "lines": [186, 188],
-      "reason": "Test input (fleet green leg 15; moved with host_portability's tests 2026-11-01): the 'aplay' lines are a quoted specimen of hooks apps/sound.py written to tmp as host_portability's input; nothing here runs aplay."
-    },
-    {
-      "file": "tests/test_posix_literal_nominator.py",
-      "standard": "windows_compat",
-      "lines": [44, 45, 47, 49, 50, 51, 52, 64, 176],
-      "reason": "The subject, not a path the test uses (fleet green leg 15): '/tmp' is the rooted literal the posix_literal nominator is about, handed only to ntpath/posixpath string functions to measure the hazard, or written as source text into tmp_path for the nominator to read (69) and as a parametrize case of the rooted-literal predicate (201); nothing touches the filesystem at it."
-    },
-    {
-      "file": "tests/test_posix_literal_nominator.py",
-      "standard": "literal_path",
-      "lines": [44, 45, 52],
-      "reason": "The subject, not a path the test uses (fleet green leg 15): the rooted literal is the nominator's own species, handed to ntpath.splitdrive/posixpath.splitdrive/posixpath.abspath, which are string functions; no host reads it."
-    },
-    {
-      "file": "tests/test_posix_literal_nominator.py",
-      "standard": "no_product_call",
-      "reason": "One test, test_ntpath_does_not_call_a_rooted_literal_absolute (fleet green leg 15): the measured platform premise the nominator rests on, a control of the library behaviour the rule exists for, not a test of the product. File-wide because no_product_call passes no line to is_bypassed; every other test here calls the nominator."
     },
     {
       "file": "tests/test_audit_tests_lane_gate.py",
@@ -350,31 +321,6 @@
       "file": "apps/handlers/aipass_standards/skip_dirs.py",
       "standard": "json_structure",
       "reason": "Pure constants module \u2014 defines SOURCE_SKIP_DIRS frozenset only, no operations to log."
-    },
-    {
-      "file": "tests/test_windows_compat.py",
-      "standard": "windows_compat",
-      "reason": "Test file for this standard: its cases write deliberate POSIX patterns ('/tmp/output.log', '/tmp/cache', aplay, shell=True) into tmp_path files as checker input. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
-    },
-    {
-      "file": "tests/test_windows_compat.py",
-      "standard": "log_structure",
-      "reason": "Test input, not a log sink: L383 writes the string Path('/tmp/output.log') into a tmp_path file so windows_compat can flag it. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
-    },
-    {
-      "file": "apps/handlers/aipass_standards/exclusive_create_race.py",
-      "standard": "json_structure",
-      "reason": "Pure AST detector \u2014 takes a parsed tree and returns (line, text) pairs: no I/O, no operation to log. Its one caller, windows_compat_check.check_branch_info, logs windows_compat_advisory_lines per branch. Same shape as skip_dirs.py above."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/mock_repr_path.py",
-      "standard": "json_structure",
-      "reason": "Pure AST detector, same shape as exclusive_create_race.py above: a parsed tree in, (line, text) pairs out, no I/O. Its one caller, windows_compat_check.check_branch_info, logs windows_compat_advisory_lines per branch."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/text_fixture_bytes_oracle.py",
-      "standard": "json_structure",
-      "reason": "Pure AST detector, same shape as mock_repr_path.py above (2026-10-15): a parsed tree in, (line, text) pairs out, no I/O. Its one caller, windows_compat_check.check_branch_info, logs windows_compat_advisory_lines per branch (text_bytes count)."
     },
     {
       "file": "apps/handlers/cli/help_flags.py",
@@ -478,22 +424,6 @@
       "file": "tests/test_audit_tests_lane_gate.py",
       "standard": "hardcoded_path",
       "reason": "The POSIX home literals are INPUT to plugin.classify(), whose job is to judge a path SHAPE. The literal is the fixture; this file never opens it. Replacing it with pathlib would delete the test."
-    },
-    {
-      "file": "tests/test_audit_tests_lane_gate.py",
-      "standard": "windows_compat",
-      "reason": "The /tmp literals are INPUT to plugin.classify_sqlite(), which parses sqlite connection strings. The string shape is the subject under test, never a location this file touches."
-    },
-    {
-      "file": "tests/test_audit_tests_lane.py",
-      "standard": "windows_compat",
-      "lines": [693],
-      "reason": "An argv token, not a location (surfaced by the 10-08 split, hidden until then under the file-wide classify_sqlite row): '/tmp/some_project' is a documented `audit-tests <path>` invocation handed to the verb's parser, whose runner is a recorder; nothing opens it."
-    },
-    {
-      "file": "tests/test_audit_tests_static.py",
-      "standard": "windows_compat",
-      "reason": "The /tmp literals are FIELD VALUES inside a hand-built artifact dict fed to the law checkers. Nothing opens them; they stand in for paths a run would have recorded, and the laws judge the document's shape, not the filesystem."
     },
     {
       "file": "apps/handlers/tests_pytest_standards/gutting.py",

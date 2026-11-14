@@ -33,7 +33,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     checks = []
     path = Path(module_path)
 
-    # Normalize to forward slashes so string matching works on Windows too
     module_path = Path(module_path).as_posix()
 
     if is_bypassed(module_path, "handlers", bypass_rules=bypass_rules):
@@ -324,7 +323,7 @@ def check_auto_detection(content: str) -> Optional[Dict]:
         "passed": False,
         "message": (
             "Has an optional module_name but never reads the caller frame "
-            "(use sys._getframe — NOT inspect.stack(), which needs a readable cwd on Windows). "
+            "(use sys._getframe — NOT inspect.stack(), which needs a readable cwd). "
             "If this module_name is an event payload rather than a caller identity, say so — "
             "the checker reads the name and cannot tell them apart."
         ),

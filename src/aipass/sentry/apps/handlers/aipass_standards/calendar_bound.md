@@ -31,8 +31,7 @@ ran inside its one-week window.
 
 **Why no existing rule saw it.** `pytest_quality` judges what a test proves, and
 a literal equality is a strong oracle, so `no_oracle` and `assertion_shape` score
-it as good. `platform_oracle`, `host_portability` and `windows_compat` ask which
-HOST a test needs, never which DATE. `host_state` asks whether the machine is
+it as good. `host_portability` asks which HOST a test needs, never which DATE. `host_state` asks whether the machine is
 restored, and reading the clock changes nothing. The execution lane
 (`audit-tests`) runs the suite on today's date, which is exactly the blind spot.
 No rule in either pack read the clock.

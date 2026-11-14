@@ -249,7 +249,7 @@ def test_auto_detection_missing():
     assert result is not None
     assert result["passed"] is False
     assert "never reads the caller frame" in result["message"]
-    # Pinned as a refusal: inspect.stack() is the Windows dead-cwd defect, never a "clearer" instruction.
+    # Pinned as a refusal: inspect.stack() is the dead-cwd defect, never a "clearer" instruction.
     assert "use sys._getframe" in result["message"]
     assert "NOT inspect.stack()" in result["message"]
 

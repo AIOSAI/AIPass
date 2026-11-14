@@ -187,7 +187,6 @@ def get_host_portability_standards() -> str:
         "[bold cyan]REFERENCE:[/bold cyan]",
         "  [dim]See: sentry standards pack (host_portability)[/dim]",
         "  [dim]Checker: host_portability_check.py[/dim]",
-        "  [dim]Sibling: windows_compat (same helpers, different host)[/dim]",
     ]
 
     json_handler.log_operation("standard_content_queried", {"standard": "host_portability"})

@@ -93,12 +93,9 @@ def _put_ruff_on_path(tmp_path: Path, monkeypatch) -> None:
     """PATH holds only a stand-in ruff; subprocess.run is sealed, so it never runs."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    # Windows finds ruff.exe through PATHEXT and ignores the bit; POSIX needs the bit.
-    for name in ("ruff", "ruff.exe"):
-        stub = bin_dir / name
-        stub.write_text("", encoding="utf-8")
-        if sys.platform != "win32":
-            os.chmod(stub, 0o755)
+    stub = bin_dir / "ruff"
+    stub.write_text("", encoding="utf-8")
+    os.chmod(stub, 0o755)
     monkeypatch.setenv("PATH", str(bin_dir))
 
 
@@ -960,10 +957,8 @@ class TestCheckModule:
         target = tmp_path / "x.py"
         _write_file(target, "x = 1\n")
         venv_bin = _hide_ruff(tmp_path, monkeypatch)
-        for name in ("ruff", "ruff.exe"):
-            (venv_bin / name).write_text("", encoding="utf-8")
-            if sys.platform != "win32":
-                os.chmod(venv_bin / name, 0o755)
+        (venv_bin / "ruff").write_text("", encoding="utf-8")
+        os.chmod(venv_bin / "ruff", 0o755)
         with patch(_RUN, side_effect=[_ruff_proc([], returncode=0), _fmt_proc()]) as run:
             result = check_module(str(target))
         assert Path(run.call_args_list[0].args[0][0]).parent == venv_bin

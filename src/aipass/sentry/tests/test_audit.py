@@ -216,15 +216,4 @@ def test_uppercase_registry_name_no_entry_when_only_uppercase_file(tmp_path, mon
     _registry(tmp_path, [{"name": "BACKUP", "path": str(branch_dir)}], monkeypatch)
 
     result = discovery.discover_branches()
-    # Case folding is a property of the filesystem, not of the OS name, so ask
-    # the directory the test just wrote instead of guessing from platform.
-    lowercase_resolves = (apps_dir / "backup.py").exists()
-
-    if lowercase_resolves:
-        # Case-insensitive filesystem (default macOS/Windows): BACKUP.py answers
-        # to backup.py, so the branch IS found -- under the lowercase entry name.
-        assert len(result) == 1
-        assert result[0]["entry_file"].endswith("backup.py")
-    else:
-        # Case-sensitive filesystem (Linux): no lowercase entry file, no branch.
-        assert result == []
+    assert result == []

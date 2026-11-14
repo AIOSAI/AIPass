@@ -28,8 +28,6 @@ TEST_DIRS: tuple = corpus.TEST_DIRS
 HOST_CONTROL_BINARIES: frozenset = frozenset(
     {
         "systemctl",
-        "launchctl",
-        "sc",
         "service",
         "systemd-run",
         "crontab",

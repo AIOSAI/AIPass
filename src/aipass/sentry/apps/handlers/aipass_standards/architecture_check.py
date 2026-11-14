@@ -55,7 +55,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     checks = []
     path = Path(module_path)
 
-    # Normalize to forward slashes so string matching works on Windows too
     module_path = Path(module_path).as_posix()
 
     if is_bypassed(module_path, "architecture", bypass_rules=bypass_rules):
@@ -346,8 +345,8 @@ def _resolve_template_dir(citizen_class: str) -> tuple[Optional[str], str]:
 def _relative_spelling(item: PurePath, root: PurePath) -> str:
     """One template entry's path relative to the template root, spelled in posix.
 
-    Always forward slashes on every platform: this string is the check name a branch reads
-    and the text a bypass rule (written with forward slashes) is matched against.
+    This string is the check name a branch reads and the text a bypass rule
+    (written with forward slashes) is matched against.
     """
     return item.relative_to(root).as_posix()
 

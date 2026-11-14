@@ -21,7 +21,6 @@ from aipass.sentry.apps.handlers import registry_scan
 
 def _find_registry() -> Path:
     """Find *_REGISTRY.json — CWD-first for external project support, then __file__ fallback."""
-    # Never a local glob: "*_REGISTRY.json" folds case on Windows/macOS and can match a plan counter.
     return registry_scan.find_registry()
 
 

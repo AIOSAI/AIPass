@@ -868,20 +868,6 @@ class TestThePerCheckerStampScopesAReRun:
         assert result["_cache_hit"] is False
         assert first == {"good.py", "main.py"}
 
-    def test_a_drive_letter_path_is_the_first_checkers_call_not_a_tagged_one(self, tmp_path):
-        """A Windows absolute path carries a colon, and the split told calls apart by colon."""
-        call_log = tmp_path / "calls.log"
-        call_log.write_text(
-            "C:/runner/work/apps/good.py\nsecond:C:/runner/work/apps/good.py\nbranchlevel:C:/runner/work\n",
-            encoding="utf-8",
-        )
-
-        first, second, branch_level = self._split(call_log)
-
-        assert first == {"good.py"}
-        assert second == {"good.py"}
-        assert branch_level == ["branchlevel:C:/runner/work"]
-
 
 _READER_CHECKER_TEMPLATE = """
 CALL_LOG = "__CALL_LOG__"
@@ -1086,27 +1072,10 @@ class TestTheFilenameIsSafeOnEveryHost:
     def test_a_plain_key_keeps_its_name_readable(self):
         assert incremental_cache.entry_filename("memory").startswith("memory.")
 
-    def test_no_illegal_character_survives(self):
-        """':' cannot appear in a Windows filename, and every key carries '::'."""
-        name = incremental_cache.entry_filename("memory::pack=pytest_quality")
-
-        assert ":" not in name
-        assert "memory__pack" in name
-
     def test_two_keys_that_flatten_alike_get_different_files(self):
         assert incremental_cache.entry_filename("memory::no-bypass") != incremental_cache.entry_filename(
             "memory=no-bypass"
         )
-
-    def test_keys_differing_only_in_case_get_different_files(self):
-        """Windows and macOS filesystems are case-insensitive; the fleet has BACKUP."""
-        upper = incremental_cache.entry_filename("BACKUP")
-        lower = incremental_cache.entry_filename("backup")
-
-        assert upper.lower() != lower.lower()
-
-    def test_a_windows_device_name_is_prefixed_out_of_the_way(self):
-        assert incremental_cache.entry_filename("con").startswith("_con.")
 
 
 class TestTheLegacyFlatDocMigrates:

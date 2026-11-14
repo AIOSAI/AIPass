@@ -74,7 +74,7 @@ class TestAutoDetectionNoLongerMandatesTheDeadCwdDefect:
 
     def test_the_cured_shape_passes_without_a_specially_named_helper(self):
         """@prax's blocking case. sys._getframe answers the same question and
-        cannot die on a Windows box with no working directory."""
+        cannot die with no working directory."""
         content = (
             "import sys\n\n"
             "def log_operation(op, module_name=None):\n"

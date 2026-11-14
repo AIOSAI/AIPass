@@ -14,7 +14,6 @@
 # sentry: no-test-needed(ruff) — that readme_check.py and docs_page_check.py parse and import
 
 import os
-import sys
 
 import pytest
 from pathlib import Path
@@ -419,8 +418,8 @@ def test_directory_tree_passes_absent_runtime_dir(tmp_path):
 
 
 # An unlistable directory is the only route to a walk error, and it is not one
-# everywhere: Windows ignores the mode bits and root lists through them.
-_MODE_BITS_HOLD = sys.platform != "win32" and getattr(os, "geteuid", lambda: 1)() != 0
+# everywhere: root lists through the mode bits.
+_MODE_BITS_HOLD = os.geteuid() != 0
 
 
 @pytest.mark.skipif(not _MODE_BITS_HOLD, reason="a directory cannot be made unlistable on this platform")

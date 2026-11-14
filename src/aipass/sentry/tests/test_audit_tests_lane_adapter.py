@@ -263,7 +263,7 @@ class TestCampaignBudget:
         assert seen["budget_seconds"] == gutting.DEFAULT_BUDGET_SECONDS == 1800
 
     def test_build_env_carries_the_budget_option_onto_the_spec_it_publishes(self, tmp_path, monkeypatch):
-        # rsync is the edge: Windows runners have none (PR #786, run 38365012946); the spec is the claim.
+        # rsync is the edge (PR #786, run 38365012946); the spec is the claim.
         monkeypatch.setattr(envcopy, "rsync", lambda source, destination: shutil.copytree(source, destination) and None)
         target = tmp_path / "proj"
         (target / "tests").mkdir(parents=True)
@@ -504,9 +504,6 @@ class TestPythonResolution:
     """No interpreter path is hardcoded; a one-machine checker is not a checker."""
 
     def test_an_explicit_override_wins(self, tmp_path):
-        # Built from tmp_path, never a POSIX literal: "/opt/py/bin/python" is
-        # DRIVE-RELATIVE on Windows, so find_python's abspath correctly resolves
-        # it against the current drive and the old literal could never match.
         override = tmp_path / "opt" / "py" / "bin" / "python"
         assert envcopy.find_python(tmp_path, str(override)) == override
 
@@ -525,9 +522,8 @@ class TestPythonResolution:
     def test_a_relative_override_is_made_absolute(self, tmp_path, monkeypatch):
         # Kills the mutant that drops abspath. The two tests above cannot: they
         # pass an already-absolute tmp_path, for which abspath is the identity,
-        # so both mutants SURVIVED on Linux (measured) while Windows CI was the
-        # only thing defending the line. A RELATIVE override needs resolving on
-        # every platform - and the lane must never hand subprocess a path whose
+        # so both mutants SURVIVED (measured). A RELATIVE override needs resolving
+        # - and the lane must never hand subprocess a path whose
         # meaning depends on the working directory it happens to inherit.
         monkeypatch.delenv("AUDIT_TESTS_PYTHON", raising=False)
         monkeypatch.chdir(tmp_path)
@@ -536,11 +532,9 @@ class TestPythonResolution:
         assert resolved == Path(os.path.abspath(os.path.join("rel", "python")))
 
     def test_a_tilde_override_is_expanded_to_the_home_directory(self, tmp_path, monkeypatch):
-        # Found by mutation while fixing the Windows failures, NOT caused by
-        # them: deleting .expanduser() killed no test. A "~" handed to
+        # Found by mutation: deleting .expanduser() killed no test. A "~" handed to
         # subprocess is a literal directory named "~", not the user's home.
         monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         monkeypatch.delenv("AUDIT_TESTS_PYTHON", raising=False)
         resolved = envcopy.find_python(tmp_path, os.path.join("~", "py", "python"))
         assert "~" not in str(resolved)
@@ -597,8 +591,8 @@ class TestSnapshotDiff:
         assert fingerprint[4] == ""
 
     @pytest.mark.skipif(
-        sys.platform == "win32" or getattr(os, "geteuid", lambda: 1)() == 0,
-        reason="mode bits do not stop Windows or root from statting a listed file",
+        os.geteuid() == 0,
+        reason="mode bits do not stop root from statting a listed file",
     )
     def test_a_listed_file_that_cannot_be_statted_is_absent_rather_than_an_error(self, tmp_path):
         """The vanish race, on disk: a read-only directory lists its names and refuses every stat under it."""

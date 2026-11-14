@@ -77,7 +77,7 @@ def _collect_py_files(
     """Collect auditable .py files from apps/ AND tests/, respecting ignore patterns.
 
     include_init=True is for import checkers: a cross-handler import can hide in a package marker.
-    is_retired_path() backs up the ignore patterns, whose "/.archive/" substring never matches on Windows.
+    is_retired_path() backs up the ignore patterns.
     """
     root = branch_path.resolve()
     ignore_entries = ignore_handler.load_ignore_entries(branch_path)

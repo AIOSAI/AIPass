@@ -122,10 +122,9 @@ def extract_handler_package(import_line: str) -> Optional[str]:
 
 
 def _posix(file_path: str) -> str:
-    """The path as a string with forward slashes, whatever host handed it in.
+    """The path as a string with forward slashes.
 
-    The checks below search the path for "apps/handlers/" and "apps/modules/";
-    a Windows path with backslashes matches neither.
+    The checks below search the path for "apps/handlers/" and "apps/modules/".
     """
     return str(file_path).replace("\\", "/")
 

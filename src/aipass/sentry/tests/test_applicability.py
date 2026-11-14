@@ -144,9 +144,9 @@ def test_structural_standards_are_declared_production_only():
 
 
 def test_bug_finding_standards_still_apply_to_tests():
-    """Scoping, not muting: Windows CI runs the whole suite, so a bad path in a test is real."""
+    """Scoping, not muting: CI runs the whole suite, so a bad path in a test is real."""
     checkers = discover_checkers()
-    for name in ("windows_compat", "hardcoded_path", "silent_catch", "hardcoded_key", "ruff", "encapsulation"):
+    for name in ("hardcoded_path", "silent_catch", "hardcoded_key", "ruff", "encapsulation"):
         assert applicability.applies_to(checkers[name]) == applicability.EVERYWHERE, name
 
 

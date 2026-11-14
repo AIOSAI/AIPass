@@ -9,7 +9,7 @@
 """
 Case-Exact Registry Discovery
 
-pathlib's glob is case-insensitive on Windows and macOS; the SUFFIX is checked case-exactly, never the stem."""
+The SUFFIX is checked case-exactly, never the stem."""
 
 import os
 from pathlib import Path

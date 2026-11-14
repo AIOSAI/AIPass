@@ -14,7 +14,7 @@
 # sentry: no-test-needed(stdlib) — tokenize's own error classes; the fallback they trigger is pinned via check_branch
 
 import tokenize
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
 import pytest
 from types import SimpleNamespace
@@ -33,7 +33,6 @@ from aipass.sentry.apps.handlers.aipass_standards.trigger_check import (
 )
 from aipass.sentry.apps.handlers.aipass_standards.dead_code_check import (
     check_branch as dead_code_check_branch,
-    reported_path as dead_code_reported_path,
 )
 from aipass.sentry.apps.handlers.aipass_standards.unused_function_check import (
     check_branch as unused_function_check_branch,
@@ -740,11 +739,3 @@ class TestASkipNamedPackageIsSource:
         branch = self._commons_shape(tmp_path)
         _write_file(branch / "apps" / "handlers" / ".archive" / "old_ops.py", "def retired():\n    return 1\n")
         assert _dead(branch) == ["handlers/artifacts/trade_ops.py"]
-
-
-class TestDeadCodeReportsAForwardSlashPath:
-    """Windows CI printed 'handlers\\\\security\\\\gate.py' where the oracles read a slash (addendum d13d7c68 D)."""
-
-    def test_a_windows_shaped_path_is_reported_with_forward_slashes(self):
-        target = PureWindowsPath("C:/proj/apps/handlers/security/gate.py")
-        assert dead_code_reported_path(target, PureWindowsPath("C:/proj/apps")) == "handlers/security/gate.py"

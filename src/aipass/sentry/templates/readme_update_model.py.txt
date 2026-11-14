@@ -17,7 +17,6 @@
 
 import json
 import os
-import sys
 from pathlib import Path
 
 import pytest
@@ -28,13 +27,12 @@ from aipass.sentry.apps.modules import readme_update
 
 
 # A read-only file is the only route a command has to a write failure, and it is
-# not one everywhere: Windows ignores the bit and root writes through it.
-_WRITE_BIT_HOLDS = sys.platform != "win32" and getattr(os, "geteuid", lambda: 1)() != 0
+# not one everywhere: root writes through it.
+_WRITE_BIT_HOLDS = os.geteuid() != 0
 
 
 def _set_writable(path: Path, writable: bool) -> None:
-    if sys.platform != "win32":
-        os.chmod(path, 0o644 if writable else 0o444)
+    os.chmod(path, 0o644 if writable else 0o444)
 
 
 # ---------------------------------------------------------------------------

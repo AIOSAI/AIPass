@@ -543,7 +543,7 @@ def test_inert_scope_support_reads_positional_line_argument():
     """is_bypassed(path, "debug_print", ln, rules) threads a line as much as line=ln does."""
     support = inert.scope_support()
 
-    for standard in ("debug_print", "help_text", "log_handler", "output_routing", "windows_compat"):
+    for standard in ("debug_print", "help_text", "log_handler", "output_routing"):
         assert "lines" in support[standard], f"{standard} passes line positionally and must count as live"
 
 

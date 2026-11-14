@@ -3,7 +3,7 @@
 # Description: host_portability_check — arms A to H over minimised fleet sites, and its branch score
 # Version: 1.0.0
 # Created: 2026-11-01
-# Modified: 2026-11-07
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/host_portability_check.py."""
@@ -535,7 +535,7 @@ def test_an_existence_early_out_acquits_a_proc_read(tmp_path):
 
 
 def test_a_bare_proc_string_that_never_reaches_the_filesystem_is_not_convicted(tmp_path):
-    """sentry platform_oracle_check.py:187 -- a prefix in a tuple of constants."""
+    """A prefix in a tuple of constants is data, never a read."""
     source = 'DEVICE_PATH_PREFIXES = ("/dev/null/", "/proc/", "/sys/")\n'
 
     violations, _ = _scan_source(tmp_path, source)

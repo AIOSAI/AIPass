@@ -19,7 +19,6 @@
 
 import ast
 import json
-import os
 import sys
 import textwrap
 from pathlib import Path
@@ -653,13 +652,6 @@ class TestRuffBinaryLookup:
         monkeypatch.setattr(ruff_pt_check.shutil, "which", lambda _name: str(tmp_path / "elsewhere" / "ruff"))
         assert _binary_nominate_used(tmp_path, monkeypatch) == str(sibling)
 
-    def test_the_windows_spelling_of_the_sibling_is_found_too(self, tmp_path, monkeypatch):
-        # A POSIX-only name list would report "not installed" on every Windows machine that has ruff.
-        binaries = _fake_interpreter(tmp_path, monkeypatch)
-        sibling = _executable(binaries / "ruff.exe")
-        monkeypatch.setattr(ruff_pt_check.shutil, "which", lambda _name: "")
-        assert _binary_nominate_used(tmp_path, monkeypatch) == str(sibling)
-
     def test_path_is_still_searched_when_the_interpreter_has_no_sibling(self, tmp_path, monkeypatch):
         # The fix adds a place to look, never removes one: a system ruff with no venv is the CI-runner case.
         _fake_interpreter(tmp_path, monkeypatch)
@@ -675,7 +667,6 @@ class TestRuffBinaryLookup:
         monkeypatch.setattr(ruff_pt_check.shutil, "which", lambda _name: on_path)
         assert _binary_nominate_used(tmp_path, monkeypatch) == on_path
 
-    @pytest.mark.skipif(os.name == "nt", reason="Windows ignores the executable bit")
     def test_a_sibling_without_the_executable_bit_is_not_returned(self, tmp_path, monkeypatch):
         binaries = _fake_interpreter(tmp_path, monkeypatch)
         (binaries / "ruff").write_text("not a binary\n", encoding="utf-8")
@@ -919,7 +910,10 @@ class TestRetirement:
     """A group may only vanish by a recorded ruling."""
 
     def test_the_placeholder_group_is_recorded_as_retired(self):
-        assert [entry["group"] for entry in adapter.RETIRED_GROUPS] == ["pytest.static_nominators"]
+        assert [entry["group"] for entry in adapter.RETIRED_GROUPS] == [
+            "pytest.static_nominators",
+            "pytest.static_posix_literal",
+        ]
 
     def test_the_retirement_names_a_ruling(self):
         # An entry with no ruling is refused by Law S3's own validator; the shipped entry carries one.

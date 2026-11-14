@@ -20,7 +20,6 @@ from aipass.sentry.apps.handlers.audit.discovery import registry_branches
 
 def _find_registry() -> Path:
     """Find *_REGISTRY.json — CWD-first for external project support, then __file__ fallback."""
-    # A private parent.glob folds case on Windows/macOS and can serve a plan counter as the registry.
     return registry_scan.find_registry()
 
 

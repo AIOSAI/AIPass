@@ -6,10 +6,7 @@
 # Modified: 2026-11-02
 # =============================================
 
-"""One guarded spelling for module-level ``__file__`` resolution.
-
-On Windows ``Path.resolve()`` always calls ``os.getcwd()``, so a deleted cwd breaks import.
-"""
+"""One guarded spelling for module-level ``__file__`` resolution."""
 
 from pathlib import Path
 

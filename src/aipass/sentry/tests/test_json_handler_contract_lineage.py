@@ -329,12 +329,7 @@ def test_save_json_writes_a_document_that_parses_from_disk(
     assert parsed == LOG_PAYLOAD, f"{branch}: the document on disk is not what was saved"
 
 
-# The skip is a decorator, not an in-body `if`: windows_compat's static scan recognises only that
-# as guarding os.chmod / stat.S_IMODE below.
 @pytest.mark.parametrize("branch", parametrized())
-@pytest.mark.skipif(
-    os.name == "nt", reason="permission bits are not the file's own on Windows; the claim has no subject there"
-)
 def test_rewriting_a_document_keeps_the_permission_bits_it_already_had(
     branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

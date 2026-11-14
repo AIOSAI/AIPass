@@ -49,7 +49,6 @@ STATIC_GROUPS: tuple = (
     "static_entry_point_diff",
     "static_mock_drift",
     "static_no_oracle",
-    "static_posix_literal",
     "static_raw_needle",
     "static_ruff_pt",
     "static_self_skip",
@@ -89,6 +88,14 @@ RETIRED_GROUPS: tuple = (
             "static_coverage_slot, static_entry_point_diff, static_mock_drift, static_no_oracle, "
             "static_ruff_pt, static_self_skip and static_unentered_assert - every species the "
             "placeholder stood in for is still published, more finely. No measurement was withdrawn."
+        ),
+    },
+    {
+        "group": "pytest.static_posix_literal",
+        "date": "2026-11-14",
+        "ruling": (
+            "FPLAN-0923: AIPass runs on Linux only, so a path claim true on one platform is no longer "
+            "a defect. Retired with its rule; no other group supersedes it."
         ),
     },
 )

@@ -37,13 +37,10 @@ the escape hatch. One line each here, nothing more — the rule file is the sour
 | `empty_parametrize` | Did the table vanish at collection time, leaving a green skip? |
 | `entry_point_diff` | Has the suite ever said this verb out loud? |
 | `fresh_clone` | Would this pass on a machine that has only what the repo ships? |
-| `host_leak` | Is the faked world faked all the way, or does it take one value from the real host? |
 | `host_state` | Did the test put the machine back? (About the restore, never the reach.) |
 | `mock_drift` | Does this patch replace a function, or a whole module? |
 | `module_eviction` | Did the test put the import cache back? |
 | `no_oracle` | Does this test verify anything at all? |
-| `platform_oracle` | Is the verdict about the code, or about the host it ran on? |
-| `posix_literal` | Is this path claim only true on one platform? |
 | `self_skip` | Where does the skip condition get its answer — the code, or a name that can vanish? |
 | `unentered_assert` | Does the assertion ever actually run? |
 

@@ -100,7 +100,7 @@ _STATE_ERROR = "error"
 def _repo_root() -> Path | None:
     """Walk up from this file to the repo root — the dir holding src/aipass.
 
-    module_file(), not Path.resolve(): resolve() reads the cwd on Windows.
+    module_file(), not Path.resolve().
     """
     for parent in module_file(__file__).parents:
         if (parent / "src" / "aipass").is_dir():

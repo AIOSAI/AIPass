@@ -24,9 +24,9 @@ def get_hardcoded_path_standards() -> str:
     """
     lines = [
         "[bold cyan]CORE PRINCIPLE:[/bold cyan]",
-        "  AIPass is a cross-platform PUBLIC repo. Source code must NEVER contain",
-        "  hardcoded absolute home-directory paths. They leak usernames, break on",
-        "  other machines, and violate cross-platform portability.",
+        "  AIPass is a PUBLIC repo. Source code must NEVER contain",
+        "  hardcoded absolute home-directory paths. They leak usernames and break",
+        "  on other machines.",
         "",
         "[bold cyan]WHAT IT CHECKS:[/bold cyan]",
         "  Scans Python source lines (excluding comments and docstrings) for:",
@@ -90,7 +90,7 @@ def get_hardcoded_path_standards() -> str:
         "[bold cyan]REFERENCE:[/bold cyan]",
         "  [dim]See: sentry standards pack (hardcoded_path)[/dim]",
         "  [dim]Checker: hardcoded_path_check.py[/dim]",
-        "  [dim]House rule: cross-platform, no hardcoded paths, use pathlib[/dim]",
+        "  [dim]House rule: no hardcoded paths, use pathlib[/dim]",
     ]
 
     json_handler.log_operation("standard_content_queried", {"standard": "hardcoded_path"})

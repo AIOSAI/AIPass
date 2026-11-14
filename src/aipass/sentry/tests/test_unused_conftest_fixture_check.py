@@ -13,7 +13,7 @@
 # sentry: no-test-needed(shared) — applies_to_file's production/tests split; tests/test_applicability.py
 # sentry: no-test-needed(constant) — the prose of CURE; the line and the name are asserted
 
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
 import pytest
 
@@ -197,11 +197,3 @@ class TestTheBypass:
             )["score"]
             == 100
         )
-
-
-class TestTheFindingReadsTheSameOnEveryHost:
-    """Windows CI printed 'tests\\\\conftest.py:5' where the message pins a slash (addendum d13d7c68 D)."""
-
-    def test_a_windows_shaped_path_is_reported_with_forward_slashes(self):
-        conftest = PureWindowsPath("C:/proj/tests/conftest.py")
-        assert unused_conftest_fixture_check.reported_path(conftest, PureWindowsPath("C:/proj")) == "tests/conftest.py"

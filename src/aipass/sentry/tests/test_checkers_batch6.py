@@ -14,7 +14,6 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that the four checker modules under test parse and import
 
-from pathlib import Path, PureWindowsPath
 from typing import List
 
 import pytest
@@ -30,11 +29,6 @@ from aipass.sentry.apps.handlers.bypass import utils as _bypass_utils
 def _lines(text: str) -> List[str]:
     """Split text into lines, widening LiteralString to str for pyright."""
     return text.split("\n")
-
-
-def _windows_form(tmp_path: Path, *parts: str) -> str:
-    """The tmp_path-rebuilt path as Windows spells it: a drive letter and backslashes."""
-    return str(PureWindowsPath("C:/", *tmp_path.parts[1:], *parts))
 
 
 # ---------------------------------------------------------------------------
@@ -454,17 +448,6 @@ class TestCheckCliImports:
         assert result["passed"] is True
         assert "CLI branch exempt" in result["message"]
 
-    def test_cli_branch_exempt_on_a_windows_path(self, tmp_path):
-        """A drive letter and backslashes still name the CLI branch (compass 458).
-
-        Mutant: check_cli_imports' `module_path.replace("\\", "/")` back to `module_path` — killed.
-        """
-        content = "from .display import header\n"
-        result = cli_check.check_cli_imports(content, _windows_form(tmp_path, "cli", "apps", "modules", "something.py"))
-        assert result is not None
-        assert result["passed"] is True
-        assert "CLI branch exempt" in result["message"]
-
     def test_output_without_cli_imports_fails(self, tmp_path):
         """Module with output but no CLI imports fails."""
         content = "print('hello world')\n"
@@ -705,33 +688,11 @@ class TestCheckDuplicateDisplayFunctions:
         )
         assert result is None
 
-    def test_cli_branch_exempt_on_a_windows_path(self, tmp_path):
-        """A drive letter and backslashes still name the CLI branch (compass 458).
-
-        Mutant: the "/cli/apps/" test's `module_path.replace("\\", "/")` back to `module_path` — killed.
-        """
-        content = "def header(title):\n    print(title)\n"
-        result = cli_check.check_duplicate_display_functions(
-            content, _windows_form(tmp_path, "cli", "apps", "modules", "display.py")
-        )
-        assert result is None
-
     def test_prax_logger_exempt(self, tmp_path):
         """Prax logger module is exempt (it is the logging system)."""
         content = "def error(msg):\n    pass\n"
         result = cli_check.check_duplicate_display_functions(
             content, str(tmp_path / "prax" / "apps" / "modules" / "logger" / "log.py")
-        )
-        assert result is None
-
-    def test_prax_logger_exempt_on_a_windows_path(self, tmp_path):
-        """A drive letter and backslashes still name the prax logger (compass 458).
-
-        Mutant: the "/prax/apps/modules/logger" test's `module_path.replace("\\", "/")` back to `module_path` — killed.
-        """
-        content = "def error(msg):\n    pass\n"
-        result = cli_check.check_duplicate_display_functions(
-            content, _windows_form(tmp_path, "prax", "apps", "modules", "logger", "log.py")
         )
         assert result is None
 

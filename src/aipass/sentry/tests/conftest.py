@@ -90,7 +90,7 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
     """Pin the product's consoles to one width for the whole run."""
-    # Unpinned, Rich sizes per OS and terminal (80 POSIX, 79 Windows, COLUMNS): a wrap flips substring asserts.
+    # Unpinned, Rich sizes per terminal (80 under capture, COLUMNS): a wrap flips substring asserts.
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
 

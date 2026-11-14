@@ -96,7 +96,7 @@ def get_json_structure_standards() -> str:
         "",
         "  The shim resolves NO paths of its own: the service derives this",
         "  branch's root from the shim's [dim]__file__[/dim], deliberately without",
-        "  [dim]resolve()[/dim] so a dead cwd on Windows cannot poison it. That is why",
+        "  [dim]resolve()[/dim] so a dead cwd cannot poison it. That is why",
         "  the check above accepts a shim with no [dim]Path(__file__)[/dim] in it.",
         "",
         "  [yellow]Bind, never wrap.[/yellow] The service reads the calling module at",

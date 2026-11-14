@@ -30,7 +30,6 @@
 # sentry: no-test-needed(constant) — CORE_SPINE's group names; the fixture is built from it, not a copy
 
 import os
-import sys
 from pathlib import Path
 
 import pytest
@@ -730,8 +729,8 @@ class TestCarrierSubtraction:
 
 
 # An unlistable directory is the only route to a walk error, and it is not one
-# everywhere: Windows ignores the mode bits and root lists through them.
-_MODE_BITS_HOLD = sys.platform != "win32" and getattr(os, "geteuid", lambda: 1)() != 0
+# everywhere: root lists through the mode bits.
+_MODE_BITS_HOLD = os.geteuid() != 0
 
 
 class TestSnapshotTree:

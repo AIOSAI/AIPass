@@ -130,13 +130,9 @@ class GateState:
 STATE = GateState()
 
 
-#: Windows accepts both "\\" and "/"; on POSIX "\\" is a legal filename character, so
-#: splitting on `os.sep` alone misclassifies forward-slash paths on Windows.
+#: On POSIX "\\" is a legal filename character, never a separator.
 def accepted_separators(sep: str = os.sep, altsep: Optional[str] = os.altsep) -> Tuple[str, ...]:
-    """The separators a platform honours, as a pure function of its two values.
-
-    A function so the Windows derivation is testable from Linux, where `altsep` is None.
-    """
+    """The separators a platform honours, as a pure function of its two values."""
     return tuple(dict.fromkeys(candidate for candidate in (sep, altsep) if candidate))
 
 
@@ -144,10 +140,7 @@ SEPARATORS: Tuple[str, ...] = accepted_separators()
 
 
 def _split_path(path: str, separators: Optional[Tuple[str, ...]] = None) -> List[str]:
-    """Split `path` on every separator this platform honours.
-
-    The default is read at call time, so a test can monkeypatch `SEPARATORS` from Linux.
-    """
+    """Split `path` on every separator this platform honours."""
     separators = SEPARATORS if separators is None else separators
     parts = [path]
     for sep in separators:

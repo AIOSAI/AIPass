@@ -30,8 +30,7 @@ _spec.loader.exec_module(plugin)
 
 
 def _outside_path(*parts: str) -> str:
-    """An absolute, native path that no allowance acquits, on either platform."""
-    # A POSIX literal is drive-relative on Windows: abspath rewrites it, so a hardcoded literal never matches.
+    """An absolute, native path that no allowance acquits."""
     return os.path.abspath(os.path.join(os.sep, "audit_tests_not_an_allowance", *parts))
 
 
@@ -111,32 +110,11 @@ class TestAllowances:
 
 
 class TestSeparatorPortability:
-    """The Windows branch of the classifier, driven from any platform."""
-
-    WINDOWS = ("\\", "/")
-
-    @pytest.fixture
-    def windows(self, monkeypatch):
-        monkeypatch.setattr(plugin, "SEPARATORS", self.WINDOWS)
-
-    def test_a_forward_slash_pycache_is_a_pycache_dir_on_windows_too(self, state, windows, tmp_path):
-        assert plugin.classify(str(tmp_path / "__pycache__" / "m.pyc"), state) == ("allowed", "pycache_dir")
-
-    def test_a_forward_slash_coverage_file_is_never_a_violation_on_windows(self, state, windows, tmp_path):
-        """Mutant: the classifier splits on the first separator alone in payload/audit_hygiene_plugin.py — killed."""
-        # as_posix(), not str(): on Windows str() uses backslashes and the forward-slash case is never exercised.
-        assert plugin.classify((tmp_path / ".coverage.host.1").as_posix(), state) == ("allowed", "coverage_data")
-
-    def test_a_native_backslash_path_still_classifies_on_windows(self, state, windows):
-        assert plugin.classify("D:\\x\\__pycache__\\m.pyc", state) == ("allowed", "pycache_dir")
+    """The classifier's separator set."""
 
     def test_a_backslash_is_a_filename_character_on_posix_and_never_a_separator(self):
         # Derived from os.altsep: splitting on "\\" on POSIX would tear a legal filename into invented parts.
         assert plugin._split_path("/weird/back\\slash.txt", ("/",)) == ["", "weird", "back\\slash.txt"]
-
-    def test_the_windows_pair_is_derived_from_windows_values(self):
-        # Spelled out, not re-derived: on POSIX altsep is None, so a derived expectation cannot fail.
-        assert plugin.accepted_separators("\\", "/") == ("\\", "/")
 
     def test_the_posix_single_separator_is_derived_from_posix_values(self):
         assert plugin.accepted_separators("/", None) == ("/",)
@@ -144,13 +122,6 @@ class TestSeparatorPortability:
     def test_the_platform_set_always_contains_the_platform_separator(self):
         assert os.sep in plugin.SEPARATORS
         assert plugin.SEPARATORS == plugin.accepted_separators()
-
-    def test_a_copy_boundary_survives_mixed_spelling(self, state, windows):
-        # env_root is native, the path is as typed: compared unnormalised, a write inside the copy reads outside.
-        assert plugin._under("C:/env/pkg/f.py", "C:\\env", self.WINDOWS) is True
-
-    def test_an_unrelated_tree_is_still_not_under_the_copy(self, state, windows):
-        assert plugin._under("C:/other/f.py", "C:\\env", self.WINDOWS) is False
 
 
 class TestWriteDetection:

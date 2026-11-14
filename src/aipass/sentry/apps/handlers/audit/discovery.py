@@ -41,8 +41,6 @@ def _is_branch_private(branch_name: str) -> bool:
 
 def _find_registry() -> Path:
     """Find *_REGISTRY.json by walking up from CWD first (drone's search order), then from __file__."""
-    # Trap: a local parent.glob("*_REGISTRY.json") folds case on Windows/macOS and
-    # can serve a flow_json plan counter as the trust anchor; registry_scan does not.
     return registry_scan.find_registry()
 
 

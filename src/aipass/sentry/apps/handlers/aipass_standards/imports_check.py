@@ -33,7 +33,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     checks = []
     path = Path(module_path)
 
-    # Normalize to forward slashes so string matching works on Windows too
     module_path = Path(module_path).as_posix()
 
     if path.name == "__init__.py":

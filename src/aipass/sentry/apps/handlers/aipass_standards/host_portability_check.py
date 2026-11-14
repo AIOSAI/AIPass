@@ -39,7 +39,7 @@ STANDARD_NAME = "HOST_PORTABILITY"
 _BYPASS_KEY = "host_portability"
 
 #: Split so this file's own source cannot be read as an occurrence of the
-#: literal it hunts. Same device windows_compat_check uses for /tmp.
+#: literal it hunts.
 _PROC_ROOT = "/" + "proc"
 _SYS_ROOT = "/" + "sys/"
 
