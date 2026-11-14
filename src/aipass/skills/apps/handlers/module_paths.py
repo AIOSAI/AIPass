@@ -43,8 +43,7 @@ def module_file(dunder_file: str) -> Path:
         return Path(raw).resolve()
     except OSError as exc:
         _report(raw, exc)
-        # abspath is not a second cwd read for an absolute input: posixpath reads it only for
-        # relative paths, and ntpath's _getfullpathname answers an absolute path without one.
+        # abspath is not a second cwd read for an absolute input: posixpath reads it only for relative paths.
         try:
             return Path(os.path.abspath(raw))
         except OSError as abspath_exc:

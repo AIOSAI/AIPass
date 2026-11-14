@@ -66,7 +66,6 @@ def copy_template(template_path, target_path, skill_name):
     try:
         shutil.copytree(str(template_path), str(target), ignore=shutil.ignore_patterns("__pycache__"))
 
-        # Posix-spelled and sorted so every host answers the same list: str() spells apps\handlers on Windows.
         created_files = []
         for file_path in target.rglob("*"):
             if not file_path.is_file():

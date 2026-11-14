@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 # Runs before any aipass import: the script dir would shadow the 'skills' package.
-# resolve() reads the cwd on Windows, so a dead cwd falls back to abspath.
+# A dead cwd falls back to abspath.
 try:
     _script_dir = str(Path(__file__).resolve().parent)
 except OSError as _resolve_error:
@@ -144,13 +144,6 @@ def print_help():
 
 
 if __name__ == "__main__":
-    if sys.platform == "win32":
-        os.environ.setdefault("PYTHONUTF8", "1")
-        if hasattr(sys.stdout, "reconfigure"):
-            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        if hasattr(sys.stderr, "reconfigure"):
-            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-
     args = sys.argv[1:]
     if not args:
         # Bare `drone @skills` is the live self-map; --help is the reference.

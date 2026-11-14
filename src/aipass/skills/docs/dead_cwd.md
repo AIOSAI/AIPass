@@ -6,14 +6,6 @@ Every skills module imports without a readable current directory. Why that is no
 
 Every skills module imports without a readable current directory.
 
-`ntpath.realpath` calls `os.getcwd()` on its first lines **unconditionally** —
-before it checks whether the path is even relative. `posixpath.realpath` reads
-the cwd only for relative paths, so Linux never shows it.
-`Path.resolve()` routes through realpath, so on Windows any
-`Path(__file__).resolve()` *reached at import* is an import-time crash for a
-process whose directory was deleted or whose network share dropped. Not
-"degrades" — cannot import.
-
 This matters more here than in most branches: skill units run in host processes
 nobody in this branch chose — @api's host routes, cron-fired lanes, hook
 subprocesses — and those are exactly the processes likely to hold a dead or
@@ -55,19 +47,11 @@ machine rather than derived.
 
 That rebuilt accessor captures a **sentinel** for realpath, not the host's.
 An instrument must not import behaviour it is not testing: the question it
-asks is "did the patch reach the captured attribute", and a live capture makes
-the answer depend on the dialect — on nt the accessor reads the cwd on its own
-account, so a world that reached nothing still answers *raised* and the probe
-convicts the host. The same file carries `posixpath`- and `ntpath`-shaped
-realpaths written **by name and by behaviour**, never by aliasing the dialect's
-own `realpath` (off Windows `ntpath.realpath` is a wrapper around `abspath` and
-leaves an absolute path alone, so an nt world built by aliasing never arms).
-Every accessor pin runs under both dialects and must return the same verdict;
-one shape that is *supposed* to differ is held alongside them, so a litmus that
-reached nothing cannot pass quietly. Where a claim really is per-platform — a
-relative arming path raises in both dialects, an absolute one only on nt — it
-is written as a two-row table with both rows measured here and a pin requiring
-the live host to agree with its own row.
+asks is "did the patch reach the captured attribute". The same file carries a
+`posixpath`-shaped realpath written **by name and by behaviour**, never by
+aliasing `posixpath.realpath`. A relative arming path raises whether or not the
+world armed and an absolute one does not; that is written as a table row with
+a pin requiring the live host to agree with it.
 
 Pinned by `tests/test_dead_cwd_imports.py`, which imports every skills module
 in a child process under two denial worlds (deny `getcwd`; deny `realpath`),

@@ -8,23 +8,13 @@ The portable readings, and the two published dicts the host API relays and the p
 
 Disk comes from `shutil.disk_usage`; memory, uptime and the process count ask
 **psutil** — `virtual_memory()`, `boot_time()`, `pids()` — a declared
-dependency of this project (`psutil>=5.9`) that answers on Linux, macOS and
-Windows. Two things that are not obvious:
+dependency of this project (`psutil>=5.9`). Two things that are not obvious:
 
 - **`summary` fails when a section fails.** It returns `success: False` with
   `error` naming the missing sections, and still hands back the sections that
   did answer.
 - **No psutil means a refusal, not a partial.** The three psutil actions return
   `success: False` naming the install recipe; `disk` still answers.
-
-The macOS half is manufactured on Linux in `tests/test_runner.py`, and the
-psutil stand-in is part of the world rather than a shortcut around it: psutil's
-*Linux* backend reads `/proc` through plain `open()`, so denying `/proc` with
-the real psutil in place would manufacture a failure no Mac can have — there
-psutil answers from the kernel. The world is `sys.platform == "darwin"` + every
-`/proc` read refused + a stand-in shaped like macOS's `virtual_memory` (no
-`buffers`, no `cached`), with three controls: the denial is live, the denial
-can still say yes, and the process table is gone too.
 
 **What the audit reads.** The per-file audit corpus is `apps/` (plus `tests/`
 for the branch-level arms); `lib/`, where the built-in skills live, joins it
@@ -58,7 +48,7 @@ vitals = handler.machine_vitals()
 
 | Code | When |
 |------|------|
-| `platform` | The OS has no such reading. psutil defines `sensors_temperatures` and `sensors_fans` only on Linux (temperatures also on FreeBSD); load on Windows is emulated and reads 0 until warm, so it is not drawn; `sensors_battery` exists on Linux, Windows, macOS and FreeBSD only |
+| `platform` | The installed psutil has no such reading: no `sensors_temperatures`, `sensors_fans`, `getloadavg` or `sensors_battery` |
 | `no_sensor` | The function exists but reported nothing to read from |
 | `no_allowlisted_sensor` | Chips were reported, none on the allowlist; `seen` names them |
 | `read_failed` | The call raised; `detail` carries the error |
@@ -131,8 +121,7 @@ manufactured, so the file is green on a host with no sensor chips. The
 read-only pin records every `open`, `io.open` and `os.open` under the tree and
 raises on a write mode or a fan control file, with a control proving the guard
 is armed and can still say yes. The stand-in psutil is four logical CPUs with
-different loads, CPU 2 spending half its idle time in iowait, and the Windows
-field set (no guest, no iowait) is manufactured beside it. The text actions
+different loads, CPU 2 spending half its idle time in iowait. The text actions
 are pinned in `tests/test_runner.py`.
 
 ---

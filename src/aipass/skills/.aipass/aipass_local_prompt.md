@@ -49,7 +49,7 @@ First match for a name wins, so a project shadows a built-in without editing it.
 
  - Counting the suite: bare `pytest` here collects `tests/` only. The skill suite joins under `pytest .` or from the repo root — that is the figure to quote.
  - The off-switch gates the runner, not an import. Any function published for in-process use must consult the switch itself — `machine_vitals()` and `machine_processes()` do.
- - No module-level `Path(__file__).resolve()`. Use `module_paths.module_file()`: on Windows `realpath` reads the working directory unconditionally, so a dead cwd is an import-time crash. See `docs/dead_cwd.md`.
+ - No module-level `Path(__file__).resolve()`. Use `module_paths.module_file()`. See `docs/dead_cwd.md`.
  - `apps/handlers/json/json_handler.py` is a hash-checked fleet shim. Add nothing to it; ask the service for a path instead of capturing one at import.
  - Tests redirect json and log output with `AIPASS_TEST_LOG_DIR`, never by patching a shim attribute.
  - `host_portability` is the one audit rule whose corpus includes `lib/`; the per-file rows still read `apps/` only, so a green audit is not a sweep of the skills.

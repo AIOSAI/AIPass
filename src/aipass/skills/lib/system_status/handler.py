@@ -13,7 +13,6 @@ Reference: docs/system_status.md
 
 import configparser
 import shutil
-import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -30,11 +29,6 @@ except ImportError:
     logger.warning("psutil not importable — system_status memory/uptime/processes will refuse")
 
 PSUTIL_RECIPE = "psutil is not importable on this host - install it with: pip install 'psutil>=5.9'"
-
-
-def _host_platform():
-    """sys.platform read at the call; tests patch this one door, not sys.platform process-wide."""
-    return sys.platform
 
 
 def run(action, args=None, config=None):
@@ -575,8 +569,7 @@ def _read_network(ps):
 
 def _read_load(ps):
     """1, 5 and 15 minute load averages."""
-    # Windows load is emulated and reads 0 until warm: not a measurement.
-    if _host_platform() == "win32" or not hasattr(ps, "getloadavg"):
+    if not hasattr(ps, "getloadavg"):
         return _section("load", "platform")
 
     one, five, fifteen = ps.getloadavg()
@@ -702,9 +695,6 @@ def _fan_entry(chip, fan):
 def _fan_range(chip, label):
     """Read one fan's min and max from Linux sysfs - read-only, and only those two."""
     # fanN_manual/fanN_output beside them are root-writable: never opened (pinned in tests).
-    if _host_platform() != "linux":
-        return None, "The fan range is read from Linux sysfs, and this host is not Linux."
-
     try:
         folder, stem = _locate_fan(chip, label)
     except LookupError as exc:
@@ -761,7 +751,6 @@ def _locate_fan(chip, label):
 
 def _read_battery(ps):
     """Charge, mains, state and time left, beside the low lines the host publishes."""
-    # psutil defines sensors_battery on Linux, Windows, macOS and FreeBSD only.
     if not hasattr(ps, "sensors_battery"):
         return _section("battery", "platform")
 
@@ -824,9 +813,7 @@ def _battery_state(ps, percent, plugged, secsleft):
 
 
 def _battery_sysfs_status():
-    """The kernel's status word for the first BAT* supply, or None off Linux or without one."""
-    if _host_platform() != "linux":
-        return None
+    """The kernel's status word for the first BAT* supply, or None without one."""
     for folder in sorted(POWER_SUPPLY_ROOT.glob("BAT*")):
         word = _read_sysfs_or(folder / "status", None)
         if word:
@@ -836,8 +823,6 @@ def _battery_sysfs_status():
 
 def _battery_lines():
     """The low and critical percentages UPower publishes, read from its config file."""
-    if _host_platform() != "linux":
-        return None, None, None
     try:
         text = UPOWER_CONF.read_text(encoding="utf-8")
     except FileNotFoundError:

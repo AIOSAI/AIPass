@@ -124,10 +124,7 @@ All actions return structured dicts:
 
 - Disk usage uses `shutil.disk_usage()` -- stdlib, portable
 - Memory, uptime and process count use `psutil` (`psutil>=5.9`, a declared
-  dependency of this project), which answers them on Linux, macOS and Windows
-- Until 2026-09-12 those three read `/proc` directly, so every one of them
-  returned `success: False` on macOS and `summary` reported `success: True`
-  over a disk line and an Errors trailer (FPLAN-0554)
+  dependency of this project)
 - `summary` is `success: False` whenever any section fails, and `error` names
   the sections that are missing; the sections that did answer are still in
   `output`

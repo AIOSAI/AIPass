@@ -14,7 +14,6 @@ Reference: docs/dead_cwd.md
 __all__ = [
     "ACCESSOR_SHAPE",
     "NATIVE_PATHS",
-    "NT_EMULATED_PLATFORM",
     "POSIX_EMULATED_PLATFORM",
     "WORLD_A",
     "WORLD_B",
@@ -50,7 +49,6 @@ WORLD_B = _DENIAL + (
     "    _pl._NormalAccessor.realpath = staticmethod(_dead)\n"
 )
 
-# Never os.path (the host) nor the dialect's own realpath: off Windows ntpath.realpath skips the cwd.
 _POSIX_SHAPED_REALPATH = (
     "import posixpath as _pp\n"
     "def _posix_shaped_realpath(p, *a, **k):\n"
@@ -60,34 +58,13 @@ _POSIX_SHAPED_REALPATH = (
     "    return _pp.normpath(p)\n"
 )
 
-_NT_SHAPED_REALPATH = (
-    "import ntpath as _np\n"
-    "def _nt_shaped_realpath(p, *a, **k):\n"
-    "    # ntpath.realpath reads the cwd unconditionally, ABOVE the isabs\n"
-    "    # check - that ordering is the mechanism and it is what to cite.\n"
-    "    # Measured on 3.12.3: `cwd = os.getcwd()` at Lib/ntpath.py:673 in the\n"
-    "    # str branch (:665 for bytes), `if not had_prefix and not isabs(path)`\n"
-    "    # at :687. The NUMBERS move between patch releases - @spawn read the\n"
-    "    # same call at :678 - so a claim pinned to a line number fails open\n"
-    "    # and silent on another CI leg, the way a line-scoped waiver does.\n"
-    "    # Pin the ordering; the line is a courtesy. That read is a\n"
-    "    # module-attribute lookup, which is why a bare os.getcwd rebind\n"
-    "    # reaches THROUGH a captured realpath on nt and not on posix.\n"
-    "    os.getcwd()\n"
-    "    return _np.normpath(p)\n"
-)
-
-# A probe's verdict must not move under the opposite dialect; one that moves imports behaviour it does not test.
 POSIX_EMULATED_PLATFORM = _POSIX_SHAPED_REALPATH + "os.path.realpath = _posix_shaped_realpath\n"
-NT_EMULATED_PLATFORM = _NT_SHAPED_REALPATH + "os.path.realpath = _nt_shaped_realpath\n"
 
-# Feeding posix "/probe" to the nt shape (or the reverse) measures the SPELLING, not the dialect.
 NATIVE_PATHS = {
     "posix": {"relative": ".", "absolute": "/probe"},
-    "nt": {"relative": ".", "absolute": "C:\\probe"},
 }
 
-# Captured EAGERLY (that is the defect); a live nt realpath reads the cwd itself, hence the sentinel.
+# Captured EAGERLY (that is the defect), hence the sentinel.
 _SENTINEL_REALPATH = "def _sentinel_realpath(p='/sentinel', *a, **k):\n    return p\n"
 
 ACCESSOR_SHAPE = _SENTINEL_REALPATH + (

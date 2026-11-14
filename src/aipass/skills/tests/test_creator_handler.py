@@ -90,7 +90,7 @@ class TestCreateSkill:
         assert (Path(result["path"]) / "apps").is_dir()
 
     def test_returns_created_files_list(self, tmp_path):
-        # Pins the is_file() filter, and the exact order: re-sorting as Paths is case-blind on Windows.
+        # Pins the is_file() filter, and the exact order.
         result = create_skill("test-files", template_type="full", target_dir=tmp_path)
         assert result["files"] == [
             "SKILL.md",

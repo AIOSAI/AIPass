@@ -66,8 +66,8 @@ def mock_infrastructure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
 
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
-    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
-    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    """Rich sizes an unpinned console on every print: 80 under pytest's capture,
+    the terminal's width under -s, COLUMNS when exported."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
 

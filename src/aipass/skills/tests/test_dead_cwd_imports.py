@@ -20,7 +20,7 @@
 """Tests that every skills module, and the guard in apps/handlers/__init__.py, survive a dead cwd."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(stdlib) — posixpath and ntpath realpath() themselves; only whether a world reaches them
+# sentry: no-test-needed(stdlib) — posixpath realpath() itself; only whether a world reaches it
 
 import ast
 import os
@@ -33,7 +33,6 @@ import pytest
 from aipass.skills.tests.dead_cwd_world import (
     ACCESSOR_SHAPE,
     NATIVE_PATHS,
-    NT_EMULATED_PLATFORM,
     POSIX_EMULATED_PLATFORM,
     WORLD_A,
     WORLD_B,
@@ -131,11 +130,11 @@ except Exception as exc:  # noqa: BLE001 - the measurement IS the exception
     import traceback
 
     frames = traceback.extract_tb(exc.__traceback__)
-    ours = [f for f in frames if "/aipass/skills/" in f.filename.replace("\\", "/")]
+    ours = [f for f in frames if "/aipass/skills/" in f.filename]
     frame = ours[-1] if ours else (frames[-1] if frames else None)
     where = "unknown"
     if frame is not None:
-        rel = frame.filename.replace("\\", "/").split("/aipass/skills/")[-1]
+        rel = frame.filename.split("/aipass/skills/")[-1]
         where = "%s:%d" % (rel, frame.lineno)
     print("RED %s %s %s: %s" % (TARGET, where, type(exc).__name__, exc))
     sys.exit(1)
@@ -419,7 +418,7 @@ def test_skill_creation_refuses_rather_than_guessing():
     assert "CREATE_ERROR_MENTIONS_CWD=True" in result.stdout, f"refusal did not name the reason: {result.stdout!r}"
 
 
-# The child removes its own cwd (Windows holds a cwd open, so there world A's denial stands in) and arms world A.
+# The child removes its own cwd and arms world A.
 _FENCE_DEAD_CWD_DRIVER = r"""
 import os
 import runpy
@@ -520,13 +519,11 @@ def _resolve_pre_311():
     #
     # HONEST RECORD, measured 2026-08-31 (M25): swapping the literal back for
     # the host-built spelling SURVIVES the whole suite. It is an EQUIVALENT
-    # MUTANT, and not narrowly - the four-cell table below is flat:
+    # MUTANT, and not narrowly - the table below is flat:
     #
-    #     capture     dialect   literal    host-built
-    #     sentinel    posix     NO_RAISE   NO_RAISE
-    #     sentinel    nt        NO_RAISE   NO_RAISE
-    #     live        posix     NO_RAISE   NO_RAISE
-    #     live        nt        RAISED     RAISED
+    #     capture     literal    host-built
+    #     sentinel    NO_RAISE   NO_RAISE
+    #     live        NO_RAISE   NO_RAISE
     #
     # Every accessor this runs against - sentinel, denial, cwd-reading wrapper
     # - answers before it looks at the path, so the argument decides nothing
@@ -557,8 +554,8 @@ else:
 
 _BARE_MODULE_PATCH = "def _dead(*a, **k):\n    raise FileNotFoundError(2, 'dead cwd')\nos.getcwd = _dead\n"
 
-# A windows-shaped bare module patch: reaches nothing the accessor captured, which is the point.
-_BARE_WINDOWS_MODULE_PATCH = _BARE_MODULE_PATCH + (
+# A bare module patch whose realpath reads the cwd: reaches nothing the accessor captured, which is the point.
+_BARE_CWD_READING_PATCH = _BARE_MODULE_PATCH + (
     "_rr = os.path.realpath\n"
     "def _reads(p, *a, **k):\n"
     "    os.getcwd()\n"
@@ -594,7 +591,6 @@ _LAZY_SHAPE = (
 _PLATFORMS = {
     "host": "",
     "posix": POSIX_EMULATED_PLATFORM,
-    "nt": NT_EMULATED_PLATFORM,
 }
 
 
@@ -639,47 +635,15 @@ class TestTheAccessorTrapIsReproducibleLocally:
         """The getcwd world the runtime pins use reaches the captured accessor, measurable only here on 3.11+."""
         assert _run_emulation(ACCESSOR_SHAPE, WORLD_GETCWD_DENIED) == "VERDICT=RAISED"
 
-    def test_the_platform_slot_is_live(self):
-        """ARMING PROBE for the litmus below: one shape whose verdict SHOULD move proves the platform slot is live."""
-        posix = _run_emulation(_LIVE_CAPTURE_SHAPE, _BARE_WINDOWS_MODULE_PATCH, call="resolve", platform="posix")
-        nt = _run_emulation(_LIVE_CAPTURE_SHAPE, _BARE_WINDOWS_MODULE_PATCH, call="resolve", platform="nt")
-        assert posix == "VERDICT=NO_RAISE", posix
-        assert nt == "VERDICT=RAISED", nt
-        assert posix != nt, "the platform slot reached nothing; the litmus below proves nothing"
-
-    def test_every_accessor_verdict_is_platform_blind(self):
-        """THE LITMUS: no verdict in this class may move with the platform.
-
-        Restore a live realpath capture in ACCESSOR_SHAPE and this reddens on Linux, without waiting for Windows CI.
-        """
-        cases = [
-            (ACCESSOR_SHAPE, _BARE_MODULE_PATCH, "cwd"),
-            (ACCESSOR_SHAPE, WORLD_A, "cwd"),
-            (ACCESSOR_SHAPE, WORLD_GETCWD_DENIED, "cwd"),
-            (_LAZY_SHAPE, _BARE_MODULE_PATCH, "cwd"),
-            (ACCESSOR_SHAPE, WORLD_A, "resolve"),
-            (ACCESSOR_SHAPE, _BARE_WINDOWS_MODULE_PATCH, "resolve"),
-        ]
-        moved = []
-        for shape, world, call in cases:
-            verdicts = {
-                platform: _run_emulation(shape, world, call=call, platform=platform)
-                for platform in ("host", "posix", "nt")
-            }
-            if len(set(verdicts.values())) != 1:
-                moved.append((call, verdicts))
-        assert moved == [], f"verdicts moved with the platform: {moved}"
-
 
 class TestTheArmingProbeIsDialectDependent:
-    """Why the world A arming probe uses an ABSOLUTE path - per dialect.
+    """Why the world A arming probe uses an ABSOLUTE path.
 
-    A relative probe raises in both dialects whether or not the world armed, so "." reports a shape, never a world.
+    A relative probe raises whether or not the world armed, so "." reports a shape, never a world.
     """
 
     _EXPECTED = {
         "posix": {"relative": "RAISED", "absolute": "NO_RAISE"},
-        "nt": {"relative": "RAISED", "absolute": "RAISED"},
     }
 
     @staticmethod
@@ -706,21 +670,16 @@ class TestTheArmingProbeIsDialectDependent:
         assert result.returncode == 0, result.stderr[-600:]
         return result.stdout.strip().split("=", 1)[1]
 
-    @pytest.mark.parametrize("dialect", ["posix", "nt"])
+    @pytest.mark.parametrize("dialect", ["posix"])
     def test_a_relative_probe_raises_in_both_dialects(self, dialect):
         """The load-bearing half: "." can never report a world, only a shape."""
         assert self._probe(dialect, NATIVE_PATHS[dialect]["relative"]) == "RAISED"
 
-    @pytest.mark.parametrize("dialect", ["posix", "nt"])
+    @pytest.mark.parametrize("dialect", ["posix"])
     def test_the_absolute_probe_answers_per_dialect(self, dialect):
-        """The half that parts, with both rows measured on this host."""
+        """The half that parts, measured on this host."""
         expected = self._EXPECTED[dialect]["absolute"]
         assert self._probe(dialect, NATIVE_PATHS[dialect]["absolute"]) == expected
-
-    def test_a_dialect_probe_fed_the_other_dialect_spelling_measures_nothing(self):
-        """Negative control for the table: either spelling mix-up yields an all-RAISED table that measures nothing."""
-        assert self._probe("posix", NATIVE_PATHS["nt"]["absolute"]) == "RAISED"
-        assert self._probe("nt", NATIVE_PATHS["posix"]["absolute"]) == "RAISED"
 
     def test_the_live_host_agrees_with_its_own_dialect_row(self):
         """The emulations are stand-ins; the real Path.resolve() on this host must land on its own table row."""
@@ -751,13 +710,9 @@ class TestTheArmingProbeIsDialectDependent:
             timeout=60,
         )
         assert result.returncode == 0, result.stderr[-600:]
-        row = self._EXPECTED[os.name if os.name in self._EXPECTED else "posix"]
-        assert f"REL={row['relative']}" in result.stdout, (
-            f"host {os.name} disagrees with its own table row: {result.stdout!r}"
-        )
-        assert f"ABS={row['absolute']}" in result.stdout, (
-            f"host {os.name} disagrees with its own table row: {result.stdout!r}"
-        )
+        row = self._EXPECTED["posix"]
+        assert f"REL={row['relative']}" in result.stdout, f"the host disagrees with its table row: {result.stdout!r}"
+        assert f"ABS={row['absolute']}" in result.stdout, f"the host disagrees with its table row: {result.stdout!r}"
 
 
 class TestTheAccessorTrapResolveRoute:
@@ -769,7 +724,7 @@ class TestTheAccessorTrapResolveRoute:
 
     def test_a_bare_module_patch_misses_the_resolve_route_too(self):
         """The same discrimination on the resolve route."""
-        assert _run_emulation(ACCESSOR_SHAPE, _BARE_WINDOWS_MODULE_PATCH, call="resolve") == "VERDICT=NO_RAISE"
+        assert _run_emulation(ACCESSOR_SHAPE, _BARE_CWD_READING_PATCH, call="resolve") == "VERDICT=NO_RAISE"
 
 
 class TestTheModuleWalk:

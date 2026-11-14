@@ -153,8 +153,7 @@ class TestCopyTemplate:
         target = tmp_path / "placeholder-test"
         copy_template(src["path"], target, "placeholder-test")
         files = [p for p in target.rglob("*") if p.is_file()]
-        # The floor: an empty target must fail. A set, not sorted(): Path ordering
-        # is case-insensitive on Windows and byte-wise on POSIX.
+        # The floor: an empty target must fail.
         assert {f.name for f in files} == {"SKILL.md", "handler.py"}
         for f in files:
             content = f.read_text(encoding="utf-8")

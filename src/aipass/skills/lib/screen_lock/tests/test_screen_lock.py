@@ -25,16 +25,8 @@ import pytest
 from aipass.skills.lib.screen_lock import handler as screen_lock
 
 # The resolver matches sessions against our own uid, so build the fixtures from it
-# rather than hard-coding 1000 — CI does not run as the owner. Windows has no
-# os.getuid at all, so fall back to a fixed uid there and pin the resolver to it.
-_UID = str(os.getuid()) if hasattr(os, "getuid") else "1000"
-
-
-@pytest.fixture(autouse=True)
-def _pin_getuid(monkeypatch):
-    # The resolver calls os.getuid() only after the (mocked) loginctl succeeds,
-    # so on Windows the mock walks it straight into a missing API.
-    monkeypatch.setattr(os, "getuid", lambda: int(_UID), raising=False)
+# rather than hard-coding 1000 — CI does not run as the owner.
+_UID = str(os.getuid())
 
 
 def _cpe(cmd, stderr: bytes | str = b""):
