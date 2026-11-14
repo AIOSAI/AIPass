@@ -12,16 +12,6 @@ Surfacing Governance Module — Public API
 Cross-branch consumers (@hooks' compass_recall, every prompt) import from here.
 """
 
-import os
-import sys
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
 from aipass.prax import logger  # noqa: F401
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.governance.engine import (

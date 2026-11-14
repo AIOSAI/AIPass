@@ -24,7 +24,7 @@ CORE_REGISTRY = "AIPASS_REGISTRY.json"
 
 
 def module_file(file: str) -> Path:
-    """A module's own path, resolved when it can be: on Windows resolve() reads the cwd, which may be gone."""
+    """A module's own path, resolved when it can be: resolve() may read the cwd, which may be gone."""
     path = Path(file)
     try:
         return path.resolve()
@@ -85,7 +85,7 @@ def _record_fallback(caller: str, marker: str, current: Path) -> None:
 
 def find_repo_root(start: Path | None = None, *, marker: str = CORE_REGISTRY, caller: str = MODULE_NAME) -> Path:
     """Walk up from *start* to the directory holding *marker*; else ``SOURCE_ROOT``, never the cwd."""
-    # module_file, not resolve(): this runs at import time, and on Windows resolve() reads the cwd.
+    # module_file, not resolve(): this runs at import time, where resolve() may read a gone cwd.
     current = Path(start) if start is not None else module_file(__file__).parent
     for parent in [current] + list(current.parents):
         if exists_exactly(parent / marker):

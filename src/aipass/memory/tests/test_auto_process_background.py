@@ -14,7 +14,6 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(covered_elsewhere) — run_pool_processing and auto_process() work, in tests/test_auto_process.py
 # sentry: no-test-needed(external) — what the detached child writes to _CHILD_LOG; that is the child's own run
-# sentry: no-test-needed(external) — the win32 branch of spawn_background(); only a Windows run takes it
 
 import json
 import os
@@ -63,10 +62,7 @@ class TestSpawnBackground:
             ap.spawn_background()
 
         kwargs = popen.call_args.kwargs
-        if sys.platform == "win32":
-            assert kwargs.get("creationflags", 0) != 0
-        else:
-            assert kwargs.get("start_new_session") is True
+        assert kwargs.get("start_new_session") is True
 
     def test_child_never_inherits_the_hook_pipes(self, isolated_lock):
         """Inherited pipes can block the hook when the buffer fills: each stream pinned to what it is handed."""

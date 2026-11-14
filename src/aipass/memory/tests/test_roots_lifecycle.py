@@ -17,7 +17,6 @@
 # sentry: no-test-needed(shared) — json_handler.log_operation() audit line on each roots command
 
 import json
-import pathlib
 from pathlib import Path
 
 import pytest
@@ -365,30 +364,8 @@ class TestTheOperatorLane:
         assert not hasattr(fleet, "add_root"), "the write lane leaked onto the read gateway"
 
 
-class _WindowsFlavour(pathlib.PureWindowsPath):
-    """A path that spells itself the way Windows does, on any machine, so the ``_spell`` pin has teeth on Linux."""
-
-    def resolve(self):
-        return self
-
-
 class TestTheDeclaredSpellingIsPosixOnEveryMachine:
-    """One declaration, one spelling: forward slashes, the only spelling both platforms read."""
-
-    def test_a_sibling_is_spelled_with_forward_slashes(self, monkeypatch):
-        monkeypatch.setattr(rf, "Path", _WindowsFlavour)
-
-        spelled = rf._spell(_WindowsFlavour(r"C:\proj\AIPass"), _WindowsFlavour(r"C:\proj\wren"))
-
-        assert spelled == "../wren"
-
-    def test_an_absolute_declaration_is_spelled_with_forward_slashes_too(self, monkeypatch):
-        """The other return path. A contract honoured on one branch is a coincidence."""
-        monkeypatch.setattr(rf, "Path", _WindowsFlavour)
-
-        spelled = rf._spell(_WindowsFlavour(r"C:\proj\AIPass"), _WindowsFlavour(r"D:\elsewhere\wren"))
-
-        assert spelled == "D:/elsewhere/wren"
+    """One declaration, one spelling: forward slashes."""
 
     def test_no_declaration_this_verb_writes_can_carry_a_backslash(self, home):
         """The end-to-end guard, in the file that ships."""

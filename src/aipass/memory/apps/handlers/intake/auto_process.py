@@ -31,7 +31,7 @@ from aipass.memory.apps.handlers.repo_root import module_file
 _MEMORY_ROOT = module_file(__file__).parent.parent.parent.parent
 
 # Single-flight: two concurrent rollovers would write the same .trinity files.
-# Staleness is time-based (cross-platform), so a crashed child frees the lane.
+# Staleness is time-based, so a crashed child frees the lane.
 _LOCK_PATH = Path(tempfile.gettempdir()) / "aipass-memory-auto-process.lock"
 _LOCK_STALE_SECONDS = 900
 _CHILD_LOG = Path(tempfile.gettempdir()) / "aipass-memory-auto-process.log"
@@ -134,12 +134,8 @@ def spawn_background() -> Dict[str, Any]:
         "stdout": log_handle,
         "stderr": subprocess.STDOUT,
         "cwd": str(_MEMORY_ROOT),
+        "start_new_session": True,
     }
-    if sys.platform == "win32":
-        # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-        kwargs["creationflags"] = 0x00000008 | 0x00000200
-    else:
-        kwargs["start_new_session"] = True
 
     try:
         child = subprocess.Popen([sys.executable, str(module_file(__file__))], **kwargs)

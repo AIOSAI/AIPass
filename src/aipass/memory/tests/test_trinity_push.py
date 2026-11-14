@@ -581,8 +581,7 @@ class TestScope:
         """Split from the resident half on 2026-08-27, and the split is the point.
 
         The core citizens ship with any installation, so this runs on every
-        lane that has a registry at all — including the Windows e2e job, where
-        it is the only half that was ever a claim about the software.
+        lane that has a registry at all.
         """
         names = {item["name"] for item in tp.resolve_scope()["branches"]}
         assert {"memory", "canary", "hooks"} <= names

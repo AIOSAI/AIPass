@@ -183,7 +183,7 @@ def _an_external_citizen_exists(repo_root, declared):
 
 @pytest.fixture
 def case_insensitive_filesystem(monkeypatch):
-    """Make ``Path.glob`` match the way Windows and macOS match.
+    """Make ``Path.glob`` match the way a case-insensitive filesystem matches.
 
     Pins the widened match on Linux, not a skipif; ``fnmatchcase`` because ``fnmatch`` consults the host.
     """
@@ -211,7 +211,7 @@ def case_insensitive_filesystem(monkeypatch):
 
 @pytest.fixture
 def case_insensitive_exists(monkeypatch):
-    """Make ``Path.exists`` case-fold as Windows does; it only ever ADDS a True, so a global patch is safe."""
+    """Make ``Path.exists`` case-fold as a case-insensitive filesystem does; it only ever ADDS a True, so a global patch is safe."""
     import os as _os
 
     real_exists = Path.exists
@@ -231,8 +231,8 @@ def case_insensitive_exists(monkeypatch):
 
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
-    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
-    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    """Rich sizes an unpinned console on every print: 80 under pytest's capture,
+    the terminal's width under -s, COLUMNS when exported."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
 

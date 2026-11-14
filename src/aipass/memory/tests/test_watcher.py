@@ -341,7 +341,6 @@ class TestMemoryFileWatcherOnModified:
         mod, mocks = _import_watcher(monkeypatch)
 
         watcher = mod.MemoryFileWatcher([tmp_path / "some" / "branch"])
-        # str(Path(...)) matches how on_modified normalizes the key on Windows.
 
         file_path = str(tmp_path / "some" / "branch" / ".trinity" / "local.json")
         file_key = str(Path(file_path))

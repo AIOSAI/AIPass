@@ -99,10 +99,7 @@ def _resolve(repo_root: Path | None, raw: str) -> Path:
 
 
 def _spell(repo_root: Path | None, resolved: Path) -> str:
-    """Relative to home when it fits, absolute when it does not — POSIX-spelled either way.
-
-    Forward slashes are the contract: the only spelling both platforms read as a path.
-    """
+    """Relative to home when it fits, absolute when it does not — POSIX-spelled either way."""
     root = (Path(repo_root) if repo_root is not None else find_repo_root()).resolve()
     try:
         return (Path("..") / resolved.relative_to(root.parent)).as_posix()

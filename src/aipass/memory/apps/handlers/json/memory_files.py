@@ -241,7 +241,6 @@ def write_memory_file(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
                 json.dump(data, f, indent=2, ensure_ascii=False)
                 f.write("\n")  # Add final newline
 
-            # os.replace, not rename: it overwrites on Windows too.
             os.replace(temp_path, file_path)
 
             json_handler.log_operation("write_memory_file", {"file": file_path.name, "success": True})

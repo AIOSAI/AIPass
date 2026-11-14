@@ -35,7 +35,7 @@ RESIDENCY_EXTERNAL = "external"
 DECLARED_ROOTS = "AIPASS_ROOTS.json"
 EXTERNAL_REGISTRY_GLOB = "*_REGISTRY.json"
 
-# Windows and macOS glob case-insensitively; both globs narrow to this exact case.
+# A case-insensitive filesystem globs case-insensitively; both globs narrow to this exact case.
 CORE_REGISTRY_SUFFIX = "_REGISTRY.json"
 
 

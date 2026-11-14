@@ -13,16 +13,7 @@ Gates: a fleet write needs ``--confirm`` (the owner reads the dry-run first), an
 alias of ``rollover push`` (the fleet-wide config reset keeps its own verb).
 """
 
-import os
-import sys
 from typing import List
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 from rich.panel import Panel
 from rich import box

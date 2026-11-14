@@ -14,16 +14,6 @@ Consumer severity: should_rollover -> INFO (auto-fires at PreCompact), never WAR
 total_violations > 0 -> WARNING (a write got past the cap gate).
 """
 
-import os
-import sys
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli.help_flags import wants_help

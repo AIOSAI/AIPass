@@ -355,7 +355,7 @@ class TestUnreadableFile:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """PermissionError and friends: simulated via read_text, because a
-        real chmod 000 is a no-op for root and unreliable on Windows.
+        real chmod 000 is a no-op for root.
         """
         config_dir = tmp_path / "custom_config"
         config_dir.mkdir(parents=True, exist_ok=True)

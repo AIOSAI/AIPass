@@ -199,7 +199,6 @@ class TestOneFleetOneDefinition:
         assert memory_files.write_memory_file_simple(foreign, {"sessions": []}) is False
         assert foreign.read_bytes() == before
         assert sorted(p.name for p in foreign.parent.iterdir()) == ["local.json"], "a temp file was left behind"
-        # The rendered messages, never str(call): a call's repr doubles every Windows backslash.
         errors = " ".join(str(arg) for call in said.error.call_args_list for arg in call.args)
         assert str(foreign.resolve()) in errors and str(home.resolve()) in errors, errors
 

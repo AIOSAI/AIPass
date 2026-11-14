@@ -516,13 +516,8 @@ class TestMalformedJsonDeclaresNothingAndNeverRaises:
 
 
 class TestRepoRootNeverReadsTheProcessDirectory:
-    """A registry-less world must resolve, deterministically, without cwd.
+    """A registry-less world must resolve, deterministically, without cwd."""
 
-    Runs on every platform, Windows included — see ``_PROBE`` for why the world
-    is built by denying ``getcwd`` rather than by deleting a directory.
-    """
-
-    # Denying getcwd, not deleting the cwd: Windows locks a process's directory against rmdir.
     # The world is imported from tests/dead_cwd.py and goes BEFORE `import pathlib` (3.10 captures getcwd).
     _PROBE = "{world}import sys, pathlib\nsys.path.insert(0, {src!r})\n{body}\n"
 

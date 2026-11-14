@@ -162,7 +162,6 @@ class TestDeclarationOrderSurvivesToTheDoor:
         """The order has to survive the caller too, or the fix stops at the reader."""
         _write(machine / rs.DECLARED_ROOTS, _roots(_root_row("../wren"), _root_row("../Demo")))
         visited = [Path(item["path"]) for item in rs.external_branches(machine)]
-        # Path.parts, never a string split: separators are an OS detail (Windows).
         roots = [next((name for name in ("wren", "Demo") if name in path.parts), None) for path in visited]
         assert {"wren", "Demo"} <= set(roots), f"both roots must contribute citizens, got {visited}"
         assert roots.index("wren") < roots.index("Demo")
