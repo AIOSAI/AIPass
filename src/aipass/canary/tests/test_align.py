@@ -207,7 +207,7 @@ def test_a_file_with_no_final_newline_still_reads_its_last_row(monkeypatch, caps
 
 
 def test_crlf_line_endings_read_the_same(monkeypatch, capsys, tmp_path):
-    """A file written on Windows is not a one-row table with a stray carriage return.
+    """A CRLF file is not a one-row table with a stray carriage return.
 
     A behaviour pin, not a discriminator: strip() removes the \\r either way; the two below separate."""
     path = tmp_path / "crlf.txt"

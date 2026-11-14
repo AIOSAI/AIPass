@@ -8,9 +8,8 @@ answer: none of it is load-bearing for anyone. It is test data by definition.
 ## The entry point writes nothing
 
 Measured with the test seam unset: `apps/canary.py` performs no filesystem write
-at all. The only state it touches is two process-local `os.environ.setdefault`
-calls, for the branch name the logger resolves at import and for UTF-8 on
-Windows consoles. Everything below is written by a module or by a service acting
+at all. The only state it touches is one process-local `os.environ.setdefault`
+call, for the branch name the logger resolves at import. Everything below is written by a module or by a service acting
 on this branch's behalf.
 
 ## The json handler shim

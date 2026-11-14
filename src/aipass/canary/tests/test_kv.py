@@ -430,7 +430,7 @@ def test_a_directory_named_as_the_store_is_refused(monkeypatch, capsys, tmp_path
     assert "cannot read" in _refused(monkeypatch, capsys, ["kv", str(directory), "list"])
 
 
-@pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0, reason="chmod cannot deny a windows owner or root")
+@pytest.mark.skipif(os.geteuid() == 0, reason="chmod cannot deny root")
 def test_a_store_that_cannot_be_opened_is_refused(monkeypatch, capsys, tmp_path):
     """Skipped on the environment's marker, never on the file under test."""
     path = _store(tmp_path, "a\t1\n")
@@ -560,7 +560,6 @@ def test_a_write_leaves_no_temporary_file_behind(monkeypatch, tmp_path):
     assert [entry.name for entry in directory.iterdir()] == ["store.txt"]
 
 
-@pytest.mark.skipif(os.name != "posix", reason="file modes are a posix idea")
 def test_a_created_store_gets_the_mode_the_umask_would_give_it(monkeypatch, tmp_path):
     """The temp file is created 0600; a new store must not inherit that."""
     path = tmp_path / "store.txt"
@@ -572,7 +571,6 @@ def test_a_created_store_gets_the_mode_the_umask_would_give_it(monkeypatch, tmp_
     assert path.stat().st_mode & 0o777 == 0o666 & ~umask
 
 
-@pytest.mark.skipif(os.name != "posix", reason="file modes are a posix idea")
 def test_an_existing_store_keeps_its_own_mode(monkeypatch, tmp_path):
     """A store the caller made group-readable does not go private on its next write."""
     path = tmp_path / "store.txt"

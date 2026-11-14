@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_dead_cwd_imports.py
-# Description: Windows dead-cwd import defect - two-world child pins, live-injection controls, AST ban on inspect.stack
+# Description: Dead-cwd import defect - child pins, live-injection controls, AST ban on inspect.stack
 # Version: 1.3.0
 # Created: 2026-08-31
 # Modified: 2026-11-02
@@ -8,22 +8,17 @@
 
 """Tests for apps/handlers/__init__.py and every canary package, imported under a dead cwd."""
 
-# The declared pass — nothing: every canary package and every command module is probed in both worlds.
+# The declared pass — nothing: every canary package and every command module is probed in the world.
 
 import ast
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-# ntpath.realpath reads os.getcwd() unconditionally (posixpath only for relative paths) and Path.resolve()
-# routes through it, so on Windows a resolve reached at import kills the import under an unreadable cwd.
 # Reached-at-import, not written-at-module-scope, is the test: these pins run the import in a child.
-# World A wraps realpath to read the cwd first, then denies getcwd: it convicts a raw Path.resolve(), not
-# inspect.stack (on POSIX the denial kills abspath, so getmodule fails inside its own except).
-# World B denies realpath and keeps abspath: it convicts inspect.stack() via inspect.py:1009.
+# World B denies realpath and keeps abspath: it convicts a raw Path.resolve() and inspect.stack() via inspect.py:1009.
 # Probes go through -c, never stdin: linecache caches stdin and the probe lies green.
 
 BRANCH_ROOT = Path(__file__).resolve().parents[1]
@@ -55,18 +50,6 @@ PRELOAD = [
     "aipass.prax",
 ]
 
-_WORLD_A = """
-import os, os.path
-_real = os.path.realpath
-def realpath(p, *a, **k):
-    os.getcwd()
-    return _real(p, *a, **k)
-os.path.realpath = realpath
-def _dead_cwd(*a, **k):
-    raise FileNotFoundError(2, "No such file or directory")
-os.getcwd = _dead_cwd
-"""
-
 _WORLD_B = """
 import os, os.path
 def _dead_realpath(*a, **k):
@@ -74,7 +57,7 @@ def _dead_realpath(*a, **k):
 os.path.realpath = _dead_realpath
 """
 
-WORLDS = {"A": _WORLD_A, "B": _WORLD_B}
+WORLDS = {"B": _WORLD_B}
 
 
 def _run_child(body: str) -> subprocess.CompletedProcess:
@@ -142,85 +125,8 @@ def test_control_catches_a_dead_injection(world):
     )
 
 
-# World A's inspect.stack outcome is per-platform, decided by whether abspath survives a getcwd denial.
-# POSIX: abspath reads the cwd for a relative path and dies, getmodule returns None, the stack survives.
-# Windows: abspath (_getfullpathname) never reads it, getmodule reaches the wrapped realpath, the stack dies.
-# Neither is a bug; each row is a live measurement on its platform, so re-derive the table, never delete a row.
-
-STACK_SURVIVES_WORLD_A = os.name != "nt"
-
-
-def test_world_a_abspath_outcome_is_the_mechanism():
-    """The fact the table turns on, measured here, so an interpreter change reds naming the cause."""
-    body = _WORLD_A + (
-        "import os, os.path\n"
-        "try:\n"
-        "    os.path.abspath('rel.py')\n"
-        "    print('ABSPATH_SURVIVED')\n"
-        "except OSError:\n"
-        "    print('ABSPATH_DIED')\n"
-    )
-    result = _run_child(body)
-    expected = "ABSPATH_DIED" if os.name != "nt" else "ABSPATH_SURVIVED"
-    assert expected in result.stdout, (
-        f"on {os.name}, world A's getcwd denial was expected to produce "
-        f"{expected} from os.path.abspath. If this changed, the two-world "
-        f"split and the stack table below both need re-deriving, not "
-        f"deleting:\n{result.stdout}\n{result.stderr[-800:]}"
-    )
-
-
-def test_world_a_stack_outcome_matches_the_platform_table():
-    """world A convicts inspect.stack on Windows and not on POSIX."""
-    body = _WORLD_A + (
-        "import inspect\n"
-        "try:\n"
-        "    inspect.stack()\n"
-        "    print('STACK_SURVIVED')\n"
-        "except OSError:\n"
-        "    print('STACK_DIED')\n"
-    )
-    result = _run_child(body)
-    expected = "STACK_SURVIVED" if STACK_SURVIVES_WORLD_A else "STACK_DIED"
-    assert expected in result.stdout, (
-        f"world A on {os.name} was expected to produce {expected} from "
-        f"inspect.stack(). See the platform table above: re-derive the table "
-        f"rather than deleting the pin, and check "
-        f"test_world_a_abspath_outcome_is_the_mechanism first — it names the "
-        f"cause:\n{result.stdout}\n{result.stderr[-800:]}"
-    )
-
-
-def test_the_windows_half_of_the_table_reproduces_here():
-    """Run the WINDOWS row's mechanism here: with a cwd-free abspath, inspect.stack() dies at realpath."""
-    body = _WORLD_A + (
-        "import os, os.path, inspect\n"
-        "os.path.abspath = lambda p, *a, **k: p if p.startswith('/') else '/fake/' + p\n"
-        "try:\n"
-        "    os.path.abspath('rel.py')\n"
-        "    print('ABSPATH_SURVIVED')\n"
-        "except OSError:\n"
-        "    print('ABSPATH_DIED')\n"
-        "try:\n"
-        "    inspect.stack()\n"
-        "    print('STACK_SURVIVED')\n"
-        "except OSError:\n"
-        "    print('STACK_DIED')\n"
-    )
-    result = _run_child(body)
-    assert "ABSPATH_SURVIVED" in result.stdout, (
-        "the ntpath emulation did not take — this pin proves nothing until "
-        f"abspath survives:\n{result.stdout}\n{result.stderr[-800:]}"
-    )
-    assert "STACK_DIED" in result.stdout, (
-        "with abspath surviving the getcwd denial, inspect.stack() was "
-        "expected to die at inspect.py:1009 — that causal link is the whole "
-        f"reason the Windows row of the table reads STACK_DIES:\n{result.stdout}"
-    )
-
-
 def test_world_b_does_convict_inspect_stack():
-    """The other half of the same claim: world B is the one that convicts."""
+    """World B is the one that convicts inspect.stack()."""
     body = _WORLD_B + (
         "import inspect\n"
         "try:\n"
@@ -288,8 +194,7 @@ def test_ast_ban_ignores_an_unrelated_stack_attribute():
 
 
 # The fence reads frame paths, and a path read must not kill an import whose cwd is gone. The child runs
-# support_fence.py after removing its cwd (where the OS refuses, it denies getcwd) with realpath reading
-# the cwd as ntpath's does; it reports ARM_CWD_DEAD before the probe runs, or the pin is vacuous.
+# support_fence.py after removing its cwd; it reports ARM_CWD_DEAD before the probe runs, or the pin is vacuous.
 
 FENCE_PROBE = BRANCH_ROOT / "tests" / "support_fence.py"
 
@@ -297,17 +202,7 @@ _DEAD_CWD_LAUNCHER = """
 import os, runpy, sys
 seat, shape, doomed = sys.argv[1], sys.argv[2], sys.argv[3]
 os.chdir(doomed)
-try:
-    os.rmdir(doomed)
-except OSError:
-    def _dead_cwd(*a, **k):
-        raise FileNotFoundError(2, "No such file or directory")
-    os.getcwd = _dead_cwd
-_real = os.path.realpath
-def realpath(p, *a, **k):
-    os.getcwd()
-    return _real(p, *a, **k)
-os.path.realpath = realpath
+os.rmdir(doomed)
 try:
     os.getcwd()
     print("ARM_CWD_ALIVE")

@@ -156,7 +156,7 @@ alone and a vertical tab are the boundaries only `splitlines()` finds, and each
 has its own case.
 
 `@cli` renders a refusal through rich, which **wraps stderr at the console
-width**: 80 columns when stderr is not a terminal (79 on Windows), or `COLUMNS`
+width**: 80 columns when stderr is not a terminal, or `COLUMNS`
 when exported. A refusal naming a long path is broken across lines at whatever
 space falls near that column, so any caller grepping stderr for a refusal
 phrase can miss it. The tests pin the console width and flatten stderr

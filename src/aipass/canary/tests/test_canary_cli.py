@@ -9,7 +9,6 @@
 """Tests for apps/canary.py, the entry point: routing, help and introspection."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(windows_compat) — that a Windows console is switched to utf-8 before any print
 # sentry: no-test-needed(logged_fallback) — that a module which fails to import is logged and skipped
 
 import os

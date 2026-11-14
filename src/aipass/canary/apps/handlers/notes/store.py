@@ -18,7 +18,7 @@ from typing import Dict, List
 
 from aipass.canary.apps.handlers.json import json_handler
 
-# No resolve(): __file__ is already absolute, and on Windows resolve() reads the cwd and dies with it.
+# No resolve(): __file__ is already absolute.
 BRANCH_ROOT = Path(__file__).parents[3]
 
 # docs.local/ is ignored by the repo-root .gitignore, so git never tracks it.

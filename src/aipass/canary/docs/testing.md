@@ -33,8 +33,7 @@ under the repo-root config, the same suite is all errors.
 ## What continuous integration actually runs
 
 No workflow names this branch. The fleet is tested in one process from the repo
-root: `ci.yml` across Python 3.10 to 3.13 on Linux, `macos-test.yml` on macOS
-without the e2e ignore.
+root: `ci.yml` across Python 3.10 to 3.13 on Linux.
 
 ```bash
 pytest -v --tb=short --rootdir=. --ignore=tests/e2e -n auto --dist loadscope --timeout 300 --timeout-method thread --max-worker-restart 0

@@ -45,7 +45,7 @@ collect_ignore_glob = [".archive/*", "**/.archive/*"]
 
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
-    """Unpinned, Rich sizes per print: 80 POSIX, 79 Windows under capture, the terminal under -s, COLUMNS if set."""
+    """Unpinned, Rich sizes per print: 80 under capture, the terminal under -s, COLUMNS if set."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
 
