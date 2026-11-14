@@ -227,17 +227,9 @@ def _spawn_background_runner():
     """Spawn post_close_runner.py as a fully detached background process"""
     bg_runner = FLOW_ROOT / "apps" / "modules" / "post_close_runner.py"
     cmd = [sys.executable, str(bg_runner)]
-    if sys.platform == "win32":
-        subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
-        )
-    else:
-        subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+    subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )

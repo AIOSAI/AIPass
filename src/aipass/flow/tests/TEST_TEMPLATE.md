@@ -27,21 +27,17 @@ Authored by @devpulse, 2026-09-20 22:35, amended 23:15. Every line below is eith
 11. **The name states the behaviour and the failure it excludes.** `test_a_dry_run_reports_the_change_and_writes_nothing`. The name is the claim.
 12. **Docstring: none, or one line.** Never an essay. If the test pins a shipped defect, the one line names it. OWNER 20:04 on 8-line test docstrings: "thats mental and probs only confusing readers with wrong info". 18 of the trial's 28 tests have no docstring and read better for it.
 13. **Assert the effect.** What was printed, written, returned, called, or left untouched. Never only that a router returned True (rule 1, `router_assert`, landed). A test with no effect to assert is a test that should not exist.
-14. **The edge is real, not mocked: `capsys`.** The product's consoles write to `sys.stdout` and `sys.stderr` at print time, so pytest's own `capsys` captures them with no Rich import and no console built by the test. Read both channels, `out, err = capsys.readouterr()`, and assert on the one the module writes to: `out` for the console, `err` for `error()` and `warning()`. That also pins that errors go to stderr, which `drone` piping depends on. Never a MagicMock console: `console.print.called` is the weak oracle the gold standard names. OWNER 23:00 "whatever is easier... these must be cross os". Width is item 20's job. Amended 23:15; was a Rich `Console` on a `StringIO`.
+14. **The edge is real, not mocked: `capsys`.** The product's consoles write to `sys.stdout` and `sys.stderr` at print time, so pytest's own `capsys` captures them with no Rich import and no console built by the test. Read both channels, `out, err = capsys.readouterr()`, and assert on the one the module writes to: `out` for the console, `err` for `error()` and `warning()`. That also pins that errors go to stderr, which `drone` piping depends on. Never a MagicMock console: `console.print.called` is the weak oracle the gold standard names. Width is item 20's job. Amended 23:15; was a Rich `Console` on a `StringIO`.
 15. **Mock only at the edge**: disk outside `tmp_path`, network, the clock, another branch. Never the unit under test. A recorder that replaces a sibling function to prove routing reached it is allowed; a MagicMock standing in for the thing being tested is not.
 16. **Files go through `tmp_path`.** Shared fixtures live in `conftest.py`, never copied per file.
 17. **No test depends on the live repo.** Not the real registry, not another branch's tree, not the working directory. Build what the test needs.
 18. **No test leaks state into the next.** Every patch through `monkeypatch`, every file under `tmp_path`, nothing left in `sys.modules`. A leaking test makes an unrelated test lie, and alphabetical order hides it.
 19. **Under 1,500 code lines** (rule 2, `oversize_test_file`, landed). When a module's file would pass the cap, split by behaviour, and the second file's header says why it exists.
 
-## Cross-OS, from day one
-
-Cross-OS from day one: each item below is proven on Linux by emulating the difference; macOS also runs in CI, and Windows has no runner.
-
-20. **`conftest.py` pins the console width once**, session scope, on every console the product exports (`display.CONSOLE`, `display.err_console`), through Rich's public setter. Unpinned, Rich wraps at 80 on POSIX and 79 on Windows under pytest's capture, at the terminal's width under `-s`, at `COLUMNS` when exported. Measured: 4 of the trial's 31 tests flip at width 40, none with the pin. The same conftest calls `display.reset_command_state()` after every test, so `error()`'s process flag never leaks (item 18).
-21. **Every file read or write in a test names `encoding="utf-8"`.** Windows' default for `open()` is not UTF-8 on Python 3.12, and the product's output is not ASCII (tree glyphs, the warning prefix). Proven under an ASCII locale, stricter than Windows' cp1252: 31 green.
-22. **Paths are built from `tmp_path`, never written as a literal `/...`.** `Path("/nonexistent/path")` happens to work on Windows; it is still the habit that breaks the next test.
-23. **Anything the OS does differently carries its guard in the test, with the reason stated.** A permission-bit test skips on Windows and root. No `fcntl`, `os.fork`, signals, symlinks, bare `os.geteuid`; no two names that differ only by case; text compared through `read_text`, never bytes, so CRLF on Windows round-trips.
+20. **`conftest.py` pins the console width once**, session scope, on every console the product exports (`display.CONSOLE`, `display.err_console`), through Rich's public setter. Unpinned, Rich wraps at 80 under pytest's capture, at the terminal's width under `-s`, at `COLUMNS` when exported. Measured: 4 of the trial's 31 tests flip at width 40, none with the pin. The same conftest calls `display.reset_command_state()` after every test, so `error()`'s process flag never leaks (item 18).
+21. **Every file read or write in a test names `encoding="utf-8"`.** The default for `open()` follows the locale, and the product's output is not ASCII (tree glyphs, the warning prefix). Proven under an ASCII locale: 31 green.
+22. **Paths are built from `tmp_path`, never written as a literal `/...`.**
+23. **Anything the OS does differently carries its guard in the test, with the reason stated.** A permission-bit test skips for root.
 
 ## conftest.py
 
@@ -66,8 +62,8 @@ The stdlib imports the block needs, then the environ block, then every aipass im
 ```python
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
-    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
-    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    """Rich sizes an unpinned console on every print: 80 under pytest's capture,
+    the terminal's width under -s, COLUMNS when exported."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
 ```
@@ -94,4 +90,4 @@ Every numbered item is a candidate checker, built one at a time, tests-only, in 
 
 ## The model file
 
-`readme_update_model.py.txt` beside this page is the shipped article, not a sketch: it is byte-identical to `src/aipass/sentry/tests/test_readme_update.py`, 31 tests, green on Ubuntu and macOS across Python 3.10 to 3.13 (PR#774). Read it next to this page — every item above has a line in it. The `.txt` suffix is there so pytest can never collect it and so the path-based `applicability` split never reads a test model as production code; the live, linted copy is the `tests/` one.
+`readme_update_model.py.txt` beside this page is the shipped article, not a sketch: it is byte-identical to `src/aipass/sentry/tests/test_readme_update.py`, 31 tests, green on Ubuntu across Python 3.10 to 3.13 (PR#774). Read it next to this page — every item above has a line in it. The `.txt` suffix is there so pytest can never collect it and so the path-based `applicability` split never reads a test model as production code; the live, linted copy is the `tests/` one.

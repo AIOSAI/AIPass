@@ -11,7 +11,7 @@
 Returns data dicts - module handles all display.
 """
 
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path
 from shutil import copy2
 from datetime import datetime, timezone
 from typing import Dict, Any, List
@@ -41,14 +41,6 @@ def _find_repo_root() -> Path:
 PROCESSED_PLANS_DIR = _find_repo_root() / ".backup" / "processed_plans"
 
 MODULE_NAME = "restore_plan"
-
-
-def _recorded_is_absolute(recorded: str) -> bool:
-    """Is a path RECORDED IN THE REGISTRY absolute — in either dialect?
-    Registries are shared across hosts, and Path.is_absolute() answers only for this one. Both checks
-    are needed: PureWindowsPath calls ``/srv`` relative, PurePosixPath refuses a drive letter.
-    """
-    return PurePosixPath(recorded).is_absolute() or PureWindowsPath(recorded).is_absolute()
 
 
 def recover_plan_from_backup(
@@ -83,7 +75,7 @@ def recover_plan_from_backup(
         if not original_location:
             original_location = str(FLOW_ROOT)
 
-        if _recorded_is_absolute(original_location):
+        if Path(original_location).is_absolute():
             # Re-homing a vanished absolute location would file the plan where its header never said.
             if not Path(original_location).is_dir():
                 return False, (

@@ -32,29 +32,6 @@ def _unlink_answer(path: Path) -> OSError | None:
     return None
 
 
-def _deny_exclusive_creates(lock_path: Path, denials: int | None, after: int = 0):
-    """A stand-in for lock_ops' _create_exclusive seam that answers the way
-    Windows does mid-release.
-
-    Windows delete-pending raises PermissionError, which Linux can never show. Creates of
-    ``lock_path`` pass for ``after`` calls, are denied ``denials`` times (None = forever), then pass.
-    """
-    attempts: list[int] = []
-    raised: list[PermissionError] = []
-
-    def fake_create(path):
-        if str(path) == str(lock_path):
-            attempts.append(len(attempts) + 1)
-            index = len(attempts) - after
-            if index > 0 and (denials is None or index <= denials):
-                denial = PermissionError(13, "Access is denied")
-                raised.append(denial)
-                raise denial
-        return os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-
-    return fake_create, attempts, raised
-
-
 def _age(lock: Path) -> None:
     """Set the lock's mtime an hour back, well past any unreadable-lock grace."""
     old = time.time() - 3600
@@ -88,68 +65,6 @@ class TestTryCreateLock:
         lock.write_text("99999", encoding="utf-8")
         mod.try_create_lock(lock)
         assert lock.read_text(encoding="utf-8") == "99999"
-
-    def test_delete_pending_denial_is_retried_and_lock_lands(self, tmp_path):
-        """A Windows delete-pending PermissionError is a held lock: wait, retry, win."""
-        mod = lock_ops
-        lock = tmp_path / ".test.lock"
-        fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=1)
-
-        with patch(f"{_MOD}._create_exclusive", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
-            try:
-                result = mod.try_create_lock(lock)
-            except PermissionError as exc:
-                raise AssertionError(f"the lock did not land: {exc}") from exc
-
-        assert result is True
-        assert len(attempts) == 2
-        sleep.assert_called_once()
-        assert lock.read_text(encoding="utf-8") == str(os.getpid())
-
-    def test_denial_that_never_clears_raises_at_the_budget(self, tmp_path):
-        """A denial past the budget is a real permissions problem: raise it, chained.
-
-        Not False: callers read False as "another instance is already running".
-        """
-        mod = lock_ops
-        lock = tmp_path / ".test.lock"
-        fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
-
-        with (
-            patch(f"{_MOD}._create_exclusive", side_effect=fake_open),
-            patch(f"{_MOD}._sleep") as sleep,
-            pytest.raises(PermissionError) as excinfo,
-        ):
-            mod.try_create_lock(lock)
-
-        assert str(lock) in str(excinfo.value)
-        assert excinfo.value.__cause__ is raised[-1]
-        assert len(attempts) == mod._CREATE_RETRIES
-        assert sleep.call_count == mod._CREATE_RETRIES
-        assert mod._CREATE_RETRIES > 1
-        assert f"{mod._CREATE_RETRIES} attempts" in str(excinfo.value)
-        assert not lock.exists()
-        # Positive first delay, doubling per denial, sum reported as the wait.
-        delays = [c.args[0] for c in sleep.call_args_list]
-        assert delays[0] > 0
-        assert all(later == 2 * earlier for earlier, later in zip(delays, delays[1:]))
-        assert f"({sum(delays):.2f}s waited)" in str(excinfo.value)
-
-    def test_file_exists_still_returns_false_at_once(self, tmp_path):
-        """FileExistsError is NOT retried: acquire_lock's stale check reads the holder next."""
-        mod = lock_ops
-        lock = tmp_path / ".test.lock"
-        lock.write_text("12345", encoding="utf-8")
-
-        with patch(f"{_MOD}._sleep") as sleep:
-            try:
-                result = mod.try_create_lock(lock)
-            except PermissionError as exc:
-                raise AssertionError(f"a held lock was retried to the budget: {exc}") from exc
-
-        assert result is False
-        sleep.assert_not_called()
-        assert lock.read_text(encoding="utf-8") == "12345"
 
 
 class TestIsLockStale:
@@ -291,7 +206,7 @@ class TestAcquireLock:
     def test_raises_when_stale_lock_unlink_fails(self, tmp_path):
         """A stale lock that cannot be removed raises; it is not reported as held.
 
-        Whether a read-only dir refuses an unlink is the platform's choice (not for Windows or root),
+        Whether a read-only dir refuses an unlink is the platform's choice (not for root),
         so a probe unlink decides which answer the product owes.
         """
         mod = lock_ops
@@ -369,51 +284,6 @@ class TestAcquireLock:
         call_args = mock_json_handler.call_args
         assert call_args[0][1]["stale_recovery"] is True
 
-    def test_delete_pending_after_stale_unlink_still_acquires(self, tmp_path):
-        """The re-create right after unlinking a stale lock is where Windows says
-        delete-pending; it must wait and win.
-        """
-        mod = lock_ops
-        lock = tmp_path / ".test.lock"
-        lock.write_text("999999999", encoding="utf-8")
-        # First create meets the stale file; the second, after the unlink, is denied once.
-        fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=1, after=1)
-
-        with (
-            patch(f"{_MOD}._pid_alive", return_value=False),
-            patch(f"{_MOD}._create_exclusive", side_effect=fake_open),
-            patch(f"{_MOD}._sleep") as sleep,
-        ):
-            try:
-                result = mod.acquire_lock(lock)
-            except PermissionError as exc:
-                raise AssertionError(f"the lock did not land: {exc}") from exc
-
-        assert result is True
-        assert len(attempts) == 3
-        sleep.assert_called_once()
-        assert lock.read_text(encoding="utf-8") == str(os.getpid())
-
-    def test_denial_that_never_clears_raises_instead_of_returning_false(self, tmp_path):
-        """False means "another instance is running" to every caller. A lock that
-        can never be created raises the chained PermissionError instead.
-        """
-        mod = lock_ops
-        lock = tmp_path / ".test.lock"
-        fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
-
-        with (
-            patch(f"{_MOD}._create_exclusive", side_effect=fake_open),
-            patch(f"{_MOD}._sleep") as sleep,
-            pytest.raises(PermissionError) as excinfo,
-        ):
-            mod.acquire_lock(lock)
-
-        assert str(lock) in str(excinfo.value)
-        assert excinfo.value.__cause__ is raised[-1]
-        assert len(attempts) == mod._CREATE_RETRIES
-        assert sleep.call_count == mod._CREATE_RETRIES
-
 
 class TestReleaseLock:
     """Tests for release_lock — lock file cleanup."""
@@ -469,10 +339,7 @@ class TestOsFileLock:
         assert ran == []
 
     def test_is_free_again_after_the_holder_leaves(self, tmp_path):
-        """Leaving the block drops the lock, and the lock file stays: it is never deleted.
-
-        Mutant: dropping `_os_unlock(fh)` reddens this on Windows; on POSIX closing the file also unlocks.
-        """
+        """Leaving the block drops the lock, and the lock file stays: it is never deleted."""
         lock = tmp_path / ".flow_writes.lock"
         with lock_ops.os_file_lock(lock, timeout=0.0):
             pass

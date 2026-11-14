@@ -16,14 +16,6 @@ Auto-discovery architecture:
 """
 
 import sys
-import os
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 from pathlib import Path
 
@@ -35,7 +27,6 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 from aipass.cli.apps.modules import console, header, error, reset_command_state, resolve_exit
 
-# No resolve(): resolving reads the cwd on Windows at import time.
 MODULES_DIR = Path(__file__).parent / "modules"
 
 
@@ -303,9 +294,7 @@ def print_module_help(command: str, modules: List[Any]) -> bool:
 
 if __name__ == "__main__":
     # Never at import: a pytest worker importing this module would die silently on EPIPE.
-    # SIGPIPE does not exist on Windows.
-    if hasattr(signal, "SIGPIPE"):
-        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     try:
         sys.exit(main())
     except BrokenPipeError:

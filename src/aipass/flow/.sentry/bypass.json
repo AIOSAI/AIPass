@@ -345,36 +345,29 @@
       "file": "apps/modules/create_plan.py",
       "standard": "logged_fallback",
       "category": "false_positive",
-      "lines": [254],
+      "lines": [246],
       "reason": "handle_command's True means 'this command was mine', never 'it succeeded' (the module contract in flow.py). The handler calls cli_error() first, which flow.py's resolve_exit turns into exit 2: measured 2026-10-04, `drone @flow create . probe NOSUCHTYPE` exits 2. The failure reaches the caller through the exit code, not the bool (flow's decision, leg 5)."
     },
     {
       "file": "apps/modules/post_close_runner.py",
       "standard": "logged_fallback",
       "category": "false_positive",
-      "lines": [79],
+      "lines": [71],
       "reason": "handle_command's True means 'this command was mine', never 'it succeeded' (the module contract in flow.py). The handler calls error() first, which flow.py's resolve_exit turns into a failing exit code; False would route the command on to the next module and end in 'unknown command' (flow's decision, leg 5)."
     },
     {
       "file": "apps/modules/registry_monitor.py",
       "standard": "logged_fallback",
       "category": "false_positive",
-      "lines": [138, 174],
+      "lines": [130, 166],
       "reason": "handle_command's True means 'this command was mine', never 'it succeeded' (the module contract in flow.py). Each handler calls error() first, which flow.py's resolve_exit turns into a failing exit code; False would route 'registry' on to the next module and end in 'unknown command' (flow's decision, leg 6)."
     },
     {
       "file": "apps/handlers/runner/lock_ops.py",
       "standard": "logged_fallback",
       "category": "false_positive",
-      "lines": [91, 139, 156],
+      "lines": [42, 78, 95],
       "reason": "The exception is the answer, not a failure. 97: os.kill(pid, 0) raising PermissionError means the process exists and belongs to someone else, so alive is the true answer. 160 and 186 (147 and 173 until leg 11's seam moved them): FileNotFoundError on the lock means its holder released it between our create and our read, so stale (take over) is the true answer; every other OSError on those reads re-raises (leg 3) (flow's decision, leg 5)."
-    },
-    {
-      "file": "apps/handlers/runner/lock_ops.py",
-      "standard": "logged_fallback",
-      "category": "false_positive",
-      "lines": [83],
-      "reason": "_pid_alive answers liveness, not success: True means 'alive, or cannot tell'. Its one caller, is_lock_stale, then calls the lock not stale, so acquire_lock waits and never steals it. Answering False on a failed Windows check would let a live holder's lock be taken. Fails safe by design, logged at info (flow's decision, leg 10)."
     },
     {
       "file": "apps/handlers/registry/save_registry.py",
@@ -398,22 +391,10 @@
       "reason": "Each False means 'not done' on every path; no success path answers False. save_branch_registry: its callers, auto_close_plan and repoint_plan, log the failure and return False, and the plan is then not reported healed. 434 save_central: its one caller, aggregate_central_impl, logs it and returns False. 601 aggregate_central_impl: the aggregate command prints 'Central plans aggregation failed'; push_to_plans_central now raises it into its own failure (leg 10), and close, create and restore warn on that (flow's decision, leg 10)."
     },
     {
-      "file": "tests/test_project_scope.py",
-      "standard": "stdlib_patch",
-      "category": "false_positive",
-      "reason": "File-wide because stdlib_patch passes no line (a lines rule is inert, measured leg 10); it covers lines 336 and 365. Host emulation: Path.glob is folded case-blind, the way Windows and macOS list a directory. No disk under the Linux runner folds case, so no tmp world can produce it. A seam in project_scope would have no product caller, since its one listing is this glob. 365 is the control proving the fold reaches the code under test (flow's decision, leg 10)."
-    },
-    {
-      "file": "tests/test_import_dead_cwd.py",
-      "standard": "no_product_call",
-      "category": "false_positive",
-      "reason": "Host probe measures a premise. File-wide because no_product_call passes no line (a lines rule would be inert); it covers lines 1391, 1553, 1571, 1714, 1745 and 1764 (each moved down one in DPLAN-0404 leg 13, when the support_fence import was added). Each pins the emulated hosts (posix and nt dialect tables, the shipped accessor cure they emulate, the literal probe paths) that every dead-cwd import pin in this file is written on. No product code answers whether the emulation is faithful; the pins measure the premise, not the product (flow's decision, leg 10)."
-    },
-    {
       "file": "apps/flow.py",
       "standard": "logged_fallback",
       "category": "false_positive",
-      "lines": [85],
+      "lines": [76],
       "reason": "route_command's True means 'a module handled this command'. A BrokenPipeError is the reader closing stdout early (`drone @flow list | head`): the command ran and its output was cut by the reader, not failed. False would print 'unknown command' for a known one (flow's decision, leg 5)."
     }
   ],

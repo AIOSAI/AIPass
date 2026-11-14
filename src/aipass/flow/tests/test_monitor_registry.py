@@ -70,8 +70,8 @@ class TestHandleWalkError:
         """PermissionError should not trigger a warning log.
         Mutant: if not isinstance(error, PermissionError): -> if isinstance(error, OSError): reddens this.
         """
-        if os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0):
-            pytest.skip("chmod 000 refuses no directory on Windows or to root")
+        if os.geteuid() == 0:
+            pytest.skip("chmod 000 refuses no directory to root")
         else:
             mod = monitor_ops
             with patch.object(mod, "_fire_event", return_value=True):

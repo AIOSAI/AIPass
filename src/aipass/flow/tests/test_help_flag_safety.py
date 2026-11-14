@@ -13,8 +13,6 @@
 # sentry: no-test-needed(constant) — each module's print_help() and print_introspection() literal text
 
 import os
-import re
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -285,7 +283,6 @@ class TestUnflaggedModulesHelpSafety:
     def test_post_lock_denial_reports_an_error_not_already_running(self, tmp_path, mock_logger):
         """A lock that can never be created is reported as an error, not a crash
         and not "Another instance is already running".
-        Mutant: for attempt in range(_CREATE_RETRIES): -> for attempt in range(_CREATE_RETRIES - 1): reddens this.
         """
         lock = tmp_path / ".post_close_runner.lock"
         attempts: list[str] = []
@@ -300,7 +297,6 @@ class TestUnflaggedModulesHelpSafety:
             patch(f"{_POST}.process_closed_plans") as target,
             patch(f"{_POST}.release_lock") as release,
             patch("aipass.flow.apps.handlers.runner.lock_ops._create_exclusive", side_effect=fake_create),
-            patch("aipass.flow.apps.handlers.runner.lock_ops._sleep") as sleep,
         ):
             code = post_close_runner.main(["post_close_runner.py"])
 
@@ -310,39 +306,31 @@ class TestUnflaggedModulesHelpSafety:
         logged = [c for c in mock_logger.error.call_args_list if "Could not create lock" in c.args[0]]
         assert len(logged) == 1
         assert logged[0].args[2] == lock
-        assert isinstance(logged[0].args[3], PermissionError)  # raised by lock_ops past its budget
-        reported = re.search(r"still denied after (\d+) attempts", str(logged[0].args[3]))
-        assert reported, str(logged[0].args[3])
-        assert int(reported.group(1)) > 1
-        assert attempts == [str(lock)] * int(reported.group(1))
-        # One backoff wait after every denied attempt, the last included.
-        assert sleep.call_count == len(attempts)
+        assert isinstance(logged[0].args[3], PermissionError)
+        assert attempts == [str(lock)]
 
     def test_post_unreadable_lock_reports_an_error_not_already_running(self, tmp_path, mock_logger):
         """A lock path that exists but cannot be read is an error, not a running instance.
 
-        The platform picks the route (POSIX: create FileExistsError then read fails; Windows: create PermissionError
-        past the retry budget), so the test asks the platform first and asserts the error that route ends in.
-        Mutant: except OSError as e: -> except PermissionError as e: reddens this off Windows.
-        Mutant: is_lock_stale returning False on a read error ('already running') reddens this on Linux and macOS.
-        Mutant: try_create_lock returning False past its budget reddens this on Windows.
+        The create meets FileExistsError, then the read fails.
+        Mutant: except OSError as e: -> except PermissionError as e: reddens this.
+        Mutant: is_lock_stale returning False on a read error ('already running') reddens this.
         """
         lock = tmp_path / ".post_close_runner.lock"
         lock.mkdir()
         created = _create_answer(lock)
-        assert isinstance(created, (FileExistsError, PermissionError)), (
-            f"{sys.platform} answered {created!r} to creating over a directory: the premise of this test is gone"
+        assert isinstance(created, FileExistsError), (
+            f"creating over a directory answered {created!r}: the premise of this test is gone"
         )
         answer = _read_answer(lock)
         assert isinstance(answer, OSError) and not isinstance(answer, FileNotFoundError), (
-            f"{sys.platform} answered {answer!r} to reading a directory: the premise of this test is gone"
+            f"reading a directory answered {answer!r}: the premise of this test is gone"
         )
 
         with (
             patch(f"{_POST}.LOCK_FILE", lock),
             patch(f"{_POST}.process_closed_plans") as target,
             patch(f"{_POST}.release_lock") as release,
-            patch("aipass.flow.apps.handlers.runner.lock_ops._sleep") as sleep,
         ):
             try:
                 code = post_close_runner.main(["post_close_runner.py"])
@@ -356,19 +344,8 @@ class TestUnflaggedModulesHelpSafety:
         assert len(logged) == 1
         assert logged[0].args[2] == lock
         reported = logged[0].args[3]
-        if isinstance(created, PermissionError):
-            # Windows: the create is denied past the budget; the read is never reached.
-            assert type(reported) is PermissionError
-            budget = re.search(r"still denied after (\d+) attempts", str(reported))
-            assert budget, str(reported)
-            assert sleep.call_count == int(budget.group(1))
-            cause = reported.__cause__
-            assert isinstance(cause, OSError) and type(cause) is type(created)
-            assert cause.errno == created.errno
-        else:
-            sleep.assert_not_called()
-            assert type(reported) is type(answer)
-            assert reported.errno == answer.errno
+        assert type(reported) is type(answer)
+        assert reported.errno == answer.errno
         assert lock.is_dir()
 
     def test_detached_run_with_an_unreadable_lock_logs_and_exits_1(self, tmp_path, mock_logger):

@@ -18,7 +18,6 @@ from typing import Dict, Optional
 from aipass.prax import logger
 
 from aipass.flow.apps.handlers.json import json_handler
-from aipass.flow.apps.handlers.repo_root import exactly_named
 
 MODULE_NAME = "project_scope"
 
@@ -36,8 +35,7 @@ def _holds_register(directory: Path) -> bool:
     Raises UnreadableRegisterError on a read failure: "no" would attribute rows to the enclosing project.
     """
     try:
-        # glob is case-insensitive on Windows/macOS; exactly_named drops lowercase *_registry.json.
-        candidates = exactly_named(sorted(directory.glob(REGISTER_GLOB)), "_REGISTRY.json")
+        candidates = sorted(directory.glob(REGISTER_GLOB))
     except OSError as e:
         raise UnreadableRegisterError(f"Cannot list {directory} for a project register: {e}") from e
 

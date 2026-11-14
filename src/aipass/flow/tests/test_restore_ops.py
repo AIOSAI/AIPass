@@ -30,7 +30,6 @@ from aipass.flow.apps.handlers.plan.validator import (
     validate_plan_exists as real_validate,
 )
 
-# Not a hardcoded "/tmp": a POSIX-only literal breaks on Windows once an assertion reads it back.
 _TMP = Path(tempfile.gettempdir())
 
 
@@ -659,8 +658,7 @@ class TestRecoverPlanFromBackup:
         saved_reg = save.call_args[0][0]
         assert saved_reg["plans"]["0010"]["location"] == str(flow_root)
 
-    # Absolute is EITHER dialect, and a vanished absolute record is refused by name, never re-homed
-    # to FLOW_ROOT. The host running these tests must not decide any of these verdicts.
+    # A vanished absolute record is refused by name, never re-homed to FLOW_ROOT.
 
     def _recover_with_recorded_location(self, tmp_path, recorded, plan_key="0077"):
         """Recover a backup whose header records *recorded*, in a sandbox tree."""
@@ -686,26 +684,8 @@ class TestRecoverPlanFromBackup:
 
         return ok, msg, save, flow_root
 
-    def test_a_windows_recorded_location_is_not_read_as_relative(self, tmp_path):
-        """``C:\\plans`` is absolute even on POSIX, so it cannot land in FLOW_ROOT."""
-        ok, msg, save, flow_root = self._recover_with_recorded_location(tmp_path, r"C:\plans\archive")
-
-        assert ok is False
-        assert r"C:\plans\archive" in msg
-        save.assert_not_called()
-        assert not list(flow_root.glob("*.md"))
-
-    def test_a_unc_recorded_location_is_not_read_as_relative(self, tmp_path):
-        """A UNC share is the other windows-absolute spelling, and it has no drive letter."""
-        ok, msg, save, flow_root = self._recover_with_recorded_location(tmp_path, r"\\server\share\plans")
-
-        assert ok is False
-        assert r"\\server\share\plans" in msg
-        save.assert_not_called()
-        assert not list(flow_root.glob("*.md"))
-
     def test_a_vanished_posix_location_is_refused_by_name(self, tmp_path):
-        """The same rule in the host's own dialect: gone means refused, not re-homed."""
+        """Gone means refused, not re-homed."""
         gone = tmp_path / "deleted_seat"
         ok, msg, save, flow_root = self._recover_with_recorded_location(tmp_path, str(gone))
 

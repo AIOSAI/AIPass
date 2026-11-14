@@ -8,7 +8,6 @@
 
 """Location discovery for flow, defined once and guarded.
 
-On Windows ``Path.resolve()`` reads the cwd, so a module-level resolve dies when the cwd is gone.
 The repo-root fallback is this file's tree, never cwd: writers on a guessed root write anywhere.
 """
 
@@ -57,14 +56,6 @@ def exists_exactly(path: Path) -> bool:
             f"[{MODULE_NAME}] Cannot enumerate {candidate.parent} ({exc}) — trusting exists() for {candidate.name}"
         )
         return True
-
-
-def exactly_named(candidates: list[Path], suffix: str) -> list[Path]:
-    """Keep only the candidates whose filename ends with *suffix* in EXACT case.
-
-    Never reorders: callers sort first, and order decides which is read first.
-    """
-    return [path for path in candidates if path.name.endswith(suffix)]
 
 
 def _record_fallback(caller: str, marker: str, current: Path) -> None:

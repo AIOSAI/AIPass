@@ -12,13 +12,10 @@
 # sentry: no-test-needed(ruff) — that the module parses and imports
 
 import json
-import sys
 import threading
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 from aipass.flow.apps.handlers.dashboard import push_branch_dashboard
 from aipass.prax.apps.modules.dashboard import DASHBOARD_CHAR_BUDGET, SUBJECT_CAP, dashboard_lock
@@ -894,8 +891,6 @@ class TestPushFlowToBranchDashboard:
         assert call_args[0][0] == "branch_dashboard_pushed"
         assert call_args[0][1]["success"] is True
 
-    # dashboard_lock is a no-op on Windows (no flock), so there is no contention to observe there.
-    @pytest.mark.skipif(sys.platform == "win32", reason="dashboard_lock does not lock on Windows")
     def test_the_push_waits_for_a_held_dashboard_lock_and_writes_after_release(self, tmp_path, mock_json_handler):
         mod = push_branch_dashboard
         dashboard_path = tmp_path / "DASHBOARD.local.json"

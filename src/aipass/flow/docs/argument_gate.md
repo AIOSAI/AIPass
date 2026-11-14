@@ -41,18 +41,8 @@ is an open question rather than a gate rule.
 ### What "absolute" means in a shared registry
 
 `recover_plan_from_backup` reads the plan header's `**Location**:` line to decide
-where a restored file lands. The registries are shared across install
-histories, so a row written on Windows is read on POSIX and back: whether a
-recorded path is absolute is the RECORD's answer, never the host's
-(`startswith("/")` would send `C:\plans` into the relative branch and land the
-plan under `FLOW_ROOT`, a directory its header never named).
-
-`_recorded_is_absolute()` asks both dialects by name (`PurePosixPath` OR
-`PureWindowsPath`), and the asymmetry is why both are needed: `PureWindowsPath`
-accepts a POSIX-absolute path as drive-relative, while `PurePosixPath` refuses a
-drive letter outright. A vanished absolute record is **refused by name**
+where a restored file lands. A vanished absolute record is **refused by name**
 rather than re-homed — recreate the directory or edit the header. Pinned in
-`tests/test_restore_ops.py` for the drive-letter, UNC, vanished-POSIX,
-live-POSIX and relative cases, none of which read the host.
+`tests/test_restore_ops.py` for the vanished, live and relative cases.
 
 ---
