@@ -205,7 +205,6 @@ class TestCompactThreshold:
 class TestUserSettingsPath:
     def test_the_user_file_is_read_under_home_at_call_time(self, tmp_path, monkeypatch):
         monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         assert user_settings_path() == tmp_path / ".claude" / "settings.json"
 
 
@@ -322,8 +321,7 @@ class TestCodexConfigPath:
 
     def test_without_codex_home_it_is_under_the_home_dot_codex(self, tmp_path, monkeypatch):
         monkeypatch.delenv("CODEX_HOME", raising=False)
-        for name in ("HOME", "USERPROFILE"):  # Path.home() reads HOME on POSIX, USERPROFILE on Windows
-            monkeypatch.setenv(name, str(tmp_path))
+        monkeypatch.setenv("HOME", str(tmp_path))
         assert context_window.codex_config_path() == tmp_path / ".codex" / "config.toml"
 
 

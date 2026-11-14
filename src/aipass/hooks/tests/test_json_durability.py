@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-08-16
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/json/files.py's torn-write durability."""
@@ -63,15 +63,15 @@ class TestAtomicHelper:
         target = tmp_path / "nested" / "doc.json"
         target.parent.mkdir()
         seen: dict = {}
+        real_replace = os.replace
 
         def at_the_move(source, destination):
             seen["staged"] = Path(source)
             seen["on_disk"] = Path(source).is_file()
             seen["destination"] = Path(destination)
-            os.replace(source, destination)
+            real_replace(source, destination)
 
-        # The product's own mover, not tempfile.mkstemp (stdlib_patch).
-        monkeypatch.setattr(json_files, "_replace_with_retry", at_the_move)
+        monkeypatch.setattr(json_files.os, "replace", at_the_move)
         json_files.write_json_file(target, {"a": 1})
         assert seen["on_disk"] is True
         assert seen["staged"].parent == target.parent
@@ -85,7 +85,7 @@ class TestAtomicHelper:
         def boom(*args, **kwargs):
             raise OSError("disk full")
 
-        monkeypatch.setattr(json_files, "_replace_with_retry", boom)
+        monkeypatch.setattr(json_files.os, "replace", boom)
         with pytest.raises(OSError):
             json_files.write_json_file(target, {"replacement": True})
 
@@ -94,7 +94,7 @@ class TestAtomicHelper:
 
     def test_helper_raises_it_does_not_swallow(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         """No new silent catch — a failed write must reach the caller."""
-        monkeypatch.setattr(json_files, "_replace_with_retry", lambda *a, **k: (_ for _ in ()).throw(OSError("nope")))
+        monkeypatch.setattr(json_files.os, "replace", lambda *a, **k: (_ for _ in ()).throw(OSError("nope")))
         with pytest.raises(OSError, match="nope"):
             json_files.write_json_file(tmp_path / "x.json", {"a": 1})
 
@@ -204,14 +204,10 @@ class TestConcurrentReadsStayUsable:
             local_reads = 0
             local_failures = []
             while not stop.is_set():
-                # Yield: on Windows a spinning reader's handle makes os.replace fail (WinError 5)
-                # and can starve the writer's bounded retry; Event wait ends with the writers.
+                # Yield; Event wait ends with the writers.
                 stop.wait(0.001)
                 try:
                     raw = target.read_text(encoding="utf-8")
-                except PermissionError:
-                    # Windows share-mode refusal mid-replace: not an unusable document, not a read.
-                    continue
                 except FileNotFoundError:
                     local_failures.append("missing")
                     continue

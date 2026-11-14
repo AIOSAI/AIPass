@@ -33,7 +33,7 @@ def _frame_path(frame) -> str:
     # A pseudo filename resolved against a cwd inside this branch would make every bootstrap frame kin.
     if raw.startswith("<"):
         return raw
-    # resolve() reads os.getcwd (ntpath.realpath); a process whose cwd was deleted must not die here.
+    # resolve() can read os.getcwd; a process whose cwd was deleted must not die here.
     try:
         return str(Path(raw).resolve()).replace("\\", "/")
     except OSError:

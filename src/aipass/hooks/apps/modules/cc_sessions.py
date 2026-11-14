@@ -16,7 +16,6 @@ CC keeps them resume- and exit-aware: the authoritative source of which sessions
 import json
 import os
 import signal
-import sys
 from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
@@ -30,7 +29,7 @@ CONSOLE = err_console
 def _claude_home() -> Path:
     """Home directory for Claude's state, or an unusable sentinel if unknown.
 
-    Path.home() raises when home is unresolvable (Windows without %USERPROFILE%);
+    Path.home() raises when home is unresolvable;
     at module scope that is an import crash.
     """
     try:
@@ -42,9 +41,8 @@ def _claude_home() -> Path:
 
 CC_SESSIONS_DIR = _claude_home() / ".claude" / "sessions"
 
-# Seams read at call time, so a test can stand in without replacing os.kill / sys.platform process-wide.
+# Seam read at call time, so a test can stand in without replacing os.kill process-wide.
 _kill = os.kill
-_PLATFORM = sys.platform
 
 HELP_COMMANDS = [
     ("sessions", "List all CC sessions (PID · branch · short-id · kind · age)"),
@@ -53,7 +51,7 @@ HELP_COMMANDS = [
 
 
 def _get_ppid_portable(pid: int) -> int | None:
-    """Get parent PID portably (Linux + macOS). Returns None on failure."""
+    """Get parent PID. Returns None on failure."""
     import subprocess as _sp
 
     try:
@@ -80,22 +78,12 @@ def _has_session_file(pid: int) -> bool:
 
 def process_args(pid: int) -> list[str] | None:
     """The argv of a process ([] for a kernel thread), or None when it cannot be read."""
-    import subprocess as _sp
-
-    if _PLATFORM.startswith("linux"):
-        try:
-            raw = Path(f"/proc/{pid}/cmdline").read_bytes()
-        except OSError as exc:
-            logger.info("[%s] cmdline read failed for PID %d: %s", __name__, pid, exc)
-            return None
-        return [arg for arg in raw.decode("utf-8", errors="replace").split("\0") if arg]
-    # shortcut: ps joins argv with spaces, so an arg holding one splits; fine for argv0 and flags, upgrade if more is read.
     try:
-        result = _sp.run(["ps", "-o", "args=", "-p", str(pid)], capture_output=True, text=True, timeout=5)
-    except (OSError, _sp.TimeoutExpired) as exc:
-        logger.info("[%s] args lookup failed for PID %d: %s", __name__, pid, exc)
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError as exc:
+        logger.info("[%s] cmdline read failed for PID %d: %s", __name__, pid, exc)
         return None
-    return result.stdout.split() if result.returncode == 0 else None
+    return [arg for arg in raw.decode("utf-8", errors="replace").split("\0") if arg]
 
 
 def _argv0_name(pid: int) -> str:
@@ -147,41 +135,11 @@ def resolve_session_pid() -> int | None:
     return None
 
 
-def _pid_alive_windows(pid: int) -> bool:
-    """Windows-safe liveness check via OpenProcess + GetExitCodeProcess."""
-    import ctypes
-    from ctypes import wintypes
-
-    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    STILL_ACTIVE = 259
-
-    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]  # Windows-only
-    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel32.CloseHandle.restype = wintypes.BOOL
-
-    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-    if not handle:
-        return False
-    try:
-        exit_code = wintypes.DWORD()
-        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
-            return False
-        return exit_code.value == STILL_ACTIVE
-    finally:
-        kernel32.CloseHandle(handle)
-
-
 def _proc_start_ticks(pid: int) -> str | None:
     """Read a live process's start time (field 22 of /proc/<pid>/stat), in
-    clock ticks since boot. Linux only — returns None elsewhere or on any
-    read failure, so callers can fall back to liveness-only checking.
+    clock ticks since boot. Returns None on any read failure, so callers
+    can fall back to liveness-only checking.
     """
-    if _PLATFORM != "linux":
-        return None
     try:
         raw = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
         # comm (field 2) may itself contain ')' or whitespace: split on the last ')'.
@@ -212,12 +170,6 @@ def _is_pid_alive(pid: int) -> bool:
     """Check if a process with the given PID exists."""
     if not isinstance(pid, int) or pid <= 1:
         return False
-    if _PLATFORM == "win32":
-        try:
-            return _pid_alive_windows(pid)
-        except Exception as exc:
-            logger.info("[CC_SESSIONS] PID %d Windows check failed (assuming alive): %s", pid, exc)
-            return True
     try:
         _kill(pid, 0)
         return True

@@ -110,7 +110,7 @@ EVERY reply that adds/renames/moves a handler MUST say "provider settings update
 
 # Known Gotchas
 
- - Never write a bare `Path(__file__).resolve()` at module scope -- on Windows `ntpath.realpath` reads cwd, so it is an import-time cwd dependency. Use `handlers/module_root.module_file()`. The guard in `handlers/__init__.py` runs on EVERY hooks import: a defect there masks every other site, so cure it first.
+ - Never write a bare `Path(__file__).resolve()` at module scope -- it can read cwd, so it is an import-time cwd dependency. Use `handlers/module_root.module_file()`. The guard in `handlers/__init__.py` runs on EVERY hooks import: a defect there masks every other site, so cure it first.
  - Exit code 2 has dual meaning: intentional block (with JSON) vs crash (without JSON). The engine reads stdout to tell them apart.
  - `logs/engine.jsonl` is the source of truth for hook diagnostics; prax gets a copy via system_logger.
  - Provider settings carry several named bridge entries per event for UserPromptSubmit and PreCompact -- deliberate (per-handler output + timeout).

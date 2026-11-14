@@ -17,8 +17,7 @@ Directed verbs (redirection, tee, sed -i, cp, mv, dd of=) report their target; i
 import os
 import re
 import shlex
-from pathlib import Path, PurePath, PureWindowsPath
-from typing import cast
+from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.modules.shell_programs import named_operands, sed_actions, sed_scripts
@@ -49,7 +48,7 @@ _INTERPRETERS = frozenset(
 )
 _SHELLS = frozenset({"bash", "sh", "zsh"})
 
-# Windows runs git.exe, RM.EXE, git.cmd as the bare name; only executable extensions strip (git.py is not git).
+# WSL interop runs git.exe, git.cmd as the bare name; only executable extensions strip (git.py is not git).
 _EXEC_EXTENSIONS = frozenset({".exe", ".com", ".bat", ".cmd", ".ps1"})
 
 # Apart from _SHELL_WRITE_SHAPES (`>` compares in python); only the narrow "is a file created" caller reads them.
@@ -120,9 +119,6 @@ _PATH_RUN = re.compile(r"[~\w.@+\-]*[/\\][~\w./\\@+\-]*")
 _HEREDOC_OPEN = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_]\w*)\1")
 
 _TRAILING_JUNK = ",;:)]}'\"`"
-
-# Git Bash spells C:\Users\me as /c/Users/me, and agents copy it from its pwd.
-_GIT_BASH_DRIVE = re.compile(r"/([A-Za-z])(?=/|$)")
 
 #: How an interpreter's held path is labelled. write_ownership reads it: a held path
 #: cannot be told from a read, so the branch fence never convicts on one.
@@ -365,10 +361,6 @@ def _resolve(word: str, cwd: Path) -> Path | None:
     word = word.strip().strip(_TRAILING_JUNK)
     if not word:
         return None
-    # Git Bash drives, on a Windows cwd only (on POSIX /c is a directory): WindowsPath("/c/x") joins the
-    # seat's drive as C:\c\x and lets a foreign write through.
-    if isinstance(cwd, PureWindowsPath) and (drive := _GIT_BASH_DRIVE.match(word)):
-        word = f"{drive.group(1).upper()}:/{word[drive.end() :].lstrip('/')}"
     # Separators normalise on every OS; a drive ROOT still names nothing on Linux (NOT_CAUGHT).
     word = word.replace("\\", "/")
     # os.path keeps an unknown user's word (~nosuchuser) literal, as bash does; pathlib raises on it.
@@ -494,7 +486,7 @@ def _interpreter_targets(segment: list[str], raw: str, cwd: Path) -> list[tuple[
 
 
 def write_targets_by_segment(
-    command: str, cwd: str, path_type: type[PurePath] = Path
+    command: str, cwd: str
 ) -> list[tuple[list[str], list[tuple[Path, str]]]]:
     """Same reading as :func:`write_targets`, but grouped by the segment that earned it.
 
@@ -505,7 +497,7 @@ def write_targets_by_segment(
     if not command or not command.strip():
         return []
     try:
-        base = cast(Path, path_type(cwd)) if cwd else Path.cwd()  # a pure flavour: no concrete method is called
+        base = Path(cwd) if cwd else Path.cwd()
     except OSError as exc:
         logger.warning("[HOOKS] bash_writes: no usable cwd, the command cannot be read: %s", exc)
         raise
@@ -574,9 +566,9 @@ def _heredocs_by_segment(segments: list[list[str]], bodies: list[str]) -> dict[i
     return owned
 
 
-def write_targets(command: str, cwd: str, path_type: type[PurePath] = Path) -> list[tuple[Path, str]]:
-    """Return every (path, why) this command can be seen to write, in *path_type*'s flavour (the local Path)."""
-    return [hit for _segment, hits in write_targets_by_segment(command, cwd, path_type) for hit in hits]
+def write_targets(command: str, cwd: str) -> list[tuple[Path, str]]:
+    """Return every (path, why) this command can be seen to write."""
+    return [hit for _segment, hits in write_targets_by_segment(command, cwd) for hit in hits]
 
 
 def changed_paths(command: str, cwd: str) -> list[str]:

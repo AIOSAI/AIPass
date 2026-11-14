@@ -50,7 +50,7 @@ def _absolute(raw: str) -> Path:
     path = Path(raw)
     try:
         return path.resolve()
-    except OSError as exc:  # resolve() reads the cwd on Windows; the spelling is still the place
+    except OSError as exc:  # resolve() can read the cwd; the spelling is still the place
         logger.info("[HOOKS] loader: cannot resolve %s, using it as spelled: %s", raw, exc)
         return path
 
@@ -101,7 +101,7 @@ def _is_project_root(directory: Path) -> bool:
 def locate_config() -> tuple[str, Path | None]:
     """Where this session's config comes from: (AIPASS | EXTERNAL | NONE, the directory holding .aipass/)."""
     home = aipass_home()
-    # One canonical form, like home and the trust registry's keys: a symlinked walk (macOS /var) reads as external.
+    # One canonical form, like home and the trust registry's keys: a symlinked walk reads as external.
     search, stop = (_absolute(str(bound)) for bound in _search_bounds())
     start = search
     while search != stop and search.parent != search:

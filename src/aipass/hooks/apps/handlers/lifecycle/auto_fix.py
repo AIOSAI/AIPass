@@ -34,7 +34,7 @@ def _scratch_ground(file_path: str) -> str | None:
 
     The harness scratchpad counts only below a ``claude-<uid>`` root; a bare ``scratchpad`` is a tree directory.
     """
-    dirs = [part for part in file_path.replace("\\", "/").split("/") if part][:-1]
+    dirs = [part for part in file_path.split("/") if part][:-1]
     for part in dirs:
         if part in SCRATCH_DIRS:
             return part
@@ -185,7 +185,7 @@ def _run_ruff_lint_structured(file_path: str, unanswered: list[str] | None = Non
 
     None when ruff did not judge the file (skipped, no answer, timeout); the why goes to *unanswered*.
     """
-    if "/.claude/hooks/" in file_path.replace("\\", "/"):
+    if "/.claude/hooks/" in file_path:
         return _no_answer(unanswered, "ruff", "skipped: a provider hook file")
     try:
         result = subprocess.run(
@@ -225,7 +225,7 @@ def _run_pyright_check(file_path: str, unanswered: list[str] | None = None) -> l
 
     None when pyright did not judge the file (skipped, not installed, timeout); the why goes to *unanswered*.
     """
-    if "/.claude/hooks/" in file_path.replace("\\", "/"):
+    if "/.claude/hooks/" in file_path:
         return _no_answer(unanswered, "pyright", "skipped: a provider hook file")
     try:
         result = subprocess.run(
@@ -322,7 +322,7 @@ def _parse_checklist_findings(stdout: str, marker: str) -> list[str]:
 
 
 def _run_sentry_checklist(file_path: str) -> list[str]:
-    if "/.claude/hooks/" in file_path.replace("\\", "/"):
+    if "/.claude/hooks/" in file_path:
         return []
     aipass_home = os.environ.get("AIPASS_HOME", "")
     if not aipass_home:

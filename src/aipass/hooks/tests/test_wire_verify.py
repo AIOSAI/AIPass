@@ -548,7 +548,6 @@ class TestHandleCommand:
         """The passing path must stay a normal return — only ERROR findings exit."""
         monkeypatch.delenv("CODEX_HOME", raising=False)
         monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
         monkeypatch.setenv("AIPASS_HOME", str(tmp_path / "home"))
         monkeypatch.delenv("SEED_HOME", raising=False)

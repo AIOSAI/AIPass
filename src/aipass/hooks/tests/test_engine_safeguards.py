@@ -263,7 +263,7 @@ def ns_project(temp_test_dir, monkeypatch):
         patch.object(loader, "aipass_home", return_value=None),
         patch.object(loader, "logger") as log,
     ):
-        # resolved: the loader stamps realpaths, and macOS tmp is /var -> /private/var
+        # resolved: the loader stamps realpaths
         yield temp_test_dir.resolve(), log
 
 

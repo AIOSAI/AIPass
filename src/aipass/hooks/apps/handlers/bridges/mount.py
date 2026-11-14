@@ -28,7 +28,7 @@ PACKAGE = "aipass.hooks.apps"
 def branch_root(bridge_file: str) -> str:
     """The hooks branch root, from a bridge's own path: bridges -> handlers -> apps -> branch.
 
-    abspath, never realpath: on Windows realpath reads the working directory.
+    abspath, never realpath.
     """
     path = os.path.abspath(bridge_file)
     for _ in range(4):

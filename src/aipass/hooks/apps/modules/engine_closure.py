@@ -17,7 +17,6 @@ imports are invisible, which is why the wired handlers are roots rather than dis
 
 import ast
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -138,7 +137,7 @@ def _ruff(ruff: str | None) -> str | None:
     """The ruff to run: the one handed in, else the one beside this interpreter, else PATH's."""
     if ruff:
         return ruff
-    beside = Path(sys.executable).parent / ("ruff.exe" if os.name == "nt" else "ruff")
+    beside = Path(sys.executable).parent / "ruff"
     return str(beside) if beside.is_file() else shutil.which("ruff")
 
 

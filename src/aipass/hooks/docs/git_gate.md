@@ -68,7 +68,7 @@ nested command. A plain program's operands are data, so `grep -rn rm .` and `ech
 One refusal per command: the twin named is the first git invocation's.
 
 **One program, many spellings.** `git.exe`, `GIT`, `Git`, `git.cmd`, `/usr/bin/git.exe` and `gh.exe`
-all run the program on Windows, so all are read as git or gh (`bash_writes.verb_name()`, the one
+all run the program through WSL interop, so all are read as git or gh (`bash_writes.verb_name()`, the one
 executable-extension list). A file merely NAMED for a program (`git.py`) is nobody's invocation.
 
 **git and gh from inside a program.** For every seat, an interpreter whose program text

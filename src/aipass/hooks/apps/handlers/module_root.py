@@ -10,7 +10,7 @@
 
 """One guarded spelling for module-level __file__ resolution.
 
-On Windows Path.resolve() reads os.getcwd() unconditionally: a process whose cwd was deleted cannot import.
+Path.resolve() can read os.getcwd(): a process whose cwd was deleted cannot import.
 """
 
 from pathlib import Path

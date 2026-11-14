@@ -244,7 +244,7 @@ class TestFindBranchRoot:
 
     # The walk reads the real cwd: each test stands in its directory with monkeypatch.chdir
     # (fleet green leg 7, no Path.cwd patch). Paths are compared resolved, because the
-    # real cwd comes back resolved and a temp dir can sit behind a symlink (macOS /var).
+    # real cwd comes back resolved and a temp dir can sit behind a symlink.
 
     # Read through handle() (fleet green leg 8): a found root is the one whose inbox the banner
     # counts; no root is the logged "no branch root found" and a silent banner.

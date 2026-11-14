@@ -187,11 +187,8 @@ def _stamp_session_entry(branch_dir: Path, summary: str, cap: int) -> bool:
     if not local_path.is_file():
         logger.info("[HOOKS] pre_compact_prep: no local.json at %s — skipping stamp", local_path)
         return False
-    try:
-        import fcntl
-    except ImportError:  # shortcut: Windows has no fcntl and stamps unlocked; use msvcrt.locking if that races
-        logger.info("[HOOKS] pre_compact_prep: no fcntl here, stamping %s unlocked", local_path)
-        return _stamp_locked(local_path, summary, cap)
+    import fcntl
+
     # The lock is on .trinity/ itself: a sidecar file there is a stray to @memory's push.
     try:
         folder = os.open(local_path.parent, os.O_RDONLY)

@@ -534,9 +534,7 @@ class FakeSmokeClis:
         self.session = True
         self.limited: set[str] = set()
         self.during = None
-        # Path.home() reads HOME on POSIX and USERPROFILE on Windows.
         monkeypatch.setenv("HOME", str(self.home))
-        monkeypatch.setenv("USERPROFILE", str(self.home))
         monkeypatch.delenv("OPENCODE_DB", raising=False)
         monkeypatch.delenv("OPENCODE_CONFIG_DIR", raising=False)
         monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
@@ -552,10 +550,10 @@ class FakeSmokeClis:
         monkeypatch.setattr(smoke.subprocess, "run", self._run)
 
     def install(self, name: str) -> None:
-        """A stub on PATH; Windows' which wants a PATHEXT suffix, POSIX's the execute bit."""
-        for stub in (self.bin / name, self.bin / f"{name}.cmd"):
-            stub.write_text("", encoding="utf-8")
-            stub.chmod(0o755)
+        """A stub on PATH, with the execute bit."""
+        stub = self.bin / name
+        stub.write_text("", encoding="utf-8")
+        stub.chmod(0o755)
 
     def _run(self, argv, **kwargs):
         self.calls.append({"argv": argv, **kwargs})

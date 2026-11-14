@@ -147,7 +147,6 @@ class TestIdentityHandler:
         (real / "work").mkdir()
         (tmp_path / "home").symlink_to(real, target_is_directory=True)
         monkeypatch.setenv("HOME", str(tmp_path / "home"))
-        monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
 
         result = handle({"cwd": str(real / "work")})
 

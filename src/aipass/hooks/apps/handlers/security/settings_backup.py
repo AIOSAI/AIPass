@@ -128,8 +128,7 @@ def _ensure_folder(folder: Path) -> None:
     if folder.is_dir():
         return
     folder.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if os.name != "nt":  # POSIX mode bits; Windows ACLs are not set from here
-        os.chmod(folder, 0o700)
+    os.chmod(folder, 0o700)
 
 
 def _reserve(folder: Path, base: str) -> Path:
@@ -165,8 +164,7 @@ def _keep(target: Path, tool_name: str, tool_input: dict, cwd: str, claude_dir: 
         if target.is_file():
             where = _reserve(folder, f"{target.name}.{now.strftime('%Y-%m-%dT%H-%M-%S')}.{door}")
             shutil.copy2(target, where)
-            if os.name != "nt":  # the settings file is 0600; its copy is too
-                os.chmod(where, 0o600)
+            os.chmod(where, 0o600)  # the settings file is 0600; its copy is too
             record["backup"] = where.name
             record["before_sha256"] = hashlib.sha256(where.read_bytes()).hexdigest()
         else:

@@ -26,8 +26,8 @@ CONSOLE = err_console
 
 _HOOKS_BRANCH = module_file(__file__).parent.parent.parent
 
-# Matched on the path spelled with "/" and case-insensitively: Windows and default
-# macOS filesystems open .Claude\Settings.json as the same file.
+# Matched on the path spelled with "/" and case-insensitively: a case-insensitive mount
+# opens .Claude/Settings.json as the same file.
 _ANYWHERE = (
     (re.compile(r"/\.claude/settings[^/]*\.json$", re.IGNORECASE), "the provider hook wiring (.claude/settings*.json)"),
     (re.compile(r"/\.claude/hooks/", re.IGNORECASE), "the provider hook scripts (.claude/hooks/)"),
@@ -60,7 +60,7 @@ _HELD_INSIDE = (
 def _spelled(path: Path) -> str:
     try:
         path = path.resolve()
-    except (OSError, RuntimeError) as exc:  # resolve reads the cwd on Windows; the spelling still names the file
+    except (OSError, RuntimeError) as exc:  # the spelling still names the file
         logger.info("[HOOKS] protected_paths: cannot resolve %s: %s", path, exc)
     return str(path).replace("\\", "/")
 

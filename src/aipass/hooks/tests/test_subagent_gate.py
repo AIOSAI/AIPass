@@ -15,11 +15,10 @@
 # sentry: no-test-needed(stdlib) — subprocess.run's process launch and time.monotonic's clock, the stdlib's own
 
 import json
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from aipass.hooks.apps.handlers.security.subagent_gate import handle
-from aipass.hooks.apps.handlers.security.subagent_gate import _run_sentry_checklist
 
 
 def _stop_in(repo, cwd, status: str) -> tuple[dict, list]:
@@ -136,14 +135,6 @@ class TestSubagentGateHandler:
         assert result == {"stdout": "", "exit_code": 0}
         assert [argv[1] for argv, _kw in calls] == ["@git", "readme"]
 
-    @patch("subprocess.run")
-    def test_skip_claude_hooks_in_the_windows_spelling(self, mock_run, tmp_path):
-        """The caller hands str(repo_root / filepath): backslashes on Windows (compass 458, leg 2 item 2)."""
-        repo = tmp_path / "repo"
-        result = _run_sentry_checklist(str(PureWindowsPath(repo) / ".claude" / "hooks" / "gate.py"), repo)
-        assert result == []
-        mock_run.assert_not_called()
-
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._check_hook_readme_accountability")
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._run_sentry_checklist", return_value=[])
     @patch("aipass.hooks.apps.handlers.security.subagent_gate._get_modified_py_files")
@@ -215,8 +206,7 @@ class TestSubagentGateExternalProject:
     """Verify subagent gate works for non-AIPass projects (e.g. src/vera_studio/)."""
 
     # The branch and package are read as the directory `drone @git status` runs in
-    # and the file the block names (fleet green leg 8). tmp_path keeps the paths
-    # OS-native and drive-anchored: .resolve() anchors a synthetic one on Windows.
+    # and the file the block names (fleet green leg 8).
 
     def test_get_cwd_branch_external_package(self, tmp_path):
         repo = _repo_with(tmp_path, "vera", "src/vera_studio/quality/bad.py")

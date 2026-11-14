@@ -455,10 +455,7 @@ class TestWriteDeliveryLog:
         to make impossible.
 
         The failure is injected at the seam the function itself calls
-        (``append_jsonl``), not through the filesystem's mood: a POSIX-only
-        path like `/dev/null/impossible/...` or a chmod'd directory never
-        raises on Windows, which ignores owner mode bits, so the write would
-        silently succeed there and the "must warn" assertion would never fire.
+        (``append_jsonl``), not through the filesystem's mood.
         """
         log_path = tmp_path / "delivery.jsonl"
         with (

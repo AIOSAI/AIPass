@@ -17,7 +17,6 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that cadence.py parses and imports, ruff and collection cover it
 # sentry: no-test-needed(documentation) — is_automated(), reset_counter() and should_fire() carry docstrings
-# sentry: no-test-needed(stdlib) — fcntl, unavailable on Windows; the platform fallback never runs on this CI
 
 import contextlib
 import json

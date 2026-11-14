@@ -10,8 +10,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 if [ -x "$REPO_ROOT/.venv/bin/python" ]; then
     VENV_PY="$REPO_ROOT/.venv/bin/python"
-elif [ -x "$REPO_ROOT/.venv/Scripts/python.exe" ]; then
-    VENV_PY="$REPO_ROOT/.venv/Scripts/python.exe"
 else
     VENV_PY="python3"
 fi

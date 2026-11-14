@@ -75,7 +75,7 @@ def recorded_cli_trigger(monkeypatch) -> TriggerRecorder:
 
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
-    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    """Rich sizes an unpinned console on every print: 80
     under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
@@ -253,7 +253,7 @@ _TMUX_OWN_TESTS = {
 def _no_real_tmux_lookup(request):
     """Keep the MENU tests off a real subprocess.
 
-    The menu asks tmux where each process lives: WinError 2 on the Windows runner, slow elsewhere.
+    The menu asks tmux where each process lives, which is slow.
     """
     if request.cls is not None and request.cls.__name__ in _TMUX_OWN_TESTS:
         yield

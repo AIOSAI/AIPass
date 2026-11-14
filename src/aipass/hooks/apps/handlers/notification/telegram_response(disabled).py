@@ -683,9 +683,7 @@ def _prepend_branch_prefix(text: str, cwd=None) -> str:
     """Prepend @branch identifier so user knows which branch responded.
 
     cwd is a seam, looked up at the call: handle() passes nothing and the real Path.cwd answers.
-    test_telegram_response's unreadable-cwd test hands one that raises OSError, because a cwd that
-    cannot be read cannot be made on every platform (Windows refuses to delete the directory it
-    stands in). Hooks' decision, fleet green leg 12.
+    test_telegram_response's unreadable-cwd test hands one that raises OSError.
     """
     try:
         branch_name = (cwd or Path.cwd)().name

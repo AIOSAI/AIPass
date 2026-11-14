@@ -71,7 +71,7 @@ def _find_tmux() -> str | None:
 def _tmux_session_exists(name: str) -> bool:
     """Check if a tmux session with the given name exists.
 
-    No tmux (Windows, or absent) answers "no session" rather than raising.
+    No tmux answers "no session" rather than raising.
     """
     try:
         result = subprocess.run(
@@ -133,7 +133,7 @@ def _find_tmux_session_for_pid(pid: int) -> str | None:
 
 
 def _get_ppid(pid: int) -> int | None:
-    """Get parent PID portably (Linux + macOS). Returns None on failure."""
+    """Get parent PID. Returns None on failure."""
     try:
         result = subprocess.run(
             ["ps", "-o", "ppid=", "-p", str(pid)],
@@ -494,7 +494,7 @@ def _takeover_bg(
 def _is_session_file_present(pid: int | None) -> bool:
     """Check if a CC session file exists for the given PID.
 
-    Via cc_sessions._claude_home(), live: Path.home() raises with no %USERPROFILE%, and redirects must move it.
+    Via cc_sessions._claude_home(), live: Path.home() can raise, and redirects must move it.
     """
     if pid is None:
         return False

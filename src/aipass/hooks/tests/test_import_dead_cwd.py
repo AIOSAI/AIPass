@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_import_dead_cwd.py
-# Description: Pins hooks imports against a dead working directory (two worlds)
+# Description: Pins hooks imports against a dead working directory
 # Version: 1.1.0
 # Created: 2026-08-31
 # Modified: 2026-11-02
@@ -8,8 +8,7 @@
 
 """Tests for apps/handlers/__init__.py's guard: every hooks module imports without a readable cwd."""
 
-# ntpath.realpath calls os.getcwd() unconditionally, so on Windows an import-time resolve() needs a live cwd.
-# Two worlds, each convicting half: A emulates ntpath (resolve), B denies realpath (inspect.stack()).
+# The world denies realpath, convicting inspect.stack().
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that every hooks module parses; this file pins only import under a dead cwd
@@ -20,8 +19,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 BRANCH_ROOT = Path(__file__).resolve().parents[1]
 GUARD_SOURCE = BRANCH_ROOT / "apps" / "handlers" / "__init__.py"
 
@@ -30,38 +27,6 @@ _PRELOAD = """
 from aipass.prax import logger  # noqa: F401
 import aipass.prax.apps.modules.logger  # noqa: F401
 import aipass.cli.apps.modules  # noqa: F401
-"""
-
-_WORLD_A = """
-import os
-
-_real_realpath = os.path.realpath
-
-
-def _ntpath_condition(path, **kw):
-    os.getcwd()  # ntpath.realpath reads cwd before checking absoluteness
-    return _real_realpath(path, **kw)
-
-
-os.path.realpath = _ntpath_condition
-
-
-def _dead_getcwd():
-    raise FileNotFoundError(2, "cwd deleted", "")
-
-
-os.getcwd = _dead_getcwd
-
-# Probe the instrument: does THIS interpreter's resolve() reach the denied
-# call for an absolute path? 3.11+ routes through os.path.realpath; 3.10
-# resolves absolute paths without cwd, so the denial cannot fire there.
-import pathlib
-
-try:
-    pathlib.Path(pathlib.__file__).resolve()
-    print("PROBE_VACUOUS")
-except FileNotFoundError:
-    print("PROBE_ARMED")
 """
 
 _WORLD_B = """
@@ -143,18 +108,10 @@ def _assert_world_was_armed(out: str) -> None:
 
 
 class TestEveryModuleImportsWithoutACwd:
-    """The whole tree, both worlds. One import statement per module in one
+    """The whole tree. One import statement per module in one
     child: a module that dies takes the run down and names its own line."""
 
     IMPORTS = "\n".join(f"import {name}  # noqa: F401" for name in _module_names())
-
-    def test_world_a_ntpath_emulation(self):
-        """Convicts an unguarded Path(__file__).resolve() reached at import."""
-        result = _run_world(_WORLD_A, self.IMPORTS)
-        _assert_world_was_armed(result.stdout)
-        assert "IMPORTED" in result.stdout, (
-            f"an import died with cwd unreadable:\nstdout={result.stdout}\nstderr={result.stderr}"
-        )
 
     def test_world_b_realpath_denied(self):
         """Convicts inspect.stack() at inspect.py:1009."""
@@ -191,14 +148,6 @@ class TestEveryModuleImportsWithoutACwd:
         (root / "live.py").write_text("", encoding="utf-8")
         assert _module_names(root, tmp_path) == ["dropbox.apps.live"]
 
-    def test_the_worlds_are_not_the_same_world(self):
-        """World B must deny realpath OUTRIGHT; world A must deny getcwd. If a
-        later edit merged them, both tests would prove the same half."""
-        assert "os.getcwd = _dead_getcwd" in _WORLD_A
-        assert "os.getcwd" not in _WORLD_B.replace("os.getcwd = _dead_getcwd", "")
-        assert "_denied_realpath" in _WORLD_B
-
-
 class TestTheCureCannotBeSilentlyReverted:
     """``inspect.stack()`` in the guard is the defect, not a style preference.
 
@@ -210,19 +159,6 @@ class TestTheCureCannotBeSilentlyReverted:
         all pass while reading nothing. Fence v2's public line, never a private name."""
         text = GUARD_SOURCE.read_text(encoding="utf-8")
         assert 'MY_BRANCH = "hooks"' in text
-
-    def test_the_fence_lets_kin_through_with_no_cwd(self):
-        """The kin seat imports its handlers under world A (the ntpath-shaped denial): ALLOWED.
-
-        Red against a frame walk whose resolve has no OSError arm.
-        """
-        probe = BRANCH_ROOT / "tests" / "support_fence.py"
-        run_kin = f"\nimport runpy\nimport sys\nsys.argv = [{str(probe)!r}, 'pkg']\n"
-        result = _run_world(_WORLD_A, run_kin + "runpy.run_path(sys.argv[0], run_name='__main__')\n")
-        _assert_world_was_armed(result.stdout)
-        assert "ALLOWED" in result.stdout.splitlines(), (
-            f"the fence refused or died on its kin under a dead cwd:\nstdout={result.stdout}\nstderr={result.stderr}"
-        )
 
     @staticmethod
     def _inspect_stack_calls(source: str) -> list[int]:
@@ -242,7 +178,7 @@ class TestTheCureCannotBeSilentlyReverted:
         lines = self._inspect_stack_calls(GUARD_SOURCE.read_text(encoding="utf-8"))
         assert lines == [], (
             "inspect.stack() reaches os.path.realpath, which needs a readable cwd "
-            f"on Windows - walk frames with sys._getframe instead (line {lines})"
+            f"- walk frames with sys._getframe instead (line {lines})"
         )
 
     def test_that_ban_would_convict_a_real_call(self):
@@ -263,7 +199,7 @@ class TestTheCureCannotBeSilentlyReverted:
         assert "linecache" in text, "code_context needs a replacement, not deletion"
 
     def test_the_guards_own_resolve_is_guarded(self):
-        """The world-A conviction site. An unguarded resolve in this file is
+        """An unguarded resolve in this file is
         reached by every import of hooks' handlers, so it decides every hook."""
         tree = ast.parse(GUARD_SOURCE.read_text(encoding="utf-8"))
         unguarded = [
@@ -318,10 +254,8 @@ class TestTheInsideTryHelperIsNotVacuous:
         assert _inside_try(tree, call) is False
 
 
-@pytest.mark.parametrize("world_name", ["A", "B"])
-def test_the_ordinary_import_still_works(world_name):
+def test_the_ordinary_import_still_works():
     """A guard that refused everything, or a world that killed the interpreter
     before any hooks code ran, would pass every denial test above."""
-    world = {"A": _WORLD_A, "B": _WORLD_B}[world_name]
-    result = _run_world(world, "import aipass.hooks.apps.modules.engine  # noqa: F401")
+    result = _run_world(_WORLD_B, "import aipass.hooks.apps.modules.engine  # noqa: F401")
     assert "IMPORTED" in result.stdout, result.stderr

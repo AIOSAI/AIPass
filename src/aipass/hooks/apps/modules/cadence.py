@@ -26,11 +26,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.hooks.apps.handlers.module_root import module_file
 from aipass.hooks.apps.modules.grounding_content import find_branch_root
 
-try:
-    import fcntl
-except ImportError:
-    fcntl = None  # type: ignore[assignment]
-    logger.info("[HOOKS] cadence: fcntl unavailable (Windows)")
+import fcntl
 
 CONSOLE = err_console
 
@@ -156,15 +152,13 @@ def is_automated(hook_data: dict | None) -> bool:
 
 
 def _lock(fd) -> None:
-    """Acquire exclusive lock (no-op on Windows)."""
-    if fcntl is not None:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+    """Acquire exclusive lock."""
+    fcntl.flock(fd, fcntl.LOCK_EX)
 
 
 def _unlock(fd) -> None:
-    """Release exclusive lock (no-op on Windows)."""
-    if fcntl is not None:
-        fcntl.flock(fd, fcntl.LOCK_UN)
+    """Release exclusive lock."""
+    fcntl.flock(fd, fcntl.LOCK_UN)
 
 
 def _close_fd(fd) -> None:

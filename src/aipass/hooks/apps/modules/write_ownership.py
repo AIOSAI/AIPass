@@ -37,8 +37,6 @@ PROJECT_MARKER = "*_REGISTRY.json"
 # A landing with no registry is the git work tree it sits in; its .git stands in as the marker.
 GIT_MARKER = ".git"
 
-# Windows has no pathconf, so its long-path ceiling stands in.
-_WINDOWS_PATH_MAX = 32767
 _SHOWN_CHARS = 120
 
 _WHO = (
@@ -172,12 +170,9 @@ def landing_of(target: Path) -> Project | None:
 
 
 def _path_max() -> int:
-    """The host's PATH_MAX; Windows publishes none, so its long-path ceiling. 0 when unknown: the probe alone judges."""
-    pathconf = getattr(os, "pathconf", None)
-    if pathconf is None:
-        return _WINDOWS_PATH_MAX
+    """The host's PATH_MAX. 0 when unknown: the probe alone judges."""
     try:
-        return pathconf("/", "PC_PATH_MAX")
+        return os.pathconf("/", "PC_PATH_MAX")
     except (OSError, ValueError) as exc:
         logger.info("[HOOKS] write_ownership: PATH_MAX unpublished here, the probe alone judges length: %s", exc)
         return 0

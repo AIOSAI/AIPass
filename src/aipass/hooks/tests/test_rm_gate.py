@@ -37,10 +37,9 @@ LIVE_RECORDS = (
 
 
 def _home_through_a_link(real: Path, link: Path, monkeypatch) -> None:
-    """HOME (USERPROFILE on Windows) spelled through *link*, a directory symlink to *real*, as macOS's /var is."""
+    """HOME spelled through *link*, a directory symlink to *real*."""
     link.symlink_to(real, target_is_directory=True)
     monkeypatch.setenv("HOME", str(link))
-    monkeypatch.setenv("USERPROFILE", str(link))
 
 
 @pytest.fixture(autouse=True)
@@ -718,7 +717,7 @@ class TestTheShellSpellingIsReadTheWayTheShellRunsIt:
         assert "Raw rm is refused" in json.loads(result["stdout"])["reason"], command
 
     def test_a_glob_that_matches_nothing_the_gate_can_list_is_read_as_the_verb_it_names(self, tmp_path):
-        """CI red PR #774 (Windows): Git Bash's /bin is a mount the gate cannot list, so /bin/r? read as r?."""
+        """An empty directory lists nothing for /bin/r?, which must still read as rm, not as r?."""
         unlisted = tmp_path / "bin"
         unlisted.mkdir()
         command = f"{unlisted.as_posix()}/r? notes.txt"

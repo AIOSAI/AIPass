@@ -63,14 +63,8 @@ def _chdir(where: Path) -> Iterator[None]:
 
 
 def _linked(real: Path, link: Path) -> Path:
-    """*link*, a directory symlink to *real*: CI's macOS tmp dir sits under one (/var -> /private/var).
-
-    Windows refuses a symlink without the privilege; there this case cannot be built, and the skip says so.
-    """
-    try:
-        link.symlink_to(real, target_is_directory=True)
-    except OSError as exc:
-        pytest.skip(f"this host refuses a directory symlink: {exc}")
+    """*link*, a directory symlink to *real*."""
+    link.symlink_to(real, target_is_directory=True)
     return link
 
 
@@ -569,7 +563,7 @@ class TestTrustBreakBanner:
         assert remedy in (reason or "")
 
     def test_a_project_reached_through_a_symlink_prints_its_canonical_fix_line(self, temp_test_dir, mock_logger):
-        """CI red PR #774 (macOS): enrolled through one spelling, walked through another, printed the walk's."""
+        """CI red PR #774: enrolled through one spelling, walked through another, printed the walk's."""
         reg_path = temp_test_dir / "registry.json"
         real = temp_test_dir / "real_project"
         (real / ".aipass").mkdir(parents=True)
@@ -923,7 +917,7 @@ class TestSecurityDoesNotDependOnTrust:
         assert "IGNORED" in log.warning.call_args[0][0]
 
     def test_an_install_reached_through_a_symlink_is_still_the_install(self, temp_test_dir, mock_logger):
-        """CI red PR #774 (macOS): the walk under one spelling and AIPASS_HOME under the other read it as external."""
+        """CI red PR #774: the walk under one spelling and AIPASS_HOME under the other read it as external."""
         reg_path = temp_test_dir / "registry.json"
         reg_path.write_text('{"version": 1, "projects": {}}', encoding="utf-8")
         home = _install(temp_test_dir / "real")

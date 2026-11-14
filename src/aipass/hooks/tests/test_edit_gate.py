@@ -880,7 +880,7 @@ class TestDiagnosticsStateModule:
 
         revalidate has THREE outcomes: [] clean, [...] findings, None could-not-tell.
         This used to assert == [] flatly, which conflates could-not-tell with clean —
-        the exact confusion the contract exists to prevent. On the Windows runner
+        the exact confusion the contract exists to prevent. On a slow runner
         pyright exceeded its 15s budget (0.82s locally, ~18x headroom), revalidate
         correctly answered None, and the test called that a failure. A longer budget
         would have masked a slow runner instead of fixing a dishonest assertion.
@@ -1156,8 +1156,8 @@ class TestRevalidateParsesPyrightOutput:
 
     The two real-pyright tests above are honest but can only skip when the tool is
     slow, so on a runner where pyright never answers they assert nothing. These pin
-    the same logic hermetically, so the coverage does not evaporate on the platform
-    where it is hardest to get — which is exactly where the Windows lane went red.
+    the same logic hermetically, so the coverage does not evaporate on the runner
+    where it is hardest to get.
     """
 
     def _revalidate(self, tmp_path: Path, diagnostics: list[dict]):
@@ -1313,8 +1313,7 @@ def claude_home(tmp_path: Path, monkeypatch) -> Path:
     """A tmp ~/.claude holding a settings.json and settings.local.json; the gate's home seam points at it."""
     claude = tmp_path / "home" / ".claude"
     claude.mkdir(parents=True)
-    # Bytes, not text: the test below pins the backup to the file's exact bytes, and
-    # text mode on Windows would write CRLF and fail that oracle for the wrong reason.
+    # Bytes, not text: the test below pins the backup to the file's exact bytes.
     (claude / "settings.json").write_bytes(b'{"model": "before"}\n')
     (claude / "settings.local.json").write_bytes(b'{"local": "before"}\n')
     monkeypatch.setattr(settings_backup, "_claude_dir", lambda: claude)

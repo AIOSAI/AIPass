@@ -72,7 +72,7 @@ def _hook_env(**extra: str) -> dict:
 
 def _ruff() -> str | None:
     """ruff beside this interpreter (the project venv), else on PATH."""
-    beside = Path(sys.executable).parent / ("ruff.exe" if os.name == "nt" else "ruff")
+    beside = Path(sys.executable).parent / "ruff"
     return str(beside) if beside.is_file() else shutil.which("ruff")
 
 

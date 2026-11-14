@@ -10,7 +10,6 @@
 """Tests for apps/handlers/security/testwrite_gate.py and its JSON policy switch."""
 
 # Behind a JSON switch so the way back is a field flip. Creation is blocked, editing an existing test is not.
-# A path put INTO a command string is spelled as_posix(): bash eats a Windows str()'s backslashes.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(constant) — EDIT_TOOLS and ADMIN_SEAT's literal values; the gate's use of them is pinned
@@ -19,7 +18,7 @@
 import json
 import os
 import tempfile
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -531,9 +530,6 @@ class TestNamingAPathIsNotWritingIt:
             pytest.param("popen-gw0", "", id="popen-gw0"),
             pytest.param("spawn", "", id="spawn"),
             pytest.param("spawn", ", '{base}/aipass/spawn'", id="word-last"),
-            pytest.param("spawn", ", '{doubled}'", id="windows-doubled-backslashes"),
-            pytest.param("spawn", ", '{doubled_last}'", id="windows-doubled-word-last"),
-            pytest.param("spawn", ", r'{single}'", id="windows-raw-string"),
             pytest.param("spawn", ", '~/spawn/notes.md'", id="home-and-the-word-first"),
             pytest.param("system", ", 'docs/system.md'", id="file-named-after-a-word"),
             pytest.param("exec", ", '--exec-path'", id="git-flag"),
@@ -550,10 +546,7 @@ class TestNamingAPathIsNotWritingIt:
         _policy(project)
         # Each side of the word boundary has a spelling of its own to stand down on.
         names = [Path(project["new_test"]).as_posix(), (tmp_path / parent).as_posix(), f"{parent}/x"]
-        single = str(PureWindowsPath(tmp_path / "aipass" / "spawn" / "tests"))
-        doubled_last = str(PureWindowsPath(tmp_path / "aipass" / "spawn")).replace("\\", "\\\\")
-        doubled = single.replace("\\", "\\\\")
-        extra = form.format(base=tmp_path.as_posix(), single=single, doubled=doubled, doubled_last=doubled_last)
+        extra = form.format(base=tmp_path.as_posix())
         body = "pri" + "nt(" + ", ".join(f"'{name}'" for name in names) + extra + ")"
         assert not _blocked(_run(project["seat"], command=f"python3 - <<'EOF'\n{body}\nEOF"))
 
@@ -811,7 +804,7 @@ class TestNamingAPathIsNotWritingIt:
 class TestAnOperandPathlibCannotExpand:
     """devpulse's decision C, leg 4: a tilde word pathlib cannot expand, in bash_writes._resolve.
 
-    The shell leaves ~nosuchuser literal; Windows expands it, so the test asks the platform first.
+    The shell leaves ~nosuchuser literal.
     """
 
     OPERAND = "~nosuchuser/tests/test_brand_new.py"
@@ -821,7 +814,7 @@ class TestAnOperandPathlibCannotExpand:
         return Path(seat) / os.path.expanduser(self.OPERAND)
 
     def test_a_redirect_into_an_unknown_users_home_names_the_target_under_cwd(self, project: dict):
-        """The new test file is refused wherever the platform reads it (Windows reads it off the seat, PR #774)."""
+        """The new test file is refused (PR #774)."""
         _policy(project)
         expected = self._expected(project["seat"])
         command = f"echo x > {self.OPERAND}"

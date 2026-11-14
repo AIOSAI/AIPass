@@ -11,7 +11,6 @@
 """Shared sound functions for hook handlers. Silent unless hook sounds are switched on."""
 
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
@@ -27,10 +26,7 @@ LEGACY_MUTE_FLAG = Path(tempfile.gettempdir()) / "aipass-hooks-muted"
 PIPER_BIN = Path.home() / ".local" / "share" / "piper" / "piper"
 PIPER_VOICE = Path.home() / ".local" / "share" / "piper-voices" / "en_US-amy-medium.onnx"
 
-if sys.platform == "darwin":
-    _PLAY_CMD: list[str] = ["afplay"]
-else:
-    _PLAY_CMD = ["aplay", "-q"]
+_PLAY_CMD: list[str] = ["aplay", "-q"]
 
 
 def print_introspection():

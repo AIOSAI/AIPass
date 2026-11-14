@@ -71,8 +71,6 @@ class TestManglingRule:
         [
             # Vectors from the CLI's own cP() run in node, so the measure is the CLI's.
             ("/srv/aipass/src/aipass/hooks", "-srv-aipass-src-aipass-hooks"),
-            # A Windows path: colon and backslashes are plain non-alphanumerics; NO drive-letter special case.
-            ("C:\\Work\\aipass\\ai_mail", "C--Work-aipass-ai-mail"),
             ("", ""),
             ("/srv/é–ø/x", "-srv-----x"),
             # Non-BMP: JS sees a SURROGATE PAIR and writes TWO dashes.

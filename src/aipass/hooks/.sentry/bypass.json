@@ -268,11 +268,6 @@
       "reason": "Test fixture CWD string and bash command strings contain paths as test input data — not real filesystem operations."
     },
     {
-      "file": "tests/test_registry_gate.py",
-      "standard": "windows_compat",
-      "reason": "Test fixture bash command strings contain /tmp paths as scanner input — not real filesystem operations. The handler itself is platform-agnostic (string scanning only)."
-    },
-    {
       "file": "apps/handlers/lifecycle/auto_fix.py",
       "standard": "dead_code",
       "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.lifecycle.auto_fix.handle' — not statically imported by design. Verified wired in PostToolUse.auto_fix_diagnostics + fires in engine.jsonl."
@@ -1602,7 +1597,7 @@
     {
       "file": "tests/test_json_durability.py",
       "standard": "silent_catch",
-      "reason": "Fleet green leg 5, file-wide because silent_catch passes no line (the checklist says so). The three catches, lines 244, 249 and 258 today, are in a reader thread polling a file under concurrent os.replace. 249 and 258 are not silent: each appends to local_failures, which the test asserts empty. 244 is Windows share mode refusing the open while a replace is in flight; it is deliberately not counted as a read. A log call per poll would write thousands of lines from a hot loop."
+      "reason": "Fleet green leg 5, file-wide because silent_catch passes no line (the checklist says so). The two catches are in a reader thread polling a file under concurrent os.replace. Neither is silent: each appends to local_failures, which the test asserts empty. A log call per poll would write thousands of lines from a hot loop."
     },
     {
       "file": "apps/modules/protected_paths.py",
@@ -1654,11 +1649,11 @@
       "file": "tests/test_cc_transcripts.py",
       "standard": "through_the_command",
       "lines": [
-        83,
-        106,
-        138
+        81,
+        104,
+        136
       ],
-      "reason": "Fleet green leg 9, ruling (b), hooks' decision: the contract is the Claude Code CLI's own path-to-dirname rule and 31-hash, pinned against vectors measured with the CLI's own code on RAW strings (a Windows path, the empty string, a non-BMP character). project_dir_for resolves its argument first, so on POSIX a raw Windows path or '' never reaches the rule as written, and the resolved long path's hash suffix depends on the host's spelling (a drive letter on Windows), so no fixed CLI vector can name it. Everything a short path shows goes through project_dir_for."
+      "reason": "Fleet green leg 9, ruling (b), hooks' decision: the contract is the Claude Code CLI's own path-to-dirname rule and 31-hash, pinned against vectors measured with the CLI's own code on RAW strings (the empty string, a non-BMP character). project_dir_for resolves its argument first, so '' never reaches the rule as written, and the resolved long path's hash suffix depends on the host's spelling, so no fixed CLI vector can name it. Everything a short path shows goes through project_dir_for."
     },
     {
       "file": "tests/test_telegram_response_delivery.py",
@@ -1735,6 +1730,24 @@
       "reason": "Fleet green row 0 (leg 8, landed leg 10): bash_writes.Path flavour oracle; threading flavour through every path builder is the cost; closes the leg 5 write_targets flavour HELD."
     },
     {
+      "file": "tests/test_json_durability.py",
+      "standard": "stdlib_patch",
+      "lines": [
+        74,
+        88,
+        97
+      ],
+      "reason": "Linux-only purge: the Windows retry helper that was the seam is gone, so files.os.replace is the move. 74 spies the real rename to prove the temp is staged in the target directory; 88 and 97 make it raise the test's own OSError to prove the original survives, the temp is cleaned and the error reaches the caller. No platform fails a rename on demand under tmp_path; monkeypatch undoes it at the test's end."
+    },
+    {
+      "file": "tests/test_pre_compact_prep.py",
+      "standard": "stdlib_patch",
+      "lines": [
+        156
+      ],
+      "reason": "Linux-only purge: the Windows retry helper that was the seam is gone. files.os.replace raises the test's own OSError, in a with-block, so a write that does not land is shown to leave local.json whole and no temp behind. No platform fails a rename on demand under tmp_path."
+    },
+    {
       "file": "tests/test_session_boot.py",
       "standard": "through_the_command",
       "lines": [
@@ -1809,14 +1822,6 @@
         21
       ],
       "reason": "Fleet green leg 8, ruling (b), hooks' decision: the contract is the line's shape for a given instant and the hour buckets at their bounds (5/12/17/22). handle() reads the live clock, so the public door can only pin today's hour; fixing the instant means patching temporal.datetime (scored by stdlib_patch) or a now= parameter that would exist only for the test (HELD by the ruling). The pins on _format_line and _part_of_day stay; TestHandle pins the public door's live answer."
-    },
-    {
-      "file": "tests/test_subagent_gate.py",
-      "standard": "through_the_command",
-      "lines": [
-        22
-      ],
-      "reason": "Fleet green leg 8, ruling (b), hooks' decision: the contract is that a .claude/ path is skipped in the backslashed spelling handle() hands the checklist on Windows (compass 458). Through handle() the host chooses the separator, so on POSIX the public door can only ever hand the forward-slash spelling, which test_skip_claude_hooks_from_sentry_checks pins through handle(). The one import kept is _run_sentry_checklist, for test_skip_claude_hooks_in_the_windows_spelling alone."
     },
     {
       "file": "apps/handlers/bridges/opencode.py",

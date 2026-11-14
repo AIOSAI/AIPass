@@ -101,7 +101,7 @@ _SHELL_PROGRAMS = SHELL_PROGRAMS
 
 # Interpreter names to one language, a version suffix included: python3.12 is python.
 _LANGUAGE = re.compile(
-    r"(?P<lang>python|pypy|perl|ruby|node|nodejs|php|lua|rscript|deno|bun|tsx|ts-node|osascript|pwsh|powershell"
+    r"(?P<lang>python|pypy|perl|ruby|node|nodejs|php|lua|rscript|deno|bun|tsx|ts-node|pwsh|powershell"
     r"|awk|gawk|mawk|nawk)(?:\d[\d.]*)?$"
 )
 _LANGUAGE_ALIASES = {
@@ -117,7 +117,7 @@ _LANGUAGE_ALIASES = {
 # the flags that name the script file and the flag that runs a module by name.
 _INLINE_FLAGS = {
     "python": ("-c",), "node": ("-e", "--eval", "-p", "--print"), "perl": ("-e", "-E"), "ruby": ("-e",),
-    "php": ("-r",), "lua": ("-e",), "rscript": ("-e",), "osascript": ("-e",), "pwsh": ("-command", "-c"),
+    "php": ("-r",), "lua": ("-e",), "rscript": ("-e",), "pwsh": ("-command", "-c"),
     "bun": ("-e", "--eval"), "tsx": ("-e", "--eval"), "ts-node": ("-e", "--eval"), "deno": (), "awk": (),
 }  # fmt: skip
 _VALUED_FLAGS = {
@@ -776,8 +776,7 @@ def _command_candidates(word: _Word, text: str, ctx: _Ctx) -> list[str]:
     """The program names an unquoted glob in the command word can become, against the cwd and PATH."""
     if not _globby(word):
         return [text]
-    # A watched verb the glob's last part can spell counts whatever the gate's disk shows: Git Bash's
-    # /bin is a mount Windows cannot list, so /bin/r? ran rm and read as r? (CI red, PR #774).
+    # A watched verb the glob's last part can spell counts whatever the gate's disk shows.
     found = {verb for verb in WATCHED_VERBS if fnmatch.fnmatchcase(verb, text.rsplit("/", 1)[-1])}
     if "/" in text:
         pattern = Path(os.path.expanduser(text))

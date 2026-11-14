@@ -26,7 +26,7 @@ CONSOLE = err_console
 def _claude_home() -> Path:
     """Home directory for Claude's state, or an unusable sentinel if unknown.
 
-    Path.home() raises on Windows without %USERPROFILE%; at module scope that is an import crash.
+    Path.home() raises when home is unresolvable; at module scope that is an import crash.
     """
     try:
         return Path.home()

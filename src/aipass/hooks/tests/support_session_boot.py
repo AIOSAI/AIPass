@@ -44,11 +44,8 @@ def make_transcript(projects_root, cwd, session_id, title, messages, age_seconds
 
 
 def home_env(home) -> dict[str, str]:
-    """The environment that redirects home resolution on BOTH platforms.
-
-    POSIX reads HOME, Windows USERPROFILE; under clear=True HOME alone leaves Windows with no home.
-    """
-    return {**_kept_redirect(), "HOME": str(home), "USERPROFILE": str(home)}
+    """The environment that redirects home resolution."""
+    return {**_kept_redirect(), "HOME": str(home)}
 
 
 def set_home(monkeypatch, home) -> str:

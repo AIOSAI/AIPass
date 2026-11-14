@@ -15,7 +15,6 @@
 # sentry: no-test-needed(constant) — HELP_COMMANDS' display text and the CONSOLE binding
 # sentry: no-test-needed(stdlib) — shutil.which and tempfile.gettempdir's own path-resolution correctness
 
-import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -29,9 +28,6 @@ from aipass.hooks.apps.modules.sandbox import (
     resolve_bwrap_command,
     sandbox_launch,
 )
-
-pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="sandbox is Linux-only: bwrap mount namespaces")
-
 
 class TestBuildSrtConfig:
     """Config generation from policy dict."""
@@ -79,25 +75,22 @@ def _path_holding(monkeypatch, tmp_path: Path, *names: str) -> Path:
     """PATH is one tmp directory holding exactly `names`, as the real which() reads it.
 
     No shutil.which patch (fleet green leg 7, stdlib_patch). Each name is written
-    bare and as .exe and marked executable: POSIX's which() wants the mode bit,
-    Windows' answers by PATHEXT instead. So the asserts read found or not found
+    and marked executable. So the asserts read found or not found
     and the directory it was found in, never the path's spelling.
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     for name in names:
-        for spelled in (name, f"{name}.exe"):
-            exe = bin_dir / spelled
-            exe.write_text("", encoding="utf-8")
-            exe.chmod(0o755)
+        exe = bin_dir / name
+        exe.write_text("", encoding="utf-8")
+        exe.chmod(0o755)
     monkeypatch.setenv("PATH", str(bin_dir))
     return bin_dir
 
 
 def _home_at(monkeypatch, home: Path) -> None:
-    """The real Path.home() answers from HOME on POSIX and USERPROFILE on Windows."""
+    """The real Path.home() answers from HOME."""
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("USERPROFILE", str(home))
 
 
 def _resolver_call() -> tuple[list, dict]:

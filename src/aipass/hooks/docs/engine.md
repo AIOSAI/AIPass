@@ -55,11 +55,9 @@ Handlers are called **dynamically at runtime** — the engine uses `importlib.im
 ## Importing Without a Working Directory
 
 Every hooks module must import in a process whose working directory is gone.
-`ntpath.realpath` reads `os.getcwd()` UNCONDITIONALLY — not only for relative
-paths, the way `posixpath` does — and `Path.resolve()` routes through it. So on
-Windows every `Path(__file__).resolve()` *reached at import time* is an
-import-time working-directory dependency, and a process whose cwd was deleted
-cannot import the module at all.
+`Path.resolve()` can read `os.getcwd()`, so a `Path(__file__).resolve()`
+*reached at import time* is an import-time working-directory dependency, and a
+process whose cwd was deleted cannot import the module at all.
 
 **The one spelling:** `apps/handlers/module_root.py` → `module_file(__file__)`.
 It still attempts `.resolve()` — normalising symlinks is why the call exists —
@@ -71,16 +69,13 @@ cross-branch import guard on *every* hooks import, so a dead-cwd failure there
 masks every other site: each module reports that one line. `tests/test_import_dead_cwd.py`
 pins the whole tree, discovered by walk rather than listed.
 
-**Two worlds, because one proves half.** World A emulates ntpath (`realpath`
-reads cwd, `getcwd` denied) and convicts an unguarded `resolve()`; on Linux it
-does NOT convict `inspect.stack()`, because there the raise happens inside
-`getabsfile()` where inspect catches it. World B denies `os.path.realpath`
-outright and convicts `inspect.stack()` at `inspect.py:1009`. The guard
-walks frames with `sys._getframe` and reads the import line with `linecache`.
+**The denial world.** The test denies `os.path.realpath` outright and convicts
+`inspect.stack()` at `inspect.py:1009`. The guard walks frames with
+`sys._getframe` and reads the import line with `linecache`.
 
 The `inspect.stack()` ban is **structural** (AST, not grep): the guard's
 caller-is-None branch is unreachable from any import probe, so a regrown call
-there is invisible to the world tests and caught only by the AST pin. AST and not a string ban because this guard's own
+there is invisible to the world test and caught only by the AST pin. AST and not a string ban because this guard's own
 docstrings name the defect, and a spelling ban convicts prose while acquitting
 code.
 

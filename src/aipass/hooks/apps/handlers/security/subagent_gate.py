@@ -106,8 +106,7 @@ def _get_modified_py_files(cwd: str, repo_root: Path) -> list[str]:
 
 def _run_sentry_checklist(file_path: str, repo_root: Path, timeout: float = _CHECKLIST_TIMEOUT_SECONDS) -> list[str]:
     """Run sentry checklist on a single file, return violation strings."""
-    # The caller hands str(repo_root / filepath), which is backslashed on Windows.
-    if "/.claude/" in file_path.replace("\\", "/"):
+    if "/.claude/" in file_path:
         return []
     result = subprocess.run(
         ["drone", "@sentry", "checklist", file_path],

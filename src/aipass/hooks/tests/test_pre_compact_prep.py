@@ -4,7 +4,7 @@
 # Description: Tests for pre_compact_prep lifecycle handler
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-11-10
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/lifecycle/pre_compact_prep.py."""
@@ -72,7 +72,7 @@ class TestHandle:
         branch_dir = _make_branch(tmp_path)
         rollout = tmp_path / "rollout.jsonl"
         meta = {"type": "session_meta", "payload": {"id": "s", "source": "cli"}}
-        info = {"last_token_usage": {"input_tokens": 21_545, "output_tokens": 568, "total_tokens": 22_113}}
+        info: dict = {"last_token_usage": {"input_tokens": 21_545, "output_tokens": 568, "total_tokens": 22_113}}
         info["model_context_window"] = 475_000
         count = {"type": "event_msg", "payload": {"type": "token_count", "info": info}}
         rollout.write_text(json.dumps(meta) + "\n" + json.dumps(count) + "\n", encoding="utf-8")
@@ -108,7 +108,6 @@ class TestHandle:
         assert stamped in result["stdout"]
         assert "/200k" not in result["stdout"]
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="the stamp lock is fcntl's; Windows stamps unlocked")
     def test_two_concurrent_stamps_keep_both_snapshots(self, tmp_path, monkeypatch):
         branch_dir = _make_branch(tmp_path)
         real_write = json_files.write_json_file
@@ -154,7 +153,7 @@ class TestHandle:
         before = local.read_text(encoding="utf-8")
         with (
             patch(f"{MODULE}._find_repo_root", return_value=None),
-            patch("aipass.hooks.apps.handlers.json.files._replace_with_retry", side_effect=OSError("disk full")),
+            patch("aipass.hooks.apps.handlers.json.files.os.replace", side_effect=OSError("disk full")),
         ):
             handle({"cwd": str(branch_dir)})
         assert local.read_text(encoding="utf-8") == before

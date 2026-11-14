@@ -18,7 +18,7 @@ import json
 import os
 import shutil
 import sys
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath
 from unittest.mock import patch
 
 import pytest
@@ -344,7 +344,6 @@ class TestADispatchGrantOnTheScriptedLane:
         climb = (dispatch_grant.seed / "src" / "hooks" / ".." / ".." / "package.json").as_posix()
         assert _blocked(_run(dispatch_grant.seat, command=f"echo x > {climb}"))
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need a privilege on Windows")
     def test_a_symlink_escaping_a_granted_dir_is_refused(self, dispatch_grant):
         (dispatch_grant.seed / "private").mkdir()
         (dispatch_grant.seed / "src" / "hooks" / "link").symlink_to(dispatch_grant.seed / "private")
@@ -768,19 +767,13 @@ class TestBashWritesParser:
             assert named in joined
 
     def test_no_usable_cwd_raises_rather_than_reading_no_writes(self, tmp_path: Path, monkeypatch):
-        """With no cwd to resolve against, the reader raises; [] would let a relative write through.
-
-        Windows refuses to remove a process's cwd, so there the command is read as before.
-        """
+        """With no cwd to resolve against, the reader raises; [] would let a relative write through."""
         gone = tmp_path / "gone"
         gone.mkdir()
         monkeypatch.chdir(gone)
-        shutil.rmtree(gone, ignore_errors=True)  # the platform answers by whether the directory is still there
-        if not gone.exists():
-            with pytest.raises(OSError):
-                bash_writes.write_targets_by_segment("echo hi > out.txt", "")
-        else:
-            assert write_targets("echo hi > out.txt", "") == [(gone / "out.txt", "redirection (>)")]
+        shutil.rmtree(gone)
+        with pytest.raises(OSError):
+            bash_writes.write_targets_by_segment("echo hi > out.txt", "")
 
     @pytest.mark.parametrize(
         ("command", "named"),
@@ -995,21 +988,10 @@ class TestBothSpellingsAreRead:
 
         assert all(any(c.isalnum() for c in t.name) for t, _ in hits), f"separator-only target: {hits}"
 
-    def test_the_cross_os_root_limit_is_published(self):
-        """A drive letter names nothing on Linux — said as data, not discovered."""
-        assert any("operating system" in gap for gap in bash_writes.NOT_CAUGHT), (
-            "the cross-OS root residual is not in NOT_CAUGHT"
-        )
 
 
 class TestTargetSpellingIsNotPartOfTheContract:
     """Tests compare target components, never str(target), which differs per OS."""
-
-    def test_names_accepts_the_windows_rendering(self):
-        """The Windows rendering, compared on any OS: the tests above are green on Linux either way."""
-        as_windows = [(PureWindowsPath(r"\other\Project\x.json"), "python3 (interpreter)")]
-
-        assert _names(as_windows, "other", "Project", "x.json")
 
     def test_names_does_not_match_a_shorter_tail(self):
         """A comparison loose enough to pass anywhere proves nothing."""
@@ -1030,50 +1012,6 @@ class TestTargetSpellingIsNotPartOfTheContract:
         assert all(isinstance(t, LocalPath) for t, _ in targets), (
             f"targets are not the local Path flavour the fence must walk: {targets}"
         )
-
-
-class TestTheGitBashDriveSpelling:
-    """Git Bash's /c/... names drive C on Windows, not C:\\c\\... on the seat's drive."""
-
-    SEAT = r"C:\Work\AIPass\src\aipass\hooks"
-    VERA_FILE = PureWindowsPath(r"C:\Work\Vera-Studio\f.json")
-
-    @pytest.mark.parametrize(
-        "command",
-        [
-            "sed -i s/a/b/ /c/Work/Vera-Studio/f.json",
-            "cd /c/Work/Vera-Studio && sed -i s/a/b/ f.json",
-            "cd /c/Work/Vera-Studio\nsed -i s/a/b/ f.json",
-            "sed -i s/a/b/ C:/Work/Vera-Studio/f.json",
-        ],
-    )
-    def test_a_drive_path_names_the_drive_on_windows(self, command):
-        assert [t for t, _ in write_targets(command, self.SEAT, PureWindowsPath)] == [self.VERA_FILE]
-
-    def test_the_bare_drive_is_its_root(self):
-        """/c alone is C:/, never the drive-relative C:, which pathlib joins as the seat itself."""
-        targets = [t for t, _ in write_targets("cd /c && touch x.json", self.SEAT, PureWindowsPath)]
-        assert targets == [PureWindowsPath(r"C:\x.json")], targets
-
-    def test_a_longer_first_component_is_not_a_drive(self):
-        """/cache is a directory on the seat's drive, not drive C with 'ache' under it."""
-        targets = [t for t, _ in write_targets("sed -i s/a/b/ /cache/f.json", self.SEAT, PureWindowsPath)]
-        assert targets == [PureWindowsPath(r"C:\cache\f.json")], targets
-
-    def test_the_respelled_ci_pin_lands_on_the_existing_test(self):
-        """test_a_subshell_cd_resolves_its_own_edit, read the way windows-setup reads it.
-
-        On Linux as_posix() changes nothing; this shows C:/... reaches the real file on Windows.
-        """
-        command = "(cd C:/Work/AIPass && sed -i s/a/b/ src/aipass/hooks/te" + "sts/test_existing.py)"
-
-        targets = [t for t, _ in write_targets(command, self.SEAT, PureWindowsPath)]
-        assert targets == [PureWindowsPath(self.SEAT) / "tests" / "test_existing.py"], targets
-
-    def test_on_posix_a_one_letter_directory_is_only_a_directory(self, tmp_path: Path):
-        """The drive reading is Windows-only. On Linux /c is a real directory named c."""
-        targets = [t for t, _ in write_targets("sed -i s/a/b/ /c/Work/f.json", tmp_path.as_posix(), PurePosixPath)]
-        assert targets == [PurePosixPath("/c/Work/f.json")], targets
 
 
 class TestTheBranchAndMemoryLanesAreDefaultDeny:
@@ -1129,7 +1067,7 @@ class TestTheBranchAndMemoryLanesAreDefaultDeny:
         self, registered_projects: dict, grant_withheld, tmp_path: Path
     ):
         """An unlistable directory (0o300) must not read as no project: glob answers [] for it.
-        Where the platform still lists it (Windows, root) the crossing rule refuses instead."""
+        Where the platform still lists it (root) the crossing rule refuses instead."""
         locked = tmp_path / "Projects" / "Locked"
         locked.mkdir(parents=True)
         (locked / "LOCKED_REGISTRY.json").write_text('{"branches": []}', encoding="utf-8")
@@ -1146,8 +1084,8 @@ class TestTheBranchAndMemoryLanesAreDefaultDeny:
             locked.chmod(0o700)
 
     @pytest.mark.skipif(
-        sys.platform == "win32" or (hasattr(os, "geteuid") and os.geteuid() == 0),
-        reason="0o300 leaves the directory listable on Windows and for root",
+        os.geteuid() == 0,
+        reason="0o300 leaves the directory listable for root",
     )
     def test_an_unlistable_project_logs_a_refusal_at_warning_and_a_crash_stays_error(
         self, registered_projects: dict, grant_withheld, tmp_path: Path, caplog
@@ -1182,13 +1120,7 @@ class TestAWordTheGateCannotProbe:
     @pytest.mark.parametrize(
         "name",
         [
-            pytest.param(
-                "x" * 300 + ".txt",
-                marks=pytest.mark.skipif(
-                    sys.platform == "win32", reason="the probe's errno for an over-long name is measured on POSIX only"
-                ),
-                id="name-over-NAME_MAX",
-            ),
+            pytest.param("x" * 300 + ".txt", id="name-over-NAME_MAX"),
             pytest.param("x" * 40000, id="path-over-PATH_MAX"),
         ],
     )

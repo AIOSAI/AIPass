@@ -69,9 +69,8 @@ _WGET_BODY = ("--post-data", "--post-file", "--body-data", "--body-file")
 _HTTPIE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _HTTPIE_BODY_FLAGS = ("-f", "--form", "--multipart", "--raw")
 
-# R6: programs that read a stored secret, and the subcommands of `security` (macOS) that do.
+# R6: programs that read a stored secret.
 _SECRET_PROGRAMS = frozenset({"secret-tool", "kwallet-query"})
-_SECURITY_READS = frozenset({"find-generic-password", "find-internet-password", "dump-keychain"})
 _CREDENTIAL_FILES = ("gh/hosts.yml", ".git-credentials")
 # R7: a .secrets path segment with a slash or tilde beside it; a bare word ".secrets" is a pattern or prose.
 _STORE_WORD = re.compile(r"[/~]\.secrets(?![\w.-])|(?<![\w.-])\.secrets/")
@@ -299,8 +298,6 @@ def _credential_read(inv, reader) -> str:
         inv.language == "python" and "-m" in args and _next(args, args.index("-m")) == "keyring"
     ):
         return "the keyring command"
-    if inv.program == "security" and args[:1] and args[0] in _SECURITY_READS:
-        return f"security {args[0]}"
     for arg in args:
         if any(name in arg.replace("\\", "/") for name in _CREDENTIAL_FILES):
             return f"a credential file ({arg})"

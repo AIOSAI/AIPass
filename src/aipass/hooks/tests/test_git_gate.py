@@ -595,7 +595,7 @@ class TestMailBodyIsAnArgumentNotACommand:
 class TestOneProgramSpelledManyWays:
     """A rename is not a bypass — the owner's go, 2026-09-19 (devpulse DPLAN-0352).
 
-    Windows runs every spelling below as git.
+    WSL interop runs git.exe as git; every spelling below is read alike.
     """
 
     #: Assembled, like WRITE_LINE above and for the same reason.
@@ -767,7 +767,6 @@ def trust_home(tmp_path, monkeypatch):
     (home / ".aipass").mkdir(parents=True)
     (home / ".aipass" / "trusted_projects.json").write_text("{}", encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("USERPROFILE", str(home))
     return home / ".aipass" / "trusted_projects.json"
 
 
@@ -1054,7 +1053,6 @@ def store_home(tmp_path, monkeypatch):
     (home / ".secrets" / "aipass").mkdir(parents=True)
     (home / ".secrets" / "aipass" / ".env").write_text("K=v\n", encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("USERPROFILE", str(home))
     return home / ".secrets"
 
 

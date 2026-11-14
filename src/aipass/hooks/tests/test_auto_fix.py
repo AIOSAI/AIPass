@@ -22,7 +22,7 @@ import json
 import os
 import sys
 import tempfile
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -51,11 +51,8 @@ def _kept_redirect() -> dict[str, str]:
     return {"AIPASS_TEST_LOG_DIR": os.environ["AIPASS_TEST_LOG_DIR"]}
 
 
-# A hook file as this host spells it, and as a native Windows host hands it over:
-# the skips compare with forward slashes, so the second is what compass 458 guards.
 _HOOK_SPELLINGS = [
     pytest.param(str, id="this-host"),
-    pytest.param(lambda path: str(PureWindowsPath(path)), id="windows-form"),
 ]
 
 
@@ -616,7 +613,6 @@ _SCRATCH = [
     pytest.param((".backup", "old.json"), ".backup", str, id="backup-json"),
     pytest.param((".archive", "gone.py"), ".archive", str, id="archive"),
     pytest.param(("claude-1000", "proj", "sess", "scratchpad", "proof.py"), "the harness scratchpad", str, id="pad"),
-    pytest.param(("docs.local", "probe.py"), "docs.local", lambda p: str(PureWindowsPath(p)), id="windows-form"),
 ]
 
 

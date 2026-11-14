@@ -87,7 +87,7 @@ def _find_project_file(filename: str) -> Path | None:
 def _is_user_state_dir(candidate: Path) -> bool:
     """True when *candidate* is the per-user ~/.aipass (trust registry, commons.db), not a stamped tree.
 
-    samefile, not spelling: Windows can reach the same directory through an 8.3 name.
+    samefile, not spelling: a symlink can reach the same directory.
     """
     try:
         return candidate.samefile(Path.home() / ".aipass")
