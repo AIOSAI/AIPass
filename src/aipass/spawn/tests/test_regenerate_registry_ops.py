@@ -571,7 +571,7 @@ class TestLastUpdatedTracksContentNotTheCalendar:
         """A template whose registry is already stable, stamped on a day that is not today.
 
         Settled twice: the first run creates .spawn/, which the second then tracks.
-        newline is explicit: without it write_text writes os.linesep (CRLF on Windows)."""
+        newline is explicit: without it write_text writes os.linesep."""
         template = _make_template(tmp_path, files={"README.md": "hello"})
         self._regenerate(template)
         self._regenerate(template)
@@ -592,7 +592,7 @@ class TestLastUpdatedTracksContentNotTheCalendar:
 
     @pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
     def test_no_change_regenerate_is_byte_identical(self, tmp_path, newline):
-        """A no-op keeps every byte, line endings included (CRLF: a Windows checkout).
+        """A no-op keeps every byte, line endings included.
 
         Mutant: a no-change regenerate stamps today's date -> red, both endings.
         Mutant: the writer always writes LF -> red on crlf."""

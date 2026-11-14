@@ -11,6 +11,7 @@
 metadata.id is the project credential; an entry's registry_id is a per-citizen UUID. Never conflate them.
 Entry flags owner and admin are the sealed authority; a passport never is."""
 
+import fcntl
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
@@ -19,13 +20,6 @@ from pathlib import Path
 from aipass.memory.apps.modules.door_registry_scope import fleet_branches
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.spawn.apps.handlers.json import json_handler
-
-# POSIX only: Windows has no fcntl, so registry_lock is a no-op there.
-try:
-    import fcntl
-except ImportError:
-    fcntl = None  # type: ignore[assignment]
-    logger.info("[registry] fcntl unavailable (Windows) — registry writers run unlocked")
 
 
 _PROTECTED_FLOOR = frozenset({"spawn", "devpulse", "drone"})
@@ -177,9 +171,6 @@ def registry_lock(registry_path):
 
     flock is per open file, so a nested registry_lock on the same registry in one process deadlocks."""
     registry_path = Path(registry_path)
-    if fcntl is None:
-        yield
-        return
     lock_path = registry_path.parent / f".{registry_path.stem}.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with open(lock_path, "w", encoding="utf-8") as lock_fd:

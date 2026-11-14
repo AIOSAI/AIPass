@@ -17,13 +17,11 @@ import errno
 import json
 import logging
 import os
-import sys
 import tempfile
 import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -97,7 +95,6 @@ class _Racer:
         self.reads = 0
         self.writes = 0
         self.missing = 0
-        self.refused = 0
         self.warmed_up = False
         self._stop = False
         self._lock = threading.Lock()
@@ -109,7 +106,6 @@ class _Racer:
         n = 0
         effective = 0
         while not self._stop:
-            # A zero-delay loop keeps a replace in flight and Windows then refuses every reader open.
             time.sleep(0.001)
             # Count real rewrites, not loop turns, or a race passes vacuously.
             if self.write_once(n) is True:
@@ -120,9 +116,8 @@ class _Racer:
             self.writes += effective
 
     def _reader(self):
-        reads = empty = unparseable = missing = refused = 0
+        reads = empty = unparseable = missing = 0
         while not self._stop:
-            # Windows share-mode: a spinning reader starves os.replace's bounded retry (WinError 5).
             time.sleep(0.001)
             try:
                 raw = self.target.read_text(encoding="utf-8")
@@ -130,11 +125,6 @@ class _Racer:
                 # Counted so the skip reason can tell a slow starter from a starved scheduler.
                 missing += 1
                 logger.debug("racer: target absent: %s", self.target)
-                continue
-            except PermissionError as exc:
-                # Share-mode refusal during a replace: not a torn read, counted apart.
-                refused += 1
-                logger.debug("racer: open refused: %s (%s)", self.target, exc)
                 continue
             reads += 1
             self._saw_read.set()
@@ -151,7 +141,6 @@ class _Racer:
             self.empty += empty
             self.unparseable += unparseable
             self.missing += missing
-            self.refused += refused
 
     def run(self, seconds: float = RACE_SECONDS, warmup: float = RACE_WARMUP_SECONDS):
         """Start the threads, wait until both sides are live, then race.
@@ -178,7 +167,7 @@ class _Racer:
     def final_state(self) -> str:
         """One direct read of the target, after the threads have stopped.
 
-        One of absent, empty, unparseable, unreadable (refused open, not a tear), or whole.
+        One of absent, empty, unparseable, unreadable (not a tear), or whole.
         """
         try:
             raw = self.target.read_text(encoding="utf-8")
@@ -222,7 +211,7 @@ class _Racer:
             pytest.skip(
                 "race not exercised: harness never read "
                 f"(reads=0, writes={self.writes}, target-absent={self.missing}, "
-                f"open-refused={self.refused}, final={final}) — the file itself was "
+                f"final={final}) — the file itself was "
                 "checked directly and is not torn; nothing else is claimed either way"
             )
 
@@ -675,26 +664,6 @@ class TestAtomicWriteHelper:
         assert target.read_text(encoding="utf-8") == "new\n"
         assert _stray_temps(tmp_path) == []
 
-    def test_uses_os_replace_not_path_rename(self, tmp_path, monkeypatch):
-        """Path.rename cannot overwrite on Windows; os.replace can.
-
-        Mutant: os.replace(source, destination) -> os.rename(source, destination) -> red.
-        """
-        seen = []
-        real_replace = os.replace
-
-        def spy(src, dst):
-            seen.append((src, dst))
-            return real_replace(src, dst)
-
-        monkeypatch.setattr(aw, "os", _ModuleView(os, replace=spy))
-        target = tmp_path / "out.json"
-        target.write_text("old\n", encoding="utf-8")
-
-        aw.atomic_write_text(target, "new\n")
-
-        assert len(seen) == 1, "the swap must go through os.replace"
-
     def test_fsyncs_before_swap(self, tmp_path, monkeypatch):
         """Durability across power loss needs the bytes flushed before the rename.
 
@@ -716,7 +685,6 @@ class TestAtomicWriteHelper:
 
         assert order == ["fsync", "replace"]
 
-    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
     def test_an_existing_files_mode_survives_the_swap(self, tmp_path):
         """Pins passports turning 0600: the staged temp's mkstemp mode replaced the target's."""
 
@@ -728,7 +696,6 @@ class TestAtomicWriteHelper:
 
         assert target.stat().st_mode & 0o777 == 0o644
 
-    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
     def test_a_new_file_gets_the_umask_default_not_0600(self, tmp_path):
 
         target = tmp_path / "fresh.json"
@@ -749,132 +716,6 @@ class TestAtomicWriteHelper:
             atomic_write_text(target, "bad \ud800 surrogate")
 
         assert not target.exists()
-        assert _stray_temps(tmp_path) == []
-
-
-class TestReplaceRetriesThroughSharingViolations:
-    """os.replace is atomic, but on Windows it is not always *available*.
-
-    Python opens without FILE_SHARE_DELETE, so on Windows os.replace raises PermissionError while any
-    reader holds the target; a short bounded retry converges. Linux never raises it, so tests inject it.
-    """
-
-    def test_helper_exists_and_is_bounded(self, tmp_path, monkeypatch):
-        """The SHIPPED bound and backoff, measured through the public write.
-
-        More than one attempt, every wait non-zero; aw's own ``time`` is stubbed so nothing sleeps.
-
-        Mutant: _REPLACE_ATTEMPTS = 40 -> _REPLACE_ATTEMPTS = 1 -> red.
-        """
-        attempts = []
-        sleeps = []
-
-        def blocked(src, dst):
-            attempts.append(dst)
-            raise PermissionError(13, "sharing violation", str(dst))
-
-        monkeypatch.setattr(aw, "time", SimpleNamespace(sleep=sleeps.append))
-        monkeypatch.setattr(aw, "os", _ModuleView(os, replace=blocked))
-
-        with pytest.raises(PermissionError):
-            atomic_write_text(tmp_path / "out.json", "new\n")
-
-        assert len(attempts) > 1, "a single attempt is not a retry"
-        assert len(sleeps) == len(attempts) - 1
-        assert all(s > 0 for s in sleeps), f"a zero backoff spins instead of waiting: {sleeps}"
-
-    def test_retries_through_a_transient_sharing_violation(self, tmp_path, monkeypatch):
-        """Two sharing violations then success — the write still lands."""
-        calls = {"count": 0}
-        real_replace = os.replace
-
-        def flaky(src, dst):
-            calls["count"] += 1
-            if calls["count"] <= 2:
-                raise PermissionError(13, "sharing violation", str(dst))
-            return real_replace(src, dst)
-
-        monkeypatch.setattr(aw, "os", _ModuleView(os, replace=flaky))
-        target = tmp_path / "out.json"
-        target.write_text("old\n", encoding="utf-8")
-
-        aw.atomic_write_text(target, "new\n")
-
-        assert target.read_text(encoding="utf-8") == "new\n"
-        assert calls["count"] == 3, "retry path never engaged"
-        assert _stray_temps(tmp_path) == []
-
-    def test_retry_is_bounded_and_raises(self, tmp_path, monkeypatch):
-        """A swap that never unblocks raises instead of retrying forever.
-
-        Mutant: attempt == _REPLACE_ATTEMPTS - 1 -> attempt == _REPLACE_ATTEMPTS - 2 -> red.
-        """
-
-        calls = {"count": 0}
-
-        def blocked(src, dst):
-            calls["count"] += 1
-            raise PermissionError(13, "sharing violation", str(dst))
-
-        monkeypatch.setattr(aw, "os", _ModuleView(os, replace=blocked))
-        monkeypatch.setattr(aw, "_REPLACE_BACKOFF_SECONDS", 0)
-        monkeypatch.setattr(aw, "_REPLACE_ATTEMPTS", 3)
-        target = tmp_path / "out.json"
-        target.write_text("old\n", encoding="utf-8")
-
-        with pytest.raises(PermissionError):
-            aw.atomic_write_text(target, "new\n")
-
-        assert calls["count"] == 3, "bound not honoured"
-        assert target.read_text(encoding="utf-8") == "old\n", "the live file was damaged"
-        assert _stray_temps(tmp_path) == []
-
-    def test_retry_waits_between_attempts(self, tmp_path, monkeypatch):
-        """The backoff is used, not just declared.
-
-        A busy spin passes every other pin here but never outlasts the reader handle. Patches aw's own
-        ``time`` binding: patching the shared module collects other threads' sleeps.
-
-        Mutant: time.sleep(_REPLACE_BACKOFF_SECONDS) -> time.sleep(0) -> red.
-        """
-
-        sleeps = []
-        monkeypatch.setattr(aw, "time", SimpleNamespace(sleep=sleeps.append))
-        monkeypatch.setattr(aw, "_REPLACE_ATTEMPTS", 4)
-        monkeypatch.setattr(aw, "_REPLACE_BACKOFF_SECONDS", 0.25)
-        monkeypatch.setattr(
-            aw,
-            "os",
-            _ModuleView(
-                os,
-                replace=lambda src, dst: (_ for _ in ()).throw(PermissionError(13, "sharing violation", str(dst))),
-            ),
-        )
-        target = tmp_path / "out.json"
-        target.write_text("old\n", encoding="utf-8")
-
-        with pytest.raises(PermissionError):
-            aw.atomic_write_text(target, "new\n")
-
-        assert sleeps == [0.25, 0.25, 0.25]
-
-    def test_non_permission_error_propagates_immediately(self, tmp_path, monkeypatch):
-        """A cross-device rename will not fix itself in 200ms — do not wait it out."""
-
-        calls = {"count": 0}
-
-        def broken(src, dst):
-            calls["count"] += 1
-            raise OSError(errno.EXDEV, "invalid cross-device link")
-
-        monkeypatch.setattr(aw, "os", _ModuleView(os, replace=broken))
-        monkeypatch.setattr(aw, "_REPLACE_BACKOFF_SECONDS", 0)
-
-        with pytest.raises(OSError) as caught:
-            aw.atomic_write_text(tmp_path / "out.json", "new\n")
-
-        assert caught.value.errno == errno.EXDEV
-        assert calls["count"] == 1, "a non-sharing failure was retried"
         assert _stray_temps(tmp_path) == []
 
 
@@ -921,7 +762,6 @@ _REGISTRY_WRITERS = {
 class TestRegistryWritersWaitAndReload:
     """Every registry read-modify-write runs under registry_lock and reloads inside it."""
 
-    @pytest.mark.skipif(registry_mod.fcntl is None, reason="no fcntl on Windows: the writers run unlocked there")
     @pytest.mark.parametrize("writer", sorted(_REGISTRY_WRITERS))
     def test_a_waiting_writer_keeps_the_entry_another_writer_landed(self, tmp_path, writer):
         """Pins a stale copy saved over an entry another agent added while this one held its load."""
@@ -1323,10 +1163,9 @@ class TestTheFinalStateIsCheckedDirectly:
         assert verdict == "PASSED", f"a whole file was reported {verdict}: {message}"
 
     def test_an_unreadable_target_is_not_convicted_as_torn(self, tmp_path):
-        """Share-mode / permission refusal is not evidence of tearing.
+        """A permission refusal is not evidence of tearing.
 
-        chmod cannot build the state everywhere (Windows ignores mode bits, root reads through), so the
-        host is probed, not assumed.
+        chmod cannot build the state everywhere (root reads through), so the host is probed, not assumed.
         """
         with _target(tmp_path, '{"whole": true}') as racer:
             racer.target.chmod(0o000)
@@ -1346,8 +1185,7 @@ class TestTheFinalStateIsCheckedDirectly:
         if not unreadable:
             pytest.skip(
                 "world not built: chmod(0o000) left the file readable on this "
-                f"host (platform={sys.platform}, euid={getattr(os, 'geteuid', lambda: 'n/a')()}) "
-                "— Windows ignores POSIX mode bits and root reads through them, "
+                f"host (euid={os.geteuid()}) — root reads through POSIX mode bits, "
                 "so the unreadable state cannot be constructed this way here"
             )
 

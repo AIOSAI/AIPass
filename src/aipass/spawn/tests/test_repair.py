@@ -1145,7 +1145,7 @@ class TestTemplateFiles:
 
 
 def _case_insensitive_listing(monkeypatch):
-    """Make repair_ops's registry listing behave the way a Windows volume does.
+    """Make repair_ops's registry listing behave the way a case-insensitive volume does.
 
     Patches the listing seam, not Path.glob process-wide, so the pins run red on Linux too.
     Returns the list of roots the seam was asked to list."""
@@ -1298,7 +1298,6 @@ def _adopt_pair(tmp_path, monkeypatch, tracked=(), messages=()):
     _git(target, "commit", "-q", "-m", "client")
     monkeypatch.setattr(adopt_citizen_ops, "repo_root", lambda: home)
     monkeypatch.setenv("HOME", str(tmp_path / "user"))
-    monkeypatch.setenv("USERPROFILE", str(tmp_path / "user"))
     return source_root, branch, target
 
 

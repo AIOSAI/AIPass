@@ -106,13 +106,13 @@
     {
       "file": "tests/test_json_durability.py",
       "standard": "sleep_in_test",
-      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision; HELD in leg 7). File-wide because sleep_in_test passes no line (is_bypassed without a line, sleep_in_test_check.py 146); it covers exactly the three sleeps at 106, 119 and 165. 106 and 119 are the 1ms yields between turns of the racer's writer and readers. The yield is the subject: Windows share-mode refuses os.replace on an open without FILE_SHARE_DELETE, and zero-delay loops starved CI to reads == 0 (08-18, 08-28). 165 is the timed race window, whose length is the exposure. The start already waits on the real condition (the _saw_read and _saw_write Events); no event marks enough interleavings, so there is nothing to poll."
+      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision; HELD in leg 7). File-wide because sleep_in_test passes no line (is_bypassed without a line, sleep_in_test_check.py 146); it covers exactly the three sleeps at 109, 121 and 161. 109 and 121 are the 1ms yields between turns of the racer's writer and readers. The yield is the subject: zero-delay loops starved CI to reads == 0 (08-18, 08-28). 161 is the timed race window, whose length is the exposure. The start already waits on the real condition (the _saw_read and _saw_write Events); no event marks enough interleavings, so there is nothing to poll."
     },
     {
       "file": "tests/test_template_import_guard.py",
       "standard": "import_site",
       "lines": [
-        793
+        570
       ],
       "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision; HELD in leg 7): importlib.import_module in test_the_denier_actually_denies is the negative control. Its subject is the import attempt under the denier; a top-level import would succeed before the denier exists and prove nothing. The sys.modules delitems only drop cached aipass.memory modules so the finder is consulted, and monkeypatch restores them."
     },

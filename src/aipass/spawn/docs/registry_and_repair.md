@@ -33,8 +33,8 @@ but will not parse is refused by the sync, `--fix` and `--check` alike (`--check
 `unreadable_registry`): rebuilding it would re-mint the project. Under `--fix`, a stale entry
 whose branch is found elsewhere in the project has its `path` rewritten, so `owner`, `admin`
 and `registry_id` stay; directory names are keyed through `normalize_branch_name`, so
-`my-agent` on disk matches `MY_AGENT`. Every registry writer holds `registry_lock` (POSIX
-`flock` on `.<stem>.lock`, a no-op on Windows) and loads inside it.
+`my-agent` on disk matches `MY_AGENT`. Every registry writer holds `registry_lock` (`flock`
+on `.<stem>.lock`) and loads inside it.
 
 ---
 

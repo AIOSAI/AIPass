@@ -243,7 +243,7 @@ class TestMintNeedsARegistry:
         assert handle_create([str(tmp_path / "orphan")]) != 0
 
         out, err = capsys.readouterr()
-        # Rich wraps the long tmp path at a hyphen on macOS runners, so whitespace is dropped on both sides
+        # Rich wraps the long tmp path at a hyphen, so whitespace is dropped on both sides
         assert "".join(f"No registry above {tmp_path / 'orphan'}".split()) in "".join((out + err).split())
         assert not (tmp_path / "orphan").exists()
         assert list(tmp_path.rglob("*_REGISTRY.json")) == []

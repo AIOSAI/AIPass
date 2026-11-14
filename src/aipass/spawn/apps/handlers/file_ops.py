@@ -39,7 +39,6 @@ def copy_template(template_dir, target_dir, replacements):
     for item in _walk(template_dir):
         rel_path = item.relative_to(template_dir)
 
-        # as_posix(), never str(): Windows would mix backslashes with the "/ (dir)" suffix.
         if _should_skip(rel_path):
             skipped.append(rel_path.as_posix())
             continue

@@ -9,11 +9,9 @@
 """Tests for the worlds that pin templates/citizen/apps/handlers/__init__.py, measured across hosts."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(stdlib) — Path.resolve and ntpath.realpath on other interpreters, emulated here, never run
+# sentry: no-test-needed(stdlib) — Path.resolve on other interpreters, emulated here, never run
 
 import ast
-import ntpath
-import os
 import sys
 import textwrap
 from pathlib import Path
@@ -29,7 +27,6 @@ from aipass.spawn.tests.support_template_import_guard import (
     _EMULATE_310,
     _HOST_FACTS,
     _PATHLIB_ROUTE_PROBE,
-    _PLATFORM_EMULATIONS,
     _REPORT_HOST,
     _REPORT_PARSING_DIALECT,
     _child_script,
@@ -79,14 +76,7 @@ _HALF_FLAVOUR_OBJECT = """
     import pathlib, posixpath
 
     _host_flavour = getattr(pathlib.PurePosixPath, "_flavour", None)
-    if _CONCRETE_KIND == "nt":
-        # The stand-in and its parse hook are POSIX: they replace
-        # PurePosixPath._flavour and route PurePath._parse_path through it. On a
-        # host that constructs WindowsPath neither is on the path the child
-        # travels, and installing them anyway hands the hook an ntpath module
-        # with no parse_parts. Round 9's windows reds, in one clause.
-        print("HALF:flavour-object:UNAVAILABLE:this host constructs WindowsPath; the stand-in is posix-only")
-    elif _host_flavour is None:
+    if _host_flavour is None:
         print("HALF:flavour-object:UNAVAILABLE:this host has no _flavour at all (3.13+)")
     elif hasattr(_host_flavour, "parse_parts"):
         print("HALF:flavour-object:NATIVE")
@@ -146,86 +136,22 @@ _HALF_DIRECT_RESOLVE = """
     print("HALF:direct-resolve:INSTALLED")
 """
 
-_HALF_FOREIGN_CONCRETE_CLASS = """
-    import os.path, pathlib
-
-    # MEASURED, so the copy below is not tidied away: deleting it kills the
-    # shape (the class becomes unconstructible), while changing the BASE class
-    # or routing resolve through os.path directly changes nothing on 3.12 —
-    # both are equivalents here, because the copy is what makes this class
-    # foreign and on 3.12 the copied flavour IS os.path.
-    _base_flavour = getattr(pathlib.PurePosixPath, "_flavour", None)
-
-    class _ForeignPath(pathlib.PurePath):
-        # Deliberately OUTSIDE the PosixPath hierarchy, the way WindowsPath is,
-        # and carrying the host's own flavour so it is constructible on every
-        # version. The flavour is copied at class creation, so a later patch of
-        # PurePosixPath._flavour cannot reach it — which is the whole point.
-        if _base_flavour is not None:
-            _flavour = _base_flavour
-
-        def resolve(self, strict=False):
-            # Through the flavour when the flavour IS a path module, the way
-            # WindowsPath does on 3.12 — that is what makes the copied flavour
-            # load-bearing: inherit the posix one instead of copying it and the
-            # emulation's patch reaches this class, which is the foreignness the
-            # shape exists to reproduce.
-            #
-            # ROUND 9: on 3.10 and 3.11 the flavour is a _PosixFlavour OBJECT
-            # with no realpath at all, and this line died with
-            # "'_PosixFlavour' object has no attribute 'realpath'". A stand-in
-            # that assumes what a host attribute IS, rather than asking, is the
-            # same defect as assuming the host version.
-            _mod = getattr(type(self), "_flavour", None)
-            if not hasattr(_mod, "realpath"):
-                _mod = os.path
-            return type(self)(_mod.realpath(self, strict=strict))
-
-    pathlib.Path = _ForeignPath
-    print("HALF:foreign-concrete-class:INSTALLED")
-"""
-
-# The real _PosixFlavour carries parsing and no realpath; the tolerant stand-in above cannot show that.
-_A_FLAVOUR_OBJECT_THAT_IS_NOT_A_PATH_MODULE = """
-    import pathlib, posixpath
-
-    class _FlavourWithoutRealpath:
-        sep = posixpath.sep
-        altsep = ""
-
-        def __getattr__(self, name):
-            if name in ("realpath", "abspath"):
-                raise AttributeError(f"'_PosixFlavour' object has no attribute '{name}'")
-            return getattr(posixpath, name)
-
-        def parse_parts(self, parts):
-            return ("", posixpath.sep, list(parts))
-
-    pathlib.PurePosixPath._flavour = _FlavourWithoutRealpath()
-    pathlib.PosixPath._flavour = pathlib.PurePosixPath._flavour
-    print("FLAVOUR_WITHOUT_REALPATH_INSTALLED")
-"""
-
-
 _HOST_SHAPES = {
     "3.12-as-it-is": (),
     "3.10-native-accessor-and-flavour-object": (_HALF_FLAVOUR_OBJECT, _HALF_ACCESSOR_ROUTE),
     "3.11-flavour-object-and-direct-resolve": (_HALF_FLAVOUR_OBJECT, _HALF_DIRECT_RESOLVE),
     "3.13-no-accessor-direct-resolve": (_HALF_DIRECT_RESOLVE,),
-    "nt-concrete-class-is-not-posix": (_HALF_FOREIGN_CONCRETE_CLASS,),
 }
 
-# The old emulation's symptom depends on the COMPOSED world (host flavour x shape), not the shape name;
-# the foreign-class shape carries its own flavour copy, so the emulation's write never reaches it.
-_FOREIGN_CLASS_SHAPE = "nt-concrete-class-is-not-posix"
+# The old emulation's symptom depends on the COMPOSED world (host flavour x shape), not the shape name.
 
 
 def _expected_old_emulation_symptom(flavour_in_force: str, shape: str) -> str:
     """Two rows, each read off a CI traceback rather than reasoned about.
 
-    parse_parts where parsing travels through an OBJECT flavour on a posix class; ROUTE_DARK elsewhere.
+    parse_parts where parsing travels through an OBJECT flavour; ROUTE_DARK elsewhere.
     """
-    if flavour_in_force == "object" and shape != _FOREIGN_CLASS_SHAPE:
+    if flavour_in_force == "object":
         return "parse_parts"
     return "ROUTE_DARK"
 
@@ -601,8 +527,8 @@ _HOST_SIMULATIONS = {
     "flavour-is-already-an-object": (
         _HALF_FLAVOUR_OBJECT,
         sorted(_HOST_SHAPES),
-        # On a flavourless or WindowsPath host the half reports UNAVAILABLE and presents nothing.
-        {"flavour": ("object", "module"), "concrete": ("posix",)},
+        # On a flavourless host the half reports UNAVAILABLE and presents nothing.
+        {"flavour": ("object", "module")},
     ),
     # pathlib.Path is inherited from on every version, so the accessor half has no precondition.
     "accessor-route-is-already-native": (_HALF_ACCESSOR_ROUTE, sorted(_HOST_SHAPES), {}),
@@ -616,8 +542,7 @@ _HOST_SIMULATIONS = {
         pathlib.PurePosixPath = _FlavourlessPurePosixPath
         """,
         [name for name in sorted(_HOST_SHAPES) if _HALF_FLAVOUR_OBJECT in _HOST_SHAPES[name]],
-        # On nt the half refuses for the WindowsPath reason first, not the simulated one.
-        {"concrete": ("posix",)},
+        {},
     ),
     # A module flavour without 3.12's parsing: no released interpreter is both, so it is simulated.
     "purepath-has-no-parse-path": (
@@ -631,7 +556,7 @@ _HOST_SIMULATIONS = {
         """,
         [name for name in sorted(_HOST_SHAPES) if _HALF_FLAVOUR_OBJECT in _HOST_SHAPES[name]],
         # Aims at the half's LAST branch; an object-flavour host answers NATIVE first and never reaches it.
-        {"flavour": ("module",), "concrete": ("posix",)},
+        {"flavour": ("module",)},
     ),
 }
 
@@ -792,99 +717,6 @@ class TestTheHarnessSurvivesAHostThatIsNotTheOneItWasWrittenOn:
             f"does not, so the old table was pinning a mechanism that cannot fire:\n{result.stderr}"
         )
 
-    def test_the_foreign_class_survives_a_flavour_that_is_not_a_path_module(self):
-        """CI's 3.11 red on the nt shape, reproduced on 3.12.
-
-        On 3.10/3.11 the copied flavour is an object with no realpath; the cure asks instead of assuming.
-        """
-        # No _EMULATE_310: it replaces Path.resolve, which on this shape IS the foreign class's resolve under test.
-        result = _run(
-            _child_script(
-                _A_FLAVOUR_OBJECT_THAT_IS_NOT_A_PATH_MODULE,
-                _BUILD_PROBE_PATH,
-                _shape_prelude("nt-concrete-class-is-not-posix"),
-                _DENY_REALPATH,
-                _PATHLIB_ROUTE_PROBE,
-            ),
-            cwd=Path(__file__).parent,
-        )
-
-        assert "FLAVOUR_WITHOUT_REALPATH_INSTALLED" in result.stdout.split(), (
-            f"the world never took, so this measured nothing:\n{result.stdout}\n{result.stderr}"
-        )
-        assert "has no attribute 'realpath'" not in result.stderr, (
-            "the foreign class is reading its copied flavour as a path module "
-            f"again — this is CI's 3.11 traceback, verbatim:\n{result.stderr}"
-        )
-        assert "HALF:foreign-concrete-class:INSTALLED" in result.stdout, result.stdout
-        assert "PATHLIB_ARMED" in result.stdout.split(), (
-            f"the shape stopped arming under a realpath-less flavour:\n{result.stdout}\n{result.stderr}"
-        )
-
-    def test_the_fingerprint_reads_the_host_instead_of_asserting_one(self):
-        """The fingerprint is load-bearing for four gates now, so pin its source.
-
-        The concrete kind must be DERIVED from os.name; a hard-coded "posix" passes every behavioural pin on Linux.
-        """
-        result = _run(_child_script(), cwd=Path(__file__).parent)
-
-        assert _host_line(result)[1] == ("nt" if os.name == "nt" else "posix"), result.stdout
-        assert "os.name" in _REPORT_HOST, (
-            "the fingerprint stopped reading the host — every gate keyed on concrete kind is now measuring a literal"
-        )
-        assert "_CONCRETE_KIND = " in _REPORT_HOST and '"nt" if' in _REPORT_HOST, _REPORT_HOST
-
-    @staticmethod
-    def _flavour_half_verdict(*chunks: str) -> str:
-        """The half's own last word, from a child composed exactly as given."""
-        result = _run(_child_script(*chunks, _HALF_FLAVOUR_OBJECT), cwd=Path(__file__).parent)
-        lines = [line for line in result.stdout.splitlines() if line.startswith("HALF:")]
-        assert lines, f"the half reported nothing at all:\n{result.stdout}\n{result.stderr}"
-        return lines[-1]
-
-    def test_the_flavour_half_refuses_a_host_that_builds_windows_paths(self):
-        """CI's windows red, reproduced by faking the FINGERPRINT — not a world.
-
-        The nt branch is the half's FIRST question, so this is speakable from every host.
-        """
-        refusal = self._flavour_half_verdict('_CONCRETE_KIND = "nt"')
-
-        assert refusal.startswith("HALF:flavour-object:UNAVAILABLE:"), refusal
-        assert "WindowsPath" in refusal, f"the refusal does not name what it is refusing for: {refusal!r}"
-
-    # A host whose flavour is already an object answers NATIVE, as 3.10 and 3.11 do.
-    _CONTROL_HOSTS = {
-        "as-this-host-is": (),
-        "with-an-object-flavour-already-installed": (_HALF_FLAVOUR_OBJECT,),
-    }
-
-    @pytest.mark.parametrize("control_host", sorted(_CONTROL_HOSTS))
-    def test_forcing_the_posix_branch_leaves_the_row_where_the_host_put_it(self, control_host):
-        """The control for the refusal above, and round 10's first red.
-
-        Forcing posix must leave the verdict where the host put it and forcing nt must move it: nothing spelled.
-        """
-        if _HOST_FACTS["concrete"] != "posix":
-            pytest.skip(
-                "this row forces the POSIX branch, which installs the very "
-                "stand-in the nt branch exists to refuse; from an nt host that "
-                f"is not a control, it is the defect (host: {_HOST_FACTS['concrete']})"
-            )
-
-        prelude = self._CONTROL_HOSTS[control_host]
-        control = self._flavour_half_verdict(*prelude)
-        forced_posix = self._flavour_half_verdict(*prelude, '_CONCRETE_KIND = "posix"')
-        forced_nt = self._flavour_half_verdict(*prelude, '_CONCRETE_KIND = "nt"')
-
-        assert forced_posix == control, (
-            "forcing the branch the host is already on MOVED the verdict — then "
-            f"the fingerprint substitution is doing more than it claims: {forced_posix!r} vs {control!r}"
-        )
-        assert forced_nt != control, (
-            "the nt refusal is what this host says anyway, so the row above is "
-            f"not measuring the platform branch at all: {forced_nt!r} vs {control!r}"
-        )
-
     def test_the_parsing_dialect_probe_can_report_the_answer_that_shuts_a_row(self):
         """The negative control for round 10's new instrument.
 
@@ -914,7 +746,7 @@ class TestTheHarnessSurvivesAHostThatIsNotTheOneItWasWrittenOn:
         monkeypatch.setattr(
             sys.modules[__name__],
             "_HOST_FACTS",
-            {"flavour": "absent", "concrete": "posix", "accessor": "no-accessor"},
+            {"flavour": "absent", "accessor": "no-accessor"},
             raising=True,
         )
 
@@ -946,11 +778,8 @@ class TestTheRoundNineJudgementsAnswerForHostsThisBoxIsNot:
             ("object", "3.11-flavour-object-and-direct-resolve", "parse_parts"),
             # Cross term: the HOST supplies the flavour the 3.13-named shape never mentions.
             ("object", "3.13-no-accessor-direct-resolve", "parse_parts"),
-            # The foreign class carries its own flavour copy, which the emulation's write cannot reach.
-            ("object", "nt-concrete-class-is-not-posix", "ROUTE_DARK"),
             ("absent", "3.10-native-accessor-and-flavour-object", "ROUTE_DARK"),
             ("absent", "3.11-flavour-object-and-direct-resolve", "ROUTE_DARK"),
-            ("absent", "nt-concrete-class-is-not-posix", "ROUTE_DARK"),
             ("module", "3.10-native-accessor-and-flavour-object", "ROUTE_DARK"),
             ("module", "3.13-no-accessor-direct-resolve", "ROUTE_DARK"),
             # No interpreter reports this: an unrecognised fingerprint falls to the always-true mechanism.
@@ -960,11 +789,10 @@ class TestTheRoundNineJudgementsAnswerForHostsThisBoxIsNot:
     def test_the_symptom_is_a_function_of_the_host_and_the_shape(self, flavour_in_force, shape, expected):
         assert _expected_old_emulation_symptom(flavour_in_force, shape) == expected
 
-    _A_313 = {"flavour": "absent", "concrete": "posix", "accessor": "no-accessor"}
-    _A_312 = {"flavour": "module", "concrete": "posix", "accessor": "no-accessor"}
-    _A_310 = {"flavour": "object", "concrete": "posix", "accessor": "accessor"}
-    _WINDOWS = {"flavour": "module", "concrete": "nt", "accessor": "no-accessor"}
-    _UNREADABLE = {"flavour": "unknown", "concrete": "unknown", "accessor": "unknown"}
+    _A_313 = {"flavour": "absent", "accessor": "no-accessor"}
+    _A_312 = {"flavour": "module", "accessor": "no-accessor"}
+    _A_310 = {"flavour": "object", "accessor": "accessor"}
+    _UNREADABLE = {"flavour": "unknown", "accessor": "unknown"}
 
     @pytest.mark.parametrize(
         ("simulation", "host", "speaks"),
@@ -972,17 +800,14 @@ class TestTheRoundNineJudgementsAnswerForHostsThisBoxIsNot:
             ("flavour-is-already-an-object", _A_312, True),
             ("flavour-is-already-an-object", _A_310, True),
             ("flavour-is-already-an-object", _A_313, False),
-            ("flavour-is-already-an-object", _WINDOWS, False),
             # The backstop aims at the half's LAST branch, which an object-flavour host never reaches.
             ("purepath-has-no-parse-path", _A_312, True),
             ("purepath-has-no-parse-path", _A_310, False),
             ("purepath-has-no-parse-path", _A_313, False),
             ("accessor-route-is-already-native", _A_313, True),
-            ("accessor-route-is-already-native", _WINDOWS, True),
             ("accessor-route-is-already-native", _UNREADABLE, True),
             # An unmeasured host may not be claimed by any simulation with a precondition.
             ("flavour-is-already-an-object", _UNREADABLE, False),
-            ("purposixpath-has-no-flavour", _UNREADABLE, False),
         ],
     )
     def test_a_simulation_declares_which_real_hosts_it_can_speak_from(self, simulation, host, speaks):
@@ -1072,20 +897,6 @@ class TestTheRoundNineJudgementsAnswerForHostsThisBoxIsNot:
                 f"{name} is exempt and no longer exists — a stale exemption is a hole"
             )
 
-    def test_the_platform_emulations_declare_an_asymmetry_and_not_an_oversight(self):
-        """Why one platform stand-in has a precondition and the other does not.
-
-        posix turns on whether the path READS absolute; nt's ntpath.realpath reads getcwd unconditionally.
-        """
-        posix_requires = _PLATFORM_EMULATIONS["posix"][1]
-        nt_requires = _PLATFORM_EMULATIONS["nt"][1]
-
-        assert _simulation_unavailable(posix_requires, self._WINDOWS) != ""
-        assert _simulation_unavailable(posix_requires, self._A_312) == ""
-        assert _simulation_unavailable(posix_requires, self._A_313) == ""
-        assert _simulation_unavailable(nt_requires, self._WINDOWS) == ""
-        assert _simulation_unavailable(nt_requires, self._A_312) == ""
-
     class _Result:
         def __init__(self, stdout):
             self.stdout = stdout
@@ -1093,21 +904,19 @@ class TestTheRoundNineJudgementsAnswerForHostsThisBoxIsNot:
 
     def test_the_flavour_in_force_is_read_from_the_child_not_assumed(self):
         """INSTALLED and NATIVE both mean object; otherwise the host answers."""
-        installed = self._Result("HOST module posix no-accessor\nHALF:flavour-object:INSTALLED\n")
-        native = self._Result("HOST object posix accessor\nHALF:flavour-object:NATIVE\n")
-        refused = self._Result("HOST absent posix no-accessor\nHALF:flavour-object:UNAVAILABLE:no _flavour\n")
-        windows = self._Result("HOST module nt no-accessor\nHALF:flavour-object:UNAVAILABLE:WindowsPath\n")
+        installed = self._Result("HOST module no-accessor\nHALF:flavour-object:INSTALLED\n")
+        native = self._Result("HOST object accessor\nHALF:flavour-object:NATIVE\n")
+        refused = self._Result("HOST absent no-accessor\nHALF:flavour-object:UNAVAILABLE:no _flavour\n")
 
         assert _flavour_in_force(installed) == "object"
         assert _flavour_in_force(native) == "object"
         assert _flavour_in_force(refused) == "absent"
-        assert _flavour_in_force(windows) == "module"
 
     def test_a_child_that_never_reported_its_dialect_is_unknown_not_tolerant(self):
         """Round 10's fact reads the same way its neighbours do: closed on silence."""
         assert _parsing_answer(self._Result("PARSING module-tolerant\n")) == "module-tolerant"
         assert _parsing_answer(self._Result("PARSING demands:parse_parts\n")) == "demands:parse_parts"
-        assert _parsing_answer(self._Result("HOST module posix no-accessor\n")) == "unknown"
+        assert _parsing_answer(self._Result("HOST module no-accessor\n")) == "unknown"
         assert _simulation_unavailable(
             _A_MODULE_SHAPED_FLAVOUR_NEEDS_A_TOLERANT_HOST, {"parsing": _parsing_answer(self._Result(""))}
         ), "silence must close the rows this fact gates, not open them"
@@ -1119,61 +928,18 @@ class TestTheRoundNineJudgementsAnswerForHostsThisBoxIsNot:
 
     def test_the_last_fingerprint_wins_because_a_simulation_moves_the_host(self):
         """A simulated host re-reports; the halves ran against the SECOND line."""
-        both = self._Result("HOST module posix no-accessor\nSIMULATION_INSTALLED\nHOST absent posix no-accessor\n")
+        both = self._Result("HOST module no-accessor\nSIMULATION_INSTALLED\nHOST absent no-accessor\n")
 
-        assert _host_line(both) == ["absent", "posix", "no-accessor"]
+        assert _host_line(both) == ["absent", "no-accessor"]
         assert _flavour_in_force(both) == "absent"
 
     def test_this_host_measured_itself_before_any_world_touched_it(self):
         """The parent's own fingerprint, and the gate that reads it."""
-        assert set(_HOST_FACTS) == {"flavour", "concrete", "accessor", "parsing"}
-        assert _HOST_FACTS["concrete"] in ("posix", "nt"), _HOST_FACTS
+        assert set(_HOST_FACTS) == {"flavour", "accessor", "parsing"}
         assert _HOST_FACTS["flavour"] in ("object", "module", "absent"), _HOST_FACTS
         # Closed set: module-tolerant, or demands:<named attribute>; a bare "demands:" fails too.
         dialect, colon, demanded = _HOST_FACTS["parsing"].partition(":")
         assert dialect in ("module-tolerant", "demands"), _HOST_FACTS["parsing"]
         assert (dialect == "demands") is bool(colon and demanded.strip()), (
             f"a demanding host must name the attribute it demanded: {_HOST_FACTS['parsing']!r}"
-        )
-
-
-def _drive_row_is_satisfied(os_name: str, anchor_drive: str) -> bool:
-    """Does this host's ntpath.abspath answer the way its own row says it must?"""
-    if os_name == "nt":
-        return bool(anchor_drive)
-    if os_name == "posix":
-        return anchor_drive == ""
-    return False
-
-
-class TestTheProbeLiteralNamesAnAbsolutePathOnTheRunner:
-    """@devpulse's trap (b), split into the half I can measure and the half I cannot.
-
-    Drive-relative is measured here (pure ntpath); the Windows value is answered by the runner (PROBE_NO_DRIVE).
-    """
-
-    @pytest.mark.parametrize(
-        ("os_name", "anchor_drive", "expected"),
-        [
-            ("posix", "", True),
-            ("posix", "D:", False),
-            ("nt", "D:", True),
-            ("nt", "", False),
-            # No machine produces this: the judgement must answer inputs the host cannot manufacture.
-            ("plan9", "", False),
-        ],
-    )
-    def test_the_drive_judgement_answers_for_hosts_this_one_is_not(self, os_name, anchor_drive, expected):
-        """The judgement, separated from the world that feeds it."""
-        assert _drive_row_is_satisfied(os_name, anchor_drive) is expected
-
-    def test_the_live_host_satisfies_its_own_drive_row(self):
-        """And the world, fed to the judgement above."""
-        anchor_drive = ntpath.splitdrive(ntpath.abspath(ntpath.sep))[0]
-
-        assert _drive_row_is_satisfied(os.name, anchor_drive), (
-            f"host {os.name!r} produced anchor drive {anchor_drive!r}, which its "
-            "own row does not allow — on posix that means ntpath grew a drive "
-            "and the PROBE_NO_DRIVE gate is exercisable locally after all; on nt "
-            "it means the cured probe literal cannot carry one"
         )

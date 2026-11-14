@@ -276,7 +276,6 @@ class TestReplacePathPlaceholders:
 
         Mutant: path components copied without placeholder replacement -> red.
         Mutant: the directory entry loses its " (dir)" suffix -> red.
-        Mutant: the listing spelled with str() (a backslash on Windows) -> red there.
         """
         _ = mock_json_handler
         template = tmp_path / "template"
@@ -292,10 +291,7 @@ class TestReplacePathPlaceholders:
         assert not (target / "{{BRANCH}}_json").exists()
 
     def test_replace_path_placeholders_no_match(self, tmp_path: Path, mock_json_handler) -> None:
-        """Paths without placeholders pass through unchanged, listed one spelling on every host.
-
-        Mutant: a native path joined to the literal "/ (dir)" suffix -> red on Windows.
-        """
+        """Paths without placeholders pass through unchanged."""
         _ = mock_json_handler
         template = tmp_path / "template"
         (template / "apps" / "handlers").mkdir(parents=True)

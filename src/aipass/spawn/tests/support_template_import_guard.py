@@ -56,7 +56,7 @@ _DENY_REALPATH = (
     def _no_realpath(*args, **kwargs):
         raise FileNotFoundError(errno.ENOENT, "No such file or directory")
 
-    # os.path IS posixpath/ntpath, so on 3.11+ this reaches pathlib's own
+    # os.path IS posixpath, so on 3.11+ this reaches pathlib's own
     # resolve() too. On 3.10 it does not — see _ARM_PATHLIB_ACCESSOR.
     os.path.realpath = _no_realpath
 """
@@ -81,8 +81,7 @@ def _require_live_world(result, world: str = "getcwd-denied"):
             )
         pytest.skip(
             "world not exercised: the injected os.getcwd failure does not reach "
-            "Path.resolve() on this platform (Windows resolves through "
-            "_getfullpathname, not os.getcwd), so nothing is claimed either way"
+            "Path.resolve() on this host, so nothing is claimed either way"
         )
     assert "CONTROL_LIVE" in lines, (
         f"the child never reported whether its world took:\n{result.stdout}\n{result.stderr}"
@@ -92,22 +91,12 @@ def _require_live_world(result, world: str = "getcwd-denied"):
 
 # Built once, before any world is installed: a probe built inside its world dies silently.
 _BUILD_PROBE_PATH = """
-    import ntpath, os
+    import os
 
     _ARM_ABS = {probe_literal}
 
     if not os.path.isabs(_ARM_ABS):
         print("PROBE_NOT_ABS", _ARM_ABS)
-    if os.path.sep == ntpath.sep and not os.path.splitdrive(_ARM_ABS)[0]:
-        # Keyed on the ACTIVE path module, not on os.name, so it fires under
-        # the windows emulation as well as on the real runner.
-        print("PROBE_NO_DRIVE", _ARM_ABS)
-
-    # Published, not just checked: on 3.12 ntpath.isabs still accepted a
-    # rooted-driveless path ("LEGACY BUG", ntpath.py:101), so a missing drive
-    # changed nothing here and only showed up on 3.13. A value the test can
-    # read is falsifiable on every version.
-    print("PROBE_PATH", _ARM_ABS)
 """
 
 # Decided by measuring whether Path.resolve travels through an accessor, not by hasattr:
@@ -155,9 +144,7 @@ _EMULATE_310 = """
             # captured eagerly (that is why the bare os.path rebinding is not).
             return type(self)(self._accessor.realpath(self, strict=strict))
 
-        # Patched on Path — the base of PosixPath AND WindowsPath — because the
-        # class the host instantiates is the only one that matters, and naming
-        # the posix half is exactly how this went dark on the Windows runner.
+        # Patched on Path, the base of PosixPath: the class the host instantiates is the only one that matters.
         pathlib.Path._accessor = pathlib._normal_accessor
         pathlib.Path.resolve = _resolve_310
         print("ACCESSOR_EMULATED")
@@ -186,7 +173,7 @@ _ARM_THE_ROUTE = """
 
 # A stand-in declares which real hosts it can speak from, measured in the child, and is UNAVAILABLE elsewhere.
 _REPORT_HOST = """
-    import os, pathlib
+    import pathlib
 
     _flavour_of_host = getattr(pathlib.PurePosixPath, "_flavour", None)
     if _flavour_of_host is None:
@@ -196,10 +183,9 @@ _REPORT_HOST = """
     else:
         _FLAVOUR_KIND = "module"
 
-    _CONCRETE_KIND = "nt" if os.name == "nt" else "posix"
     _HAS_ACCESSOR = hasattr(pathlib, "_NormalAccessor")
 
-    print("HOST", _FLAVOUR_KIND, _CONCRETE_KIND, "accessor" if _HAS_ACCESSOR else "no-accessor")
+    print("HOST", _FLAVOUR_KIND, "accessor" if _HAS_ACCESSOR else "no-accessor")
 """
 
 _PATHLIB_ROUTE_PROBE = """
@@ -214,7 +200,7 @@ _PATHLIB_ROUTE_PROBE = """
 """
 
 
-# One spelling, from the host's anchor: os.sep + "x" is drive-relative on nt and resolves against the cwd.
+# One spelling, from the host's anchor.
 _PROBE_LITERAL = 'os.path.join(os.path.abspath(os.sep), "definitely", "not", "here")'
 
 
@@ -231,7 +217,7 @@ def _child_script(*chunks: str) -> str:
 
 
 def _host_line(result) -> list:
-    """The child's own HOST fingerprint: flavour kind, concrete kind, accessor.
+    """The child's own HOST fingerprint: flavour kind, accessor.
 
     The last one: a child that simulates a foreign host re-reports, and that host is in force."""
     fingerprints = [line for line in result.stdout.splitlines() if line.startswith("HOST ")]
@@ -272,9 +258,9 @@ def _measure_host() -> dict:
     Never an in-process pathlib read: that would be a second spelling of the host, free to drift."""
     result = _run(_child_script(), cwd=Path(__file__).parent)
     host = _host_line(result)
-    if len(host) != 3:
-        return {"flavour": "unknown", "concrete": "unknown", "accessor": "unknown"}
-    return {"flavour": host[0], "concrete": host[1], "accessor": host[2]}
+    if len(host) != 2:
+        return {"flavour": "unknown", "accessor": "unknown"}
+    return {"flavour": host[0], "accessor": host[1]}
 
 
 def _parsing_answer(result) -> str:
@@ -306,51 +292,3 @@ def _simulation_unavailable(requires: dict, host: dict) -> str:
                 f"{sorted(allowed)}; this host reports {host.get(fact)!r}"
             )
     return ""
-
-
-# win32 ntpath.realpath calls os.getcwd unconditionally, before its isabs check; posix abspath does not.
-# The ordering is the claim, not a line number. abspath is emulated with a drive too: 3.13 ntpath.isabs
-# rejects rooted-driveless paths and would read the denied cwd while building the probe's own argument.
-_WINDOWS_EMULATED = """
-    import ntpath, os, sys
-
-    _FAKE_DRIVE = "C:"
-
-    def _win32_abspath(path):
-        path = ntpath.normpath(os.fspath(path))
-        if not ntpath.splitdrive(path)[0]:
-            if path.startswith(ntpath.sep):
-                path = _FAKE_DRIVE + path
-            else:
-                path = ntpath.join(_FAKE_DRIVE + ntpath.sep, path)
-        return path
-
-    def _win32_realpath(path, *, strict=False):
-        path = ntpath.normpath(os.fspath(path))
-        cwd = os.getcwd()
-        if not ntpath.isabs(path):
-            path = ntpath.join(cwd, path)
-        return path
-
-    ntpath.abspath = _win32_abspath
-    ntpath.realpath = _win32_realpath
-    os.path = ntpath
-    os.sep = ntpath.sep
-    sys.modules["os.path"] = ntpath
-"""
-
-# Emulate both platforms or neither: an empty "posix" row is the host wearing a posix label.
-_POSIX_EMULATED = """
-    import os, posixpath, sys
-
-    os.path = posixpath
-    os.sep = posixpath.sep
-    sys.modules["os.path"] = posixpath
-"""
-
-# Not symmetric: pathlib picks WindowsPath from os.name at import, so posix rows cannot be measured from nt.
-# The nt rows rest on the unconditional getcwd read, so they can be measured from a posix host.
-_PLATFORM_EMULATIONS = {
-    "posix": (_POSIX_EMULATED, {"concrete": ("posix",)}),
-    "nt": (_WINDOWS_EMULATED, {}),
-}

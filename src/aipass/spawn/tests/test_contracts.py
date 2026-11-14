@@ -86,7 +86,7 @@ class TestDataStructureContracts:
     def test_returns_dict(self, tmp_path):
         """The VALUES a successful mint reports, beside the key contract above.
 
-        files_copied counted as copy_template does; path resolved both sides (Windows 8.3 names)."""
+        files_copied counted as copy_template does; path resolved both sides."""
         template = get_template_dir()
         expected_files_copied = sum(
             1
