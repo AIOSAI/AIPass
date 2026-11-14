@@ -3,7 +3,7 @@
 # Description: Self Skip Standards Content Handler
 # Version: 1.0.0
 # Created: 2026-09-01
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -35,8 +35,8 @@ def get_self_skip_standards() -> str:
         "[bold cyan]THREE PROVENANCES, ONE DEFECT:[/bold cyan]",
         "  [green]machine[/green]  sys.platform, sys.version_info, os.name,",
         "            os.environ, shutil.which, find_spec — [bold]correct code[/bold].",
-        "            A Linux-only test skipping on Windows is right, and a rule",
-        "            that flagged it would teach branches to delete their own",
+        "            A test skipping on a host without its tool is right, and a",
+        "            rule that flagged it would teach branches to delete their own",
         "            portability. A machine probe acquits the whole site.",
         "  [red]subject[/red]  the condition asks whether a production symbol",
         "            still EXISTS (hasattr/getattr), or reads a name imported",
@@ -61,7 +61,7 @@ def get_self_skip_standards() -> str:
         "[bold cyan]HOW TO FIX:[/bold cyan]",
         "  Make the condition read the machine:",
         '  [red]@pytest.mark.skipif(not hasattr(mod, "THING"), ...)[/red]',
-        '  [green]@pytest.mark.skipif(sys.platform == "win32", ...)[/green]',
+        '  [green]@pytest.mark.skipif(shutil.which("git") is None, ...)[/green]',
         "  If the symbol's absence is the thing worth knowing, [bold]assert it[/bold]",
         "  instead of skipping on it.",
         "",

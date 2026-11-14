@@ -3,7 +3,7 @@
 # Description: Unit tests for handlers/aipass_standards/
 # Version: 1.6.0
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/naming_check.py and its json, host and calendar siblings."""
@@ -1052,26 +1052,14 @@ def test_shared_parse_treats_a_valueerror_as_unparseable(monkeypatch):
     assert logged.log_operation.call_count == 2
 
 
-# host_coupled_oracle_check: reductions of the two PR #807 hooks reds. proc.py is cc_sessions' shape: a
-# module-level platform alias and a local subprocess alias in the one function that forks.
+# host_coupled_oracle_check: a reduction of the PR #807 hooks red. proc.py is cc_sessions' shape.
 
 _PROC_PRODUCTION = """import os
-import sys
 from pathlib import Path
-
-_PLATFORM = sys.platform
 
 
 def process_args(pid):
-    import subprocess as _sp
-
-    if _PLATFORM.startswith("linux"):
-        return Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\\0")
-    return _sp.run(["ps", "-o", "args=", "-p", str(pid)], capture_output=True, text=True).stdout.split()
-
-
-def resolve_session_pid():
-    return process_args(os.getppid()) and None
+    return Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\\0")
 
 
 def is_pid_alive(pid):
@@ -1080,26 +1068,11 @@ def is_pid_alive(pid):
     except OSError:
         return False
     return True
-
-
-def is_supported():
-    return sys.platform.startswith("linux")
-
-
-def enable():
-    import subprocess
-
-    if not is_supported():
-        return None
-    return subprocess.run(["systemctl", "--user", "enable", "--now", "demo"])
 """
 
 _PROC_UNITS = """import os
 import subprocess
 import sys
-from unittest.mock import patch
-
-import pytest
 
 from pkg.demo.apps import proc
 
@@ -1110,31 +1083,6 @@ def test_own_title():
 
 def test_own_liveness():
     assert proc.is_pid_alive(os.getpid())
-
-
-def test_forked_count():
-    with patch("subprocess.run", side_effect=OSError("no ps")) as ps:
-        proc.resolve_session_pid()
-    assert ps.call_count == 1
-
-
-@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="the /proc path")
-def test_forked_count_on_linux_only():
-    with patch("subprocess.run", side_effect=OSError("no ps")) as ps:
-        proc.resolve_session_pid()
-    assert ps.call_count == 1
-
-
-def test_gate_pinned_by_a_fixture():
-    with patch("subprocess.run") as run, patch.object(proc, "is_supported", return_value=True):
-        proc.enable()
-    assert run.call_count == 1
-
-
-def test_a_non_runner_count():
-    with patch.object(proc, "is_pid_alive", return_value=True) as alive:
-        proc.resolve_session_pid()
-    assert alive.call_count == 1
 
 
 def _child_pid():
@@ -1157,15 +1105,13 @@ def _proc_package(tmp_path):
     return branch, test_file
 
 
-def test_host_coupled_oracle_convicts_the_title_read_and_the_forked_count_only(tmp_path):
-    """Own pid into process_args and an exact ps count convicted; liveness, a skip mark, a pinned gate and a
-    non-runner mock and a child's pid acquitted."""
+def test_host_coupled_oracle_convicts_the_title_read_only(tmp_path):
+    """Own pid into process_args convicted; liveness and a child's pid acquitted."""
     branch, test_file = _proc_package(tmp_path)
 
     rows = host_coupled_oracle_check.scan_file(str(test_file), str(branch.parent))
 
-    assert _lines(rows) == [_line_of(_PROC_UNITS, "process_args(os.getpid())"), _line_of(_PROC_UNITS, "ps.call_count")]
-    assert "demo/apps/proc.py:8 process_args" in rows[1][1]
+    assert _lines(rows) == [_line_of(_PROC_UNITS, "process_args(os.getpid())")]
 
 
 def test_host_coupled_oracle_scores_by_clean_test_file_share(tmp_path):

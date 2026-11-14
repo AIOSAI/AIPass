@@ -14,9 +14,8 @@ with the clock, and nothing in the test owns the clock.
 
 ## Why It Matters
 
-main (16bcf3c4, Windows run 34731222219) and PR #767 (Linux CI 34769664864 on all
-four Pythons plus coverage, Windows 34769664829, macOS) went red on one test on
-every host:
+main (16bcf3c4) and PR #767 (Linux CI 34769664864 on all four Pythons plus
+coverage) went red on one test on every host:
 
 ```
 src/aipass/daemon/tests/test_run_module.py::TestSlotSeeding::test_a_slotted_job_is_seeded_before_it_can_fire

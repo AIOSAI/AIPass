@@ -3,7 +3,7 @@
 # Description: literal_path_check — test template v1 item 22, paths built from tmp_path, never written
 # Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/literal_path_check.py."""
@@ -26,8 +26,7 @@ from aipass.sentry.apps.modules import checklist
 MODEL = Path(__file__).resolve().parent / "test_readme_update.py"
 
 #: Split so this file's own source is not a home path to hardcoded_path, which
-#: is the very standard the carve-out below hands the shape back to. Same
-#: device host_portability uses for its /proc literal.
+#: is the very standard the carve-out below hands the shape back to.
 HOME_SAMPLE = "/" + "home/someone/AIPass/x.py"
 
 
@@ -89,7 +88,7 @@ class TestANameBoundOnlyToALiteralIsTheSameHabit:
         ]
 
     def test_the_binding_line_alone_is_not_a_hit(self):
-        """An assignment touches nothing. ARM A's measurement is why this line sits here."""
+        """An assignment touches nothing."""
         assert _values('fake_home = "/fake/aipass/home"\n') == []
 
     def test_a_name_reassigned_to_anything_else_is_dropped(self):
@@ -147,8 +146,8 @@ class TestWhatIsNeverConvicted:
         assert _values(source) == []
 
     def test_a_pure_path_class_touches_no_filesystem(self):
-        """26 fleet-wide: string algebra, which is how a POSIX path is judged as Windows."""
-        assert _values('PureWindowsPath("/x/checkout/a.py")\n') == []
+        """26 fleet-wide: string algebra, no filesystem."""
+        assert _values('PurePosixPath("/x/checkout/a.py")\n') == []
 
     def test_a_string_operation_is_a_comparison_not_a_path(self):
         """10 fleet-wide."""
@@ -164,33 +163,8 @@ class TestWhatIsNeverConvicted:
         assert _values('Path("apps/handlers/x.py")\n') == []
 
 
-class TestTheDriveRootedCountIsRecordedNotCharged:
-    """15 sites in 8 files. On a POSIX host tmp_path cannot produce C:\\proj."""
-
-    def test_a_drive_rooted_literal_is_not_convicted(self):
-        assert _values('_spell(_WindowsFlavour(r"C:\\proj\\AIPass"))\n') == []
-
-    def test_a_drive_rooted_literal_is_counted(self):
-        source = '_spell(_WindowsFlavour(r"C:\\proj\\AIPass"))\n'
-
-        assert literal_path_check.counted_drive_paths(source) == [(1, "C:\\proj\\AIPass")]
-
-    def test_a_forward_slash_drive_is_counted_too(self):
-        assert literal_path_check.counted_drive_paths('_under("C:/env/pkg/f.py")\n') == [(1, "C:/env/pkg/f.py")]
-
-    def test_a_drive_rooted_mock_value_is_not_even_counted(self):
-        assert literal_path_check.counted_drive_paths('m.root.return_value = "C:/env"\n') == []
-
-    def test_the_count_rides_in_the_passing_message(self, tmp_path):
-        path = _write(tmp_path, '_under("C:/env/pkg/f.py")\n')
-
-        message = literal_path_check.check_module(str(path))["checks"][0]["message"]
-
-        assert message == (
-            "Every path in use is built, not written (1 drive-rooted path is counted, which the rule allows)"
-        )
-
-    def test_a_clean_file_with_no_drive_paths_says_so_plainly(self, tmp_path):
+class TestThePassingMessage:
+    def test_a_clean_file_says_so_plainly(self, tmp_path):
         path = _write(tmp_path, 'def test_x(tmp_path):\n    classify(tmp_path / "a.py")\n')
 
         message = literal_path_check.check_module(str(path))["checks"][0]["message"]

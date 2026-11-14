@@ -102,7 +102,7 @@ from aipass.branch.apps.handlers.legacy import old_processor
 - **Threshold:** Score >= 75 to pass overall
 - A branch with 20/25 files referenced scores 80 (passes)
 - A branch with 15/25 files referenced scores 60 (fails)
-- The violation message lists up to 10 unreferenced files, each relative to `apps/` with forward slashes on every host (`handlers/x/y.py`, never `handlers\x\y.py`; since 2026-10-10, Windows CI)
+- The violation message lists up to 10 unreferenced files, each relative to `apps/` (`handlers/x/y.py`)
 
 ---
 

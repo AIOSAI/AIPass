@@ -10,8 +10,8 @@ Test template v1, **item 20** — a branch's `tests/conftest.py` pins the consol
 session scope, on every console the product exports, and resets the command state after
 every test.
 
-Rich sizes an unpinned console **on every print**: 80 on POSIX and 79 on Windows under
-pytest's capture, the terminal's width under `-s`, `COLUMNS` when exported. The template
+Rich sizes an unpinned console **on every print**: 80 under pytest's capture, the
+terminal's width under `-s`, `COLUMNS` when exported. The template
 measured 4 of the trial's 31 tests flipping at width 40, none with the pin. A suite that is
 green on one developer's terminal and red in CI, for no reason anybody can see, is what this
 prevents.
@@ -85,7 +85,7 @@ pins nothing, and C1 is not satisfied. The name has to come from an `aipass.cli`
 `display.CONSOLE`, `display.err_console`, or the `console` / `err_console` those modules
 export — or be the loop variable of a `for` over them, which is the template's own spelling.
 
-Same install-site restriction `mock_console` took from `host_portability` ARM A: a thing that
+Same install-site restriction as `mock_console`: a thing that
 merely **sits** somewhere is data; only a thing reaching the product is in use.
 
 A loop is checked element by element. `for console in (display.CONSOLE, Console()):` does not

@@ -3,7 +3,7 @@
 # Description: stale_header_date_check — a Modified: date older than the file's own history
 # Version: 1.1.1
 # Created: 2026-09-25
-# Modified: 2026-11-07
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/stale_header_date_check.py."""
@@ -101,7 +101,7 @@ class TestThePlantedSpecimen:
 class TestTheWorkingTreeIsJudgedAsOfToday:
     @pytest.fixture
     def frozen_today(self, monkeypatch):
-        """Tomorrow, on purpose: the checker's clock across midnight from the real one (Windows CI, 2026-10-11)."""
+        """Tomorrow, on purpose: the checker's clock across midnight from the real one (CI, 2026-10-11)."""
         frozen = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
         monkeypatch.setattr(checker, "_today", lambda: frozen)
         return frozen

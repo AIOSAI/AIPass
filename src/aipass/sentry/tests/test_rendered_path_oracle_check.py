@@ -3,7 +3,7 @@
 # Description: rendered_path_oracle_check — a whole path asserted against rendered console output
 # Version: 1.0.0
 # Created: 2026-10-13
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/rendered_path_oracle_check.py."""
@@ -50,7 +50,7 @@ def _write(tmp_path, body, name="test_specimen.py"):
 
 
 class TestTheSpecimenIsConvicted:
-    """The exact shape that went red on Windows and macOS CI."""
+    """The exact shape that went red in CI."""
 
     def test_the_specimen_is_convicted_on_its_assert_line(self):
         """One finding, on the f-string assert, naming the path and the haystack."""

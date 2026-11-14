@@ -3,7 +3,7 @@
 # Description: Declared Pass Symbol Resolves Standards Content Handler
 # Version: 1.0.3
 # Created: 2026-09-25
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Declared Pass Symbol Resolves Standards Content Handler"""
@@ -35,7 +35,7 @@ def get_declared_pass_symbol_resolves_standards() -> str:
         "  A chain is [green]read, never run[/green]: no declared module is imported (leg 11).",
         "  A module that builds its names when it runs (hashlib) is never a conviction.",
         "  Stdlib is [green]sys.stdlib_module_names[/green], not importability: a stdlib module this",
-        "  host lacks ([green]fcntl[/green] on Windows) is never a conviction (PR #774 Windows row 3).",
+        "  host lacks ([green]readline[/green] on a Python built without it) is never a conviction.",
         "",
         "[bold cyan]A LINE THAT NAMES NOTHING:[/bold cyan]",
         "  Its own finding -- unless its category is a standard in this pack (ruff,",

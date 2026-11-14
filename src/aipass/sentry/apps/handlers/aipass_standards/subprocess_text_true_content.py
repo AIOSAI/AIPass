@@ -3,7 +3,7 @@
 # Description: Subprocess Text True Standards Content Handler
 # Version: 1.0.0
 # Created: 2026-09-25
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -20,7 +20,7 @@ def get_subprocess_text_true_standards() -> str:
     lines = [
         "[bold cyan]CORE PRINCIPLE:[/bold cyan]",
         "  A subprocess call in text mode with no encoding decodes the child's output with",
-        "  the locale encoding: UTF-8 on Linux and macOS, cp1252 on Windows. The same hazard",
+        "  the locale encoding, which is not UTF-8 under a non-UTF-8 locale. The same hazard",
         "  as named_encoding, one pipe over; named_encoding never looks at subprocess.",
         "",
         "[bold cyan]THE SHAPE:[/bold cyan]",

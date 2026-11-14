@@ -3,7 +3,7 @@
 # Description: CLI Standards Checker Handler
 # Version: 1.1.2
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """CLI Standards Checker Handler"""
@@ -295,7 +295,7 @@ def check_handler_separation(content: str) -> Dict:
 def check_cli_imports(content: str, module_path: str = "") -> Optional[Dict]:
     """Check for CLI service imports"""
     # Exception: CLI branch uses internal imports (it's the implementation)
-    if "/cli/apps/" in module_path.replace("\\", "/"):
+    if "/cli/apps/" in module_path:
         return {"name": "CLI service imports", "passed": True, "message": "CLI branch exempt (uses internal imports)"}
 
     has_cli_imports = (
@@ -477,11 +477,11 @@ def _module_level_function_names(content: str) -> set:
 
 def check_duplicate_display_functions(content: str, module_path: str = "") -> Optional[Dict]:
     """Check for duplicate display functions that should use CLI service instead."""
-    if "/cli/apps/" in module_path.replace("\\", "/"):
+    if "/cli/apps/" in module_path:
         return None
 
     # Exception: Prax logger IS the logging system — it defines these legitimately
-    if "/prax/apps/modules/logger" in module_path.replace("\\", "/"):
+    if "/prax/apps/modules/logger" in module_path:
         return None
 
     cli_display_functions = ["header", "success", "error", "warning", "info"]

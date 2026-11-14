@@ -3,7 +3,7 @@
 # Description: Trigger Standards Checker Handler
 # Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -219,8 +219,7 @@ def _is_trigger_branch(file_path: str) -> bool:
 
     It defines trigger.fire(), so it must not be required to import itself.
     """
-    normalized = file_path.replace("\\", "/")
-    return "/trigger/apps/" in normalized
+    return "/trigger/apps/" in file_path
 
 
 def check_trigger_import_pattern(content: str, _lines: List[str], _module_path: str) -> Optional[Dict]:

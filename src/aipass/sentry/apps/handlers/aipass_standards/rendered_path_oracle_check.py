@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rendered_path_oracle_check.py
 # Description: Rendered Path Oracle Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-10-13
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -38,7 +38,7 @@ TMP_PATH = "tmp_path"
 TMP_PATH_FACTORY = "tmp_path_factory"
 
 #: Constructors that build a path from whatever they are given.
-PATH_CONSTRUCTORS = frozenset({"Path", "PurePath", "PosixPath", "WindowsPath", "PurePosixPath", "PureWindowsPath"})
+PATH_CONSTRUCTORS = frozenset({"Path", "PurePath", "PosixPath", "PurePosixPath"})
 
 #: Methods of a path that return another path.
 PATH_METHODS = frozenset({"joinpath", "resolve", "absolute", "with_name", "with_suffix", "with_stem", "expanduser"})
@@ -59,8 +59,8 @@ RESULT_STREAMS = frozenset({"output", "stdout", "stderr"})
 CURE = 'assert the words without the path, and the path\'s .name ("system_logs" in err)'
 
 WHY = (
-    "WRAP: Rich wraps at the console width and a Windows/macOS tmp path crosses it; "
-    "REPR: an OSError renders the path with %r, doubling Windows backslashes"
+    "WRAP: Rich wraps at the console width and a longer tmp path (another user, TMPDIR or xdist worker) crosses it; "
+    "REPR: an OSError renders the path with %r, which escapes a quote or an undecodable byte"
 )
 
 FUNCTION_NODE = Union[ast.FunctionDef, ast.AsyncFunctionDef]

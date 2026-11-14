@@ -117,7 +117,7 @@ the test's behalf, through its own API, when the product itself declares the und
 test_stop.py:259 stop_flag.catch_sigterm() writes the product's own state and nothing calls reset_stop_state() - an autouse fixture in conftest.py calling reset_stop_state()
 ```
 
-The specimen is PR 792's CI red (Linux run 38999228669, macOS run 38999228656):
+The specimen is PR 792's CI red (Linux run 38999228669):
 `backup/apps/handlers/state/stop_flag.py` keeps `_STATE` and declares `reset_stop_state()`;
 `test_stop.py` fires the installed SIGTERM handler inside `catch_sigterm` and nothing lowers the
 flag, so under `xdist --dist loadscope` the next versioned class on that worker copies nothing.

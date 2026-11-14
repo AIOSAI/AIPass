@@ -3,7 +3,7 @@
 # Description: Handler Encapsulation Standards Checker
 # Version: 1.4.2
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Handler Encapsulation Standards Checker"""
@@ -122,11 +122,11 @@ def extract_handler_package(import_line: str) -> Optional[str]:
 
 
 def _posix(file_path: str) -> str:
-    """The path as a string with forward slashes.
+    """The path as a string.
 
     The checks below search the path for "apps/handlers/" and "apps/modules/".
     """
-    return str(file_path).replace("\\", "/")
+    return str(file_path)
 
 
 def get_file_handler_package(file_path: str) -> Optional[str]:

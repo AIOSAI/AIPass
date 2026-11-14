@@ -3,7 +3,7 @@
 # Description: named_encoding_check — test template v1 item 21, encoding named on every text read and write
 # Version: 1.0.0
 # Created: 2026-09-21
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/named_encoding_check.py."""
@@ -154,7 +154,7 @@ class TestTheFix:
         fix = named_encoding_check.scan("p.write_text(body)\n")[0][2]
 
         assert 'encoding="utf-8"' in fix
-        assert "cp1252" in fix
+        assert "non-UTF-8 locale" in fix
 
 
 class TestCheckModuleIsThePerFileLane:
@@ -245,7 +245,7 @@ class TestThroughTheChecklistCommand:
 
         out = capsys.readouterr().out
         assert "[FAIL] — named_encoding" in out
-        assert "cp1252" in out
+        assert "non-UTF-8 locale" in out
 
     def test_the_command_stays_quiet_on_a_clean_file(self, tmp_path, capsys):
         """The standard still prints — as a tick. The absence to assert is the conviction."""
@@ -255,4 +255,4 @@ class TestThroughTheChecklistCommand:
 
         out = capsys.readouterr().out
         assert "✓ named_encoding" in out
-        assert "cp1252" not in out
+        assert "non-UTF-8 locale" not in out

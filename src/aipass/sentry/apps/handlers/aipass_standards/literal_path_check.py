@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: literal_path_check.py
 # Description: Literal Absolute Path Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-22
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -33,9 +33,6 @@ STANDARD_KEY = "literal_path"
 #: no habit to end.
 _POSIX_ABS = re.compile(r"^/[A-Za-z0-9_.\-]")
 
-#: A drive-rooted path. Counted, never convicted -- see literal_path.md.
-_DRIVE_ABS = re.compile(r"^[A-Za-z]:[\\/]")
-
 #: hardcoded_path's own ground, spelled as that checker spells it, so one line
 #: is never charged by two standards.
 _HOME_ROOTED = re.compile(r"^(/home/[a-zA-Z][\w.\-]+/|/Users/[a-zA-Z][\w.\-]+/)")
@@ -51,9 +48,6 @@ _SYSTEM_ROOTS: Tuple[str, ...] = (
     "/dev/",
     "/var/run/",
     "/opt/",
-    "/Library/",
-    "/System/",
-    "/Applications/",
 )
 
 #: Calls whose arguments are a stub's data, not a path the test opens.
@@ -82,7 +76,7 @@ _URL_CALLS: frozenset[str] = frozenset(
 )
 
 #: Path classes that cannot touch a filesystem.
-_PURE_PATH_CLASSES: frozenset[str] = frozenset({"PurePath", "PurePosixPath", "PureWindowsPath"})
+_PURE_PATH_CLASSES: frozenset[str] = frozenset({"PurePath", "PurePosixPath"})
 
 #: str methods that compare or cut. The literal is an operand, not a path.
 _STRING_OPS: frozenset[str] = frozenset(
@@ -119,13 +113,6 @@ def _is_path_literal(value: str) -> bool:
     if len(value) < 3 or any(char.isspace() for char in value):
         return False
     return bool(_POSIX_ABS.match(value))
-
-
-def _is_drive_literal(value: str) -> bool:
-    """Whether this string is a drive-rooted path -- counted, never convicted."""
-    if len(value) < 3 or "\n" in value:
-        return False
-    return bool(_DRIVE_ABS.match(value))
 
 
 def _acquittal(call_name: str, keyword_name: str | None, value: str) -> str | None:
@@ -236,35 +223,6 @@ def scan(source: str) -> List[Tuple[int, str, str]]:
     return sorted(hits)
 
 
-def counted_drive_paths(source: str) -> List[Tuple[int, str]]:
-    """(line, value) for every drive-rooted literal handed to a call.
-
-    Counted, never convicted: ``tmp_path`` on a POSIX host cannot produce a drive-rooted path.
-    """
-    tree = _parse(source)
-    if tree is None:
-        return []
-
-    found: List[Tuple[int, str]] = []
-    seen: Set[Tuple[int, str]] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        call_name = tail_name(node.func)
-        for keyword_name, argument in _arguments(node):
-            value = _string_value(argument)
-            if value is None or not _is_drive_literal(value):
-                continue
-            if call_name in _MOCK_CALLS or keyword_name in _MOCK_KEYWORDS or call_name in _URL_CALLS:
-                continue
-            key = (argument.lineno, value)
-            if key in seen:
-                continue
-            seen.add(key)
-            found.append(key)
-    return sorted(found)
-
-
 _read = partial(read_text, tag="literal_path", errors="ignore")
 _result = partial(result, standard=STANDARD)
 
@@ -272,17 +230,6 @@ _result = partial(result, standard=STANDARD)
 def _one_check(passed: bool, message: str) -> List[Dict]:
     """A single-entry checks list, for the paths that have one thing to say."""
     return [{"name": "Literal path", "passed": passed, "message": message}]
-
-
-def _clean_message(drive_paths: List[Tuple[int, str]]) -> str:
-    """What a passing file says, carrying the drive-rooted count."""
-    if not drive_paths:
-        return "Every path in use is built, not written"
-    subject = "path is" if len(drive_paths) == 1 else "paths are"
-    return (
-        f"Every path in use is built, not written "
-        f"({len(drive_paths)} drive-rooted {subject} counted, which the rule allows)"
-    )
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
@@ -301,7 +248,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     hits = [h for h in scan(source) if not is_bypassed(module_path, STANDARD_KEY, h[0], bypass_rules)]
 
     if not hits:
-        return _result(True, _one_check(True, _clean_message(counted_drive_paths(source))), 100)
+        return _result(True, _one_check(True, "Every path in use is built, not written"), 100)
 
     # One check for every hit: checklist._format_failure prints only the first failed check plus "(+N more)".
     detail = "\n".join(f"{path.name}:{line} {name} - {fix}" for line, name, fix in hits)

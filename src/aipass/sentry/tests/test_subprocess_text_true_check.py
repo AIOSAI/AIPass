@@ -3,7 +3,7 @@
 # Description: subprocess_text_true_check — a text-mode subprocess call in a test that names no encoding
 # Version: 1.0.0
 # Created: 2026-09-25
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/subprocess_text_true_check.py."""
@@ -124,7 +124,7 @@ class TestThePlantedSpecimens:
         message = _verdict(tmp_path, "import subprocess\nsubprocess.run(['x'], text=True)\n")[1]
         assert message == (
             "test_specimen.py:2 subprocess.run(text=True) without encoding - decodes with the locale "
-            'encoding, cp1252 on Windows; pass encoding="utf-8" (and errors= if the child may print '
+            'encoding, which a non-UTF-8 locale breaks; pass encoding="utf-8" (and errors= if the child may print '
             "bytes that are not utf-8)"
         )
 

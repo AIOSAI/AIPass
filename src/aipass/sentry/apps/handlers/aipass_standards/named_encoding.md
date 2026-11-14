@@ -19,9 +19,9 @@ Neither call says what encoding it means, so both take whatever the host's local
 
 ## Why It Matters
 
-`open()`, `Path.read_text()` and `Path.write_text()` fall back to `locale.getpreferredencoding(False)`. On this fleet's Linux and macOS hosts that is UTF-8 and the omission is invisible. On Windows, through Python 3.12, it is **cp1252**.
+`open()`, `Path.read_text()` and `Path.write_text()` fall back to `locale.getpreferredencoding(False)`. On this fleet's own hosts that is UTF-8 and the omission is invisible. Under a non-UTF-8 locale (latin-1, EUC-JP) it is not.
 
-The product's output is not ASCII. The audit prints box-drawing characters, plan templates carry em dashes, @commons posts carry whatever a citizen typed. A test that writes such a fixture without naming utf-8 passes on the machine it was written on and raises `UnicodeDecodeError` on a Windows host — which is a failure of the **test**, not of the product it was meant to measure.
+The product's output is not ASCII. The audit prints box-drawing characters, plan templates carry em dashes, @commons posts carry whatever a citizen typed. A test that writes such a fixture without naming utf-8 passes on the machine it was written on and raises `UnicodeDecodeError` on a host whose locale differs — which is a failure of the **test**, not of the product it was meant to measure.
 
 Measured 2026-09-21 across 553 fleet test files (`test_*.py` and `conftest.py` under each branch's `tests/`):
 
@@ -106,4 +106,4 @@ Fleet standing on arrival, 2026-09-21 — standard average **86%**:
 
 ## Provenance
 
-`templates/test_template_v1.md` item 21, built 2026-09-21 on @devpulse's dispatch (DPLAN-0354). Fifth checker in the per-item series, after `router_assert`, `oversize_test_file`, `import_site` and `through_the_command`, and built to the same two-lane shape. The Windows evidence is PR#774.
+`templates/test_template_v1.md` item 21, built 2026-09-21 on @devpulse's dispatch (DPLAN-0354). Fifth checker in the per-item series, after `router_assert`, `oversize_test_file`, `import_site` and `through_the_command`, and built to the same two-lane shape. The CI evidence is PR#774.

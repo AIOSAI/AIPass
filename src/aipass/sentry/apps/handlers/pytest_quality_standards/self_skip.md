@@ -36,17 +36,14 @@ written to catch.
 ### The machine — correct code, never flagged
 
 ```python
-@pytest.mark.skipif(sys.platform == "win32", reason="posix only")
-def test_uses_a_fifo(): ...
-
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
 def test_reads_the_log(): ...
 ```
 
 `sys.platform`, `sys.version_info`, `os.name`, `os.environ`, `os.getenv`,
-`shutil.which`, `platform.system`, `platform.machine`, `find_spec`. A Linux-only
-test that skips on Windows is right, and a rule that flagged it would teach
-branches to delete their own portability. A machine probe anywhere in the
+`shutil.which`, `platform.system`, `platform.machine`, `find_spec`. A test that
+skips on a host without the tool it needs is right, and a rule that flagged it
+would teach branches to delete their own portability. A machine probe anywhere in the
 condition — or anywhere in a helper the condition calls — acquits the whole site.
 
 ### The subject — SELF-SKIP and SKIP-ON-DRIFT
@@ -86,7 +83,7 @@ Make the condition read the machine:
 def test_feature_x(): ...
 
 # after
-@pytest.mark.skipif(sys.platform == "win32", reason="posix only")
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
 def test_feature_x(): ...
 ```
 
@@ -110,7 +107,7 @@ has moved it from the collector into the oracle, where it is harder to see and
 where the board goes green either way.
 
 The measurement is two rows, both of them cures written against this rule, and
-both of them red on the first Linux/Windows CI matrix:
+both of them red on the first CI matrix:
 
 - `ai_mail/tests/test_cross_project_bridge.py:664` branches on
   `projects_tree.is_dir()` and asserts in **both** arms — four resident branches

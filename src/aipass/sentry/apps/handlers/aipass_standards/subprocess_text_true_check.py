@@ -3,7 +3,7 @@
 # Description: Subprocess Text True Standards Checker Handler
 # Version: 1.0.1
 # Created: 2026-09-25
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -35,7 +35,7 @@ CALLS: frozenset[str] = frozenset(
 FLAGS: Tuple[str, ...] = ("text", "universal_newlines")
 
 CURE = 'pass encoding="utf-8" (and errors= if the child may print bytes that are not utf-8)'
-WHY = "decodes with the locale encoding, cp1252 on Windows"
+WHY = "decodes with the locale encoding, which a non-UTF-8 locale breaks"
 
 
 def _bindings(node: ast.AST) -> List[Tuple[str, str]]:

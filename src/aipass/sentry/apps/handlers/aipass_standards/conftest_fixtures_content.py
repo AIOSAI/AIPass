@@ -3,7 +3,7 @@
 # Description: Conftest Fixtures Standards Content Handler
 # Version: 1.0.0
 # Created: 2026-09-22
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -38,8 +38,8 @@ def get_conftest_fixtures_standards() -> str:
         "[bold cyan]TWO SUB-RULES, BOTH ON ONE CHECK:[/bold cyan]",
         "",
         "  [red]C1[/red]  A [green]session-scope autouse[/green] fixture pins [green].width[/green] on the PRODUCT's",
-        "      consoles. Rich sizes an unpinned console on every print: 80 on POSIX, 79 on",
-        "      Windows under pytest's capture, the terminal's width under -s, and",
+        "      consoles. Rich sizes an unpinned console on every print: 80 under",
+        "      pytest's capture, the terminal's width under -s, and",
         "      COLUMNS when exported. The template measured 4 of the trial's 31",
         "      tests flipping at width 40, none with the pin.",
         "",
@@ -62,8 +62,8 @@ def get_conftest_fixtures_standards() -> str:
         "  never prints to, so it pins nothing and C1 is NOT satisfied. The name has",
         "  to come from an aipass.cli import — display.CONSOLE, display.err_console,",
         "  or the console / err_console those modules export — or be the loop",
-        "  variable of a `for` over them. Same install-site restriction mock_console",
-        "  took from host_portability ARM A.",
+        "  variable of a `for` over them. Same install-site restriction as",
+        "  mock_console.",
         "",
         "  ORDER MATTERS for C2: a reset BEFORE the yield clears the flag the",
         "  PREVIOUS test set and hands this test's flag straight on.",

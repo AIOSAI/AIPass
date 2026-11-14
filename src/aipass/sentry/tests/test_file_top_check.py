@@ -3,7 +3,7 @@
 # Description: file_top_check — test template v1 items 5, 6 and 7, the top of a test file
 # Version: 1.1.2
 # Created: 2026-09-22
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/file_top_check.py."""
@@ -245,7 +245,7 @@ class TestATestPluginIsExcusedItemSix:
     reasoning; items 5 and 7 still bind. Told apart by the AST, never the name.
     """
 
-    PLUGIN = '\n"""A pytest plugin that\nsimulates a Windows home."""\n'
+    PLUGIN = '\n"""A pytest plugin that\nsimulates a fresh home."""\n'
     HOOK = "\nimport pytest\n\n\ndef pytest_configure(config):\n    return None\n"
 
     def _said(self, tmp_path, text):
