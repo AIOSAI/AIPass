@@ -229,7 +229,7 @@ def _empty_state() -> Dict[str, Any]:
 def _next_write_seq(state: Dict[str, Any]) -> int:
     """Return the next write-ordering number for this state document.
 
-    Breaks last_seen ties (Windows clock ticks ~15.6ms); persisted, not monotonic(),
+    Breaks last_seen ties; persisted, not monotonic(),
     because a monotonic value is meaningless across a restart.
     """
     seq = int(state.get("write_seq", 0)) + 1

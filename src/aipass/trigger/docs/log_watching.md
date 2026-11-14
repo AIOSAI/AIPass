@@ -62,11 +62,9 @@ branch is attributed the moment its directory exists. A static list survives as 
 for when the tree cannot be read. `UNKNOWN` means what it says: nobody in the tree owns
 this log.
 
-**Path classification is separator-agnostic.** `classify_log_path()` matches on
+**Path classification reads path components.** `classify_log_path()` matches on
 `PurePath.parts` — `"aipass" in parts and "logs" in parts` for a branch log,
-`"system_logs" in parts` for a system log — not on `"/logs/" in path`, which matches
-forward slashes only and would skip every branch log on Windows while reporting healthy.
-Pinned on both platforms from either one with `PureWindowsPath` and `PurePosixPath`.
+`"system_logs" in parts` for a system log — not on `"/logs/" in path`.
 
 ---
 

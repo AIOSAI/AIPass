@@ -3,7 +3,7 @@
 # Description: Operator config loader for trigger.config.json
 # Version: 1.0.0
 # Created: 2026-08-08
-# Modified: 2026-10-17
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -14,7 +14,7 @@ import json
 import os
 from typing import Any
 
-from aipass.trigger.apps.config import TRIGGER_JSON_DIR, TRIGGER_ROOT, replace_with_retry, trail_logger
+from aipass.trigger.apps.config import TRIGGER_JSON_DIR, TRIGGER_ROOT, trail_logger
 
 CONFIG_PATH = TRIGGER_JSON_DIR / "custom_config" / "trigger.config.json"
 
@@ -73,7 +73,7 @@ def _write_config_file(config: dict[str, Any]) -> bool:
     try:
         CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
         tmp_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-        replace_with_retry(str(tmp_path), str(CONFIG_PATH))
+        os.replace(str(tmp_path), str(CONFIG_PATH))
         return True
     except OSError as exc:
         logger.error(f"failed to write {CONFIG_PATH}: {exc}")

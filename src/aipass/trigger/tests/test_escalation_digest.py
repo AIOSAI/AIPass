@@ -388,7 +388,7 @@ class TestReporting:
         assert len(rows) == 2
 
     def test_ordering_holds_when_last_seen_ties(self, lane, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The Windows CI flake: identical last_seen must still list newest first."""
+        """Identical last_seen must still list newest first."""
         _freeze_clock(monkeypatch, lane)
         _fire_warning(lane, times=1, message="older warning")
         newest = _fire_warning(lane, times=1, message="newer warning")["signature"]

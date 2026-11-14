@@ -19,25 +19,25 @@ _HANDLERS_SPELLINGS = (
 _THIRD_PARTY_DIRS = ("/site-packages/", "/dist-packages/")
 
 try:
-    _THIS_FILE = str(Path(__file__).resolve()).replace("\\", "/")
+    _THIS_FILE = str(Path(__file__).resolve())
 except OSError:
-    _THIS_FILE = str(__file__).replace("\\", "/")
+    _THIS_FILE = str(__file__)
 # Exact prefixes, never a substring: a directory that merely shares a branch's name is not that branch.
 _BRANCH_ROOT = _THIS_FILE.rsplit("/", 3)[0] + "/"
 _FLEET_ROOT = _THIS_FILE.rsplit("/", 4)[0] + "/"
 
 
 def _frame_path(frame) -> str:
-    """The frame's file as a forward-slash absolute path, or its raw spelling."""
+    """The frame's file as an absolute path, or its raw spelling."""
     raw = frame.f_code.co_filename
     # A pseudo filename resolved against a cwd inside this branch would make every bootstrap frame kin.
     if raw.startswith("<"):
         return raw
-    # resolve() reads os.getcwd (ntpath.realpath); a process whose cwd was deleted must not die here.
+    # resolve() reads os.getcwd for a relative path; a process whose cwd was deleted must not die here.
     try:
-        return str(Path(raw).resolve()).replace("\\", "/")
+        return str(Path(raw).resolve())
     except OSError:
-        return raw.replace("\\", "/")
+        return raw
 
 
 def _classify(frame, path: str) -> str:

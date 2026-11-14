@@ -3,22 +3,21 @@
 # Description: Trigger package paths, cwd-free module resolve, atomic JSON writes, recursion-safe trail logger
 # Version: 1.8.0
 # Created: 2026-03-09
-# Modified: 2026-10-17
+# Modified: 2026-11-14
 # =============================================
 
 """
 Trigger package path configuration.
 """
 
+import fcntl
 import json
-import sys
 import os
 import tempfile
-import time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
 try:
     from aipass.prax import append_jsonl as _append_jsonl
@@ -31,8 +30,7 @@ UNRESOLVED: list[str] = []
 
 def module_file(file: str) -> Path:
     """A module's own path, absolute, resolved when the filesystem allows."""
-    # On Windows Path.resolve() always calls os.getcwd(), so a deleted cwd kills the import;
-    # the fallback is sound because __file__ is absolute (3.9+), just not symlink-resolved.
+    # The fallback is sound because __file__ is absolute (3.9+), just not symlink-resolved.
     path = Path(file)
     try:
         return path.resolve()
@@ -105,56 +103,6 @@ TRIGGER_JSON_DIR = TRIGGER_ROOT / "trigger_json"
 ARCHIVE_DIR_NAME = ".archive"
 
 
-# Windows raises PermissionError while an AV scanner holds the file; bounded so it raises, not hangs.
-_REPLACE_ATTEMPTS = 40
-_REPLACE_BACKOFF_SECONDS = 0.005
-
-# win32 only: no blocking flock there, so it polls.
-_LOCK_ATTEMPTS = 100
-_LOCK_BACKOFF_SECONDS = 0.05
-
-
-def replace_with_retry(
-    source: str,
-    destination: str,
-    replace_fn: Optional[Callable[[str, str], None]] = None,
-    sleep_fn: Optional[Callable[[float], None]] = None,
-) -> None:
-    """Move a staged file into place, tolerating Windows sharing violations."""
-    # replace_fn and sleep_fn are test seams; None is os.replace and time.sleep.
-    replace = replace_fn or os.replace
-    sleep = sleep_fn or time.sleep
-    for attempt in range(_REPLACE_ATTEMPTS):
-        try:
-            replace(source, destination)
-            return
-        except PermissionError:
-            if attempt == _REPLACE_ATTEMPTS - 1:
-                raise
-            sleep(_REPLACE_BACKOFF_SECONDS)
-
-
-def read_text_with_retry(
-    path: Path,
-    encoding: str = "utf-8",
-    read_fn: Optional[Callable[..., str]] = None,
-    sleep_fn: Optional[Callable[[float], None]] = None,
-) -> str:
-    """Read a document, tolerating Windows sharing violations."""
-    # Windows refuses a read mid-replace, and json_handler answers a refused open by regenerating.
-    sleep = sleep_fn or time.sleep
-    for attempt in range(_REPLACE_ATTEMPTS):
-        try:
-            if read_fn is None:
-                return path.read_text(encoding=encoding)
-            return read_fn(path, encoding=encoding)
-        except PermissionError:
-            if attempt == _REPLACE_ATTEMPTS - 1:
-                raise
-            sleep(_REPLACE_BACKOFF_SECONDS)
-    raise AssertionError("unreachable: the loop above either returns or raises")
-
-
 def atomic_write_json(path: Path, data, indent: int = 2, ensure_ascii: bool = True, encoding: str = "utf-8") -> None:
     """Write JSON data to a file atomically using write-to-tmp + os.replace."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -162,7 +110,7 @@ def atomic_write_json(path: Path, data, indent: int = 2, ensure_ascii: bool = Tr
     try:
         with os.fdopen(fd, "w", encoding=encoding) as f:
             json.dump(data, f, indent=indent, ensure_ascii=ensure_ascii)
-        replace_with_retry(tmp_path, str(path))
+        os.replace(tmp_path, str(path))
     except BaseException:
         try:
             os.unlink(tmp_path)
@@ -171,103 +119,18 @@ def atomic_write_json(path: Path, data, indent: int = 2, ensure_ascii: bool = Tr
         raise
 
 
-# Bound once at import, before any test pretends another platform; a missing one raises at use.
-try:
-    import fcntl
-except ImportError:
-    fcntl = None  # type: ignore[assignment]
-
-try:
-    import msvcrt
-except ImportError:
-    msvcrt = None  # type: ignore[assignment]
-
-
-def _lock_primitive(module: Any, name: str) -> Any:
-    """The module-level lock primitive, or an ImportError naming the host."""
-    if module is None:
-        raise ImportError(f"{name} is unavailable on this host ({sys.platform}); json_file_lock cannot lock")
-    return module
-
-
-def _try_lock_win32(lock_file, msvcrt_module: Any = None) -> bool:
-    """One non-blocking attempt at the sidecar's byte lock."""
-    if msvcrt_module is None:
-        msvcrt_module = _lock_primitive(msvcrt, "msvcrt")
-
-    try:
-        lock_file.seek(0)
-        msvcrt_module.locking(lock_file.fileno(), msvcrt_module.LK_NBLCK, 1)
-        return True
-    except OSError:
-        return False
-
-
-def _acquire_lock_win32(
-    lock_file, msvcrt_module: Any = None, sleep_fn: Optional[Callable[[float], None]] = None
-) -> None:
-    """Poll for the lock — Windows has no blocking flock."""
-    # Locking a byte past EOF is legal on Windows, so the sidecar needs no contents.
-    if msvcrt_module is None:
-        msvcrt_module = _lock_primitive(msvcrt, "msvcrt")
-    sleep = sleep_fn or time.sleep
-
-    for _attempt in range(_LOCK_ATTEMPTS - 1):
-        if _try_lock_win32(lock_file, msvcrt_module):
-            return
-        sleep(_LOCK_BACKOFF_SECONDS)
-
-    # Unguarded on purpose: the caller gets the real OSError; never return without the lock.
-    lock_file.seek(0)
-    msvcrt_module.locking(lock_file.fileno(), msvcrt_module.LK_NBLCK, 1)
-
-
-def _acquire_lock(
-    lock_file,
-    platform: Optional[str] = None,
-    msvcrt_module: Any = None,
-    sleep_fn: Optional[Callable[[float], None]] = None,
-) -> None:
-    """Take an exclusive OS lock on an open .lock sidecar."""
-    if platform == "win32" or (platform is None and sys.platform == "win32"):
-        _acquire_lock_win32(lock_file, msvcrt_module, sleep_fn)
-    else:
-        posix_lock = _lock_primitive(fcntl, "fcntl")
-        posix_lock.flock(lock_file, posix_lock.LOCK_EX)
-
-
-def _release_lock(lock_file, platform: Optional[str] = None, msvcrt_module: Any = None) -> None:
-    """Release the lock taken by _acquire_lock."""
-    if platform == "win32" or (platform is None and sys.platform == "win32"):
-        if msvcrt_module is None:
-            msvcrt_module = _lock_primitive(msvcrt, "msvcrt")
-
-        lock_file.seek(0)
-        msvcrt_module.locking(lock_file.fileno(), msvcrt_module.LK_UNLCK, 1)
-    else:
-        posix_lock = _lock_primitive(fcntl, "fcntl")
-        posix_lock.flock(lock_file, posix_lock.LOCK_UN)
-
-
 @contextmanager
-def json_file_lock(
-    path: Path,
-    platform: Optional[str] = None,
-    msvcrt_module: Any = None,
-    sleep_fn: Optional[Callable[[float], None]] = None,
-):
+def json_file_lock(path: Path):
     """Acquire exclusive lock for a JSON file's read-modify-write cycle."""
     # Pair with atomic_write_json: atomic stops a torn file, this stops a lost update.
-    # win32 raises OSError when its bounded wait runs out; it never yields unlocked.
     lock_path = path.with_suffix(".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    # "a+" not "w": truncating a byte-locked sidecar is a sharing violation on Windows.
     with open(lock_path, "a+", encoding="utf-8") as lock_f:
-        _acquire_lock(lock_f, platform, msvcrt_module, sleep_fn)
+        fcntl.flock(lock_f, fcntl.LOCK_EX)
         try:
             yield
         finally:
-            _release_lock(lock_f, platform, msvcrt_module)
+            fcntl.flock(lock_f, fcntl.LOCK_UN)
 
 
 def _archive_legacy_file(path: Path) -> bool:
@@ -279,7 +142,7 @@ def _archive_legacy_file(path: Path) -> bool:
         if target.exists():
             stamp = int(path.stat().st_mtime)
             target = archive_dir / f"{path.stem}.{stamp}{path.suffix}"
-        replace_with_retry(str(path), str(target))
+        os.replace(str(path), str(target))
         return True
     except OSError as exc:
         logger.warning(f"archive of {path.name} failed: {exc}")

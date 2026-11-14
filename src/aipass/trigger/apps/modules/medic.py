@@ -12,7 +12,6 @@ Medic Toggle Module - Control auto-healing error dispatch
 Also the door to run_error_catchup(): log_watcher_service is an entry point, and entry points import modules.
 """
 
-import os
 import sys
 from pathlib import Path
 from typing import Callable
@@ -46,13 +45,6 @@ from aipass.trigger.apps.handlers.medic_state import (
     DEFAULT_MUTE_SECONDS,
     DEFAULT_OFF_SECONDS,
 )
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 
 def run_error_catchup(fire_event: Callable[..., object] | None = None) -> None:

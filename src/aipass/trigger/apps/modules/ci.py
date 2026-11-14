@@ -10,7 +10,6 @@
 CI red lane - poll dev's runs, wake the owner of a red, gate its cure through @sentry, push it
 """
 
-import os
 import sys
 from typing import Any, Dict, List
 
@@ -21,13 +20,6 @@ from aipass.trigger.apps.handlers.events.ci_red import PAYLOAD_KEYS, is_retried,
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers.repo_root import find_repo_root
 from aipass.trigger.apps.modules.core import trigger
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 _SUBCOMMANDS = ["poll", "status", "reply", "verdict"]
 CHANGELOG_NAME = "CHANGELOG.md"

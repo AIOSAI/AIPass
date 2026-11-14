@@ -484,7 +484,7 @@ class TestInodeRotationDetection:
 
     def test_zero_inode_falls_back_to_size_check(self, tmp_path):
         """No-overreach guard: a recorded inode of 0 is treated as unknown.
-        Passes with and without the fix: some Windows filesystems report st_ino 0.
+        Passes with and without the fix.
         """
         watcher = lw.BranchLogWatcher()
 
@@ -557,7 +557,6 @@ class TestOnModified:
 
         warned: MagicMock = lw.logger.warning  # type: ignore[assignment]
         warned.assert_called_once()
-        # Not a repr of the call: repr doubles Windows backslashes, so a path search never matches.
         reported_args = warned.call_args.args
         assert "/some/core.log" == reported_args[1], f"the failing file must be named, got: {reported_args}"
         assert "disk error" in str(reported_args[2]), f"the cause must be named, got: {reported_args}"

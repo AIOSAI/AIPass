@@ -8,7 +8,7 @@
 
 """Module-file and repo-root resolution, defined once for trigger.
 
-Never the cwd, never resolve() at import (Windows reads os.getcwd()); no prax (watched path, circular)."""
+Never the cwd; no prax (watched path, circular)."""
 
 import os
 from collections.abc import Callable

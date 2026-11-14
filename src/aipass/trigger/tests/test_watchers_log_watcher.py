@@ -630,7 +630,7 @@ class TestLogFileWatcherInodeRotation:
     def test_zero_inode_falls_back_to_size_check(self, tmp_path):
         """No-overreach guard: a recorded inode of 0 is treated as unknown.
 
-        Some Windows filesystems report st_ino 0, which must never read as a rotation."""
+        An st_ino of 0 must never read as a rotation."""
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -736,7 +736,6 @@ class TestWatcherOnModified:
 
         warned: MagicMock = wlw.logger.warning  # type: ignore[assignment]
         warned.assert_called_once()
-        # Assert on the call's own arguments: repr doubles backslashes in a Windows path.
         reported_args = warned.call_args.args
         assert str(logs_dir / "app.log") == reported_args[1], f"the failing file must be named: {reported_args}"
         assert "disk error" in str(reported_args[2]), f"the cause must be named, got: {reported_args}"

@@ -184,7 +184,7 @@ class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else o
         Read new content from a log file and process lines.
 
         Rotation is detected by inode, not size: a fresh log may already be past the old offset.
-        Inode 0 (some Windows filesystems) means unknown and falls back to the size check.
+        Inode 0 means unknown and falls back to the size check.
         """
         stats = Path(file_path).stat()
         current_size = stats.st_size

@@ -13,7 +13,7 @@
       "file": "apps/config.py",
       "standard": "silent_catch",
       "pattern": "guarded prax import / sidecar write failure / tmp cleanup",
-      "reason": "Three sites, all structurally unloggable. L35: guarded `from aipass.prax import append_jsonl` — config.py is imported by everything and cannot hard-depend on prax (circular). L71: append_trail's own write failure — you cannot log a failure to log, so it is returned as False and COUNTED on TrailLogger.dropped, surfaced by callers (escalation get_stats). L170: atomic_write_json unlinking its temp file on an already-failing write; the original exception is re-raised on the next line."
+      "reason": "Three sites, all structurally unloggable. L35: guarded `from aipass.prax import append_jsonl` — config.py is imported by everything and cannot hard-depend on prax (circular). L71: append_trail's own write failure — you cannot log a failure to log, so it is returned as False and COUNTED on TrailLogger.dropped, surfaced by callers (escalation get_stats). L116: atomic_write_json unlinking its temp file on an already-failing write; the original exception is re-raised on the next line."
     },
     {
       "file": "apps/modules/core.py",
@@ -43,7 +43,7 @@
       "file": "apps/config.py",
       "standard": "error_handling",
       "pattern": "atomic_write_json tmp cleanup",
-      "reason": "Reported as line 170, body at L170-171: unlinking the temp file after a failed atomic write. The real error is re-raised immediately after, so nothing is swallowed. FILE-WIDE: error_handling_check passes no line to is_bypassed()."
+      "reason": "Reported as line 116, body at L116-117: unlinking the temp file after a failed atomic write. The real error is re-raised immediately after, so nothing is swallowed. FILE-WIDE: error_handling_check passes no line to is_bypassed()."
     },
     {
       "file": "apps/modules/core.py",
@@ -153,7 +153,7 @@
       "file": "apps/config.py",
       "standard": "logged_fallback",
       "lines": [
-        60
+        58
       ],
       "pattern": "append_trail returns False when the trail write fails",
       "reason": "False means not written in both arms, and success is True, so no caller can mistake the failure for an answer (fleet green leg 5, kept leg 10). Each caller reads False as not written: TrailLogger.dropped counts it, and error_detected, runaway_handler and startup check it. You cannot log a failure to log.",

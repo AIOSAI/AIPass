@@ -3,7 +3,7 @@
 # Description: Unit tests for the error_registry handler
 # Version: 1.3.2
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/error_registry.py: the dedup engine, circuit breaker and backoff."""
@@ -98,17 +98,6 @@ def test_normalize_strips_paths(tmp_path: Path) -> None:
     normalized = er.normalize_message(f"Cannot read {data_file}")
     assert str(tmp_path) not in normalized
     assert "<path>" in normalized
-
-
-def test_normalize_strips_windows_paths() -> None:
-    """normalize_message replaces a drive-letter path with either separator (compass 458).
-
-    Two Windows errors differing only by path must share one fingerprint."""
-    er = _import_registry()
-    backslash = er.normalize_message(r"failed at C:\work\AIPass\src\foo.py line 12")
-    forward = er.normalize_message("failed at D:/work/AIPass/src/bar.py line 99")
-    assert backslash == "failed at <path> line N"
-    assert forward == "failed at <path> line N"
 
 
 def test_normalize_strips_uuids() -> None:
@@ -1273,43 +1262,6 @@ def test_get_dispatch_count_does_not_mutate_state(tmp_path: Path) -> None:
     er.get_dispatch_count("read_only_fp")
 
     assert not er.CB_STATE_FILE.exists()
-
-
-def _refuse_once(mp, er):
-    """Refuse ONE read of target with a Windows sharing violation.
-
-    _load_registry turns a refused read into a blank registry that callers write straight back."""
-    state = {"left": 1, "seen": 0}
-
-    # The concrete flavour (PosixPath or WindowsPath): before 3.12 a bare Path subclass has no _flavour.
-    class _RefusingPath(type(Path())):
-        """The registry path, refusing its first read; only er.REGISTRY_FILE is swapped."""
-
-        def read_text(self, *args, **kwargs):
-            if state["left"]:
-                state["left"] -= 1
-                state["seen"] += 1
-                raise PermissionError(13, "used by another process")
-            return super().read_text(*args, **kwargs)
-
-    mp.setattr(er, "REGISTRY_FILE", _RefusingPath(er.REGISTRY_FILE))
-    return state
-
-
-def test_a_refused_read_does_not_wipe_the_registry(tmp_path: Path) -> None:
-    """A sharing violation mid-write must not cost the whole registry."""
-    _seed_registry(tmp_path)
-    er = _import_registry()
-    er.report(error_type="ImportError", message="first", component="FLOW")
-    assert len(json.loads(er.REGISTRY_FILE.read_text(encoding="utf-8"))["errors"]) == 1
-
-    with pytest.MonkeyPatch.context() as mp:
-        state = _refuse_once(mp, er)
-        er.report(error_type="ValueError", message="second", component="FLOW")
-
-    assert state["seen"] == 1, "fixture refused nothing — test is vacuous"
-    errors = json.loads(er.REGISTRY_FILE.read_text(encoding="utf-8"))["errors"]
-    assert len(errors) == 2, f"registry was blanked by a transient refusal: {list(errors)}"
 
 
 _STALE = "2020-01-01T00:00:00"

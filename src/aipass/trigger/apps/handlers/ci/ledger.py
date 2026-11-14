@@ -3,7 +3,7 @@
 # Description: CI red lane ledger - run verdicts and cure states in trigger_json/ci_ledger.json
 # Version: 1.2.1
 # Created: 2026-10-22
-# Modified: 2026-10-24
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterator
 
-from aipass.trigger.apps.config import TRIGGER_JSON_DIR, atomic_write_json, json_file_lock, read_text_with_retry
+from aipass.trigger.apps.config import TRIGGER_JSON_DIR, atomic_write_json, json_file_lock
 from aipass.trigger.apps.handlers.json import json_handler
 
 LEDGER_FILE = TRIGGER_JSON_DIR / "ci_ledger.json"
@@ -52,7 +52,7 @@ def load() -> Dict[str, Any]:
     if not LEDGER_FILE.exists():
         return _empty()
     try:
-        data = json.loads(read_text_with_retry(LEDGER_FILE))
+        data = json.loads(LEDGER_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise RuntimeError(f"ci ledger unreadable ({LEDGER_FILE.name}): {exc}") from exc
     data.setdefault("runs", {})

@@ -3,7 +3,7 @@
 # Description: Medic state persistence and status collection handler
 # Version: 1.3.0
 # Created: 2026-02-12
-# Modified: 2026-10-17
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -26,7 +26,6 @@ from aipass.trigger.apps.config import (
     atomic_write_json,
     json_file_lock,
     migrate_json_file,
-    read_text_with_retry,
 )
 from aipass.trigger.apps.handlers.json import json_handler
 
@@ -91,7 +90,7 @@ def read_config() -> dict:
     if not MEDIC_STATE_FILE.exists():
         return {}
     try:
-        return json.loads(read_text_with_retry(MEDIC_STATE_FILE))
+        return json.loads(MEDIC_STATE_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         logger.warning("read_config failed: %s", exc)
         raise

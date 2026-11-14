@@ -3,7 +3,7 @@
 # Description: Unit tests for medic_state handler — real file I/O via tmp_path
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for the medic_state handler (apps/handlers/medic_state.py)."""
@@ -14,7 +14,6 @@
 import json
 from datetime import datetime, timedelta
 import pytest
-from pathlib import Path
 from unittest.mock import MagicMock
 
 from aipass.trigger.apps.handlers import medic_state
@@ -977,32 +976,3 @@ class TestLegacyPathMigration:
         data = json.loads(state_mod.MEDIC_STATE_FILE.read_text(encoding="utf-8"))
         assert [e["name"] for e in data["config"]["muted_branches"]] == ["sentry"]
         assert not legacy.exists()
-
-
-class TestARefusedReadDoesNotBlankTheState:
-    """read_config returns {} when it cannot read, and write_config persists
-    exactly what it is handed, so a refused read must raise rather than blank every mute.
-    """
-
-    def test_a_transient_refusal_does_not_cost_the_mutes(self, state_mod):
-        state_mod.mute_branch("flow")
-        assert state_mod.get_muted_branches() == ["flow"]
-
-        seen = []
-        state_file = str(state_mod.MEDIC_STATE_FILE)
-
-        class _RefusedOnce(type(Path())):
-            """The state file's own path, refused once — no other path in the process is touched."""
-
-            def read_text(self, *args, **kwargs):
-                if str(self) == state_file and not seen:
-                    seen.append(1)
-                    raise PermissionError(13, "used by another process")
-                return super().read_text(*args, **kwargs)
-
-        with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(state_mod, "MEDIC_STATE_FILE", _RefusedOnce(state_file))
-            state_mod.mute_branch("sentry")
-
-        assert seen, "fixture refused nothing — test is vacuous"
-        assert sorted(state_mod.get_muted_branches()) == ["flow", "sentry"]

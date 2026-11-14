@@ -721,10 +721,9 @@ def systemctl_never_answers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
     Only an inert stub on PATH and subprocess.run replaced at service_control, so no real systemctl runs."""
     bin_dir = tmp_path / "systemd_bin"
     bin_dir.mkdir()
-    for name in ("systemctl", "systemctl.exe"):  # the .exe is what which() finds on Windows
-        stub = bin_dir / name
-        stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        stub.chmod(0o755)
+    stub = bin_dir / "systemctl"
+    stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    stub.chmod(0o755)
     monkeypatch.setenv("PATH", str(bin_dir))
     calls: list = []
 

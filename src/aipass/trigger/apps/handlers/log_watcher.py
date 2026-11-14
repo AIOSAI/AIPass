@@ -305,7 +305,6 @@ def fleet_logs_dirs() -> Dict[Path, str]:
 
 def classify_log_path(path: PurePath) -> str:
     """Say which tree a log file belongs to, from its path components."""
-    # Components, never separators: a "/logs/" substring test drops every Windows path.
     parts = path.parts
     if "aipass" in parts and "logs" in parts:
         return "branch"

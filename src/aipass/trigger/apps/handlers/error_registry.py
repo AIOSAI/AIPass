@@ -3,7 +3,7 @@
 # Description: Structured error tracking and registry for Medic v2
 # Version: 2.6.0
 # Created: 2026-02-13
-# Modified: 2026-10-24
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -22,7 +22,7 @@ from typing import Dict, Iterator, Optional, Tuple
 
 
 from aipass.prax.apps.modules.logger import get_direct_logger
-from aipass.trigger.apps.config import TRIGGER_ROOT, atomic_write_json, json_file_lock, read_text_with_retry
+from aipass.trigger.apps.config import TRIGGER_ROOT, atomic_write_json, json_file_lock
 from aipass.trigger.apps.handlers.json import json_handler
 
 logger = get_direct_logger()
@@ -105,7 +105,7 @@ def _load_circuit_breaker_state() -> Tuple[CircuitBreakerState, dict]:
     try:
         if not CB_STATE_FILE.exists():
             return breaker, per_fingerprint
-        raw = read_text_with_retry(CB_STATE_FILE).strip()
+        raw = CB_STATE_FILE.read_text(encoding="utf-8").strip()
         if not raw:
             return breaker, per_fingerprint
         data = json.loads(raw)
@@ -315,8 +315,7 @@ def normalize_message(message: str) -> str:
 
     normalized = re.sub(r"\d{4}-\d{2}-\d{2}", "<date>", normalized)
 
-    # Rule order matters: paths eat a drive colon before the port rule can see it.
-    normalized = re.sub(r"\b[A-Za-z]:[\\/][\w.\\/-]*|/[\w./-]+", "<path>", normalized)
+    normalized = re.sub(r"/[\w./-]+", "<path>", normalized)
 
     normalized = re.sub(r"\bline \d+\b", "line N", normalized, flags=re.IGNORECASE)
 
@@ -344,12 +343,12 @@ def compute_fingerprint(error_type: str, normalized_msg: str, component: str) ->
 def _load_registry() -> dict:
     """Load the error registry from disk.
 
-    Callers write the blank fallback straight back, so a transient Windows sharing violation
-    is retried; a refusal that never clears still returns blank and loses the registry.
+    Callers write the blank fallback straight back, so an unreadable file
+    returns blank and loses the registry.
     """
     try:
         if REGISTRY_FILE.exists():
-            raw = read_text_with_retry(REGISTRY_FILE).strip()
+            raw = REGISTRY_FILE.read_text(encoding="utf-8").strip()
             if not raw:
                 return {"errors": {}, "metadata": {"version": "1.0.0", "last_updated": datetime.now().isoformat()}}
             data = json.loads(raw)
