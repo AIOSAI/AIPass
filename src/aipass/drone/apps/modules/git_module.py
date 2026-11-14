@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.18.0
+# Version: 1.18.1
 # Created: 2026-03-17
-# Modified: 2026-11-10
+# Modified: 2026-11-11
 # =============================================
 
 """
@@ -529,6 +529,9 @@ def _handle_gh_passthrough(subcommand: str, args: list[str]) -> dict:
     watch = subcommand == "run" and args[:1] == ["watch"]
     if watch and not any(arg in ("-i", "--interval") or arg.startswith("--interval=") for arg in args):
         args = [*args, "--interval", _RUN_WATCH_INTERVAL]
+    # A failed run must exit non-zero, so a background watch can be judged by its exit.
+    if watch and "--exit-status" not in args:
+        args = [*args, "--exit-status"]
     timeout = _RUN_WATCH_TIMEOUT if watch else _GH_TIMEOUT
     cmd = ["gh", subcommand] + args
     try:
@@ -1341,7 +1344,7 @@ def _gh_verb_help(command: str) -> str:
     )
     log_line = (
         "  view <id> --log | --log-failed reads a run's log (job API fallback)\n"
-        "  watch <id> streams gh's poll every 60 s (or -i), gives up after 45 min\n"
+        "  watch <id> polls every 60 s (or -i), 45 min cap, exits 1 if the run fails\n"
         "  list | view | watch --repo <path> reads another repo's runs (admin seat)\n"
         if command == "run"
         else "  create | comment --repo AIOSAI/AIPass --body 'text' [any seat]: signed with\n"

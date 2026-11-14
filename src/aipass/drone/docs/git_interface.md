@@ -233,7 +233,9 @@ honoured, and a job whose log the API refuses fails the command by name (`TestRu
 **`run watch <id>`.** A CI run takes about 30 minutes, so watch waits up to 45 before it gives up,
 and gh polls every 60 seconds unless the caller passes its own `-i/--interval`. Its output is not
 captured: gh's own run state reaches the terminal on every poll, so a human sees it is alive. Past
-the ceiling the command fails with `gh run timed out after 2700s`.
+the ceiling the command fails with `gh run timed out after 2700s`. Watch always passes gh's
+`--exit-status`, so a run that ends in failure exits non-zero and a background watch can be judged
+by its exit code alone.
 
 These three verbs take gh's **own** `--repo OWNER/NAME`, which is why they are not external-repo
 door verbs.
