@@ -14,7 +14,6 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(stdlib) — hashlib.sha256 and secrets.token_urlsafe themselves, behind issue_token()
 # sentry: no-test-needed(constant) — print_help() and print_introspection() display text beyond the names asserted
-# sentry: no-test-needed(windows_compat) — the 0o600 token file mode on Windows; the POSIX tests carry a skipif
 # sentry: no-test-needed(duplicate_test) — the face lane in depth, covered by tests/test_host_face.py
 # sentry: no-test-needed(duplicate_test) — the lifetime and fleet lanes in depth, tests/test_host_lifetime.py
 
@@ -47,7 +46,7 @@ from aipass.api.tests.support_host_api import TAILNET_SHAPED, UNHELD_ADDRESS, _b
 from aipass.cli.apps.modules import display
 
 
-# Never opened; under the platform temp dir, not /tmp, so it reads the same on Windows.
+# Never opened; under the platform temp dir, not /tmp.
 STANDIN_LOG = Path(tempfile.gettempdir()) / "host_api_serve.log"
 
 
@@ -82,7 +81,7 @@ def _printed(*mocks: Any) -> str:
     """
     What the mocked output calls were given, as one plain string.
 
-    Never the calls' repr: it doubles backslashes, so a Windows path is never found.
+    Never the calls' repr: it doubles backslashes.
     """
     given = (value for mock in mocks for call in mock.call_args_list for value in (*call.args, *call.kwargs.values()))
     return " ".join(str(value) for value in given)
@@ -286,7 +285,6 @@ class TestIssueTokenCommand:
         assert receipt.is_file(), "no receipt was written and nothing said so"
         assert host_tokens.verify_token(receipt.read_text(encoding="utf-8")) is not None
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions")
     def test_the_default_receipt_is_still_0600(self, store: Path, quiet_module: dict) -> None:
         """The mode is the point of the file, not a property of --out."""
         handle_command("host-api", ["issue-token", "pixel-8"])
@@ -388,8 +386,7 @@ class TestIssueTokenCommand:
 
         raw = out.read_text(encoding="utf-8")
         assert host_tokens.verify_token(raw) is not None
-        if sys.platform != "win32":
-            assert stat.S_IMODE(os.stat(out).st_mode) == 0o600
+        assert stat.S_IMODE(os.stat(out).st_mode) == 0o600
 
     def test_scope_flag_is_honoured(self, store: Path, tmp_path: Path, quiet_module: dict) -> None:
         """--scope operate mints an operate token, not a read one."""
@@ -825,7 +822,6 @@ class TestSetConfigCommand:
     ) -> None:
         """A quoted ~ reaches this command unexpanded; the store only ever holds absolute paths."""
         monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         bundle = _face_bundle(tmp_path / "face")
 
         with patch(PATCH_CONFIG_LOGGER):
@@ -1008,7 +1004,6 @@ class TestIntrospection:
         home.mkdir()
         repo.mkdir()
         monkeypatch.setenv("HOME", str(home))
-        monkeypatch.setenv("USERPROFILE", str(home))
         monkeypatch.setattr(host_fleet, "repo_root", lambda: repo)
         monkeypatch.setattr(host_fleet.shutil, "which", lambda _name: None)
         return repo

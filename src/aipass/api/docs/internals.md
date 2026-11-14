@@ -94,26 +94,6 @@ POSIX machine that fails to measure all three is an error; and the skip path its
 is exercised by taking the capabilities away by hand, because on a box that has them
 the whole block is otherwise unreachable. See its own README for the format.
 
-## The module that must import where it cannot run
-
-`host/attach.py` hosts a PTY running a tmux client. A PTY is a Unix object and
-tmux does not run on Windows, so **nothing in that module can work there** —
-which is fine, guarded by `PTY_AVAILABLE`, and tested. Failing to **import** is
-a different failure, and a much wider one: `server` imports `attach` and
-`host_api` imports `server`, so one bad line takes every host test file down.
-
-A default argument is evaluated when the module is imported, so a POSIX-only name
-reached directly in a signature (`os.setsid`) breaks the import before any platform
-guard runs. Every POSIX-only default in `attach.py` is fetched with `getattr`.
-
-Pinned two ways. An AST test asserts no default in that signature is a bare
-attribute access. And `tests/test_windows_import.py` imports **every** module under
-`apps/` in a disposable child interpreter with POSIX hidden — a `meta_path` finder
-refuses `fcntl`/`pty`/`termios`/`grp`/`pwd`/`resource`/`tty` and the POSIX-only `os`
-attributes are deleted. The finder matters — patching `builtins.__import__` puts the
-test file into the import stack, where the fleet's cross-branch import gate reads it
-and blocks the sweep instead of measuring anything.
-
 ---
 
 [← api README](../README.md)

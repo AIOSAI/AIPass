@@ -220,11 +220,8 @@ class TestTheCorpusItself:
         assert needy[0]["id"] in str(skipped.value)
         assert "cannot host the case" in str(skipped.value)
 
-    # Trap: the getattr is needed. test_windows_import hides os.geteuid with os.name
-    # still "posix", and a bare call here runs at collection and takes the file with it.
     @pytest.mark.skipif(
-        os.name != "posix" or getattr(os, "geteuid", lambda: 0)() == 0,
-        reason="this guard is about a non-root POSIX machine, where all three capabilities exist",
+        os.geteuid() == 0, reason="this guard is about a non-root machine, where all three capabilities exist"
     )
     def test_a_posix_machine_measures_every_capability(self) -> None:
         """The counterpart to verify-then-skip, and the reason it is not a hole."""

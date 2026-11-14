@@ -40,7 +40,7 @@ and `last_used`, which tells a live token from a merely un-revoked one.
 
 `last_used` writes on every authenticated request, so the store is written
 atomically (temp file, `fsync`, `os.replace`, created `0o600`) behind a
-cross-platform lock with stale-lock breaking. **Telemetry never undoes security**:
+lock with stale-lock breaking. **Telemetry never undoes security**:
 the touch re-reads inside the lock, so a stale list never revives a revoked token,
 and a lock it cannot take drops the timestamp, never raises. Writes coalesce to
 one per minute per token. The envelope is versioned; records predating the fields

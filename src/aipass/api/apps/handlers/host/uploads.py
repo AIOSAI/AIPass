@@ -170,7 +170,7 @@ def _require_within_cap(declared: Optional[int], subject: str) -> None:
 
 def _pictures_dir() -> Path:
     """The operator's Pictures directory, the way the desktop finds it."""
-    # Tauri's picture_dir() lookup; the ~/Pictures fallback is right on Windows and macOS too.
+    # Tauri's picture_dir() lookup.
     from_env = os.environ.get("XDG_PICTURES_DIR", "").strip()
     if from_env:
         return Path(os.path.expandvars(from_env)).expanduser()

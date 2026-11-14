@@ -155,8 +155,6 @@ class TestTheGate:
 PATCH_CONFIG_LOGGER = "aipass.api.apps.handlers.host.config.logger"
 PATCH_FLEET_LOGGER = "aipass.api.apps.handlers.host.fleet.logger"
 
-posix_permissions = pytest.mark.skipif(sys.platform == "win32", reason="os.access X_OK is always true on Windows")
-
 
 def _executable(path: Path, mode: int = 0o755) -> Path:
     """A stand-in binary: a regular file with the given mode."""
@@ -175,7 +173,6 @@ def places(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     repo.mkdir()
     on_path: dict = {}
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setattr(host_fleet, "repo_root", lambda: repo)
     monkeypatch.setattr(host_fleet.shutil, "which", lambda name: on_path.get(name))
 
@@ -239,7 +236,6 @@ class TestBinaryResolution:
         assert str(configured) in message
         assert "set-config --baud-bin default" in message
 
-    @posix_permissions
     def test_a_configured_binary_that_lost_its_bit_is_refused_by_name(self, places: SimpleNamespace) -> None:
         """Present is not enough: a file that cannot be exec'd refuses here, not as a 500 at the exec."""
         configured = _executable(places.elsewhere / "baud-cli")
@@ -272,7 +268,6 @@ class TestBinaryResolution:
         assert positions == sorted(positions), message
         assert message.endswith("Install it: aipass baud install.")
 
-    @posix_permissions
     def test_an_automatic_file_without_the_bit_is_passed_and_named(self, places: SimpleNamespace) -> None:
         """A download nobody chmodded is skipped for the next step, and still named when nothing answers."""
         installed = _executable(places.home / host_fleet.INSTALLED_BINARY_RELATIVE, mode=0o644)

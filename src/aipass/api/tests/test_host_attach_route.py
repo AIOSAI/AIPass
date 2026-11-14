@@ -12,7 +12,6 @@
 # sentry: no-test-needed(covered) — issue_token() and the token store's own locking, tests/test_host_token_store.py
 # sentry: no-test-needed(generated) — the tmux client that attach_command() builds; these tests spawn cat, never tmux
 
-import ast
 import errno
 import json
 import os
@@ -33,7 +32,6 @@ from aipass.api.tests.support_host_attach import (
     _forced_tmux_which,
     detach_and_wait,
     fastapi_required,
-    pty_required,
     wait_for_log,
 )
 
@@ -45,7 +43,7 @@ PATCH_SERVER_LOGGER = "aipass.api.apps.handlers.host.server.logger"
 PATCH_PUMP_LOGGER = "aipass.api.apps.handlers.host.pump.logger"
 
 
-# Portable: Linux symlinks /dev/fd to /proc/self/fd, macOS mounts fdescfs there; /proc is Linux-only.
+# Linux symlinks /dev/fd to /proc/self/fd.
 FD_DIR = "/dev/fd"
 
 
@@ -61,7 +59,6 @@ fd_census_required = pytest.mark.skipif(
 )
 
 
-@pty_required
 class TestOpeningAnAttach:
     """What has to be true before a PTY exists at all."""
 
@@ -139,7 +136,7 @@ class TestOpeningAnAttach:
         assert "tmux client" in str(caught.value)
 
     def test_a_pty_case_opens_on_a_host_that_has_no_tmux(self, quiet: Any, monkeypatch: Any) -> None:
-        """The other half of the case above, and the whole macOS red in one line."""
+        """The other half of the case above."""
         # `which` answers None for EVERY binary, a tmux-less runner; the forced rule must still open the session.
         empty_host = MagicMock(return_value=None)
         monkeypatch.setattr(host_attach.shutil, "which", _forced_tmux_which(empty_host))
@@ -417,7 +414,6 @@ class TestGlobalMissionControlIsReachable:
         DESKTOP's argv, so if the two ever diverge the phone diverges with the desk."""
         assert "all" not in host_attach.monitor_command("")
 
-    @pty_required
     def test_the_global_watch_actually_opens(self, quiet: Any, tmp_path: Path) -> None:
         """End to end through open_monitor, with no target at all."""
         with patch.object(host_attach, "monitor_command", lambda target="": ["cat"]):
@@ -429,7 +425,6 @@ class TestGlobalMissionControlIsReachable:
         finally:
             session.hangup()
 
-    @pty_required
     def test_a_targetless_watch_is_named_not_blank(self, quiet: Any, tmp_path: Path) -> None:
         """'watch-' with nothing after it reads as a truncated name. A watch over
         everything has a name of its own so a log line says what it was."""
@@ -448,8 +443,6 @@ class TestGlobalMissionControlIsReachable:
     )
     def test_garbage_is_still_refused_before_anything_spawns(self, quiet: Any, garbage: str, monkeypatch) -> None:
         """Making absence reachable must not make anything ELSE reachable."""
-        # PTY_AVAILABLE forced so the FENCE answers on every platform; the platform gate stands in front of it.
-        monkeypatch.setattr(host_attach, "PTY_AVAILABLE", True)
         # No drone on PATH: the fence must answer before the PATH check, not lean on the argv builder behind it.
         which = MagicMock(return_value=None)
         monkeypatch.setattr(host_attach.shutil, "which", which)
@@ -460,18 +453,6 @@ class TestGlobalMissionControlIsReachable:
         which.assert_not_called()
         spawn.assert_not_called()
 
-    def test_a_pty_less_platform_is_refused_in_words_before_the_fence(self, quiet: Any) -> None:
-        """The Windows contract, pinned from every platform: no PTY means the
-        honest sentence, raised before the fence or any spawn is consulted."""
-        with patch.object(host_attach, "PTY_AVAILABLE", False):
-            with patch.object(host_attach.subprocess, "Popen") as spawn:
-                with pytest.raises(host_attach.AttachUnavailable) as refusal:
-                    host_attach.open_monitor("sentry")
-
-        assert "PTY is a POSIX object" in str(refusal.value)
-        spawn.assert_not_called()
-
-    @pty_required
     def test_whitespace_is_absence_not_a_target(self, quiet: Any, tmp_path: Path) -> None:
         """A target of spaces is nobody named, which is the global form."""
         with patch.object(host_attach, "monitor_command", lambda target="": ["cat"]):
@@ -489,7 +470,6 @@ class TestAWatchIsNotAnchorTooling:
 
     # @prax's output is identical from any cwd and it already says on screen what it cannot show.
 
-    @pty_required
     def test_a_tenant_project_watch_is_not_refused(self, quiet: Any, tmp_path: Path) -> None:
         """BAUD lives in projects/ and @prax scopes to it. Measured, not assumed."""
         with patch.object(host_attach, "monitor_command", lambda target="": ["cat"]):
@@ -583,8 +563,6 @@ class TestOneRoomHonoursAnOutsideSeat:
     def test_the_attach_only_flag_actually_reaches_the_spawned_argv(self, monkeypatch) -> None:
         """The WIRING, not just the resolution — and this pin exists because a
         mutation proved the wiring was unprotected."""
-        # Preflights FORCED, never skipped: argv composition is string work, and a skip leaves it unmeasured on Windows.
-        monkeypatch.setattr(host_attach, "PTY_AVAILABLE", True)
         monkeypatch.setattr(host_attach.shutil, "which", lambda _binary: "/usr/bin/tmux")
         with patch.object(host_attach, "_spawn_pty") as spawn:
             spawn.return_value = (MagicMock(pid=4242), 7)
@@ -599,7 +577,6 @@ class TestOneRoomHonoursAnOutsideSeat:
     def test_without_the_flag_a_named_room_is_still_attach_or_create(self, monkeypatch) -> None:
         """The regression guard for the pin above. The shell lane names its own
         room and MUST still be able to create it."""
-        monkeypatch.setattr(host_attach, "PTY_AVAILABLE", True)
         monkeypatch.setattr(host_attach.shutil, "which", lambda _binary: "/usr/bin/tmux")
         with patch.object(host_attach, "_spawn_pty") as spawn:
             spawn.return_value = (MagicMock(pid=4242), 7)
@@ -713,39 +690,6 @@ class TestTheOneSeatHostsAnyProjectsRoom:
         spawn.assert_not_called()
         assert closed["code"] == 1008
         assert "no branch named" in closed["reason"]
-
-
-class TestThisModuleImportsWhereItCannotRun:
-    """The Windows lane's 22 collection errors, and the one line that caused them."""
-
-    # A DEFAULT ARGUMENT IS EVALUATED AT IMPORT: a bare `os.setsid` default breaks importing every host module there.
-
-    def test_no_posix_only_default_is_reached_for_directly(self) -> None:
-        """The structural pin, so the NEXT one is caught rather than shipped."""
-        tree = ast.parse(Path(host_attach.__file__).read_text(encoding="utf-8"))
-        hook = next(
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_acquire_controlling_tty"
-        )
-
-        assert hook.args.defaults, "nothing is bound — the child would look it all up"
-        for default in hook.args.defaults:
-            reached_for = isinstance(default, ast.Attribute) and isinstance(default.value, ast.Name)
-            assert not reached_for, f"{ast.unparse(default)} is evaluated at import; use getattr with a default"
-
-    def test_a_platform_with_no_way_to_claim_a_tty_refuses(self) -> None:
-        """What the getattr defaults become off POSIX, and what happens then."""
-        # No caller reaches this (all sit behind PTY_AVAILABLE); without the refusal it is `None()` in a forked child.
-        with pytest.raises(host_attach.AttachUnavailable) as refusal:
-            host_attach._acquire_controlling_tty(
-                _setsid=None,
-                _login_tty=None,
-                _ioctl=None,
-                _tiocsctty=None,
-            )
-
-        assert "controlling tty" in str(refusal.value)
 
 
 @fastapi_required

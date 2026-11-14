@@ -51,18 +51,6 @@ class LifetimeError(Exception):
     """A detached server could not be started, found or stopped."""
 
 
-def _detach_kwargs() -> Dict[str, Any]:
-    """However this platform says "you are not my child any more"."""
-    # start_new_session is POSIX only: Windows accepts it and silently does nothing.
-    # Both Windows flags are needed: one severs the console, the other blocks Ctrl-C.
-    if sys.platform == "win32":  # pragma: no cover - exercised on Windows only
-        detached_process = 0x00000008
-        create_new_process_group = 0x00000200
-        return {"creationflags": detached_process | create_new_process_group}
-
-    return {"start_new_session": True}
-
-
 def _branch_root() -> Path:
     """This branch's own directory."""
     return Path(__file__).resolve().parents[3]
@@ -99,9 +87,8 @@ def server_home() -> Tuple[str, Path]:
         return sys.executable, root
 
     branch = home / "src" / "aipass" / "api"
-    windows = sys.platform == "win32"
     # Used as found, never resolved: a venv's python is a symlink, and following it loses the venv.
-    python = home / ".venv" / ("Scripts" if windows else "bin") / ("python.exe" if windows else "python")
+    python = home / ".venv" / "bin" / "python"
     for needed in (python, branch / "apps" / "api.py"):
         if not needed.is_file():
             raise LifetimeError(
@@ -165,19 +152,6 @@ def _alive(pid: int) -> bool:
     """Whether a process id is currently running."""
     if pid <= 0:
         return False
-
-    # Never os.kill on Windows: it terminates outright, killing what it asked about.
-    if sys.platform == "win32":  # pragma: no cover - exercised on Windows only
-        import ctypes
-
-        query_limited_information = 0x1000
-        handle = ctypes.windll.kernel32.OpenProcess(query_limited_information, False, pid)
-
-        if not handle:
-            return False
-
-        ctypes.windll.kernel32.CloseHandle(handle)
-        return True
 
     try:
         # Reap our own exited child first: os.kill(pid, 0) says yes to a zombie.
@@ -274,7 +248,7 @@ def serve_detached(host: Optional[str] = None, port: Optional[int] = None) -> Di
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
             cwd=str(server_home()[1]),
-            **_detach_kwargs(),
+            start_new_session=True,
         )
 
     time.sleep(SETTLE_SECONDS)

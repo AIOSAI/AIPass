@@ -285,12 +285,11 @@ def _install_piper(home: Path, forever: bool = False) -> Path:
 
 
 def _gone(pid: int) -> bool:
-    """Whether no process holds *pid* any more (killed and reaped); its callers skip off posix."""
-    if os.name == "posix":
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return True
+    """Whether no process holds *pid* any more (killed and reaped)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
     return False
 
 
@@ -300,13 +299,11 @@ def speaker(store: Any, host_app: Any, tmp_path: Path, monkeypatch: pytest.Monke
     from fastapi.testclient import TestClient
 
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     with patch(PATCH_SERVER_LOGGER):
         _, raw = host_tokens.issue_token("extension", "read")
         yield TestClient(host_app, raise_server_exceptions=False), {"Authorization": f"Bearer {raw}"}
 
 
-@pytest.mark.skipif(os.name != "posix", reason="a script with a shebang stands in for the Piper binary")
 @fastapi_required
 class TestSpeakStreamsPipersPcm:
     """POST /v1/speak: audio/L16 with the voice's rate, the text cleaned; 503 without Piper, 400 without text."""
@@ -338,7 +335,6 @@ class TestSpeakStreamsPipersPcm:
         assert api.post("/v1/speak", json=body, headers=read).status_code == 400
 
 
-@pytest.mark.skipif(os.name != "posix", reason="a script with a shebang stands in for the Piper binary")
 class TestAHungUpListenerKillsPiper:
     """Piper never outlives its listener: closing the stream, or the client going away, kills the child."""
 
@@ -420,7 +416,6 @@ def _install_gdbus(home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return shot
 
 
-@pytest.mark.skipif(os.name != "posix", reason="a script with a shebang stands in for gdbus")
 @fastapi_required
 class TestScreenshotAnswersTheSavedPath:
     """POST /v1/screenshot: the picker's PNG as {path}; 503 with no gdbus; read scope is refused."""
@@ -431,7 +426,6 @@ class TestScreenshotAnswersTheSavedPath:
         from fastapi.testclient import TestClient
 
         monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         shot = _install_gdbus(tmp_path, monkeypatch)
         with patch(PATCH_SERVER_LOGGER):
             _, raw = host_tokens.issue_token("extension", "operate")

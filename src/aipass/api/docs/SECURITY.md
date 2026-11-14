@@ -11,8 +11,6 @@ Every secret value rests in the owner's login keyring, reached through the pytho
 | OS      | Backend                                              |
 |---------|------------------------------------------------------|
 | Linux   | SecretService (GNOME Keyring, KWallet) over D-Bus    |
-| macOS   | the login Keychain                                   |
-| Windows | the Credential Locker                                |
 
 - One entry per secret: service `aipass`, username `<provider>/<slug>`, the value as the password. A value written with `as_json` is stored as a JSON document.
 - `aipass` / `<provider>/` is the provider's index entry, a JSON list of its slugs, kept by `set_secret` so `list_secrets` needs no file on disk.

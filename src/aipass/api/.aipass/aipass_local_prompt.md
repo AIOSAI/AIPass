@@ -62,7 +62,6 @@ api/
  - Secrets never reach stdout. `get-secret` prints a masked summary; programmatic reads go through `modules/secrets.py`.
  - The phone face is resolved once at `create_app` (restart to change it); the baud binary is resolved per request (no restart).
  - Expensive host reads go through `read_cache.py` — single-flight plus TTL. A refusal must be raised inside the producer, never returned, or the refusal gets cached.
- - `os.access(X_OK)` is always true on Windows; those tests carry a posix skip.
  - No module may need a working directory to import: route module-level path resolves through `module_root.module_file()`.
  - Server file cap is 1500 lines — the next host route splits into a router.
 

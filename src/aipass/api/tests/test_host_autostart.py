@@ -193,14 +193,6 @@ class TestTheProbeAnswersAbsenceAndFailureDifferently:
                 run.assert_not_called()
         gate.assert_called_once_with()
 
-    def test_a_platform_without_systemd_never_shells_out(self, quiet: None) -> None:
-        """The Windows lesson, applied before the bug rather than after."""
-        with patch.object(host_autostart.sys, "platform", "win32"):
-            with patch.object(host_autostart.subprocess, "run") as run:
-                assert host_autostart.supervised_pid() == 0
-                assert host_autostart.is_supported() is False
-                run.assert_not_called()
-
 
 class TestTheBindIsReadFromTheUnitNotTheConfig:
     """

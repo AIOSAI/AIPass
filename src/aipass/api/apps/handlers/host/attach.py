@@ -5,18 +5,19 @@
 # Created: 2026-08-14
 # Modified: 2026-11-03
 # =============================================
-# pyright: reportOptionalMemberAccess=false
-# fcntl/pty/termios are None off POSIX; every use sits behind PTY_AVAILABLE, which the checker cannot narrow.
 
 """Host API Attach Handler
 Reference: docs/host_surfaces.md. Detach is SIGHUP and the room survives: nothing here may kill a session."""
 
+import fcntl
 import os
+import pty
 import re
 import shutil
 import signal
 import struct
 import subprocess
+import termios
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -24,21 +25,6 @@ from typing import Any, Dict, List, Optional
 
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
-
-try:
-    import fcntl
-    import pty
-    import termios
-
-    PTY_AVAILABLE = True
-except ImportError as e:  # pragma: no cover - Windows only
-    logger.warning("[host_api] PTY support unavailable on this platform: %s", e)
-
-    fcntl = None  # type: ignore[assignment]
-    pty = None  # type: ignore[assignment]
-    termios = None  # type: ignore[assignment]
-
-    PTY_AVAILABLE = False
 
 # @baud's convention, mirrored: an invented name would be a second room beside the real one.
 ROOM_PREFIX = "baud-"
@@ -102,11 +88,6 @@ def _reserve_session(room: str) -> None:
 def _release_session() -> None:
     """Give a pump thread back."""
     _PUMP_SLOTS.release()
-
-
-def is_available() -> bool:
-    """Whether this platform can host a PTY at all."""
-    return PTY_AVAILABLE
 
 
 def _tmux_safe(text: str) -> str:
@@ -215,9 +196,6 @@ def attach_only_command(room: str) -> List[str]:
 
 def set_winsize(descriptor: int, cols: int, rows: int) -> None:
     """Stamp a terminal size into the kernel for a PTY."""
-    if not PTY_AVAILABLE:
-        raise AttachUnavailable("Setting a terminal size needs a PTY, which this platform does not have")
-
     # struct winsize is (rows, cols, ...): backwards renders a plausible wrong shape, not an error.
     packed = struct.pack("HHHH", rows, cols, 0, 0)
     fcntl.ioctl(descriptor, termios.TIOCSWINSZ, packed)
@@ -256,9 +234,6 @@ class AttachSession:
 
     def resize(self, cols: int, rows: int) -> None:
         """Resize the PTY, so the room draws at the client's geometry."""
-        if not PTY_AVAILABLE:
-            raise AttachUnavailable("Resizing needs a PTY, which this platform does not have")
-
         set_winsize(
             self.descriptor,
             _require_dimension(cols, "cols"),
@@ -297,9 +272,6 @@ def open_attach(
     attach_only: bool = False,
 ) -> AttachSession:
     """Spawn a PTY running a tmux client into a branch's room."""
-    if not PTY_AVAILABLE:
-        raise AttachUnavailable("This host cannot attach: a PTY is a POSIX object and this platform has none")
-
     if not (room and room.strip()) and (not branch or not branch.strip()):
         raise AttachRefused("A branch name is required — this lane has no default room")
 
@@ -324,9 +296,6 @@ def open_attach(
 def open_monitor(target: str = "", cwd: Optional[Path] = None) -> AttachSession:
     """Spawn a tier-0 watch: `drone @prax monitor run <target>` on its own PTY.
     Not tmux-backed: a watch holds no work, so it dies with its socket."""
-    if not PTY_AVAILABLE:
-        raise AttachUnavailable("This host cannot attach: a PTY is a POSIX object and this platform has none")
-
     cleaned = target.strip().lstrip("@")
 
     # Absence is asked here, before the fence: folding "" into the mirrored fence would break the mirror.
@@ -390,21 +359,18 @@ def _spawn_pty(command: List[str], cwd: Optional[Path], room: str, close_fd: Any
 
 
 def _acquire_controlling_tty(
-    _setsid: Any = getattr(os, "setsid", None),
+    _setsid: Any = os.setsid,
     _login_tty: Any = getattr(os, "login_tty", None),
-    _ioctl: Any = getattr(fcntl, "ioctl", None),
-    _tiocsctty: Any = getattr(termios, "TIOCSCTTY", None),
+    _ioctl: Any = fcntl.ioctl,
+    _tiocsctty: Any = termios.TIOCSCTTY,
 ) -> None:
     """Run in the CHILD, between fork and exec: take the slave as our controlling tty.
     SIGWINCH reaches only a controlling tty's group, and inheriting a descriptor never acquires one.
     Callables are default args so the forked child does no lookup or allocation before exec;
-    each is a getattr, os.setsid included, because a bare name raises at import on Windows."""
+    login_tty is a getattr because os.login_tty arrived in Python 3.11."""
     if _login_tty is not None:
         _login_tty(0)
         return
-
-    if _setsid is None or _ioctl is None or _tiocsctty is None:
-        raise AttachUnavailable("This platform cannot acquire a controlling tty")
 
     _setsid()
     _ioctl(0, _tiocsctty, 0)

@@ -89,8 +89,7 @@ def prepare_receipt_dir(target: Path) -> None:
     """Make sure a receipt's directory exists and is owner-only."""
     target.parent.mkdir(parents=True, exist_ok=True)
 
-    if os.name == "posix":
-        os.chmod(target.parent, 0o700)
+    os.chmod(target.parent, 0o700)
 
 
 def receipt_path(label: str) -> Path:
@@ -142,7 +141,6 @@ def store_lock() -> Iterator[None]:
 @contextmanager
 def _store_lock(wait: Optional[float] = None) -> Iterator[None]:
     """Hold an exclusive write lock on the token store."""
-    # O_CREAT|O_EXCL rather than fcntl: this has to work on Windows too.
     # wait=None reads LOCK_WAIT_SECONDS at call time, not def time: the tests shorten it there.
     wait = LOCK_WAIT_SECONDS if wait is None else wait
     path = lock_path()

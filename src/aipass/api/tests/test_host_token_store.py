@@ -19,7 +19,6 @@
 import importlib.util
 import json
 import os
-import sys
 import threading
 import time
 from pathlib import Path
@@ -306,11 +305,7 @@ class TestTheRowsRestInAnOwnerOnlyFile:
         assert keyring_store.entries == {}
         assert [item.name for item in (store / "host_api").iterdir()] == ["tokens.json"]
 
-    # getattr: test_windows_import hides os.geteuid with os.name still "posix", and this evaluates at collection.
-    @pytest.mark.skipif(
-        sys.platform == "win32" or getattr(os, "geteuid", lambda: -1)() == 0,
-        reason="POSIX mode bits; root reads any mode",
-    )
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root reads any mode")
     def test_the_file_is_0600_in_a_0700_directory(self, store: Path) -> None:
         host_tokens.issue_token("pixel-8", scope="read")
 
@@ -781,7 +776,6 @@ class TestTheReceiptHasAHomeAndTheLabelIsFenced:
         assert receipt.name == "Someone's old phone.token"
         assert receipt.parent == (store / "host_api").resolve()
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privilege on Windows")
     def test_a_receipt_path_that_symlinks_out_of_the_store_is_refused(self, store: Path) -> None:
         """The second gate, and the case that proves it is not decoration.
 

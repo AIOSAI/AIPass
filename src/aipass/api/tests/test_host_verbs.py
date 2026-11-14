@@ -1063,7 +1063,6 @@ CODEX_MODELS = {
 def seat(room: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """The room fixture with HOME in tmp_path, holding a Codex model cache; the agent idle (no hook rows)."""
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     cache = tmp_path / ".codex" / "models_cache.json"
     cache.parent.mkdir(parents=True)
     cache.write_text(json.dumps(CODEX_MODELS), encoding="utf-8")

@@ -57,7 +57,6 @@ def _write_json(file_path: Path, data: Dict) -> bool:
 @contextmanager
 def store_lock(file_path: Path) -> Iterator[None]:
     """Hold the store's exclusive lock (a sibling .lock file) across one read-modify-write; OSError past the wait."""
-    # O_CREAT|O_EXCL rather than fcntl, as host/tokens.py does: this has to work on Windows too.
     lock = file_path.with_name(file_path.name + ".lock")
     lock.parent.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + LOCK_WAIT_SECONDS

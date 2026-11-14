@@ -12,15 +12,8 @@ Secrets Module
 Cross-branch in-process API for the secrets provider store.
 """
 
-import os
 import sys
 
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 from typing import Any, List, Optional, Union
 
 from aipass.prax import logger  # noqa: F401 — sentry imports standard

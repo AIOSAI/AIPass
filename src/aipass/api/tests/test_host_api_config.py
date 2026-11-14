@@ -12,7 +12,6 @@
 # sentry: no-test-needed(stdlib) — hashlib.sha256 and secrets.token_urlsafe themselves, behind issue_token()
 
 import json
-import sys
 from pathlib import Path
 from typing import Any, Optional
 from unittest.mock import patch
@@ -314,9 +313,6 @@ class TestFaceDir:
         assert config == {"host": "127.0.0.1", "port": 9100, "face_dir": str(bundle)}
 
 
-posix_permissions = pytest.mark.skipif(sys.platform == "win32", reason="os.access X_OK is always true on Windows")
-
-
 class TestBaudBin:
     """The baud binary the host lanes exec, stored beside face_dir."""
 
@@ -356,7 +352,6 @@ class TestBaudBin:
 
         assert host_config.baud_bin() is None
 
-    @posix_permissions
     def test_a_file_without_the_executable_bit_is_refused(self, store: Path, tmp_path: Path) -> None:
         """Leg four: a download nobody chmodded would fail at every exec instead."""
         binary = _baud_binary(tmp_path / "baud-cli", mode=0o644)

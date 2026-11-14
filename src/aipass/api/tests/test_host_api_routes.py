@@ -881,7 +881,6 @@ def agents(store: Path, host_app: Any, tmp_path: Path, monkeypatch: pytest.Monke
     from fastapi.testclient import TestClient
 
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setattr(host_fleet, "snapshot_binary", lambda: "baud")
     monkeypatch.setattr(host_fleet, "repo_root", lambda: tmp_path)
     fake = FakeBaud([agent_row()])
@@ -1315,12 +1314,10 @@ def _no_model_or_usage_cache_between_tests() -> Any:
 def catalog(client: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """The real app, a read token, HOME in tmp_path; subprocess left real, so a script can stand in for opencode."""
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     _, raw = host_tokens.issue_token("extension", "read")
     return client, {"Authorization": f"Bearer {raw}"}, None
 
 
-@pytest.mark.skipif(os.name != "posix", reason="a shell script stands in for the opencode binary")
 @fastapi_required
 class TestTheModelCatalog:
     """GET /v1/models: the deck's {claude, codex, opencode, switch} catalog."""

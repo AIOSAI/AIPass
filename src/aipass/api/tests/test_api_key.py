@@ -40,7 +40,6 @@ def key_source_stub(monkeypatch):
 def fake_home(monkeypatch, tmp_path):
     """Point Path.home() at tmp_path through the environment, so init_env never sees a real home."""
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     return tmp_path
 
 

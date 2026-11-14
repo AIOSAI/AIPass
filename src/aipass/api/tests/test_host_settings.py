@@ -114,7 +114,6 @@ class TestAgentSettings:
         assert view["model"] == "sonnet"
         assert view["auto_compact_window"] == 350_000
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX mode bits; Windows has none to keep")
     def test_a_write_keeps_the_files_mode(self, tmp_path) -> None:
         """The staged file is born 0600; the replaced file must keep the mode it had."""
         path = agent_file(tmp_path)
@@ -285,7 +284,6 @@ class TestHooksSound:
 
         flag = tmp_path / ".aipass" / operator_flag.name
         monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         # TMPDIR too: the door moves a legacy temp-dir flag once, and the operator's must never be the one moved.
         monkeypatch.setenv("TMPDIR", str(tmp_path))
 
@@ -325,7 +323,6 @@ class TestTheGuardsOnTheLiveDoorTest:
         operator_flag = _where_the_door_would_write()
         elsewhere = tmp_path / "elsewhere"
         monkeypatch.setenv("HOME", str(elsewhere))
-        monkeypatch.setenv("USERPROFILE", str(elsewhere))
 
         would_write = _where_the_door_would_write()
 
@@ -366,16 +363,7 @@ class TestAnUnreadableFileIsNeverBlank:
 
         assert "settings.local.json" in str(refusal.value)
 
-    @pytest.mark.skipif(
-        sys.platform == "win32",
-        reason="chmod 0o000 cannot construct an unreadable file here - no POSIX mode bits",
-    )
-    # Trap: these evaluate at collection. test_windows_import hides os.geteuid with
-    # os.name still "posix", so a bare os.geteuid() takes the whole file down; keep the getattr.
-    @pytest.mark.skipif(
-        sys.platform == "win32" or getattr(os, "geteuid", lambda: -1)() == 0,
-        reason="a file mode only means something to a non-root POSIX process",
-    )
+    @pytest.mark.skipif(os.geteuid() == 0, reason="a file mode only means something to a non-root process")
     def test_a_file_we_may_not_read_is_a_fault_not_a_blank(self, tmp_path) -> None:
         """The one that would have cost real settings: unreadable, not empty."""
         secret = tmp_path / "settings.local.json"

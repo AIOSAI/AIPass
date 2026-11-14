@@ -66,8 +66,7 @@ def write(name: str, document: Any) -> Path:
     path = store_path(name)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        if os.name == "posix":
-            os.chmod(path.parent, 0o700)
+        os.chmod(path.parent, 0o700)
         _replace(path, document)
     except OSError as e:
         raise StoreUnavailable(f"The host store file {path.name} cannot be written ({type(e).__name__})") from e

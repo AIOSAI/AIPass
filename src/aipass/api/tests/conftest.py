@@ -330,7 +330,7 @@ def mock_logger() -> MagicMock:
 
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
-    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    """Rich sizes an unpinned console on every print: 80
     under pytest's capture; at 80 Rich cuts the rows test_openrouter_client and test_google_client read whole."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200

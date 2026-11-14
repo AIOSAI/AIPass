@@ -18,8 +18,6 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that every api module parses; this file measures only the import's cwd
-# sentry: no-test-needed(windows_compat) — a real Windows host's ntpath; world A emulates it here on POSIX
-# sentry: no-test-needed(covered_elsewhere) — POSIX-only imports on Windows, tests/test_windows_import.py
 
 import ast
 import json

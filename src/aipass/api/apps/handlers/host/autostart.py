@@ -15,7 +15,6 @@ the server, and asks it to stop. Reference: docs/host_autostart.md
 
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -55,9 +54,6 @@ class SupervisorUnreachable(Exception):
 
 def is_supported() -> bool:
     """Whether the supervisor lane can work on this platform at all."""
-    if not sys.platform.startswith("linux"):
-        return False
-
     return shutil.which("systemctl") is not None
 
 

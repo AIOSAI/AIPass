@@ -22,11 +22,6 @@ from aipass.api.apps.handlers.host import attach as host_attach
 from aipass.api.apps.handlers.host import pump as host_pump
 from aipass.api.apps.handlers.host import server as host_server
 
-pty_required = pytest.mark.skipif(
-    not host_attach.is_available(),
-    reason="a PTY is a POSIX object and this platform has none",
-)
-
 fastapi_required = pytest.mark.skipif(
     not host_server.is_available(),
     reason="the [host] extra is not installed",
