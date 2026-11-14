@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_central_writer.py
 # Description: Tests for the central writer handler
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-04-05
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/central_writer.py."""
@@ -176,7 +176,26 @@ class TestWriteCentralFile:
 
         written = json.loads(central_file.read_text(encoding="utf-8"))
         assert written["stats"]["total_vectors"] == 10
-        assert not central_file.with_suffix(".tmp").exists(), "the atomic write left its temp file"
+        assert list(central_file.parent.iterdir()) == [central_file], "the atomic write left its temp file"
+
+    def test_a_writer_racing_another_neither_fails_nor_loses_its_write(self, monkeypatch, tmp_path):
+        """Pins the 2026-11-08 ENOENT: two writers shared one temp name and one replace took the other's."""
+        cw = _import_central_writer(monkeypatch, tmp_path)
+        real_replace = cw.os.replace
+        raced = []
+
+        def replace_after_a_rival_lands(src, dst):
+            if not raced:
+                raced.append(True)
+                cw.write_central_file({"writer": "rival"})
+            real_replace(src, dst)
+
+        monkeypatch.setattr(cw.os, "replace", replace_after_a_rival_lands)
+        cw.write_central_file({"writer": "first"})
+
+        central_file = tmp_path / "central" / "MEMORY.central.json"
+        assert json.loads(central_file.read_text(encoding="utf-8")) == {"writer": "first"}
+        assert list(central_file.parent.iterdir()) == [central_file], "a racing write left its temp file"
 
     def test_overwrites_existing_file(self, monkeypatch, tmp_path):
         """Should overwrite existing file content."""
@@ -203,6 +222,14 @@ class TestWriteCentralFile:
 
         with pytest.raises(Exception, match="Failed to write central file"):
             cw.write_central_file({"test": True})
+
+    def test_a_failed_dump_raises_and_leaves_no_temp_file(self, monkeypatch, tmp_path):
+        cw = _import_central_writer(monkeypatch, tmp_path)
+
+        with pytest.raises(Exception, match="Failed to write central file"):
+            cw.write_central_file({"unserialisable": object()})
+
+        assert list((tmp_path / "central").iterdir()) == []
 
 
 class TestUpdateCentral:
