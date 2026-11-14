@@ -8,16 +8,6 @@
 
 """Rich CLI rendering for backup — full output pipeline faithfully ported from gold source."""
 
-import os
-import sys
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
-
 from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 
 from aipass.prax import logger

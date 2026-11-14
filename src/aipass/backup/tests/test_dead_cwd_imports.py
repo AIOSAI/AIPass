@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_dead_cwd_imports.py
-# Description: Dead-cwd import defect — safe path helper, both worlds, the fence with its cwd removed
+# Description: Dead-cwd import defect — safe path helper, the denied-cwd world, the fence with its cwd removed
 # Version: 2.0.4
 # Created: 2026-08-31
 # Modified: 2026-11-02
@@ -13,12 +13,10 @@
 # sentry: no-test-needed(documentation) — the docstrings of module_file() and branch_root()
 # sentry: no-test-needed(stdlib) — linecache.getline(), which fills the fence message's Blocked: line
 
-import ast
 import json
 import os
 import subprocess
 import sys
-import textwrap
 from pathlib import Path
 
 import pytest
@@ -26,14 +24,10 @@ import pytest
 from aipass.backup.apps.handlers.path import module_paths
 from aipass.backup.tests import support_fence
 
-# On Windows ntpath.realpath always reads os.getcwd(), so a resolve() at import crashes under a dead cwd.
-# World A (getcwd denied) convicts a raw resolve(); world B (realpath denied) convicts inspect.stack(),
-# which world A lets pass green. Probes run as -c, never stdin: linecache caches stdin and lies green.
+# World A (getcwd denied) convicts an import-time cwd read. Probes run as -c, never stdin:
+# linecache caches stdin and lies green.
 
 
-TEST_FILE = Path(__file__).resolve()
-BRANCH_ROOT = TEST_FILE.parents[1]
-GUARD_FILE = BRANCH_ROOT / "apps" / "handlers" / "__init__.py"
 KIN_PROBE = Path(support_fence.__file__)
 
 
@@ -60,19 +54,10 @@ for name in preload:
         __import__(name)
     except Exception:
         pass
-_real_realpath = os.path.realpath
-def _realpath_reads_cwd(path, *a, **k):
-    os.getcwd()
-    return _real_realpath(path, *a, **k)
 def _dead_getcwd(*a, **k):
     raise FileNotFoundError(2, "probe: cwd denied")
-def _dead_realpath(*a, **k):
-    raise OSError(2, "probe: realpath denied")
 if world in ("A", "CONTROL"):
-    os.path.realpath = _realpath_reads_cwd
     os.getcwd = _dead_getcwd
-elif world == "B":
-    os.path.realpath = _dead_realpath
 if world == "CONTROL":
     from pathlib import Path
     try:
@@ -128,10 +113,9 @@ class TestTheInjectionCanSayNo:
 class TestImportsSurviveADeadCwd:
     """No backup module may need a readable cwd in order to be imported."""
 
-    @pytest.mark.parametrize("world", ["A", "B"])
-    def test_no_module_dies_at_import(self, world: str) -> None:
-        """Every probed module imports with the cwd/realpath denied."""
-        assert _run_probe(world)["red"] == {}
+    def test_no_module_dies_at_import(self) -> None:
+        """Every probed module imports with the cwd denied."""
+        assert _run_probe("A")["red"] == {}
 
 
 class _ResolveDeniedPath(type(Path())):
@@ -155,10 +139,7 @@ class TestSafePathHelper:
         real.parent.mkdir()
         real.write_text("", encoding="utf-8")
         link = base / "link"
-        try:
-            link.symlink_to(real.parent, target_is_directory=True)
-        except (OSError, NotImplementedError) as exc:
-            pytest.skip(f"symlinks cannot be made here (Windows without the privilege): {exc}")
+        link.symlink_to(real.parent, target_is_directory=True)
 
         assert module_paths.module_file(str(link / "mod.py")) == base / "real" / "mod.py"
 
@@ -213,70 +194,20 @@ class TestDegradedResolutionIsAnnouncedOnce:
         assert err.count("cwd unreadable") == 2
 
 
-def _inspect_stack_calls(source: str) -> list[int]:
-    """Line numbers of every literal ``inspect.stack()`` CALL in source."""
-    hits = []
-    for node in ast.walk(ast.parse(source)):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        if (
-            isinstance(func, ast.Attribute)
-            and func.attr == "stack"
-            and isinstance(func.value, ast.Name)
-            and func.value.id == "inspect"
-        ):
-            hits.append(node.lineno)
-    return hits
-
-
-class TestGuardNeverCallsInspectStack:
-    """An AST ban: inspect.stack() reaches os.path.realpath, which a dead cwd denies on Windows."""
-
-    def test_guard_file_has_no_inspect_stack_call(self) -> None:
-        """The shipped guard contains no inspect.stack() call."""
-        assert _inspect_stack_calls(GUARD_FILE.read_text(encoding="utf-8")) == []
-
-    def test_positive_control_a_real_call_convicts(self) -> None:
-        """The detector fires on an actual call."""
-        source = textwrap.dedent(
-            """
-            import inspect
-            def f():
-                return inspect.stack()
-            """
-        )
-        assert _inspect_stack_calls(source) == [4]
-
-    def test_negative_control_a_docstring_mention_is_not_a_call(self) -> None:
-        """Prose naming inspect.stack() must not convict."""
-        source = '"""Uses sys._getframe rather than inspect.stack() -- see defect."""\n'
-        assert _inspect_stack_calls(source) == []
-
-    def test_negative_control_numpy_stack_is_not_inspect_stack(self) -> None:
-        """A different module's stack() must not convict."""
-        source = "import numpy\nnumpy.stack([1, 2])\n"
-        assert _inspect_stack_calls(source) == []
-
-
-#: The kin probe in a child whose cwd was removed (where the platform allows it): ALLOWED either way.
+#: The kin probe in a child whose cwd was removed: ALLOWED.
 _DEAD_CWD_PROBE = """
 import json, os, runpy, sys, tempfile
 seat, shape = sys.argv[1], sys.argv[2]
 dead = tempfile.mkdtemp()
 os.chdir(dead)
-try:
-    os.rmdir(dead)
-    removed = True
-except OSError:
-    removed = False
+os.rmdir(dead)
 try:
     os.getcwd()
     cwd_dead = False
 except OSError:
     cwd_dead = True
 probe = runpy.run_path(seat)
-print(json.dumps({"removed": removed, "cwd_dead": cwd_dead, "verdict": probe["_run"](shape)}))
+print(json.dumps({"cwd_dead": cwd_dead, "verdict": probe["_run"](shape)}))
 """
 
 
@@ -296,5 +227,5 @@ class TestTheFenceSurvivesADeadCwd:
         assert proc.returncode == 0, proc.stderr[-600:]
         report = json.loads(proc.stdout.strip().splitlines()[-1])
 
-        assert report["cwd_dead"] is report["removed"], report
+        assert report["cwd_dead"] is True, report
         assert report["verdict"] == "ALLOWED", report

@@ -8,7 +8,6 @@
 
 """The branch's ONE safe path helper."""
 
-# ntpath.realpath (under Path.resolve) reads os.getcwd always: a dead cwd crashes any import-time resolve().
 # Stdlib only: importing @prax here would put its cwd-reading logger on the path this module protects.
 
 import os

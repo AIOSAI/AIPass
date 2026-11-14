@@ -8,9 +8,7 @@
 
 """A running lane's process, seen from another process (DPLAN-0412)."""
 
-# psutil, never /proc, so the same code answers on Linux, macOS and Windows.
 # Two guards before any signal: live_lane (alive, not a zombie, not a recycled pid) and lane_for_root.
-# On Windows terminate is TerminateProcess: no SIGTERM handler runs, so the running file is left behind.
 
 from datetime import datetime
 from pathlib import Path

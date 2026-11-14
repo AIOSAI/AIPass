@@ -69,8 +69,8 @@ class TestScanWalk:
         assert result == []
 
     @pytest.mark.skipif(
-        os.name == "nt" or getattr(os, "geteuid", lambda: -1)() == 0,
-        reason="an unlistable directory needs POSIX modes and a non-root reader",
+        os.geteuid() == 0,
+        reason="an unlistable directory needs a non-root reader",
     )
     def test_a_directory_the_walk_cannot_list_raises_instead_of_dropping_out(self, tmp_path: Path) -> None:
         proj = tmp_path / "proj"

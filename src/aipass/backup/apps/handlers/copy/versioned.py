@@ -24,7 +24,7 @@ from aipass.prax import logger
 
 from ..diff.generator import generate_diff_content, should_create_diff
 from ..audit import trail
-from ..path.builder import build_versioned_file_path, exceeds_max_path
+from ..path.builder import build_versioned_file_path
 from ..state.stop_flag import stop_requested
 
 
@@ -115,17 +115,12 @@ def copy_versioned(
         copied = -1
         ok = True
 
-        if exceeds_max_path(str(target)):
-            logger.warning(f"Path too long (>260), skipping: {rel_path}")
-            errors.append(f"{rel_path}: path too long (>260 chars)")
+        try:
+            copied = _copy_one(source, target, abs_path)
+        except OSError as e:
+            logger.warning(f"Failed to process {rel_path}: {e}")
+            errors.append(f"{rel_path}: {e}")
             ok = False
-        else:
-            try:
-                copied = _copy_one(source, target, abs_path)
-            except OSError as e:
-                logger.warning(f"Failed to process {rel_path}: {e}")
-                errors.append(f"{rel_path}: {e}")
-                ok = False
         if copied >= 0:
             bytes_copied += copied
             files_copied += 1

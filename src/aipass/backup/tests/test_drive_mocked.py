@@ -12,7 +12,6 @@
 # sentry: no-test-needed(ruff) — that the six modules imported below parse; ruff parses, it does not import
 # sentry: no-test-needed(documentation) — that each module's public functions carry docstrings
 # sentry: no-test-needed(constant) — the [bold cyan]/[yellow] styling in print_introspection(); tests read plain text
-# sentry: no-test-needed(stdlib) — the win32 preamble's os.environ.setdefault and stream reconfigure
 
 import json
 from pathlib import Path

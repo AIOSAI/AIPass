@@ -472,7 +472,7 @@ class TestWalkSkipsIgnoredDirectories:
         """The relative paths the walk yields under the project's own spec."""
         return sorted(rel.replace("\\", "/") for _abs, rel in walk_project(str(root), load_spec(str(root)), whitelist))
 
-    @pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="needs a POSIX directory a user cannot list")
+    @pytest.mark.skipif(os.geteuid() == 0, reason="needs a directory a user cannot list")
     def test_an_ignored_directory_is_never_opened(self, tmp_path: Path) -> None:
         """Mutant: the walk enters node_modules/, and the walk refuses a directory it cannot list."""
         (tmp_path / ".backupignore").write_text("node_modules/\n", encoding="utf-8")

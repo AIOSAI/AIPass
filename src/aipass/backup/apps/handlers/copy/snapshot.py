@@ -16,7 +16,6 @@ from pathlib import Path
 from aipass.prax import logger
 
 from ..cleanup.mirror import cleanup_deleted_files
-from ..path.builder import exceeds_max_path
 from ..audit import trail
 from ..report.result import BackupResult
 from ..state.stop_flag import stop_requested
@@ -45,15 +44,9 @@ def _copy_single_file(
     abs_path: str,
     rel_path: str,
     dest_path: Path,
-    errors: list[str],
 ) -> int:
-    """Copy a single file to the snapshot destination; bytes copied, or -1 when unchanged or refused."""
+    """Copy a single file to the snapshot destination; bytes copied, or -1 when unchanged."""
     target = str(dest_path / rel_path)
-
-    if exceeds_max_path(target):
-        logger.warning(f"Path too long (>260 chars), skipping: {rel_path}")
-        errors.append(f"{rel_path}: path too long (>260 chars)")
-        return -1  # signal: skipped due to error
 
     target_path = Path(target)
     target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -107,7 +100,7 @@ def copy_snapshot(
         result_bytes = -1
         failures_before = len(errors)
         try:
-            result_bytes = _copy_single_file(abs_path, rel_path, dest_path, errors)
+            result_bytes = _copy_single_file(abs_path, rel_path, dest_path)
             if result_bytes >= 0:
                 bytes_copied += result_bytes
                 files_copied += 1

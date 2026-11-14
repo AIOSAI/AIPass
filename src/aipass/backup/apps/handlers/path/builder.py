@@ -9,21 +9,11 @@
 """Path builder handler."""
 
 import hashlib
-import os
 from pathlib import Path
 
 from ..audit import trail
 
 BACKUP_DIR = ".backup"
-
-#: Windows' MAX_PATH only: on POSIX an over-long path is the OS's OSError, which each lane records,
-#: and a 260 guard there only kept real files out of the store.
-_MAX_PATH = 260 if os.name == "nt" else None
-
-
-def exceeds_max_path(target: str) -> bool:
-    """True when a store path is longer than this platform lets the lane write."""
-    return _MAX_PATH is not None and len(target) > _MAX_PATH
 
 
 def backup_root(project_root: str) -> Path:

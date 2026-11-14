@@ -4,10 +4,9 @@
 
 Why every module-level path goes through one stdlib-only helper, and what that protects against.
 
-`ntpath.realpath` reads `os.getcwd()` **unconditionally** (posixpath only does so
-for relative paths), and `Path.resolve()` routes through it. So on Windows every
-`resolve()` *reached at import time* is an import-time crash for a process whose
-cwd has been deleted: the module cannot be imported at all. The discriminator is
+`os.path.realpath` reads `os.getcwd()` for a relative path, and `Path.resolve()`
+routes through it. So a `resolve()` *reached at import time* can be an import-time
+crash for a process whose cwd has been deleted: the module cannot be imported at all. The discriminator is
 **reached-at-import**, not written-at-module-scope — a `resolve()` inside a
 function that the module calls while importing is just as fatal.
 
@@ -34,11 +33,9 @@ path it catches `OSError` and keeps the raw spelling, and a pseudo filename
 (`<string>`, `<frozen ...>`) is never resolved.
 
 The pin is `tests/test_dead_cwd_imports.py`. Note what it does and does not
-do: it runs a child interpreter under two injections (two denial worlds) against
+do: it runs a child interpreter with `os.getcwd()` denied against
 **9 representative modules** (`PROBE_MODULES`), not the whole tree; nothing in
-CI re-walks every module. The file also carries an AST ban on
-`inspect.stack()` — a behavioural test cannot catch its return, because the
-branch that used it is unreachable from any import-shaped pin.
+CI re-walks every module.
 
 **Backup destinations are unaffected by all of this.** Every path under
 `.backup/` is derived from the caller-supplied `project_root` (see

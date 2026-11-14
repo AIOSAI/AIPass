@@ -126,9 +126,7 @@ else the root's directory name. A pid is signalled only when, through psutil,
 its process started no later than the lane and its command line is backup's
 entry point running that verb for that root (`@name` and `all --registered`
 resolve through the registry); anything else is refused on stderr, nothing is
-signalled, exit 2. psutil reads the process table on Linux, macOS and Windows
-alike; on Windows its terminate is TerminateProcess, so a Windows lane gets no
-chance to save and its running file is cleared by the next reader.
+signalled, exit 2.
 
 The stopped lane, in the main thread, turns SIGTERM into a flag. The copy loops
 read it between files, so the file in flight finishes; `upload_batch` cancels

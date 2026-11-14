@@ -18,8 +18,6 @@ import os
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from aipass.backup.apps.handlers.copy.versioned import copy_versioned
 from aipass.backup.apps.handlers.path import builder as path_builder
 from aipass.backup.apps.handlers.diff.generator import generate_diff_content, is_binary_file, should_create_diff
@@ -376,7 +374,7 @@ class TestRestoreModule:
 
         assert out_path.read_text(encoding="utf-8") == "where = 'tools'"
         out, err = capsys.readouterr()
-        # The file read above proves the destination; a rendered tmp path wraps on macOS.
+        # The file read above proves the destination.
         assert "Restored tools/main.py to" in out and out_path.parent.name in out
         assert err == ""
 
@@ -567,8 +565,8 @@ class TestRestoreModule:
         assert err == ""
 
 
-class TestTheLongPathGuardIsWindowsOnly:
-    """260 is Windows' MAX_PATH; elsewhere the OS enforces its own limit and the file is stored."""
+class TestALongPathIsStored:
+    """A store path over 260 characters is stored; the OS enforces its own limit."""
 
     PARENT = "p" * 200
 
@@ -581,27 +579,13 @@ class TestTheLongPathGuardIsWindowsOnly:
         assert len(str(stored)) > 260
         return project, f"{self.PARENT}/a.txt", stored
 
-    def test_a_path_over_260_is_stored_where_the_os_allows_it(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(path_builder, "_MAX_PATH", None)
+    def test_a_path_over_260_is_stored_where_the_os_allows_it(self, tmp_path: Path) -> None:
         project, rel, stored = self._long_source(tmp_path)
 
         result = copy_versioned([(str(project / rel), rel)], str(project))
 
         assert (result["files_copied"], result["errors"]) == (1, [])
         assert stored.read_text(encoding="utf-8") == "deep"
-
-    def test_under_the_windows_limit_a_path_over_260_is_refused_with_an_errors_row(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(path_builder, "_MAX_PATH", 260)
-        project, rel, stored = self._long_source(tmp_path)
-
-        result = copy_versioned([(str(project / rel), rel)], str(project))
-
-        assert (result["files_copied"], result["errors"]) == (0, [f"{rel}: path too long (>260 chars)"])
-        assert not stored.exists()
 
 
 # =============================================
