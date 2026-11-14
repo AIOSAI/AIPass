@@ -609,7 +609,7 @@ class TestColourFollowsTheLiveStream:
     """Both consoles decide colour at each print, against the stream as it is then.
 
     Rich fixes its colour system in __init__, so a console built at import keeps the
-    import-time stream's answer (an xdist worker's NUL is a terminal on Windows).
+    import-time stream's answer.
     """
 
     @pytest.fixture(autouse=True)

@@ -199,7 +199,7 @@ def print_help():
 
     CONSOLE.print("[bold cyan]REFERENCE:[/bold cyan]")
     CONSOLE.print()
-    # On Windows resolve() reads os.getcwd(); help must not traceback with a dead cwd.
+    # help must not traceback with a dead cwd.
     try:
         _display_path = Path(__file__).resolve()
     except OSError:
