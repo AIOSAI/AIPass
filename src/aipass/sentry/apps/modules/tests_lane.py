@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests_lane.py
 # Description: Tests Lane Module — the retire lane and the test-template distribution
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-09-21
-# Modified: 2026-11-06
+# Modified: 2026-11-13
 # =============================================
 
 """Tests Lane Module
@@ -45,6 +45,9 @@ EXIT_UNKNOWN_ARGUMENT = 7
 
 #: A bump that could not stamp, or a restore that could not land, in the same vocabulary.
 EXIT_NOT_STAMPED = 2
+
+#: Every path handed in lies outside the repository: nothing here to check.
+EXIT_NO_TARGET = 3
 
 #: sentry only operates its own retire lane: another branch's retirement is that branch's move.
 BRANCH = "sentry"
@@ -195,15 +198,22 @@ def _handle_pinning(args: List[str]) -> None:
         display_error(f"No repository above {Path.cwd()}: nothing to search")
         raise CommandRefused(EXIT_NOT_STAMPED, "tests pinning")
 
-    rels = []
+    rels: List[str] = []
+    outside: List[str] = []
     for arg in args:
         path = Path(arg)
+        if path.is_absolute() and not path.resolve().is_relative_to(root):
+            err_console.print(f"{arg}: outside the repository {root}, skipped", markup=False)
+            outside.append(arg)
+            continue
         rel = path.resolve().relative_to(root).as_posix() if path.is_absolute() else path.as_posix()
         if rel.endswith(".py"):
             err_console.print(f"{rel}: a Python file, skipped: its tests follow its imports", markup=False)
         else:
             rels.append(rel)
 
+    if len(outside) == len(args):
+        raise CommandRefused(EXIT_NO_TARGET, "tests pinning")
     found = pinning.pinning(root, rels)
     for rel, files in found.items():
         count = f"{len(files)} test file{'' if len(files) == 1 else 's'}" if files else "no test names it"
