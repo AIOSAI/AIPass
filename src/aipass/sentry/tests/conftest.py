@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for sentry tests
 # Version: 2.4.2
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Shared pytest fixtures for sentry tests."""

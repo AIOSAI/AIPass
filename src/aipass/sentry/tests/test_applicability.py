@@ -3,7 +3,7 @@
 # Description: Unit tests for aipass_standards/applicability.py and its two consumers
 # Version: 1.16.6
 # Created: 2026-08-09
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/applicability.py and its two consumers."""

@@ -3,7 +3,7 @@
 # Description: Unit tests for checker sub-functions in architecture, cli, cli_flags, documentation
 # Version: 1.1.1
 # Created: 2026-04-25
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for the sub-functions of apps/handlers/aipass_standards/architecture_check.py and 3 siblings."""

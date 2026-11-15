@@ -3,7 +3,7 @@
 # Description: Core pins for the audit-tests lane (spine, refusal, laws)
 # Version: 1.0.3
 # Created: 2026-08-29
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/audit_tests/spine.py, refusal.py, laws.py and runner.py."""

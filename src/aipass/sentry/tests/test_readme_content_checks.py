@@ -3,7 +3,7 @@
 # Description: Unit tests for readme content accuracy checks and the docs page standard
 # Version: 1.3.2
 # Created: 2026-05-15
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/readme_check.py and docs_page_check.py beside it."""

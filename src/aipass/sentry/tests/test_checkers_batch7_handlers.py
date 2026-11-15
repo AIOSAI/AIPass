@@ -3,7 +3,7 @@
 # Description: handlers_check auto-detection rulings (split from test_checkers_batch7.py)
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/handlers_check.py."""

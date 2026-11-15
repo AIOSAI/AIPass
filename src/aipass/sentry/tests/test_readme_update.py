@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_readme_update.py
 # Description: Template v1 model — readme_update module, readme_generator and readme_ops
-# Version: 2.3.1
+# Version: 2.3.2
 # Created: 2026-09-20
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/readme_update.py and the handlers it drives."""

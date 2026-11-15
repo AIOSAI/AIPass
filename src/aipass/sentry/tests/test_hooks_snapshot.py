@@ -3,7 +3,7 @@
 # Description: Snapshot tests for hook configurations across provider, project, and branch levels
 # Version: 1.1.0
 # Created: 2026-05-07
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for the hook wiring .claude/provider_manifest.json gives hooks/apps/handlers/bridges/claude.py."""

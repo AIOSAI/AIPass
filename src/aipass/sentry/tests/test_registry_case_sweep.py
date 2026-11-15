@@ -3,7 +3,7 @@
 # Description: Case-exact registry discovery and the lanes that delegate to it
 # Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/registry_scan.py and the lanes that delegate to it."""

@@ -3,7 +3,7 @@
 # Description: Unit tests for 5 sentry checker handlers (batch 4)
 # Version: 1.5.0
 # Created: 2026-03-29
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for 5 checkers: aipass_standards/stderr_routing_check.py, todo, trigger, dead_code, unused_function."""

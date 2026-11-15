@@ -3,7 +3,7 @@
 # Description: Unit tests for handlers/bypass/
 # Version: 1.3.2
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/bypass/bypass_handler.py, ignore_handler.py, utils.py and inert.py."""

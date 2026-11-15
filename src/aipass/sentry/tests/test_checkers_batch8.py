@@ -3,7 +3,7 @@
 # Description: Unit tests for handlers, log_handler, log_level, log_structure, meta, naming, permission_flags
 # Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/handlers_check.py and six sibling checkers (batch 8)."""

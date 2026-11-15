@@ -3,7 +3,7 @@
 # Description: Line-coverage tests for architecture_check.py and checklist.py
 # Version: 1.1.4
 # Created: 2026-04-26
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/architecture_check.py and apps/modules/checklist.py."""

@@ -3,7 +3,7 @@
 # Description: Unit tests for encapsulation_check sub-functions (the other checkers moved to test_checkers_batch7_*.py)
 # Version: 1.4.2
 # Created: 2026-04-25
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/encapsulation_check.py and its sibling checkers (batch 7)."""

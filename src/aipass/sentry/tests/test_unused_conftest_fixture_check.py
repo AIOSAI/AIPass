@@ -3,7 +3,7 @@
 # Description: unused_conftest_fixture_check — crack class G, a shared fixture nothing requests
 # Version: 1.2.0
 # Created: 2026-09-22
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/unused_conftest_fixture_check.py."""

@@ -173,7 +173,7 @@
     {
       "file": "apps/handlers/bypass/bypass_handler.py",
       "standard": "logged_fallback",
-      "lines": [78],
+      "lines": [77],
       "reason": "Devpulse's ruling (c), fleet green leg 15: no raise here, the verdict path stays as it is. The failure is made loud instead: it is recorded in UNREADABLE_REGISTRIES, and the checklist and the audit each print one note naming the unreadable registry (registry_notes; pinned in test_checklist and test_standards_audit)."
     },
     {
@@ -247,7 +247,7 @@
     {
       "file": "tests/test_audit_tests_lane_gate.py",
       "standard": "literal_path",
-      "lines": [135],
+      "lines": [117],
       "reason": "Data, not a host path (fleet green leg 15): plugin._split_path splits a STRING on separators and never touches disk; '/weird/back\\\\slash.txt' is the input whose backslash must survive on POSIX."
     },
     {
@@ -284,7 +284,7 @@
     {
       "file": "tests/test_audit_tests_core.py",
       "standard": "through_the_command",
-      "lines": [631, 651, 665, 677, 690, 701, 711, 719, 726],
+      "lines": [630, 650, 664, 676, 689, 700, 710, 718, 725],
       "reason": "No public route (fleet green leg 15): runner._m10_proof is reached by the lane only after a full suite run under the gate. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
@@ -303,13 +303,7 @@
       "file": "tests/test_checkers_batch8.py",
       "standard": "through_the_command",
       "lines": [20],
-      "reason": "No public route (fleet green leg 15): handlers_check._branch_before is the path splitter check_module uses; its cases (Windows separators, nested apps) need no tree. Named in the leg 15 reply to @devpulse as the checker asks."
-    },
-    {
-      "file": "tests/test_coverage_arch_checklist.py",
-      "standard": "through_the_command",
-      "lines": [617],
-      "reason": "Fleet green leg 15 (line moved by devpulse's landing edit, which imports the checklist scope helpers from their public home in verdicts): architecture_check._relative_spelling is fed PureWindowsPath so the Windows spelling is pinned on any host; check_module would ask the host's own Path. Named in the leg 15 reply to @devpulse."
+      "reason": "No public route (fleet green leg 15): handlers_check._branch_before is the path splitter check_module uses; its cases (dotted module names, nested apps) need no tree. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
       "file": "tests/test_coverage_audit.py",
@@ -433,7 +427,7 @@
     {
       "file": "apps/handlers/audit/incremental_cache.py",
       "standard": "logged_fallback",
-      "lines": [249, 280, 291],
+      "lines": [243, 274, 285],
       "reason": "A cache, and the checker is wrong on these lines (fleet green leg 14). An unreadable legacy doc migrates 0 entries (migrate_legacy_cache), and an unreadable or corrupt entry is a cache miss (load_branch_entry). Every caller needs the same answer to both: run the full audit and write the entry fresh, which is the documented fail-open. The corrupt entry is renamed aside to .corrupt and each failure is logged, so nothing is lost and nothing is silent."
     },
     {
@@ -481,7 +475,7 @@
     {
       "file": "apps/handlers/aipass_standards/architecture_check.py",
       "standard": "logged_fallback",
-      "lines": [322],
+      "lines": [321],
       "reason": "The checker is wrong on this line (fleet green leg 15): the failure answer is the strict one. The caller sees the passport still exists and fails Template baseline ('No citizen_class in ...passport.json'); only an absent passport skips, and that path never reaches this except."
     },
     {
@@ -493,19 +487,19 @@
     {
       "file": "apps/handlers/audit/discovery.py",
       "standard": "logged_fallback",
-      "lines": [235],
+      "lines": [233],
       "reason": "No verdict reads this value (fleet green leg 15): measure_pack_corpus feeds the corpus banner only, its docstring says a raising measurer answers None so the caller keeps its own count rather than print a fabricated 0, and the failure is logged as a warning naming the measurer."
     },
     {
       "file": "apps/handlers/tests_pytest_standards/envdiff.py",
       "standard": "logged_fallback",
-      "lines": [657],
+      "lines": [652],
       "reason": "The checker is wrong on these lines (fleet green leg 15): the failure answer is the strict one. read_records' docstring names both: an unreadable log is an empty list and its emptiness produces the refusal; an undecodable line is dropped with a warning naming the file and line, and the missing session record it leaves is refused upstream."
     },
     {
       "file": "apps/handlers/tests_pytest_standards/payload/audit_hygiene_plugin.py",
       "standard": "logged_fallback",
-      "lines": [248],
+      "lines": [241],
       "reason": "Named, not silent (fleet green leg 15): the hook must never raise inside the suite it measures, and _note_error carries the realpath failure to the artifact, where Law M10 reports it. Only reachable in symlink-sibling mode, off by default."
     },
     {

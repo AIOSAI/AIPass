@@ -3,7 +3,7 @@
 # Description: Unit tests for ruff_check and clear_text_secret_logging checker handlers (batch 5)
 # Version: 1.6.1
 # Created: 2026-04-16
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/ruff_check.py and clear_text_secret_logging_check.py."""
