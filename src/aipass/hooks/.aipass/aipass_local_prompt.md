@@ -48,7 +48,6 @@ apps/
     hookstatus.py hooksound.py feedback.py alert_dismiss.py   # one-verb modules
     comment_scan.py comments.py   #   Comment budget: the pure counter; the `comments` verb
   handlers/
-    module_root.py         # module_file() -- the ONE import-time-safe __file__ resolve
     bridges/
       mount.py             #   Serves the promoted copy as aipass.hooks.apps (loaded by path)
       claude.py codex.py   #   Provider bridges; refuse PreToolUse if the engine can't load
@@ -110,7 +109,7 @@ EVERY reply that adds/renames/moves a handler MUST say "provider settings update
 
 # Known Gotchas
 
- - Never write a bare `Path(__file__).resolve()` at module scope -- it can read cwd, so it is an import-time cwd dependency. Use `handlers/module_root.module_file()`. The guard in `handlers/__init__.py` runs on EVERY hooks import: a defect there masks every other site, so cure it first.
+ - Module-scope `Path(__file__).resolve()` is fine: an absolute `__file__` never reads the cwd on Linux. The fence (`handlers/__init__.py`) keeps its `_frame_path` try; it runs on EVERY hooks import, so a defect there masks every other site.
  - Exit code 2 has dual meaning: intentional block (with JSON) vs crash (without JSON). The engine reads stdout to tell them apart.
  - `logs/engine.jsonl` is the source of truth for hook diagnostics; prax gets a copy via system_logger.
  - Provider settings carry several named bridge entries per event for UserPromptSubmit and PreCompact -- deliberate (per-handler output + timeout).

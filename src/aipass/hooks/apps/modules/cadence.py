@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.12.2
+# Version: 2.12.3
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-08
-# Modified: 2026-11-07
+# Modified: 2026-11-15
 # =============================================
 
 """Turn counter for prompt injection cadence — fires loaders every Nth turn.
@@ -23,7 +23,6 @@ from pathlib import Path
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.hooks.apps.handlers.module_root import module_file
 from aipass.hooks.apps.modules.grounding_content import find_branch_root
 
 import fcntl
@@ -31,7 +30,7 @@ import fcntl
 CONSOLE = err_console
 
 _GUARD_DIR = Path(tempfile.gettempdir())
-_BRANCH_ROOT = module_file(__file__).parent.parent.parent
+_BRANCH_ROOT = Path(__file__).resolve().parent.parent.parent
 _CONFIG_PATH = _BRANCH_ROOT / "hooks_json" / "custom_config" / "cadence_config.json"
 _DEBOUNCE_S = 2.0
 
@@ -103,9 +102,12 @@ def _load_config() -> dict:
     if _CONFIG_PATH.is_file():
         try:
             overrides = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
-            _deep_merge(result, overrides)
         except (json.JSONDecodeError, OSError) as exc:
-            logger.info("[HOOKS] cadence: config load failed, using defaults: %s", exc)
+            overrides = exc
+        if isinstance(overrides, dict):
+            _deep_merge(result, overrides)
+        else:  # ERROR, not a raise: edit_gate reads cadence, and a raise there refuses every memory write
+            logger.error("[HOOKS] cadence: %s unusable (%s), the built-in cadence runs", _CONFIG_PATH, overrides)
 
     _config = result
     return result

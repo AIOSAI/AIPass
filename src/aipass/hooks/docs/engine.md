@@ -2,9 +2,9 @@
 
 # The engine
 
-**Branch** hooks · **Code** `apps/modules/engine.py`, `apps/modules/promote.py`, `apps/handlers/bridges/mount.py`, `apps/handlers/config/gates.py`, `apps/handlers/config/output_merge.py`, `apps/handlers/module_root.py`
+**Branch** hooks · **Code** `apps/modules/engine.py`, `apps/modules/promote.py`, `apps/handlers/bridges/mount.py`, `apps/handlers/config/gates.py`, `apps/handlers/config/output_merge.py`
 
-The dispatch path from a normalized event to a handler, how a source edit becomes live code, why a broken gate refuses while a broken injector is skipped, how the stdouts become one document, and why every module in this branch must import in a process whose working directory is gone.
+The dispatch path from a normalized event to a handler, how a source edit becomes live code, why a broken gate refuses while a broken injector is skipped, and how the stdouts become one document.
 
 ---
 
@@ -51,35 +51,6 @@ Each fail-closed gate also refuses the call it guards when it crashes internally
 Handlers are called **dynamically at runtime** — the engine uses `importlib.import_module()` + `getattr()` on the dotted handler path from `hooks.json` (e.g., `aipass.hooks.apps.handlers.prompt.identity.handle`). Handlers are never statically imported. This means static analysis tools (including sentry's dead_code checker) cannot see that they are used: run unshielded, `dead_code` reports dispatched handlers as unreferenced, which is this indirection and not rot. Shielded, `dead_code` audits 100%.
 
 `hooks.json` wires 37 entries under 36 distinct names — `auto_process` is the one name wired twice, on UserPromptSubmit and PreCompact. **35 of the 37 are `enabled: true`**: `feedback_pulse` is off by choice in this repo, and `auto_watchdog` is off because its handler is retired. The AIPass root `.aipass/hooks.json` is read with no trust check, so editing it changes what fires and never turns the hooks off; it is a protected file, written by the admin seat alone. Firing evidence is a *narrow* window — `logs/engine.jsonl` rotates at `JSONL_MAX_BYTES = 500_000` keeping one `.1` backup (prax `jsonl_writer.py`), so it holds minutes to tens of minutes of live traffic and absence from it is **not** evidence of a dead wire. A short window routinely misses the PreCompact-only handlers (`pre_compact`, `pre_compact_rollover`, `pre_compact_prep`) and the SessionStart ones (`cadence_reset`, `release_notice`), whose events fire rarely. `feedback_pulse` does appear, but as `{"action": "skipped_disabled"}`: it is wired `enabled: false` in this repo, so it is dispatched and declines.
-
-## Importing Without a Working Directory
-
-Every hooks module must import in a process whose working directory is gone.
-`Path.resolve()` can read `os.getcwd()`, so a `Path(__file__).resolve()`
-*reached at import time* is an import-time working-directory dependency, and a
-process whose cwd was deleted cannot import the module at all.
-
-**The one spelling:** `apps/handlers/module_root.py` → `module_file(__file__)`.
-It still attempts `.resolve()` — normalising symlinks is why the call exists —
-and falls back to the absolute spelling only in the world where the alternative
-is a dead import. New module-level `__file__` resolution goes through it.
-
-**The guard is the first site.** `apps/handlers/__init__.py` runs a
-cross-branch import guard on *every* hooks import, so a dead-cwd failure there
-masks every other site: each module reports that one line. `tests/test_import_dead_cwd.py`
-pins the whole tree, discovered by walk rather than listed.
-
-**The denial world.** The test denies `os.path.realpath` outright and convicts
-`inspect.stack()` at `inspect.py:1009`. The guard walks frames with
-`sys._getframe` and reads the import line with `linecache`.
-
-The `inspect.stack()` ban is **structural** (AST, not grep): the guard's
-caller-is-None branch is unreachable from any import probe, so a regrown call
-there is invisible to the world test and caught only by the AST pin. AST and not a string ban because this guard's own
-docstrings name the defect, and a spelling ban convicts prose while acquitting
-code.
-
----
 
 ## Related
 

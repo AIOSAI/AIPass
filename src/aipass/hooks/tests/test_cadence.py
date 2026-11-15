@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_cadence.py
-# Version: 1.10.1
+# Version: 1.10.2
 # Description: Tests for cadence module (DPLAN-0200): the fire decision; regroup and counter in test_cadence_regroup.py
 # Branch: hooks
 # Created: 2026-06-08
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/cadence.py: the fire decision."""
@@ -92,6 +92,20 @@ class TestShouldFire:
             patch(f"{MODULE}._CONFIG_PATH", config),
         ):
             assert should_fire("global") is True
+
+    @pytest.mark.parametrize("body", ["{broken", "[]"], ids=["not-json", "not-object"])
+    def test_an_unusable_config_is_an_error_and_never_a_crash(self, tmp_path, caplog, body):
+        """A non-object file crashed _deep_merge; a broken one fell to the defaults at INFO."""
+        config = tmp_path / "cadence.json"
+        config.write_text(body, encoding="utf-8")
+        with (
+            patch(f"{MODULE}._GUARD_DIR", tmp_path),
+            patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
+            patch(f"{MODULE}._CONFIG_PATH", config),
+            caplog.at_level("ERROR"),
+        ):
+            assert should_fire("global") is True
+        assert any(r.levelname == "ERROR" and "cadence.json" in r.getMessage() for r in caplog.records)
 
     def test_cadence_disabled_always_fires(self, tmp_path):
         state_file = tmp_path / "aipass-cadence-test-session.json"

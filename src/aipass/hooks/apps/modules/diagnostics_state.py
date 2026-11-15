@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: diagnostics_state.py
-# Version: 2.3.0
+# Version: 2.3.1
 # Description: Post-edit diagnostics state per seat — location, meaning, and live re-validation
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-13
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """Owns what the diagnostics state means: one file per seat since leg 4 (see load_seat).
@@ -30,9 +30,8 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 CONSOLE = err_console
 HELP_COMMANDS = [("diagnostics_state", "Show what the edit gate remembers, re-checked live")]
 
-# One file per seat so no seat loses another's write; the shared version 1 file is removed on write.
+# One file per seat so no seat loses another's write.
 STATE_DIR = Path(tempfile.gettempdir()) / "aipass-diagnostics-state"
-LEGACY_FILE = Path(__file__).parent.parent.parent.parent / ".diagnostics_state.json"
 MAX_AGE_SECONDS = 24 * 60 * 60
 
 # A name missing from ANOTHER module is cross-file. Matched on text: auto_fix stores no rule name,
@@ -107,7 +106,6 @@ def save_seat(seat: str, file_path: str, errors: list[dict]) -> None:
             json.dump(payload, handle)
         os.replace(temp_name, _seat_file(seat))
         temp_name = ""
-        LEGACY_FILE.unlink(missing_ok=True)
         _prune()
     except (OSError, ValueError) as exc:
         logger.info("[HOOKS] diagnostics_state: seat state write failed: %s", exc)

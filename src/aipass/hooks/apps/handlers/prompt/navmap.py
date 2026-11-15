@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: navmap.py
-# Version: 1.4.0
+# Version: 1.4.1
 # Description: Tier 1 navigation map — periodic prompt injection (UserPromptSubmit); edit-time cap warning (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-06-18
-# Modified: 2026-11-10
+# Modified: 2026-11-15
 # =============================================
 
 """Loads .aipass/tier1_navmap.md — richer navigation map injected periodically — and warns when an edit leaves it over its cap."""
@@ -52,7 +52,7 @@ def handle(hook_data: dict) -> dict:
         return {"stdout": content, "exit_code": 0, "sound": "navmap"}
 
     except Exception as exc:
-        logger.info("[HOOKS] navmap: unexpected error: %s", exc)
+        logger.error("[HOOKS] navmap: unexpected error: %s", exc)
         return {"stdout": "", "exit_code": 0}
 
 

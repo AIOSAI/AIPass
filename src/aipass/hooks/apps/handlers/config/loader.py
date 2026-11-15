@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: loader.py
-# Version: 2.3.0
+# Version: 2.3.1
 # Description: Hook config loader — the AIPass config from AIPASS_HOME, a project's own behind trust, gates always
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-05-19
-# Modified: 2026-11-09
+# Modified: 2026-11-15
 # =============================================
 
 """Which hook config a session runs. Security never depends on trust (DPLAN-0356 item 1).
@@ -20,7 +20,6 @@ import tempfile
 from pathlib import Path
 
 from aipass.hooks.apps.handlers.config import gates
-from aipass.hooks.apps.handlers.module_root import module_file
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 _GUARD_DIR = Path(tempfile.gettempdir())
@@ -63,7 +62,7 @@ def aipass_home() -> Path | None:
     raw = os.environ.get("AIPASS_HOME", "")
     if raw:
         return _absolute(raw)
-    here = module_file(__file__)
+    here = Path(__file__).resolve()
     if len(here.parents) > 6:
         root = here.parents[6]
         if (root / _CONFIG).is_file() and (root / "src" / "aipass").is_dir():
@@ -187,7 +186,12 @@ def find_project_config() -> dict | None:
     if kind == EXTERNAL:
         if not registry_path().exists():
             bootstrap()
-        if not is_trusted(str(where)):
+        try:
+            trusted = is_trusted(str(where))
+        except ValueError as exc:  # a registry that cannot be read is no trust: the gate set serves
+            logger.error("[HOOKS] loader: %s — %s runs the AIPass gates only", exc, where)
+            return None
+        if not trusted:
             # Its handler_namespace with it: no handler of an untrusted config is imported.
             logger.warning(
                 "[HOOKS] project not enrolled, or its hooks.json changed since enrollment: %s (its own hooks are off;"
@@ -250,6 +254,22 @@ def config_unavailable_reason() -> str:
             f"Fix (re-enroll): aipass trust {where}"
         )
     return f"{config_file} could not be read or parsed — see the [HOOKS] error in the engine log.{tail}"
+
+
+def config_break_banner() -> str | None:
+    """Loud check for an AIPass config that cannot be read: the built-in gate set alone runs, every injector is off."""
+    home = aipass_home()
+    if home is None:
+        return None
+    try:
+        _read_config(home / _CONFIG)
+    except (OSError, ValueError) as exc:
+        return (
+            "# HOOKS CONFIG UNREADABLE — ONLY THE BUILT-IN GATES RUN\n\n"
+            f"{home / _CONFIG} cannot be read ({exc}), so grounding, identity and every other "
+            "injector are off. The gates still run.\n\nFix the file: this does not heal itself."
+        )
+    return None
 
 
 def trust_break_banner() -> str | None:

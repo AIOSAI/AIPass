@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: identity.py
-# Version: 1.3.0
+# Version: 1.3.1
 # Description: Injects branch identity from passport.json (UserPromptSubmit), cadence-gated
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-05-22
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Reads .trinity/passport.json and outputs formatted identity for prompt injection."""
@@ -45,5 +45,5 @@ def handle(hook_data: dict) -> dict:
         return {"stdout": content, "exit_code": 0, "sound": "identity"}
 
     except Exception as exc:
-        logger.info("[HOOKS] identity: unexpected error: %s", exc)
+        logger.error("[HOOKS] identity: unexpected error: %s", exc)
         return {"stdout": "", "exit_code": 0}

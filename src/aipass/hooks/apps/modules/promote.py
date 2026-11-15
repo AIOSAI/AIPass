@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: promote.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: The one step that makes edited hook code live: check, copy, smoke, then point (drone @hooks promote)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-30
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """Hook code goes live through one explicit step, never by being saved (DPLAN-0356 item 3).
@@ -28,7 +28,6 @@ from pathlib import Path
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.json import json_handler
-from aipass.hooks.apps.handlers.module_root import module_file
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
@@ -38,7 +37,7 @@ HELP_COMMANDS = [
     ("promote status", "Show which promoted copy every hook process is running"),
 ]
 
-BRANCH_ROOT = module_file(__file__).parent.parent.parent
+BRANCH_ROOT = Path(__file__).resolve().parent.parent.parent
 # Spelled again in handlers/bridges/mount.py, which must stay stdlib-only and
 # cannot import this module; the pins in test_engine hold the two equal.
 POINTER = ".live-current"

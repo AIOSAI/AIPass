@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.22.0
+# Version: 1.22.1
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-11-07
+# Modified: 2026-11-15
 # =============================================
 
 """Blocks unsafe edits: inbox, cross-project, cross-branch and shell-to-memory writes, daemon confinement, diagnostics
@@ -494,12 +494,7 @@ def _allowed_fields(v: dict, limits: dict, el: Any) -> list[str] | None:
     Read through ``fields_for``: the shape is memory's to publish; an unconfigured type answers {}."""
     if v.get("reason") != "unknown_field":
         return None
-    try:
-        fields = el.fields_for(v.get("entry_type", ""), limits)
-    except AttributeError as exc:
-        # An older @memory has no fields_for; the refusal stays correct without the allow-list.
-        logger.info("[HOOKS] edit_gate: fields_for unavailable, refusal renders without the shape: %s", exc)
-        return None
+    fields = el.fields_for(v.get("entry_type", ""), limits)
     # Declaration order, not alphabetical: the config's order reads as the entry's shape.
     return list(fields) if isinstance(fields, dict) and fields else None
 
@@ -532,12 +527,7 @@ def _evaluate_file_budget(file_name: str, after_text: str, limits: dict, el: Any
     SIZE only: @spawn owns passport's schema, @memory the numbers. Warn mode logs and allows."""
     if file_name not in _FILE_BUDGET_FILES:
         return None
-    try:
-        violations = el.check_file_budget(file_name, after_text)
-    except AttributeError as exc:
-        # An older @memory publishes no file budgets: a size rule that cannot be read has not failed.
-        logger.info("[HOOKS] edit_gate: check_file_budget unavailable, %s unmeasured: %s", file_name, exc)
-        return None
+    violations = el.check_file_budget(file_name, after_text)
     if not violations:
         return None
     if not limits.get("enforce"):

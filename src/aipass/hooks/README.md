@@ -109,9 +109,7 @@ events, `notification/` for sound and mail, plus `config/`, `cli/` and the `json
 branch shares.
 
 Handlers are imported dynamically by dotted path at dispatch time, never statically, which is why no
-handler is referenced anywhere in this tree and why static analysis cannot see them as used. Every
-module-level `__file__` resolution goes through `apps/handlers/module_root.py`, because a hook must
-import in a process whose working directory is gone.
+handler is referenced anywhere in this tree and why static analysis cannot see them as used.
 
 The directory tree lives in this branch's own prompt (`.aipass/aipass_local_prompt.md`) — one place,
 so it cannot disagree with itself.

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: grounding_receipt.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: The grounding receipt, .ai_mail.local/grounding.json: did the five grounding entries reach the model
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-28
-# Modified: 2026-10-28
+# Modified: 2026-11-15
 # =============================================
 
 """The grounding receipt beside a branch's session pointer: one current row plus a history of 20.
@@ -30,6 +30,8 @@ from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.modules import context_window
 from aipass.prax.apps.modules.logger import system_logger as logger
+
+HELP_COMMANDS = [("receipt", "Did the grounding entries reach the model, per seat")]
 
 #: The grounding entries (bridges/opencode.py GROUNDING) and where a seat re-reads each one.
 SOURCES = {

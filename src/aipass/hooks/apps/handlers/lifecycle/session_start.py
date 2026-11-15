@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: session_start.py
-# Version: 1.5.0
+# Version: 1.5.1
 # Description: Resets cadence counter on new chat / clear; injects the culture file; writes the session pointer
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-07
-# Modified: 2026-11-04
+# Modified: 2026-11-15
 # =============================================
 
 """SessionStart: resets the cadence counter, injects the culture file, writes the session pointer.
@@ -37,7 +37,7 @@ def handle(hook_data: dict) -> dict:
         cadence.reset_counter(hook_data=hook_data, caller="session_start")
         logger.info("[HOOKS] session_start: cadence reset (source=%s)", source)
     except Exception as exc:
-        logger.info("[HOOKS] session_start: cadence reset failed: %s", exc)
+        logger.error("[HOOKS] session_start: cadence reset failed: %s", exc)
         return {"stdout": "", "exit_code": 0}
 
     return {"stdout": "", "exit_code": 0, "sound": "cadence reset"}
@@ -97,7 +97,7 @@ def handle_session_pointer(hook_data: dict) -> dict:
         door = importlib.import_module("aipass.ai_mail.apps.modules.door_session_pointer")
         written = door.write_pointer(branch, session_id, "session-start", provider=provider)
     except Exception as exc:  # a missed pointer costs a resume, never the session
-        logger.info("[HOOKS] session_start: session pointer not written for %s: %s", branch, exc)
+        logger.error("[HOOKS] session_start: session pointer not written for %s: %s", branch, exc)
         return {"stdout": "", "exit_code": 0}
     logger.info("[HOOKS] session_start: pointer %s -> %s (%s) written=%s", branch, session_id, provider, written)
     return {"stdout": "", "exit_code": 0}

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: tier0_kernel.py
-# Version: 1.3.0
+# Version: 1.3.1
 # Description: Tier 0 kernel — always-on minimal prompt injection (UserPromptSubmit)
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-06-18
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Loads .aipass/tier0_kernel.md — tiny always-on identity + reflex block."""
@@ -82,5 +82,5 @@ def handle(hook_data: dict) -> dict:
         return {"stdout": stdout, "exit_code": 0, "sound": "tier0 kernel"}
 
     except Exception as exc:
-        logger.info("[HOOKS] tier0_kernel: unexpected error: %s", exc)
+        logger.error("[HOOKS] tier0_kernel: unexpected error: %s", exc)
         return {"stdout": "", "exit_code": 0}

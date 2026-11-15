@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: sandbox.py
-# Version: 1.0.3
+# Version: 1.0.4
 # Description: Sandbox wrapper — launches commands inside srt (kernel FS boundary)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-09
-# Modified: 2026-11-01
+# Modified: 2026-11-15
 # =============================================
 
 """Sandbox wrapper — launches commands inside srt kernel filesystem boundary.
@@ -23,11 +23,10 @@ from pathlib import Path
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.hooks.apps.handlers.module_root import module_file
 
 CONSOLE = err_console
 
-_MODULE_DIR = module_file(__file__).parent
+_MODULE_DIR = Path(__file__).resolve().parent
 _SRT_RESOLVE = _MODULE_DIR / "_srt_resolve.mjs"
 
 _VAR_TMP = Path("/var/tmp")

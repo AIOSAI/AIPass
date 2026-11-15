@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for hooks's entry point routing, help and introspection
-# Version: 1.2.4
+# Version: 1.2.5
 # Created: 2026-09-03
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/hooks.py, the branch's CLI entry point."""
@@ -268,6 +268,19 @@ class TestDiscoverySkipsRetiredModules:
         self._stand_in(monkeypatch, "presence(disabled)", _StubModule())
 
         assert branch_entry.discover_modules() == [stub]
+
+    def test_a_module_whose_import_breaks_is_an_error_not_a_quiet_retry(self, monkeypatch, tmp_path, caplog):
+        """A broken dependency logged INFO 'not found', then a retry under apps.modules masked it."""
+        self._modules_dir(monkeypatch, tmp_path)
+        (tmp_path / "broken.py").write_text("", encoding="utf-8")
+        (tmp_path / "sessions.py").write_text("", encoding="utf-8")
+        stub = _StubModule()
+        self._stand_in(monkeypatch, "sessions", stub)
+        monkeypatch.setitem(sys.modules, f"{_MODULES_PACKAGE}.broken", None)  # None in sys.modules: ImportError
+
+        with caplog.at_level("ERROR"):
+            assert branch_entry.discover_modules() == [stub]
+        assert [r.levelname for r in caplog.records if "broken" in r.getMessage()] == ["ERROR"]
 
     def test_the_mark_is_matched_anywhere_in_the_name(self, monkeypatch, tmp_path):
         # "presence(disabled)_v2" is the same retirement as a suffix mark.

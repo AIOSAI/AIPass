@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: protected_paths.py
-# Version: 2.3.0
+# Version: 2.3.1
 # Description: The files that switch the gates themselves — written by the admin seat alone (git_gate)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-30
-# Modified: 2026-11-03
+# Modified: 2026-11-15
 # =============================================
 
 """Which files decide whether the gates run, and so must never be an agent's to write (DPLAN-0356 item 1).
@@ -19,12 +19,11 @@ from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.handlers.config.loader import aipass_home
-from aipass.hooks.apps.handlers.module_root import module_file
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
 
-_HOOKS_BRANCH = module_file(__file__).parent.parent.parent
+_HOOKS_BRANCH = Path(__file__).resolve().parent.parent.parent
 
 # Matched on the path spelled with "/" and case-insensitively: a case-insensitive mount
 # opens .Claude/Settings.json as the same file.

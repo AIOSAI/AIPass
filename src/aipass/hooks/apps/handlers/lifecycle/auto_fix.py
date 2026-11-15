@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: auto_fix.py
-# Version: 1.7.0
+# Version: 1.7.1
 # Description: Post-edit diagnostics — syntax, lint, type, pattern, sentry checks (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-11-10
+# Modified: 2026-11-15
 # =============================================
 
 """Runs diagnostics on edited files and surfaces errors for the agent to fix."""
@@ -321,11 +321,13 @@ def _parse_checklist_findings(stdout: str, marker: str) -> list[str]:
     return [f for f in findings if f]
 
 
-def _run_sentry_checklist(file_path: str) -> list[str]:
+def _run_sentry_checklist(file_path: str, unanswered: list[str] | None = None) -> list[str]:
+    """The checklist's findings; a checklist that did not run puts its why in *unanswered*, never a clean []."""
     if "/.claude/hooks/" in file_path:
         return []
     aipass_home = os.environ.get("AIPASS_HOME", "")
     if not aipass_home:
+        _no_answer(unanswered, "sentry checklist", "no AIPASS_HOME")
         return []
     try:
         result = subprocess.run(
@@ -345,8 +347,10 @@ def _run_sentry_checklist(file_path: str) -> list[str]:
         return _parse_checklist_findings(result.stdout, _checklist_marker())[:5]
     except FileNotFoundError:
         logger.info("[HOOKS] auto_fix: drone not found for sentry checklist")
+        _no_answer(unanswered, "sentry checklist", "drone not found")
     except Exception as exc:
         logger.info("[HOOKS] auto_fix: sentry checklist failed: %s", exc)
+        _no_answer(unanswered, "sentry checklist", f"{type(exc).__name__}: {exc}")
     return []
 
 
@@ -460,7 +464,7 @@ def handle(hook_data: dict) -> dict:
         if file_path.endswith(".py"):
             errors = _run_python_checks(file_path)
 
-            sentry_violations = _run_sentry_checklist(file_path)
+            sentry_violations = _run_sentry_checklist(file_path, unanswered)
             for v in sentry_violations:
                 errors.append(f"SENTRY: {v}")
 
@@ -499,5 +503,5 @@ def handle(hook_data: dict) -> dict:
         return {"stdout": _to_model(f"[diagnostics] {no_answer}"), "exit_code": 0}
 
     except Exception as exc:
-        logger.info("[HOOKS] auto_fix: unexpected error (allowing): %s", exc)
+        logger.error("[HOOKS] auto_fix: unexpected error (allowing): %s", exc)
         return {"stdout": "", "exit_code": 0}

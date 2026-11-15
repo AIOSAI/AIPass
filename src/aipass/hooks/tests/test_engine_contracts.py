@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_engine_contracts.py
 # Description: The hook engine's contracts and resilience: bad config, log writes, fixtures, CLI routing, paths
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/engine.py: its contracts and error resilience."""
@@ -74,6 +74,26 @@ class TestErrorResilience:
             config = find_project_config()
         assert config is None
         assert "bad config" in loader_logger.error.call_args[0][0]
+
+    @pytest.mark.parametrize("body", ["{invalid json!!!", "[]"], ids=["not-json", "not-object"])
+    def test_an_unreadable_aipass_config_says_so_at_the_prompt(self, tmp_path, monkeypatch, mock_logger, body):
+        """The built-in gate set ran with every injector off, and the session was never told."""
+        install = tmp_path / "install"
+        (install / ".aipass").mkdir(parents=True)
+        (install / ".aipass" / "hooks.json").write_text(body, encoding="utf-8")
+        monkeypatch.setenv("AIPASS_HOME", str(install))
+        output, code = dispatch("UserPromptSubmit", "{}", {"UserPromptSubmit": {}})
+        assert code == 0
+        assert output.startswith("# HOOKS CONFIG UNREADABLE")
+        assert str(install / ".aipass" / "hooks.json") in output
+
+    def test_a_readable_aipass_config_raises_no_banner(self, tmp_path, monkeypatch, mock_logger):
+        install = tmp_path / "install"
+        (install / ".aipass").mkdir(parents=True)
+        (install / ".aipass" / "hooks.json").write_text("{}", encoding="utf-8")
+        monkeypatch.setenv("AIPASS_HOME", str(install))
+        output, _code = dispatch("UserPromptSubmit", "{}", {"UserPromptSubmit": {}})
+        assert "CONFIG UNREADABLE" not in output
 
     def test_a_registry_bootstrap_lands_in_the_sandbox(self, temp_test_dir, tmp_path, monkeypatch, mock_logger):
         """sentry's runtime probe, 2026-09-14: this class created ~/.aipass/trusted_projects.json.
@@ -359,6 +379,21 @@ class TestErrorResilienceExtended:
             result = dispatch("Stop", "", config)
         assert "ok" in result[0]
         assert result[1] == 0
+
+    @pytest.mark.parametrize("stdin", ["{not json", "[]", '"text"', ""], ids=["not-json", "array", "string", "empty"])
+    def test_an_unreadable_pretooluse_payload_is_refused_and_no_gate_runs(self, mock_logger, stdin):
+        config = {"PreToolUse": {"gate": {"enabled": True, "command": "echo ok", "matcher": ""}}}
+        with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
+            output, code = dispatch("PreToolUse", stdin, config)
+        assert code == 2
+        assert json.loads(output)["decision"] == "block"
+        mock_run.assert_not_called()
+
+    def test_an_unreadable_stop_payload_still_runs_its_hooks(self, mock_logger):
+        config = {"Stop": {"hook": {"enabled": True, "command": "echo ok", "matcher": ""}}}
+        with patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run:
+            mock_run.return_value = {"exit_code": 0, "stdout": "ok", "stderr": "", "elapsed_ms": 5}
+            assert dispatch("Stop", "[]", config) == ("ok", 0)
 
     def test_config_with_nonexistent_dir(self, temp_test_dir, mock_logger):
         nonexistent = temp_test_dir / "does_not_exist"

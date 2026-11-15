@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: post_compact_regrounding.py
-# Version: 2.2.0
+# Version: 2.2.1
 # Description: Mid-turn grounding backstop after compaction, budgeted per fire (PostToolUse, DPLAN-0276, #752)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-31
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Re-grounds the agent after compaction even when no UserPromptSubmit arrives.
@@ -225,5 +225,5 @@ def handle(hook_data: dict) -> dict:
         return {"stdout": json.dumps(result), "exit_code": 0, "sound": "post compact reground"}
 
     except Exception as exc:
-        logger.info("[HOOKS] post_compact_regrounding: unexpected error: %s", exc)
+        logger.error("[HOOKS] post_compact_regrounding: unexpected error: %s", exc)
         return _SILENT

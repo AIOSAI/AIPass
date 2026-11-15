@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: wire_verify.py
-# Version: 1.8.0
+# Version: 1.8.1
 # Description: Wire verification — cross-checks provider settings vs project hook config
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-09
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Wire verification — catches silent hook-wiring breaks.
@@ -34,7 +34,6 @@ from aipass.hooks.apps.handlers.config.loader import aipass_home, config_unavail
 from aipass.hooks.apps.modules.context_window import codex_hooks_path
 from aipass.hooks.apps.modules.engine import PROJECT_ROW, own_hooks
 from aipass.hooks.apps.handlers.json import files as json_files
-from aipass.hooks.apps.handlers.module_root import module_file
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
@@ -47,11 +46,11 @@ HELP_COMMANDS = [
 _BRIDGE_MARKER = "bridges/claude.py"
 _CODEX_MARKER = "bridges/codex.py"
 _OPENCODE_MARKER = "bridges/opencode.py"
-OPENCODE_PLUGIN_SOURCE = module_file(__file__).parents[1] / "handlers" / "bridges" / "opencode_plugin.ts"
+OPENCODE_PLUGIN_SOURCE = Path(__file__).resolve().parents[1] / "handlers" / "bridges" / "opencode_plugin.ts"
 _META_KEYS = frozenset({"_comment", "hooks_enabled"})
 
 _SEED_MARKER = "bridges/seed.py"
-SEED_BRIDGE = module_file(__file__).parents[1] / "handlers" / "bridges" / "seed.py"
+SEED_BRIDGE = Path(__file__).resolve().parents[1] / "handlers" / "bridges" / "seed.py"
 #: The events a Seed head fires (its src/hooks/hooks.md); the manifest has no cli.seed section to name them.
 SEED_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostCompact", "Stop")
 #: Seed events Claude is not wired for: its PostCompact output never reaches the model; PostToolUse re-grounds.

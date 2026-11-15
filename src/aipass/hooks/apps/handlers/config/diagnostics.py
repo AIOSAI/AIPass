@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: diagnostics.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Description: JSONL diagnostic logging for hook engine
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-05-19
-# Modified: 2026-05-19
+# Modified: 2026-11-15
 # =============================================
 
 """JSONL diagnostic logging — appends structured entries for hook activity."""
@@ -16,9 +16,8 @@ from pathlib import Path
 
 from aipass.prax import append_jsonl
 from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.hooks.apps.handlers.module_root import module_file
 
-BRANCH_ROOT = module_file(__file__).parent.parent.parent.parent
+BRANCH_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _PROD_LOG_FILE = BRANCH_ROOT / "logs" / "engine.jsonl"
 
 

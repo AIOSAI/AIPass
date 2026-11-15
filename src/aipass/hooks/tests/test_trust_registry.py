@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_trust_registry.py
-# Version: 2.2.0
+# Version: 2.2.1
 # Description: Tests for trusted-project registry — DPLAN-0244 Layer B
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-15
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/config/trust_registry.py and apps/handlers/config/loader.py's trust integration."""
@@ -141,12 +141,16 @@ class TestRegistryHelpers:
             result = read_registry()
         assert "/some/path" in result["projects"]
 
-    def test_read_registry_corrupt(self, temp_test_dir, mock_logger):
+    @pytest.mark.parametrize(
+        "body", ["{corrupt!!!", "[]", '{"projects": []}'], ids=["not-json", "not-object", "no-projects"]
+    )
+    def test_a_corrupt_registry_raises_never_reads_as_empty(self, temp_test_dir, mock_logger, body):
+        """An empty read was written back by the next enroll, erasing every enrollment."""
         reg_path = temp_test_dir / "registry.json"
-        reg_path.write_text("{corrupt!!!", encoding="utf-8")
+        reg_path.write_text(body, encoding="utf-8")
         with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
-            result = read_registry()
-        assert result == {"version": 1, "projects": {}}
+            with pytest.raises(ValueError, match="trust registry"):
+                read_registry()
 
 
 class TestEnrollRevoke:
@@ -774,6 +778,22 @@ class TestLoaderTrustIntegration:
         ):
             config = find_project_config()
         assert config is None
+
+    def test_a_corrupt_registry_runs_the_gates_only_and_says_so(self, temp_test_dir, mock_logger, caplog):
+        reg_path = temp_test_dir / "registry.json"
+        reg_path.write_text("{corrupt!!!", encoding="utf-8")
+        project = temp_test_dir / "some_project"
+        (project / ".aipass").mkdir(parents=True)
+        (project / ".aipass" / "hooks.json").write_text('{"hooks_enabled": true}', encoding="utf-8")
+        with (
+            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
+            _chdir(project),
+            caplog.at_level("ERROR"),
+        ):
+            config = find_project_config()
+        assert config is None
+        assert any("trust registry" in r.getMessage() and r.levelname == "ERROR" for r in caplog.records)
+        assert reg_path.read_text(encoding="utf-8") == "{corrupt!!!"
 
     def test_hash_mismatch_skipped(self, temp_test_dir, mock_logger):
         reg_path = temp_test_dir / "registry.json"

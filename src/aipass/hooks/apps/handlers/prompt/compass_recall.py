@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: compass_recall.py
-# Version: 1.2.0
+# Version: 1.2.1
 # Description: Ambient compass recall — surfaces rated decisions on relevant prompts
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-16
-# Modified: 2026-10-31
+# Modified: 2026-11-15
 # =============================================
 
 """Queries compass FTS against the user's prompt and injects matching decisions
@@ -169,5 +169,5 @@ def handle(hook_data: dict) -> dict:
         return {"stdout": "\n".join(lines), "exit_code": 0, "sound": "compass recall"}
 
     except Exception as exc:
-        logger.info("[HOOKS] compass_recall_unreachable: %s", exc)
+        logger.error("[HOOKS] compass_recall_unreachable: %s", exc)
         return {"stdout": "", "exit_code": 0}

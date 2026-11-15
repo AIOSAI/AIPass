@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: write_grant.py
-# Version: 1.2.0
+# Version: 1.2.1
 # Description: Whether a dispatch's write grant covers one cross-project write, read through @ai_mail's door
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-11-03
-# Modified: 2026-11-08
+# Modified: 2026-11-15
 # =============================================
 
 """Whether this session's dispatch grant covers one crossing write: @ai_mail's door decides, any doubt refuses."""
@@ -17,7 +17,6 @@ from pathlib import Path
 from types import ModuleType
 
 from aipass.cli.apps.modules import err_console
-from aipass.hooks.apps.handlers.module_root import module_file
 from aipass.hooks.apps.modules.write_ownership import AIPASS_REGISTRY, Project
 from aipass.prax.apps.modules.logger import system_logger as logger
 
@@ -109,7 +108,7 @@ def _register_root(door: ModuleType, caller_root: Path, landing: Project, dispat
 
 def aipass_root() -> Path | None:
     """The AIPass checkout this code runs from, by its registry above this file: never the target, the cwd or an env."""
-    return next((p for p in module_file(__file__).parents if (p / AIPASS_REGISTRY).is_file()), None)
+    return next((p for p in Path(__file__).resolve().parents if (p / AIPASS_REGISTRY).is_file()), None)
 
 
 def _verified_caller(cwd: str) -> str:

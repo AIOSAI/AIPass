@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: compact.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: Injects live state for post-compact recovery (PreCompact)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-10-28
+# Modified: 2026-11-15
 # =============================================
 
 """Reads branch state and injects recovery context before compaction."""
@@ -126,5 +126,5 @@ def handle(hook_data: dict) -> dict:
         return {"stdout": "\n\n".join(sections), "exit_code": 0, "sound": "pre compact"}
 
     except Exception as exc:
-        logger.info("[HOOKS] compact: unexpected error: %s", exc)
+        logger.error("[HOOKS] compact: unexpected error: %s", exc)
         return {"stdout": "", "exit_code": 0}

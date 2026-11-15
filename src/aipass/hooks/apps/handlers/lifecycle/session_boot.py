@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: session_boot.py
-# Version: 4.6.1
+# Version: 4.6.2
 # Description: Boot wrapper — attach-first menu, resumes by pointer (0448), steps aside while dispatched (0449)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-06-30
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Boot wrapper for Claude Code sessions.
@@ -405,11 +405,6 @@ def boot(cwd: str | None = None, extra_args: list[str] | None = None) -> dict:
     if live:
         return _menu_live(live, branch, claude_bin, defaults, extra_args, cwd)
     return _menu_no_live(branch, claude_bin, defaults, extra_args, cwd)
-
-
-def _has_bg(sessions: list[dict]) -> bool:
-    """Check if any session is a background session."""
-    return any(s.get("kind") in ("bg", "background") for s in sessions)
 
 
 def _get_collateral_bg(branch: str) -> list[dict]:

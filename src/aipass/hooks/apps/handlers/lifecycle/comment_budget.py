@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: comment_budget.py
-# Version: 1.4.0
+# Version: 1.4.1
 # Description: Comment budget — measures every edit's comment share (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-10-16
-# Modified: 2026-11-10
+# Modified: 2026-11-15
 # =============================================
 
 """Measures an edited file's comment share and tells the agent when it is over budget (docs/comments.md)."""
@@ -22,12 +22,11 @@ from pathlib import Path
 from aipass.prax import append_jsonl
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.hooks.apps.handlers.lifecycle.auto_fix import _scratch_ground
-from aipass.hooks.apps.handlers.module_root import module_file
 
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 CONTEXT_CAP = 700
 HELD_FRESH_SECONDS = 10
-BRANCH_ROOT = module_file(__file__).parent.parent.parent.parent
+BRANCH_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _PROD_LEDGER = BRANCH_ROOT / "logs" / "comments.jsonl"
 _SILENT = {"stdout": "", "exit_code": 0}
 comment_scan = importlib.import_module("aipass.hooks.apps.modules.comment_scan")

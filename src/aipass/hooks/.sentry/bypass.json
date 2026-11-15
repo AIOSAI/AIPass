@@ -14,16 +14,6 @@
     },
     {
       "file": "apps/handlers/bridges/claude.py",
-      "standard": "dead_code",
-      "reason": "Bridge called externally by provider settings subprocess — no internal import. Verified wired in ~/.claude/settings.json hook entries."
-    },
-    {
-      "file": "apps/handlers/bridges/claude.py",
-      "standard": "unused_function",
-      "reason": "main() called as subprocess entry point from provider settings — never statically imported."
-    },
-    {
-      "file": "apps/handlers/bridges/claude.py",
       "standard": "handlers",
       "reason": "Bridges import engine module by design — that is their entire purpose."
     },
@@ -38,24 +28,9 @@
       "reason": "Bridge importing engine module is its architectural purpose."
     },
     {
-      "file": "apps/handlers/bridges/claude.py",
-      "standard": "imports",
-      "reason": "Bridge imports engine module by design — sole purpose."
-    },
-    {
       "file": "apps/handlers/bridges/mount.py",
       "standard": "json_structure",
       "reason": "Stdlib-only by necessity (DPLAN-0356 item 3): it runs BEFORE aipass.hooks.apps exists in the hook process, and importing json_handler would import the source tree it is mounting the promoted copy in place of."
-    },
-    {
-      "file": "apps/handlers/bridges/codex.py",
-      "standard": "dead_code",
-      "reason": "Bridge called externally by Codex hook settings subprocess — no internal import. Wired in .codex/hooks.json."
-    },
-    {
-      "file": "apps/handlers/bridges/codex.py",
-      "standard": "unused_function",
-      "reason": "main() called as subprocess entry point from Codex hook settings — never statically imported."
     },
     {
       "file": "apps/handlers/bridges/codex.py",
@@ -73,34 +48,9 @@
       "reason": "Bridge importing engine module is its architectural purpose."
     },
     {
-      "file": "apps/handlers/bridges/codex.py",
-      "standard": "imports",
-      "reason": "Bridge imports engine module by design — sole purpose."
-    },
-    {
-      "file": "apps/handlers/prompt/identity.py",
-      "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.prompt.identity.handle' — not statically imported by design. Verified wired in UserPromptSubmit.identity_injector + fires in engine.jsonl."
-    },
-    {
-      "file": "apps/handlers/prompt/identity.py",
-      "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Verified fires in engine.jsonl (UserPromptSubmit.identity_injector)."
-    },
-    {
       "file": "apps/handlers/prompt/identity.py",
       "standard": "json_structure",
       "reason": "Uses stdlib json.loads to read passport.json — no JSON file ops needing json_handler."
-    },
-    {
-      "file": "apps/handlers/prompt/branch_loader.py",
-      "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.prompt.branch_loader.handle' — not statically imported by design. Verified wired in UserPromptSubmit.branch_prompt + fires in engine.jsonl."
-    },
-    {
-      "file": "apps/handlers/prompt/branch_loader.py",
-      "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Verified fires in engine.jsonl (UserPromptSubmit.branch_prompt)."
     },
     {
       "file": "apps/handlers/prompt/branch_loader.py",
@@ -109,28 +59,8 @@
     },
     {
       "file": "apps/handlers/prompt/tier0_kernel.py",
-      "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.prompt.tier0_kernel.handle' - not statically imported by design. Wired in UserPromptSubmit.tier0_kernel (FPLAN-0284)."
-    },
-    {
-      "file": "apps/handlers/prompt/tier0_kernel.py",
-      "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Wired in UserPromptSubmit.tier0_kernel (FPLAN-0284)."
-    },
-    {
-      "file": "apps/handlers/prompt/tier0_kernel.py",
       "standard": "json_structure",
       "reason": "No JSON operations - reads markdown file (.aipass/tier0_kernel.md) and outputs text."
-    },
-    {
-      "file": "apps/handlers/prompt/navmap.py",
-      "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.prompt.navmap.handle' - not statically imported by design. Wired in UserPromptSubmit.navmap (FPLAN-0284)."
-    },
-    {
-      "file": "apps/handlers/prompt/navmap.py",
-      "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Wired in UserPromptSubmit.navmap (FPLAN-0284)."
     },
     {
       "file": "apps/handlers/prompt/navmap.py",
@@ -159,28 +89,8 @@
     },
     {
       "file": "apps/handlers/security/edit_gate.py",
-      "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.edit_gate.handle' — not statically imported by design. Verified wired in PreToolUse.pre_edit_gate + fires in engine.jsonl."
-    },
-    {
-      "file": "apps/handlers/security/edit_gate.py",
-      "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Verified fires in engine.jsonl (PreToolUse.pre_edit_gate)."
-    },
-    {
-      "file": "apps/handlers/security/edit_gate.py",
       "standard": "json_structure",
       "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
-    },
-    {
-      "file": "apps/handlers/security/git_gate.py",
-      "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.git_gate.handle' — not statically imported by design. Verified wired in PreToolUse.git_gate + fires in engine.jsonl."
-    },
-    {
-      "file": "apps/handlers/security/git_gate.py",
-      "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Verified fires in engine.jsonl (PreToolUse.git_gate)."
     },
     {
       "file": "apps/handlers/security/git_gate.py",
@@ -199,43 +109,13 @@
     },
     {
       "file": "apps/handlers/security/rm_gate.py",
-      "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.rm_gate.handle' — not statically imported by design. Wired in PreToolUse.rm_gate."
-    },
-    {
-      "file": "apps/handlers/security/rm_gate.py",
-      "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Wired in PreToolUse.rm_gate."
-    },
-    {
-      "file": "apps/handlers/security/rm_gate.py",
       "standard": "json_structure",
       "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/security/subagent_gate.py",
-      "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.subagent_gate.handle' — not statically imported by design. Verified wired in SubagentStop.subagent_stop_gate + fires in engine.jsonl."
-    },
-    {
-      "file": "apps/handlers/security/subagent_gate.py",
-      "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Verified fires in engine.jsonl (SubagentStop.subagent_stop_gate)."
-    },
-    {
-      "file": "apps/handlers/security/subagent_gate.py",
       "standard": "json_structure",
       "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
-    },
-    {
-      "file": "apps/handlers/security/registry_gate.py",
-      "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.registry_gate.handle' — not statically imported by design. Wired in PreToolUse.registry_gate."
-    },
-    {
-      "file": "apps/handlers/security/registry_gate.py",
-      "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Wired in PreToolUse.registry_gate."
     },
     {
       "file": "apps/handlers/security/registry_gate.py",
@@ -253,44 +133,9 @@
       "reason": "Test methods use descriptive names as documentation per pytest convention."
     },
     {
-      "file": "tests/test_registry_gate.py",
-      "standard": "encapsulation",
-      "reason": "Tests import handlers directly to test implementation details."
-    },
-    {
-      "file": "tests/test_registry_gate.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
-    },
-    {
-      "file": "tests/test_registry_gate.py",
-      "standard": "hardcoded_path",
-      "reason": "Test fixture CWD string and bash command strings contain paths as test input data — not real filesystem operations."
-    },
-    {
-      "file": "apps/handlers/lifecycle/auto_fix.py",
-      "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.lifecycle.auto_fix.handle' — not statically imported by design. Verified wired in PostToolUse.auto_fix_diagnostics + fires in engine.jsonl."
-    },
-    {
-      "file": "apps/handlers/lifecycle/auto_fix.py",
-      "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Verified fires in engine.jsonl (PostToolUse.auto_fix_diagnostics)."
-    },
-    {
       "file": "apps/handlers/lifecycle/auto_fix.py",
       "standard": "json_structure",
       "reason": "Diagnostics handler uses stdlib json for hook protocol responses and state file — no JSON file ops needing json_handler."
-    },
-    {
-      "file": "apps/handlers/lifecycle/compact.py",
-      "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.lifecycle.compact.handle' — not statically imported by design. Verified wired in PreCompact.pre_compact (PreCompact events are rare — fires only during context compaction)."
-    },
-    {
-      "file": "apps/handlers/lifecycle/compact.py",
-      "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Wired in PreCompact.pre_compact — fires during compaction events."
     },
     {
       "file": "apps/handlers/lifecycle/compact.py",
@@ -299,28 +144,8 @@
     },
     {
       "file": "apps/handlers/lifecycle/rollover.py",
-      "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.lifecycle.rollover.handle' — not statically imported by design. Verified wired in PreCompact.pre_compact_rollover (PreCompact events are rare — fires only during context compaction)."
-    },
-    {
-      "file": "apps/handlers/lifecycle/rollover.py",
-      "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Wired in PreCompact.pre_compact_rollover — fires during compaction events."
-    },
-    {
-      "file": "apps/handlers/lifecycle/rollover.py",
       "standard": "json_structure",
       "reason": "Uses stdlib json.loads for registry and memory file checks — no JSON file ops needing json_handler."
-    },
-    {
-      "file": "apps/handlers/lifecycle/auto_process.py",
-      "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.lifecycle.auto_process.handle' — not statically imported by design. Wired in UserPromptSubmit.auto_process + PreCompact.auto_process."
-    },
-    {
-      "file": "apps/handlers/lifecycle/auto_process.py",
-      "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Wired in UserPromptSubmit.auto_process + PreCompact.auto_process."
     },
     {
       "file": "apps/handlers/lifecycle/auto_process.py",
@@ -329,28 +154,8 @@
     },
     {
       "file": "apps/handlers/lifecycle/session_start.py",
-      "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.lifecycle.session_start.handle' — not statically imported by design. Wired in SessionStart.cadence_reset."
-    },
-    {
-      "file": "apps/handlers/lifecycle/session_start.py",
-      "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Wired in SessionStart.cadence_reset."
-    },
-    {
-      "file": "apps/handlers/lifecycle/session_start.py",
       "standard": "json_structure",
       "reason": "Delegates to cadence.reset_counter() via importlib — no direct JSON file ops needing json_handler."
-    },
-    {
-      "file": "apps/modules/cadence.py",
-      "standard": "dead_code",
-      "reason": "Cadence module — should_fire() called from tier0_kernel.py, navmap.py, and branch_loader.py guard lines; reset_counter() called from compact.py PreCompact handler. Not statically discoverable because callers are themselves dynamically dispatched."
-    },
-    {
-      "file": "apps/modules/cadence.py",
-      "standard": "unused_function",
-      "reason": "should_fire() called from tier0_kernel.py, navmap.py, branch_loader.py; reset_counter() called from compact.py. All callers are dynamically dispatched handlers."
     },
     {
       "file": "apps/modules/cadence.py",
@@ -359,28 +164,8 @@
     },
     {
       "file": "apps/handlers/notification/announce.py",
-      "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.notification.announce.handle' — not statically imported by design. Verified wired in Notification.notification_sound + fires in engine.jsonl."
-    },
-    {
-      "file": "apps/handlers/notification/announce.py",
-      "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Verified fires in engine.jsonl (Notification.notification_sound)."
-    },
-    {
-      "file": "apps/handlers/notification/announce.py",
       "standard": "json_structure",
       "reason": "Sound handler — no JSON operations, plays WAV files."
-    },
-    {
-      "file": "apps/handlers/notification/email.py",
-      "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.notification.email.handle' — not statically imported by design. Verified wired in UserPromptSubmit.email_notification + fires in engine.jsonl."
-    },
-    {
-      "file": "apps/handlers/notification/email.py",
-      "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Verified fires in engine.jsonl (UserPromptSubmit.email_notification)."
     },
     {
       "file": "apps/handlers/notification/email.py",
@@ -389,38 +174,13 @@
     },
     {
       "file": "apps/handlers/notification/stop_sound.py",
-      "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.notification.stop_sound.handle' — not statically imported by design. Verified wired in Stop.stop_sound + fires in engine.jsonl."
-    },
-    {
-      "file": "apps/handlers/notification/stop_sound.py",
-      "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Verified fires in engine.jsonl (Stop.stop_sound)."
-    },
-    {
-      "file": "apps/handlers/notification/stop_sound.py",
       "standard": "json_structure",
       "reason": "Sound handler — no JSON operations, plays WAV files."
     },
     {
       "file": "apps/handlers/notification/tool_sound.py",
-      "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.notification.tool_sound.handle' — not statically imported by design. Verified wired in PreToolUse.tool_use_sound + fires in engine.jsonl."
-    },
-    {
-      "file": "apps/handlers/notification/tool_sound.py",
-      "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Verified fires in engine.jsonl (PreToolUse.tool_use_sound)."
-    },
-    {
-      "file": "apps/handlers/notification/tool_sound.py",
       "standard": "json_structure",
       "reason": "Sound handler — no JSON operations, plays WAV files."
-    },
-    {
-      "file": "apps/handlers/config/trust_registry.py",
-      "standard": "unused_function",
-      "reason": "enroll() and revoke() are the public API consumed CROSS-BRANCH by @aipass CLI (init/trust/revoke commands, DPLAN-0244 phase 2). sentry's intra-branch static analysis cannot see cross-branch callers. read_registry() also exported for @aipass CLI use."
     },
     {
       "file": "apps/handlers/config/loader.py",
@@ -440,7 +200,7 @@
     {
       "file": "apps/modules/engine.py",
       "standard": "modules",
-      "reason": "dispatch() is the engine's core purpose — it IS the module's primary function, not a handler that belongs elsewhere. The engine exists to dispatch; moving dispatch to handlers/ would leave an empty module."
+      "reason": "dispatch() is the engine's core purpose: it IS the module's primary function, not a handler that belongs elsewhere. Its stdlib json is the stdin payload, handler stdouts and the per-seat budget state, never branch data. Moving dispatch to handlers/ would leave an empty module."
     },
     {
       "file": "apps/modules/hook_test.py",
@@ -450,12 +210,12 @@
     {
       "file": "apps/modules/hooksound.py",
       "standard": "json_structure",
-      "reason": "Sound mute toggle — touches /tmp/aipass-hooks-muted flag file only, no JSON operations or json_handler storage."
+      "reason": "Sound toggle: touches the ~/.aipass sound flag file only, no JSON operations or json_handler storage."
     },
     {
       "file": "apps/sound.py",
       "standard": "trigger",
-      "reason": "MUTE_FLAG.unlink(missing_ok=True) in unmute() removes a /tmp mute flag file for sound toggle — not a tracked resource or production data deletion. Deliberate user action via 'drone @hooks hooksound on' or an imported unmute() call. Moved here from apps/modules/hooksound.py when the write pair was exported so the flag has one writer."
+      "reason": "SOUND_FLAG.unlink(missing_ok=True) in mute() removes the sound-on flag file: not a tracked resource or production data. Deliberate user action via 'drone @hooks hooksound off' or an imported mute() call."
     },
     {
       "file": "apps/modules/feedback.py",
@@ -475,17 +235,7 @@
     {
       "file": "apps/modules/cadence.py",
       "standard": "modules",
-      "reason": "Cadence module reads /tmp state file and hooks_json/custom_config/cadence_config.json with stdlib json — lightweight ephemeral state (turn counter) + tunable config. json_handler is for persistent branch data, not /tmp session state or config knobs."
-    },
-    {
-      "file": "apps/hooks.py",
-      "standard": "unused_function",
-      "reason": "print_introspection() called by drone's discovery system, not internal code."
-    },
-    {
-      "file": "apps/sound.py",
-      "standard": "unused_function",
-      "reason": "play() called by handler files (stop_sound.py, announce.py) that are dynamically dispatched via importlib — static analysis cannot trace the call chain from hooks.json → engine → handler → sound.play()."
+      "reason": "Cadence reads its per-session turn, fire and window state and hooks_json/custom_config/cadence_config.json with stdlib json: ephemeral session state and tunable knobs, not persistent branch data for json_handler."
     },
     {
       "file": "apps/sound.py",
@@ -498,19 +248,9 @@
       "reason": "Test fixtures live in tests/, not in the 3-layer apps structure."
     },
     {
-      "file": "tests/conftest.py",
-      "standard": "json_handler",
-      "reason": "Fixture file, not a module with JSON storage — it arms the AIPASS_TEST_LOG_DIR seam and imports the shim to measure the sandbox off it (DPLAN-0325), and does no JSON file ops of its own."
-    },
-    {
       "file": "tests/test_engine.py",
       "standard": "architecture",
       "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_engine.py",
-      "standard": "encapsulation",
-      "reason": "Tests import handlers directly to test implementation details."
     },
     {
       "file": "tests/test_engine.py",
@@ -523,11 +263,6 @@
       "reason": "Test data contains command references as part of test fixtures, not user-facing help."
     },
     {
-      "file": "tests/test_engine.py",
-      "standard": "json_handler",
-      "reason": "Engine tests exercise JSONL diagnostic logging, which is the engine's own record — no branch JSON documents to route through the handler."
-    },
-    {
       "file": "tests/test_tool_sound.py",
       "standard": "architecture",
       "reason": "Test files live in tests/, not in the 3-layer apps structure."
@@ -536,16 +271,6 @@
       "file": "tests/test_tool_sound.py",
       "standard": "documentation",
       "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_tool_sound.py",
-      "standard": "encapsulation",
-      "reason": "Tests import handlers directly to test implementation details."
-    },
-    {
-      "file": "tests/test_tool_sound.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
     },
     {
       "file": "tests/test_stop_sound.py",
@@ -558,16 +283,6 @@
       "reason": "Test methods use descriptive names as documentation per pytest convention."
     },
     {
-      "file": "tests/test_stop_sound.py",
-      "standard": "encapsulation",
-      "reason": "Tests import handlers directly to test implementation details."
-    },
-    {
-      "file": "tests/test_stop_sound.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
-    },
-    {
       "file": "tests/test_announce.py",
       "standard": "architecture",
       "reason": "Test files live in tests/, not in the 3-layer apps structure."
@@ -576,16 +291,6 @@
       "file": "tests/test_announce.py",
       "standard": "documentation",
       "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_announce.py",
-      "standard": "encapsulation",
-      "reason": "Tests import handlers directly to test implementation details."
-    },
-    {
-      "file": "tests/test_announce.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
     },
     {
       "file": "tests/test_email.py",
@@ -598,16 +303,6 @@
       "reason": "Test methods use descriptive names as documentation per pytest convention."
     },
     {
-      "file": "tests/test_email.py",
-      "standard": "encapsulation",
-      "reason": "Tests import handlers directly to test implementation details."
-    },
-    {
-      "file": "tests/test_email.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
-    },
-    {
       "file": "tests/test_subagent_gate.py",
       "standard": "architecture",
       "reason": "Test files live in tests/, not in the 3-layer apps structure."
@@ -618,16 +313,6 @@
       "reason": "Test methods use descriptive names as documentation per pytest convention."
     },
     {
-      "file": "tests/test_subagent_gate.py",
-      "standard": "encapsulation",
-      "reason": "Tests import handlers directly to test implementation details."
-    },
-    {
-      "file": "tests/test_subagent_gate.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
-    },
-    {
       "file": "tests/test_auto_fix.py",
       "standard": "architecture",
       "reason": "Test files live in tests/, not in the 3-layer apps structure."
@@ -636,16 +321,6 @@
       "file": "tests/test_auto_fix.py",
       "standard": "documentation",
       "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_auto_fix.py",
-      "standard": "encapsulation",
-      "reason": "Tests import handlers directly to test implementation details."
-    },
-    {
-      "file": "tests/test_auto_fix.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
     },
     {
       "file": "tests/test_auto_fix.py",
@@ -653,11 +328,6 @@
       "reason": "Test data contains '# logger.debug(msg)' as input to pattern checker under test — not a commented-out call."
     },
     {
-      "file": "tests/test_auto_fix.py",
-      "standard": "trigger",
-      "reason": "Test cleanup .unlink() removes temporary state files — not a production file deletion."
-    },
-    {
       "file": "tests/test_identity.py",
       "standard": "architecture",
       "reason": "Test files live in tests/, not in the 3-layer apps structure."
@@ -666,16 +336,6 @@
       "file": "tests/test_identity.py",
       "standard": "documentation",
       "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_identity.py",
-      "standard": "encapsulation",
-      "reason": "Tests import handlers directly to test implementation details."
-    },
-    {
-      "file": "tests/test_identity.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
     },
     {
       "file": "tests/test_branch_loader.py",
@@ -688,16 +348,6 @@
       "reason": "Test methods use descriptive names as documentation per pytest convention."
     },
     {
-      "file": "tests/test_branch_loader.py",
-      "standard": "encapsulation",
-      "reason": "Tests import handlers directly to test implementation details."
-    },
-    {
-      "file": "tests/test_branch_loader.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
-    },
-    {
       "file": "tests/test_compact.py",
       "standard": "architecture",
       "reason": "Test files live in tests/, not in the 3-layer apps structure."
@@ -706,16 +356,6 @@
       "file": "tests/test_compact.py",
       "standard": "documentation",
       "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_compact.py",
-      "standard": "encapsulation",
-      "reason": "Tests import handlers directly to test implementation details."
-    },
-    {
-      "file": "tests/test_compact.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
     },
     {
       "file": "tests/test_rollover.py",
@@ -728,34 +368,9 @@
       "reason": "Test methods use descriptive names as documentation per pytest convention."
     },
     {
-      "file": "tests/test_rollover.py",
-      "standard": "encapsulation",
-      "reason": "Tests import handlers directly to test implementation details."
-    },
-    {
-      "file": "tests/test_rollover.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
-    },
-    {
       "file": "tests/test_hookstatus.py",
       "standard": "architecture",
       "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_hookstatus.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_hookstatus.py",
-      "standard": "encapsulation",
-      "reason": "Tests import modules directly to test implementation details."
-    },
-    {
-      "file": "tests/test_hookstatus.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
     },
     {
       "file": "tests/test_hooksound.py",
@@ -766,16 +381,6 @@
       "file": "tests/test_hooksound.py",
       "standard": "documentation",
       "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_hooksound.py",
-      "standard": "encapsulation",
-      "reason": "Tests import modules directly to test implementation details."
-    },
-    {
-      "file": "tests/test_hooksound.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
     },
     {
       "file": "tests/test_edit_gate.py",
@@ -790,12 +395,7 @@
     {
       "file": "tests/test_edit_gate.py",
       "standard": "encapsulation",
-      "reason": "Tests import handlers directly to test implementation details."
-    },
-    {
-      "file": "tests/test_edit_gate.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
+      "reason": "test_edit_gate.py imports handlers directly to test implementation details, and (:32) the ai_mail dispatch grant handler as dispatch_grant_handler, the grant edit_gate reads."
     },
     {
       "file": "tests/test_edit_gate_trinity.py",
@@ -806,21 +406,6 @@
       "file": "tests/test_edit_gate_trinity.py",
       "standard": "documentation",
       "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_edit_gate_trinity.py",
-      "standard": "encapsulation",
-      "reason": "Tests import handlers directly to test implementation details."
-    },
-    {
-      "file": "tests/test_edit_gate_trinity.py",
-      "standard": "hardcoded_path",
-      "reason": "Test fixture strings contain paths as test input data, not real filesystem ops."
-    },
-    {
-      "file": "tests/test_edit_gate_trinity.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
     },
     {
       "file": "tests/test_git_gate.py",
@@ -833,16 +418,6 @@
       "reason": "Test methods use descriptive names as documentation per pytest convention."
     },
     {
-      "file": "tests/test_git_gate.py",
-      "standard": "encapsulation",
-      "reason": "Tests import handlers directly to test implementation details."
-    },
-    {
-      "file": "tests/test_git_gate.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
-    },
-    {
       "file": "tests/test_rm_gate.py",
       "standard": "architecture",
       "reason": "Test files live in tests/, not in the 3-layer apps structure."
@@ -851,16 +426,6 @@
       "file": "tests/test_rm_gate.py",
       "standard": "documentation",
       "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_rm_gate.py",
-      "standard": "encapsulation",
-      "reason": "Tests import handlers directly to test implementation details."
-    },
-    {
-      "file": "tests/test_rm_gate.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
     },
     {
       "file": "tests/test_sound.py",
@@ -873,16 +438,6 @@
       "reason": "Test methods use descriptive names as documentation per pytest convention."
     },
     {
-      "file": "tests/test_sound.py",
-      "standard": "encapsulation",
-      "reason": "Tests import sound module directly to test implementation details."
-    },
-    {
-      "file": "tests/test_sound.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
-    },
-    {
       "file": "tests/test_auto_process.py",
       "standard": "architecture",
       "reason": "Test files live in tests/, not in the 3-layer apps structure."
@@ -893,16 +448,6 @@
       "reason": "Test methods use descriptive names as documentation per pytest convention."
     },
     {
-      "file": "tests/test_auto_process.py",
-      "standard": "encapsulation",
-      "reason": "Tests import handlers directly to test implementation details."
-    },
-    {
-      "file": "tests/test_auto_process.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
-    },
-    {
       "file": "tests/test_cadence.py",
       "standard": "architecture",
       "reason": "Test files live in tests/, not in the 3-layer apps structure."
@@ -911,16 +456,6 @@
       "file": "tests/test_cadence.py",
       "standard": "documentation",
       "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_cadence.py",
-      "standard": "encapsulation",
-      "reason": "Tests import modules and handlers directly to test implementation details."
-    },
-    {
-      "file": "tests/test_cadence.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
     },
     {
       "file": "apps/modules/sandbox.py",
@@ -968,76 +503,11 @@
       "reason": "Test methods use descriptive names — docstrings redundant per hooks test convention."
     },
     {
-      "file": "tests/test_sandbox.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
-    },
-    {
       "file": "apps/modules/sandbox.py",
       "standard": "modules",
       "reason": "Read-only passport.json check in _is_devpulse() to detect branch role for policy generation — not a file-write operation, not a handler-level concern. Module reads sibling passports to determine writable/RO map."
     },
     {
-      "file": "apps/modules/sandbox.py",
-      "standard": "unused_function",
-      "reason": "sandbox_launch(), build_policy(), build_srt_config(), and resolve_bwrap_command() are consumed CROSS-BRANCH by ai_mail's dispatch_monitor.py (the launch seam at Phase 4). sentry's intra-branch static analysis cannot see these callers. Verified: dispatch_monitor imports sandbox module to wire build_policy + sandbox_launch at agent launch."
-    },
-    {
-      "file": "apps/handlers/security/presence_gate.py",
-      "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.presence_gate.handle' — not statically imported by design. Wired in UserPromptSubmit.presence_gate + Stop.presence_release."
-    },
-    {
-      "file": "apps/handlers/security/presence_gate.py",
-      "standard": "unused_function",
-      "reason": "handle() and handle_stop() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Wired in UserPromptSubmit.presence_gate and Stop.presence_release."
-    },
-    {
-      "file": "apps/handlers/security/presence_gate.py",
-      "standard": "json_structure",
-      "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
-    },
-    {
-      "file": "apps/handlers/notification/telegram_response.py",
-      "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Wired in Stop.telegram_response."
-    },
-    {
-      "file": "apps/handlers/notification/telegram_response.py",
-      "standard": "json_structure",
-      "reason": "Uses stdlib json for JSONL transcript parsing and Telegram Bot API payloads — no branch data storage needing json_handler."
-    },
-    {
-      "file": "tests/test_telegram_response.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_telegram_response.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_telegram_response.py",
-      "standard": "encapsulation",
-      "reason": "Tests import handlers directly to test implementation details."
-    },
-    {
-      "file": "tests/test_telegram_response.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
-    },
-    {
-      "file": "apps/handlers/security/presence_gate.py",
-      "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.presence_gate.handle' — not statically imported by design. Wired in UserPromptSubmit.presence_gate + Stop.presence_release."
-    },
-    {
-      "file": "apps/handlers/security/presence_gate.py",
-      "standard": "unused_function",
-      "reason": "handle() and handle_stop() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Wired in UserPromptSubmit.presence_gate + Stop.presence_release."
-    },
-    {
       "file": "apps/handlers/security/presence_gate.py",
       "standard": "json_structure",
       "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
@@ -1051,16 +521,6 @@
       "file": "tests/test_presence_gate.py",
       "standard": "documentation",
       "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_presence_gate.py",
-      "standard": "encapsulation",
-      "reason": "Tests import handlers directly to test implementation details."
-    },
-    {
-      "file": "tests/test_presence_gate.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
     },
     {
       "file": "apps/modules/cc_sessions.py",
@@ -1096,11 +556,6 @@
       "reason": "The boot wrapper's launcher is the owner's shell, outside the repo by design: typing claude in a branch directory runs python -m aipass.hooks.apps.handlers.lifecycle.session_boot. Not engine-dispatched, imported by nothing. Path is apps-relative: dead_code matches the rule against handlers/..., never apps/handlers/... (2026-10-08)."
     },
     {
-      "file": "apps/handlers/lifecycle/session_boot.py",
-      "standard": "unused_function",
-      "reason": "boot() and main() invoked via __main__ entry point from shell shim — not statically imported. _resolve_claude_binary(), _find_live_sessions(), _find_tmux(), etc. are internal helpers called by boot()."
-    },
-    {
       "file": "tests/test_cc_sessions.py",
       "standard": "architecture",
       "reason": "Test files live in tests/, not in the 3-layer apps structure."
@@ -1111,11 +566,6 @@
       "reason": "Test methods use descriptive names as documentation per pytest convention."
     },
     {
-      "file": "tests/test_cc_sessions.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
-    },
-    {
       "file": "tests/test_session_boot.py",
       "standard": "architecture",
       "reason": "Test files live in tests/, not in the 3-layer apps structure."
@@ -1124,16 +574,6 @@
       "file": "tests/test_session_boot.py",
       "standard": "documentation",
       "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_session_boot.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
-    },
-    {
-      "file": "tests/test_session_boot.py",
-      "standard": "encapsulation",
-      "reason": "Tests import handlers directly to test implementation details."
     },
     {
       "file": "tests/test_session_start.py",
@@ -1146,16 +586,6 @@
       "reason": "Test methods use descriptive names as documentation per pytest convention."
     },
     {
-      "file": "tests/test_session_start.py",
-      "standard": "encapsulation",
-      "reason": "Tests import handlers directly to test implementation details."
-    },
-    {
-      "file": "tests/test_session_start.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
-    },
-    {
       "file": "tests/test_wire_verify.py",
       "standard": "architecture",
       "reason": "Test files live in tests/, not in the 3-layer apps structure."
@@ -1164,16 +594,6 @@
       "file": "tests/test_wire_verify.py",
       "standard": "documentation",
       "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_wire_verify.py",
-      "standard": "encapsulation",
-      "reason": "Tests import modules directly to test implementation details."
-    },
-    {
-      "file": "tests/test_wire_verify.py",
-      "standard": "meta",
-      "reason": "Test files do not need Version/Modified metadata headers."
     },
     {
       "file": "tests/test_wire_verify.py",
@@ -1201,24 +621,14 @@
       "reason": "Delegates to context_window module for transcript/settings reads — no direct JSON file ops needing json_handler. Same pattern as session_start.py delegating to cadence."
     },
     {
-      "file": "apps/handlers/prompt/compass_recall.py",
-      "standard": "handlers",
-      "reason": "Lines 49, 75, 84: lazy cross-branch imports of aipass.memory.apps.modules.governance and aipass.devpulse.apps.modules.compass. Surfacing other branches' rated decisions at prompt time IS this handler's job — not orchestration bleed but the designed integration point, same authorized cross-branch primitive pattern as ai_mail's dispatch_monitor.py. Whole handler wrapped in try/except and never blocks the prompt on failure."
-    },
-    {
       "file": "apps/modules/diagnostics_state.py",
       "standard": "json_structure",
-      "reason": "Reads/writes the transient .diagnostics_state.json cache with stdlib json — the same file and profile already bypassed on its writer, apps/handlers/lifecycle/auto_fix.py. Routing one end through json_handler and not the other is exactly the writer/reader drift this module exists to prevent."
+      "reason": "Reads/writes the per-seat diagnostics cache files under STATE_DIR with stdlib json, the same profile already bypassed on its writer, apps/handlers/lifecycle/auto_fix.py. Routing one end through json_handler and not the other is the writer/reader drift this module exists to prevent."
     },
     {
       "file": "apps/modules/diagnostics_state.py",
       "standard": "trigger",
-      "reason": "clear() unlinks the transient .diagnostics_state.json diagnostics cache — same profile as hooksound.py MUTE_FLAG.unlink() and feedback.py sentinel.unlink(). Not a tracked resource or production data; it is regenerated by auto_fix on the next edit."
-    },
-    {
-      "file": "apps/handlers/cli/help_flags.py",
-      "standard": "json_structure",
-      "reason": "Pure argument-inspection predicate — no I/O, no JSON, no disk. Measured: the only finding is the json_handler import, and importing it would give a help-flag check the power to log and block, which is exactly what the gate must not have. Fleet convention settled 2026-08-13 by @memory/@trigger/@drone/@ai_mail/@flow, all five carrying this same measured bypass (help_flag_safety)."
+      "reason": "clear_seat() unlinks one seat's transient diagnostics cache file under STATE_DIR: not a tracked resource or production data; auto_fix regenerates it on the next edit."
     },
     {
       "file": "apps/modules/cc_transcripts.py",
@@ -1239,16 +649,6 @@
       "file": "apps/modules/bash_writes.py",
       "standard": "modules",
       "reason": "Not a drone command surface: it is the write-target reader consumed by handlers/security/edit_gate.py inside a PreToolUse hook, where there is no CLI caller to route. Same pattern as grounding_content.py (consumed by 5 handlers) and cadence.py. print_introspection() IS provided, so the module still answers for itself."
-    },
-    {
-      "file": "apps/handlers/security/testwrite_gate.py",
-      "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.testwrite_gate.handle' — not statically imported by design. Same profile as edit_gate/rm_gate/registry_gate."
-    },
-    {
-      "file": "apps/handlers/security/testwrite_gate.py",
-      "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. NOTE: the PreToolUse.testwrite_gate entry is NOT yet in .aipass/hooks.json — adding it changes the trust hash, so it is the owner's/@devpulse's step. No engine.jsonl firing evidence yet; this bypass is provisional until that wire lands."
     },
     {
       "file": "apps/handlers/security/testwrite_gate.py",
@@ -1318,7 +718,7 @@
     {
       "file": "apps/modules/shell_reader.py",
       "standard": "modules",
-      "reason": "Not a drone command surface: the one shell-word reader consumed by handlers/security/rm_gate.py and git_gate.py inside a PreToolUse hook, where there is no CLI caller to route. Same profile as bash_writes.py. print_introspection() IS provided."
+      "reason": "Not a drone command surface: the one shell-word reader consumed by handlers/security/rm_gate.py and git_gate.py inside a PreToolUse hook, where there is no CLI caller to route. print_introspection() IS provided."
     },
     {
       "file": "apps/modules/comment_scan.py",
@@ -1334,16 +734,6 @@
       "file": "apps/handlers/lifecycle/comment_budget.py",
       "standard": "json_structure",
       "reason": "PostToolUse handler: stdlib json for the hook protocol response and to read its own JSONL ledger, written through prax append_jsonl as handlers/config/diagnostics.py does. Same profile as auto_fix.py."
-    },
-    {
-      "file": "apps/handlers/lifecycle/comment_budget.py",
-      "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.lifecycle.comment_budget.handle'. Wired in PostToolUse.comment_budget. Same profile as auto_fix.py."
-    },
-    {
-      "file": "apps/handlers/lifecycle/comment_budget.py",
-      "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib from hooks.json (PostToolUse.comment_budget). Same profile as auto_fix.py."
     },
     {
       "file": "apps/modules/protected_paths.py",
@@ -1384,13 +774,11 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "logged_fallback",
       "lines": [
-        502,
-        540,
-        592,
-        829,
-        885
+        582,
+        819,
+        875
       ],
-      "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 502 _allowed_fields: the refusal's wording only, the refusal stands. 540 _evaluate_file_budget: an older @memory publishes no check_file_budget, so there is no rule to apply (logged). 592: the todos advisory text, never a verdict. 829 _seat_trinity and 885 _read_pending: the tripwire, which reports after the call and decides nothing. The two that did let a write through were cured fail-closed in leg 5."
+      "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 592: the todos advisory text, never a verdict. 829 _seat_trinity and 885 _read_pending: the tripwire, which reports after the call and decides nothing."
     },
     {
       "file": "apps/handlers/lifecycle/session_start.py",
@@ -1407,23 +795,6 @@
         73
       ],
       "reason": "Fleet green leg 5: _get_cwd_branch, a cwd outside src/<pkg>/<branch> has no branch to check. SubagentStop guards no write, and a block there traps the sub-agent in a stop loop (documented in the module)."
-    },
-    {
-      "file": "apps/handlers/security/presence_gate.py",
-      "standard": "logged_fallback",
-      "lines": [
-        76,
-        95
-      ],
-      "reason": "Fleet green leg 5: 106 _format_session_age is display text only. 127 _session_start: None means 'cannot rank', which the docstring states and the caller treats as never younger, so no seat gains standing from an unreadable start."
-    },
-    {
-      "file": "apps/modules/bash_writes.py",
-      "standard": "logged_fallback",
-      "lines": [
-        369
-      ],
-      "reason": "Fleet green leg 5: a word Path() cannot construct (a NUL byte) names no file the OS can write; NOT_CAUGHT says so, and the shell itself refuses such a path."
     },
     {
       "file": "apps/modules/testgate_policy.py",
@@ -1446,10 +817,10 @@
       "file": "apps/modules/diagnostics_state.py",
       "standard": "logged_fallback",
       "lines": [
-        206,
-        209,
-        212,
-        215
+        204,
+        207,
+        210,
+        213
       ],
       "reason": "Fleet green leg 5: revalidate's None is 'unknown' (pyright missing, timed out, unparseable, failed) and its docstring says it must never be read as clean; the success path returns a list. edit_gate keeps the recorded errors on None, so the fence stays as it was: fail-closed."
     },
@@ -1457,26 +828,25 @@
       "file": "apps/modules/cc_sessions.py",
       "standard": "logged_fallback",
       "lines": [
-        150,
         178,
         181,
         184,
         207,
         282
       ],
-      "reason": "Fleet green leg 5, read for presence_gate (its one gate caller). 203 and 212 answer 'alive' on doubt: the gate keeps refusing the newer seat. 209 is the real answer (ESRCH = dead). 215: os.kill(pid, 0) raises only ESRCH and EPERM on POSIX, both handled; any other errno is read as dead so a stale record cannot hold a branch shut with an unsatisfiable block (ruling a, DPLAN-0310). 170 start ticks and 321 session_start: None is 'cannot rank', never younger. 238: display text."
+      "reason": "Fleet green leg 5, read for presence_gate (its one gate caller). _is_pid_alive: 178 is the real answer (ESRCH = dead); 181 answers 'alive' on EPERM, so the gate keeps refusing the newer seat; 184: os.kill(pid, 0) raises only ESRCH and EPERM on POSIX, any other errno is read as dead so a stale record cannot hold a branch shut with an unsatisfiable block. 207 _format_age '?': display text. 282 session_start: None is 'cannot rank', never younger."
     },
     {
       "file": "apps/modules/cadence.py",
       "standard": "logged_fallback",
       "lines": [
-        439,
-        444,
-        531,
-        713,
-        798,
-        855,
-        939
+        441,
+        446,
+        533,
+        715,
+        800,
+        857,
+        941
       ],
       "reason": "Fleet green leg 5: cadence decides which turn an injector fires on and guards no write. On doubt each answers its documented empty value ('never fired', not grounded, nothing pending), logged: the worst case is a grounding block early, late or twice, never a write let through."
     },
@@ -1556,7 +926,7 @@
         117,
         186,
         328,
-        867
+        862
       ],
       "reason": "Fleet green leg 5: boot display (tmux name, age, pinned CLI version) and the dispatch-lock read for the boot banner. Guards no write."
     },
@@ -1575,23 +945,6 @@
         56
       ],
       "reason": "Fleet green leg 5: an injector; an unreadable alerts.json shows no alert this turn (logged). Injectors are skipped on error by doctrine; guards no write."
-    },
-    {
-      "file": "apps/handlers/notification/email.py",
-      "standard": "logged_fallback",
-      "lines": [
-        77
-      ],
-      "reason": "Fleet green leg 5: the new-mail count for a notification; an unreadable inbox notifies nothing (logged). The inbox itself is read by drone @ai_mail inbox, not by this count."
-    },
-    {
-      "file": "apps/handlers/notification/telegram_response.py",
-      "standard": "logged_fallback",
-      "lines": [
-        158,
-        339
-      ],
-      "reason": "Fleet green leg 5: an unreadable transcript relays nothing to Telegram, logged at ERROR. A notification, guards no write."
     },
     {
       "file": "tests/test_json_durability.py",
@@ -1637,14 +990,6 @@
       "reason": "Fleet green leg 8, ruling (b), hooks' decision: _find_project_dir's contract is that the per-user ~/.aipass is never read as a stamped tree. The handler's stdout cannot show the silent side: tmp_path may sit under a real home or a real stamped tree, and the walk keeps climbing past the fake home, so silence would be a property of the host. The loud side of the same test goes through handle()."
     },
     {
-      "file": "tests/test_codex_bridge.py",
-      "standard": "through_the_command",
-      "lines": [
-        20
-      ],
-      "reason": "Fleet green leg 8, ruling (c), hooks' decision: the public door is main(), whose far side mounts the promoted .live copy over aipass.hooks.apps in sys.modules (mount.py) and runs the real engine over the live .aipass/hooks.json, writing engine.jsonl and cadence state. _normalize_stdin (Codex input -> tool_input) and _wrap_output (the hookSpecificOutput envelope, block -> deny) are pure, and reaching them by name is the safe door."
-    },
-    {
       "file": "tests/test_cc_transcripts.py",
       "standard": "through_the_command",
       "lines": [
@@ -1655,30 +1000,10 @@
       "reason": "Fleet green leg 9, ruling (b), hooks' decision: the contract is the Claude Code CLI's own path-to-dirname rule and 31-hash, pinned against vectors measured with the CLI's own code on RAW strings (the empty string, a non-BMP character). project_dir_for resolves its argument first, so '' never reaches the rule as written, and the resolved long path's hash suffix depends on the host's spelling, so no fixed CLI vector can name it. Everything a short path shows goes through project_dir_for."
     },
     {
-      "file": "tests/test_telegram_response_delivery.py",
-      "standard": "through_the_command",
-      "lines": [
-        22
-      ],
-      "reason": "Fleet green leg 9, ruling (c), hooks' decision: the import of _advance_pending, _deliver_chunks, _prepend_branch_prefix, _send_with_retry and _write_delivery_log. Their one public door is handle(), whose far side sends to the Telegram Bot API (send_to_telegram/edit_telegram_message over urlopen), writes the delivery log and rewrites or unlinks the bot's pending file; telegram's send is a named far side. Contract: retry until ok, edit-then-send per chunk, the pending cursor advances to the transcript's line count, one JSONL record per delivery. _is_expired and _extract_user_text are read through find_pending_file and extract_mirror_turn. Moved from tests/test_telegram_response.py:26 (split leg, 2026-10-08)."
-    },
-    {
-      "file": "tests/test_telegram_response_mirror.py",
-      "standard": "through_the_command",
-      "lines": [
-        23
-      ],
-      "reason": "Moved from tests/test_telegram_response.py:26 (split leg, 2026-10-08); the ruling of that row, fleet green leg 9, ruling (c): _advance_pending's one public door is handle(), whose far side sends to the Telegram Bot API. Contract here: a mirror mapping file is never unlinked, with or without a readable transcript."
-    },
-    {
       "file": "tests/test_auto_fix.py",
       "standard": "through_the_command",
       "lines": [
-        32,
-        420,
-        421,
-        427,
-        428
+        32
       ],
       "reason": "Fleet green leg 9, ruling (c), hooks' decision: _check_syntax, _check_ruff_lint, _check_ruff_format, _check_line_pattern, _check_patterns, _run_pyright_check, _run_ruff_lint_structured, _run_sentry_checklist, _checklist_marker and _CHECKLIST_MARKER_FALLBACK. Their one public door is handle() on a .py edit, whose far side spawns py_compile, ruff (lint, format, structured), pyright and the sentry checklist as subprocesses and writes the seat's diagnostics state; no seam may bind on a spawn. Contract: each check answers its own violation lines (SYNTAX/LINT/FORMAT/PATTERN/TYPE/SENTRY), a check that cannot run answers nothing or NO ANSWER, the checklist marker is sentry's FINDING_MARKER with a loud fallback. The json path and handle()'s refusal shape are read through handle()."
     },
@@ -1721,14 +1046,6 @@
       "reason": "Fleet green row 0 (leg 8, landed leg 10): Path.home patched to raise (unresolvable home), not an exec; no portable in-process way to make the real Path.home raise. Re-pointed from test_session_boot.py by the 2026-10-08 split."
     },
     {
-      "file": "tests/test_edit_gate_bash.py",
-      "standard": "stdlib_patch",
-      "lines": [
-        987
-      ],
-      "reason": "Fleet green row 0 (leg 8, landed leg 10): bash_writes.Path flavour oracle; threading flavour through every path builder is the cost; closes the leg 5 write_targets flavour HELD."
-    },
-    {
       "file": "tests/test_json_durability.py",
       "standard": "stdlib_patch",
       "lines": [
@@ -1736,7 +1053,7 @@
         88,
         97
       ],
-      "reason": "Linux-only purge: the Windows retry helper that was the seam is gone, so files.os.replace is the move. 74 spies the real rename to prove the temp is staged in the target directory; 88 and 97 make it raise the test's own OSError to prove the original survives, the temp is cleaned and the error reaches the caller. No platform fails a rename on demand under tmp_path; monkeypatch undoes it at the test's end."
+      "reason": "files.os.replace is the move. 74 spies the real rename to prove the temp is staged in the target directory; 88 and 97 make it raise the test's own OSError to prove the original survives, the temp is cleaned and the error reaches the caller. No platform fails a rename on demand under tmp_path; monkeypatch undoes it at the test's end."
     },
     {
       "file": "tests/test_pre_compact_prep.py",
@@ -1744,7 +1061,7 @@
       "lines": [
         156
       ],
-      "reason": "Linux-only purge: the Windows retry helper that was the seam is gone. files.os.replace raises the test's own OSError, in a with-block, so a write that does not land is shown to leave local.json whole and no temp behind. No platform fails a rename on demand under tmp_path."
+      "reason": "files.os.replace raises the test's own OSError, in a with-block, so a write that does not land is shown to leave local.json whole and no temp behind. No platform fails a rename on demand under tmp_path."
     },
     {
       "file": "tests/test_session_boot.py",
@@ -1755,14 +1072,6 @@
         238
       ],
       "reason": "_stop_session's bg early return (a bg session is never SIGTERMed): every boot() caller (_menu_single_new, _menu_single_close, _close_all, _new_over_all) filters bg sessions out first, so no boot()/main() route reaches it and no single mutant can turn a boot()-level test red. Kept as a second layer; whether it is deliberate or dead is open with devpulse (2026-10-24)."
-    },
-    {
-      "file": "tests/test_codex_bridge.py",
-      "standard": "import_site",
-      "lines": [
-        242
-      ],
-      "reason": "The pin's subject is prax being unimportable: a None entry in sys.modules is what makes that import raise; the bridge is then loaded fresh from its file, never stubbed."
     },
     {
       "file": "tests/test_session_boot_lookups.py",
@@ -1829,11 +1138,6 @@
     },
     {
       "file": "apps/handlers/bridges/opencode.py",
-      "standard": "unused_function",
-      "reason": "main() called as subprocess entry point from the aipass.ts OpenCode plugin — never statically imported."
-    },
-    {
-      "file": "apps/handlers/bridges/opencode.py",
       "standard": "handlers",
       "reason": "Bridges import engine module by design — that is their entire purpose."
     },
@@ -1846,21 +1150,6 @@
       "file": "apps/handlers/bridges/opencode.py",
       "standard": "architecture",
       "reason": "Bridge importing engine module is its architectural purpose."
-    },
-    {
-      "file": "apps/handlers/bridges/opencode.py",
-      "standard": "imports",
-      "reason": "Bridge imports engine module by design — sole purpose."
-    },
-    {
-      "file": "apps/handlers/bridges/seed.py",
-      "standard": "dead_code",
-      "reason": "Bridge called externally by a Seed head's hooks.json command rows — no internal import. Written by drone @hooks seed install."
-    },
-    {
-      "file": "apps/handlers/bridges/seed.py",
-      "standard": "unused_function",
-      "reason": "main() called as subprocess entry point from a Seed head's hooks.json — never statically imported."
     },
     {
       "file": "apps/handlers/bridges/seed.py",
@@ -1876,11 +1165,6 @@
       "file": "apps/handlers/bridges/seed.py",
       "standard": "architecture",
       "reason": "Bridge importing engine module is its architectural purpose."
-    },
-    {
-      "file": "apps/handlers/bridges/seed.py",
-      "standard": "imports",
-      "reason": "Bridge imports engine module by design — sole purpose."
     }
   ],
   "notes": {

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: engine.py
-# Version: 2.6.0
+# Version: 2.6.1
 # Description: Hook engine — unified dispatcher; gates fail closed, injectors skip on error
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-18
-# Modified: 2026-10-30
+# Modified: 2026-11-15
 # =============================================
 
 """Hook engine — dispatches hook events to handlers, logs via prax + JSONL.
@@ -30,11 +30,10 @@ from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config import gates
 from aipass.hooks.apps.handlers.config.diagnostics import log_entry as _log, tail_log
 from aipass.hooks.apps.handlers.config.output_merge import combine_outputs
-from aipass.hooks.apps.handlers.module_root import module_file
 from aipass.hooks.apps.modules import cadence
 
 CONSOLE = err_console
-BRANCH_ROOT = module_file(__file__).parent.parent.parent
+BRANCH_ROOT = Path(__file__).resolve().parent.parent.parent
 
 HELP_COMMANDS = [
     ("log", "Tail recent hook activity (last 20 entries)"),
@@ -315,17 +314,35 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
 
     event_hooks = config.get(event_type, {})
 
-    match_value = ""
-    parsed = {}
     try:
         parsed = json.loads(stdin_data) if stdin_data.strip() else {}
-        match_value = parsed.get("tool_name", "") or parsed.get("compact_type", "") or parsed.get("type", "")
     except json.JSONDecodeError as exc:
-        logger.warning("[HOOKS] stdin parse error: %s", exc)
+        parsed = exc
+    if event_type == "PreToolUse" and not stdin_data.strip():
+        parsed = "empty stdin"
+    if not isinstance(parsed, dict):
+        why = f"the payload is not a JSON object: {str(parsed)[:120]}"
+        if event_type == "PreToolUse":  # a tool call the gates cannot read is refused, never waved through
+            logger.error("[HOOKS] PreToolUse refused: %s", why)
+            _log({"ts": time.time(), "event": event_type, "action": "payload_unreadable", "why": why})
+            return json.dumps({"decision": "block", "reason": f"AIPass hooks cannot read this tool call ({why})"}), 2
+        logger.warning("[HOOKS] %s %s, its hooks run on an empty payload", event_type, why)
+        parsed = {}
+    match_value = parsed.get("tool_name", "") or parsed.get("compact_type", "") or parsed.get("type", "")
     payload_session_id = parsed.get("session_id", "")
 
     if event_type == "UserPromptSubmit":
-        from aipass.hooks.apps.handlers.config.loader import never_enrolled_banner, trust_break_banner
+        from aipass.hooks.apps.handlers.config.loader import (
+            config_break_banner,
+            never_enrolled_banner,
+            trust_break_banner,
+        )
+
+        broken = config_break_banner()
+        if broken:
+            logger.error("[HOOKS] AIPass config unreadable — emitting loud banner")
+            _log({"ts": time.time(), "event": event_type, "action": "config_break_banner"})
+            return broken, 0
 
         banner = trust_break_banner()
         if banner:

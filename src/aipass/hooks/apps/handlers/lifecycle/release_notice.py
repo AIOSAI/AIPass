@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: release_notice.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Description: Tells a project manager a newer AIPass is installed (SessionStart, DPLAN-0335)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-09-09
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """SessionStart door for the manager-only AIPass release notice.
@@ -35,7 +35,7 @@ def handle(hook_data: dict) -> dict:
     try:
         content = load_content(hook_data)
     except Exception as exc:
-        logger.info("[HOOKS] release_notice: unexpected error: %s", exc)
+        logger.error("[HOOKS] release_notice: unexpected error: %s", exc)
         return {"stdout": "", "exit_code": 0}
 
     if not content:

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: conftest.py
-# Version: 2.9.0
+# Version: 2.9.1
 # Description: Shared pytest fixtures for hooks tests
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Shared pytest fixtures for hooks tests.
@@ -130,11 +130,9 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
 
 @pytest.fixture(autouse=True)
 def isolated_mute_flag(tmp_path_factory, monkeypatch) -> Path:
-    """Keep every test off the owner's LIVE sound flag, and off the old mute flags is_muted() removes."""
+    """Keep every test off the owner's LIVE sound flag."""
     sandbox = tmp_path_factory.mktemp("mute_flag")
     monkeypatch.setattr(sound, "SOUND_FLAG", sandbox / "home" / "aipass-hooks-sound-on")
-    monkeypatch.setattr(sound, "MUTE_FLAG", sandbox / "home" / "aipass-hooks-muted")
-    monkeypatch.setattr(sound, "LEGACY_MUTE_FLAG", sandbox / "tmp" / "aipass-hooks-muted")
     return sound.SOUND_FLAG
 
 
@@ -273,13 +271,8 @@ def fake_projects(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def isolated_diagnostics_state(tmp_path_factory, monkeypatch):
-    """Keep the fleet-shared .diagnostics_state.json out of every test.
-
-    Live sessions write it, so a test would read another branch's open error or erase one.
-    """
-    sandbox = tmp_path_factory.mktemp("diagnostics_state") / ".diagnostics_state.json"
-    monkeypatch.setattr(ds, "LEGACY_FILE", sandbox)
-    monkeypatch.setattr(ds, "STATE_DIR", sandbox.parent / "seats")
+    """Keep the live per-seat diagnostics state out of every test: a test would read or erase a live seat's error."""
+    monkeypatch.setattr(ds, "STATE_DIR", tmp_path_factory.mktemp("diagnostics_state") / "seats")
 
 
 @pytest.fixture

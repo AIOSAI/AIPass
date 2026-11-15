@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: context_gauge.py
-# Version: 1.10.0
+# Version: 1.10.1
 # Description: Heads-up to run /prep ($prep on Codex) before auto-compact, and the grounding receipt (UserPromptSubmit)
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-20
-# Modified: 2026-11-10
+# Modified: 2026-11-15
 # =============================================
 
 """Heads-up so the model banks memories via /prep before the compact ceiling.
@@ -171,5 +171,5 @@ def _gauge(hook_data: dict) -> dict:
         return {"stdout": "", "exit_code": 0}
 
     except Exception as exc:
-        logger.info("[HOOKS] context_gauge: unexpected error: %s", exc)
+        logger.error("[HOOKS] context_gauge: unexpected error: %s", exc)
         return {"stdout": "", "exit_code": 0}

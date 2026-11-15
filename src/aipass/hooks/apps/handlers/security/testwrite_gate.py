@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: testwrite_gate.py
-# Version: 1.4.1
+# Version: 1.4.2
 # Description: Blocks agent creation of NEW test files (PreToolUse) + the test template pointer (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-09-01
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Enforces the owner's 2026-09-01 ruling: agents do not create tests for now.
@@ -265,11 +265,7 @@ def _nearest_test_tree(path: Path) -> Path | None:
 
 def targets_module_test_dir() -> str:
     """The directory name that marks a test tree, read from the classifier."""
-    try:
-        return str(_module("testwrite_targets").TEST_DIR)
-    except Exception as exc:
-        logger.info("[HOOKS] testwrite_gate: classifier unread for TEST_DIR (%s)", exc)
-        return "tests"
+    return str(_module("testwrite_targets").TEST_DIR)
 
 
 def _template_version(tests_dir: Path) -> str:

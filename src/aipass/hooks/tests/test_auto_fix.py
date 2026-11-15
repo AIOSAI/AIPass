@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_auto_fix.py
-# Version: 1.4.1
+# Version: 1.4.2
 # Description: Tests for auto_fix lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/lifecycle/auto_fix.py."""
@@ -125,6 +125,20 @@ class TestAutofixPython:
                 "additionalContext": "[diagnostics] NO ANSWER from pyright: this edit cleared no recorded error",
             }
         }
+
+    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_pyright_check", return_value=[])
+    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_ruff_lint_structured", return_value=[])
+    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_python_checks", return_value=[])
+    def test_a_checklist_that_could_not_run_says_so_not_clean(
+        self, mock_py, mock_ruff_s, mock_pyright, tmp_path, monkeypatch
+    ):
+        monkeypatch.delenv("AIPASS_HOME", raising=False)
+        result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "clean.py")}})
+        context = json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"]
+        assert (
+            context
+            == "[diagnostics] NO ANSWER from sentry checklist (no AIPASS_HOME): this edit cleared no recorded error"
+        )
 
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_sentry_checklist", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_pyright_check", return_value=[])
@@ -645,7 +659,7 @@ class TestScratchIsNotJudged:
     )
     def test_a_tree_path_that_only_resembles_scratch_is_still_judged(self, parts, tmp_path, monkeypatch):
         monkeypatch.setattr(auto_fix, "_run_python_checks", lambda path: ["LINT: mod.py:1:1: F401 unused"])
-        monkeypatch.setattr(auto_fix, "_run_sentry_checklist", lambda path: [])
+        monkeypatch.setattr(auto_fix, "_run_sentry_checklist", lambda path, unanswered: [])
         monkeypatch.setattr(auto_fix, "_run_pyright_check", lambda path, unanswered: [])
         monkeypatch.setattr(auto_fix, "_run_ruff_lint_structured", lambda path, unanswered: [])
 

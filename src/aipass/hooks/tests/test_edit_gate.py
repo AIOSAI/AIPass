@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate.py
-# Version: 1.11.0
+# Version: 1.11.1
 # Description: Tests for edit_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py and its PreToolUse sibling settings_backup.py."""
@@ -1008,18 +1008,6 @@ class TestDiagnosticsStateBySeat:
         result = self._gate_edit(seat_tree, seat_tree["impl"], _seat())
 
         assert result["exit_code"] == 2
-
-    def test_pin4_a_version_1_file_is_nobodys_and_replaced_on_the_next_write(self, seat_tree: dict):
-        """Green from its first run, as the shape it reads did not exist before; its proof is a mutant."""
-        ds.LEGACY_FILE.write_text(
-            json.dumps({"file": str(seat_tree["red_test"]), "errors": [LOCAL_ERROR]}), encoding="utf-8"
-        )
-
-        result = self._gate_edit(seat_tree, seat_tree["impl"], _seat(session=""))
-        _auto_fix_edit(seat_tree["red_test"], _seat(), [LOCAL_ERROR], [])
-
-        assert result["exit_code"] == 0
-        assert not ds.LEGACY_FILE.exists()
 
     def test_pin5_an_entry_older_than_24_hours_is_ignored(self, seat_tree: dict):
         """The clock is handed in through diagnostics_state's _now seam. Proof: a mutant."""

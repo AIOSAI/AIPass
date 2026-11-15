@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_sound.py
-# Version: 2.0.0
+# Version: 2.0.1
 # Description: Tests for shared sound module
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/sound.py."""
@@ -18,7 +18,6 @@
 import os
 import subprocess as real_sub
 import sys
-import tempfile
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -55,36 +54,9 @@ class TestSoundFlagHome:
             paths.add(Path(child.stdout.strip()))
         assert paths == {tmp_path / "home" / ".aipass" / "aipass-hooks-sound-on"}
 
-    def test_old_mute_flags_are_removed_once_and_the_seat_stays_muted(self):
-        for old in (sound.MUTE_FLAG, sound.LEGACY_MUTE_FLAG):
-            old.parent.mkdir(parents=True, exist_ok=True)
-            old.touch()
-        with patch.object(sound, "logger") as mock_logger:
-            assert is_muted() is True
-            assert is_muted() is True
-        assert not sound.MUTE_FLAG.exists()
-        assert not sound.LEGACY_MUTE_FLAG.exists()
-        assert mock_logger.info.call_count == 2
-
-    def test_an_old_mute_flag_never_silences_a_seat_that_turned_sound_on(self):
-        sound.MUTE_FLAG.parent.mkdir(parents=True, exist_ok=True)
-        sound.MUTE_FLAG.touch()
-        unmute()
-        assert is_muted() is False
-
-    def test_an_old_flag_it_cannot_remove_still_reads_muted(self, monkeypatch):
-        """A sandboxed seat cannot write the home: the flag waits for a seat that can, and the answer is muted."""
-        locked = MagicMock()
-        locked.exists.return_value = True
-        locked.unlink.side_effect = PermissionError("read-only home")
-        monkeypatch.setattr(sound, "MUTE_FLAG", locked)
-        assert is_muted() is True
-
     def test_the_suite_never_points_at_the_live_flags(self):
         """conftest's isolated_mute_flag: a hooksound test that reached the real home would flip the owner's sound."""
         assert sound.SOUND_FLAG != Path.home() / ".aipass" / "aipass-hooks-sound-on"
-        assert sound.MUTE_FLAG != Path.home() / ".aipass" / "aipass-hooks-muted"
-        assert sound.LEGACY_MUTE_FLAG != Path(tempfile.gettempdir()) / "aipass-hooks-muted"
 
 
 class TestSpeak:

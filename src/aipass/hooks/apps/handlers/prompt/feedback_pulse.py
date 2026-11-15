@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: feedback_pulse.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Description: Periodic feedback ask — one ignorable line every ~10 turns
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-18
-# Modified: 2026-07-18
+# Modified: 2026-11-15
 # =============================================
 
 """Periodic feedback pulse — surfaces a one-line feedback ask every ~10 turns.
@@ -94,5 +94,5 @@ def handle(hook_data: dict) -> dict:
         return {"stdout": _FEEDBACK_LINE, "exit_code": 0}
 
     except Exception as exc:
-        logger.info("[HOOKS] feedback_pulse: unexpected error: %s", exc)
+        logger.error("[HOOKS] feedback_pulse: unexpected error: %s", exc)
         return {"stdout": "", "exit_code": 0}
