@@ -1227,14 +1227,28 @@ class TestCheckWireVerify:
         assert results[0].label == "wire verify"
         assert results[0].glyph == "[green]✓[/green]"
 
-    def test_fail_on_nonzero_exit(self) -> None:
-        """Non-zero exit from drone @hooks verify produces a FAIL row."""
-        fake = MagicMock(returncode=1, stdout="ERROR empty array\n2 errors, 0 warnings\n")
-        with patch("aipass.aipass.apps.modules._doctor_wire.subprocess.run", return_value=fake):
+    def test_a_failed_verify_names_each_error_hooks_wrote_to_stderr(self) -> None:
+        """The row names what failed, never a bare 'errors detected': hooks reports on stderr.
+
+        Mutant: stderr not read -> red. Mutant: COLUMNS not widened -> red at the env assert.
+        """
+        report = (
+            "✗ Wire check FAILED\n\n"
+            "  ERROR  PostCompact: 1 enabled handler(s) in project config but NO provider event entry\n"
+            "  OK     Stop: unfiltered bridge, 4 enabled hooks OK\n"
+            "  ERROR  Codex: no hooks file\n\n"
+            "2 errors, 0 warnings\n"
+        )
+        fake = MagicMock(returncode=1, stdout="", stderr=report)
+        with patch("aipass.aipass.apps.modules._doctor_wire.subprocess.run", return_value=fake) as run:
             results = check_wire_verify()
         assert len(results) == 1
         assert results[0].glyph == "[red]✗[/red]"
-        assert "errors" in results[0].detail
+        assert results[0].detail == (
+            "PostCompact: 1 enabled handler(s) in project config but NO provider event entry; Codex: no hooks file"
+        )
+        assert "drone @hooks verify" in results[0].remediation
+        assert run.call_args.kwargs["env"]["COLUMNS"] == "1000"
 
     def test_warn_on_drone_not_found(self) -> None:
         """FileNotFoundError (drone missing) produces a WARN row."""

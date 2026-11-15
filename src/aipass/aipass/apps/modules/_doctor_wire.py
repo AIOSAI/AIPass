@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: _doctor_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.7.0
+# Version: 1.7.1
 # Created: 2026-05-08
-# Modified: 2026-10-28
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -13,6 +13,7 @@ doctor_wire — auto-wire provider settings
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -571,17 +572,21 @@ def check_wire_verify() -> list[WireCheckResult]:
             capture_output=True,
             text=True,
             timeout=10,
+            # hooks prints its report to stderr through Rich, which wraps a pipe at 80 columns.
+            env={**os.environ, "COLUMNS": "1000"},
         )
         if proc.returncode == 0:
             return [WireCheckResult("wire verify", _GLYPH_PASS, "provider hooks wired correctly", "")]
-        lines = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
-        detail = lines[-1] if lines else "errors detected"
+        lines = [ln.strip() for ln in f"{proc.stdout}\n{proc.stderr}".splitlines() if ln.strip()]
+        found = [ln.removeprefix("ERROR").strip() for ln in lines if ln.startswith("ERROR")]
+        detail = "; ".join(found) or (lines[-1] if lines else f"drone @hooks verify exited {proc.returncode}")
         return [
             WireCheckResult(
                 "wire verify",
                 _GLYPH_FAIL,
                 detail,
-                "Run 'aipass doctor --fix' to re-wire, then re-run doctor to confirm",
+                "'aipass doctor --fix' re-wires only the provider manifest's rows; "
+                "if this stays after it, the full report is 'drone @hooks verify' and the fix is @hooks'",
             )
         ]
     except FileNotFoundError as exc:
