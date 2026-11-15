@@ -369,10 +369,7 @@ class TestTheRoomCanActuallyHearAResize:
             session = host_attach.open_attach("api")
 
         try:
-            if hasattr(os, "getpgid"):
-                assert os.getpgid(session.process.pid) != os.getpgid(os.getpid())
-            else:
-                pytest.fail("this platform opens a PTY and has no os.getpgid to read the child's group by")
+            assert os.getpgid(session.process.pid) != os.getpgid(os.getpid())
         finally:
             session.hangup()
 
@@ -531,10 +528,7 @@ class TestHangupDetachesAndNeverKillsTheRoom:
             session = host_attach.open_attach("api")
 
         try:
-            if hasattr(os, "getsid"):
-                assert os.getsid(session.process.pid) == session.process.pid
-            else:
-                pytest.fail("this platform opens a PTY and has no os.getsid to read the child's session by")
+            assert os.getsid(session.process.pid) == session.process.pid
         finally:
             session.hangup()
 

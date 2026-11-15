@@ -355,9 +355,9 @@
       "file": "tests/test_host_attach_pump.py",
       "standard": "through_the_command",
       "lines": [
-        691
+        685
       ],
-      "reason": "_spawn_pty is called with its close_fd seam so a failed openpty or set_winsize shows which PTY ends were closed and that the reserved slot came back; the same seam as test_host_perf.py's 713 row. open_attach and open_monitor reach _spawn_pty but cannot hand it close_fd, and a public door would exist for these tests alone (api, 2026-10-24). Lines shifted by the Linux-only purge (2026-11-14): 705 -> 691."
+      "reason": "_spawn_pty is called with its close_fd seam so a failed openpty or set_winsize shows which PTY ends were closed and that the reserved slot came back; the same seam as test_host_perf.py's 713 row. open_attach and open_monitor reach _spawn_pty but cannot hand it close_fd, and a public door would exist for these tests alone (api, 2026-10-24). Lines shifted by the Linux-only purge (2026-11-14): 705 -> 691, 691 -> 685 with the straggler sweep."
     },
     {
       "file": "apps/modules/host_api.py",

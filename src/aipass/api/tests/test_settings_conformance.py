@@ -136,7 +136,7 @@ class TestTheCorpusItself:
         """
         manifest = _load_manifest()
         on_disk = {
-            str(path.relative_to(CORPUS)).replace(os.sep, "/"): digest(path.read_bytes())
+            str(path.relative_to(CORPUS)): digest(path.read_bytes())
             for path in sorted(CORPUS.rglob("*.json"))
             if path.name != "manifest.json"
         }

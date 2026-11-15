@@ -130,7 +130,6 @@ class TestTheChildIsGenuinelyDetached:
         handed = popen.call_args.kwargs
 
         assert handed["start_new_session"] is True
-        assert "creationflags" not in handed
 
     def test_the_child_never_shares_the_callers_stdin(self, runtime: Path, bind_ok: None) -> None:
         """A detached server reading a closed terminal is a server that stalls."""
@@ -324,9 +323,9 @@ class TestStopping:
 
         assert record is not None
         assert signal.SIGTERM in [call.args[1] for call in killed.call_args_list]
-        assert not hasattr(signal, "SIGKILL") or signal.SIGKILL not in [
-            call.args[1] for call in killed.call_args_list
-        ], "a graceful shutdown was cut short"
+        assert signal.SIGKILL not in [call.args[1] for call in killed.call_args_list], (
+            "a graceful shutdown was cut short"
+        )
         assert not host_lifetime.record_path().exists()
 
     def test_a_server_that_will_not_go_is_said_out_loud(
