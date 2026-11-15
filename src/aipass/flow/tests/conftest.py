@@ -3,7 +3,7 @@
 # Description: Shared fixtures for flow tests - log redirect, console pin, command-state reset
 # Version: 1.4.0
 # Created: 2026-03-05
-# Modified: 2026-10-26
+# Modified: 2026-11-14
 # =============================================
 
 """Shared pytest fixtures for flow tests"""

@@ -3,7 +3,7 @@
 # Description: Tests for lock_ops handler — atomic lock file management
 # Version: 1.2.0
 # Created: 2026-04-26
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/runner/lock_ops.py."""

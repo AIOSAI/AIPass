@@ -3,7 +3,7 @@
 # Description: Every flow module imports, and keeps logging, without a readable working directory
 # Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for aipass/flow/apps/__init__.py and every module beneath it importing with no readable working directory."""

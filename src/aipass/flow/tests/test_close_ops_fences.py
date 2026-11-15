@@ -3,7 +3,7 @@
 # Description: Tests for close_all's project-scope fence, split from test_close_ops.py (oversize, leg 12)
 # Version: 1.0.0
 # Created: 2026-10-06
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for the project-scope fence of close_all_plans_impl in apps/handlers/plan/close_ops.py."""

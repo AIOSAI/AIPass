@@ -3,7 +3,7 @@
 # Description: Tests for apps/handlers/cli/help_flags.py -- whole-sequence help detection (DPLAN-0291 rule E)
 # Version: 1.1.1
 # Created: 2026-08-13
-# Modified: 2026-11-12
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py and the flow command modules that call it."""

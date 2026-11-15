@@ -3,7 +3,7 @@
 # Description: Tests for apps/handlers/plan/project_scope.py — project root resolution and register discrimination
 # Version: 1.0.1
 # Created: 2026-08-22
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/plan/project_scope.py."""
