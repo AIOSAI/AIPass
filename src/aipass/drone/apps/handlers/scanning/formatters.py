@@ -3,24 +3,16 @@
 # Description: Rich output formatting for scan results
 # Version: 1.0.1
 # Created: 2026-03-17
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Rich output formatting for scan results."""
 
 from __future__ import annotations
 
-try:
-    from aipass.cli.apps.modules import console
-except ImportError:
-    from aipass.prax import logger
-
-    logger.warning("formatters: aipass.cli.apps.modules.console unavailable, using fallback Rich Console")
-    from rich.console import Console
-
-    console = Console()
-
 from rich.table import Table
+
+from aipass.cli.apps.modules import console
 
 from aipass.drone.apps.handlers.json import json_handler
 

@@ -167,7 +167,7 @@
       "file": "apps/handlers/git/lock_handler.py",
       "standard": "logged_fallback",
       "lines": [
-        44
+        45
       ],
       "reason": "_pid_alive: os.kill(pid, 0) raising PermissionError (EPERM) IS the answer 'alive' - the process exists and belongs to another user (POSIX kill(2)). Nothing failed, so True is the true answer, not a fallback. The real fallbacks of this function (any other OSError) now raise and check_lock_status reports the holder as unchecked (fleet green leg 6, drone's decision).",
       "anchor": "return True"
@@ -176,12 +176,13 @@
       "file": "apps/drone.py",
       "standard": "logged_fallback",
       "lines": [
-        594,
-        613,
-        617,
-        681
+        597,
+        616,
+        620,
+        676,
+        686
       ],
-      "reason": "main() is the process exit status: 1 is the failure answer to the OS on every path that returns it (routing refused, unknown command, registry unreadable at 653 and 675, an unhandled systems error at 679, a module that raised at 747), and success is 0. Each handler prints the error to stderr before it. A passport fault (leg 7) is printed after routing by the _reports_passport_fault wrapper and never changes the code. The checker counts the other `return 1`s as a success path because they are not error() calls; they are failures too. Callers: the console script entry only (sys.exit(main())). Fleet green leg 6, drone's decision.",
+      "reason": "main() is the process exit status: 1 is the failure answer to the OS on every path that returns it (routing refused, unknown command, the registry unreadable, an unhandled systems error, a module that failed to import or raised), and success is 0. Each handler prints the error to stderr before it. A passport fault (leg 7) is printed after routing by the _reports_passport_fault wrapper and never changes the code. The checker counts the other `return 1`s as a success path because they are not error() calls; they are failures too. Callers: the console script entry only (sys.exit(main())). Fleet green leg 6, drone's decision.",
       "anchor": "return 1"
     },
     {
@@ -198,7 +199,7 @@
       "file": "apps/handlers/module_registry_handler.py",
       "standard": "logged_fallback",
       "lines": [
-        130
+        129
       ],
       "reason": "get_module_info: None for a registered internal module whose adapter fails to import, and None for an unknown name. Every caller tells them apart by what it already knows: drone.py:237 and module_registry.py:106 iterate list_modules() (registered names only) and print '(not available)'; module_registry.py:116 asks is_module() and says 'registered but could not load'. A raise would take the whole services listing down for one broken adapter. Fleet green leg 6, drone's decision.",
       "anchor": "return None"
@@ -235,19 +236,10 @@
       "file": "apps/handlers/command_registry/ops.py",
       "standard": "logged_fallback",
       "lines": [
-        121
+        120
       ],
       "reason": "save_registry: True = written, False = not written; every False is a failure (invalid structure, a failed write here, logged ERROR) and the success path returns True only. Callers add_command/remove_command report False as a failed save. load_registry never saves: a missing file reads as an empty registry. Fleet green leg 6, drone's decision.",
       "anchor": "return False"
-    },
-    {
-      "file": "apps/handlers/broker/path_resolver.py",
-      "standard": "host_portability",
-      "lines": [
-        103
-      ],
-      "reason": "_fd_path reads /proc/self/fd, and its one caller is _open_via_openat2, entered only from resolve_contained after _openat2_available() (x86_64) said yes. The fence is real, two hops up; the checker acquits a guard one hop away only (ledger rows 491, 510). A platform raise inside _fd_path would be a door for the checker alone: the walk lane never calls it (pinned in tests/test_broker.py with a failing reader). Fleet green leg 6, drone's decision.",
-      "anchor": "/proc/self/fd/"
     }
   ],
   "notes": {

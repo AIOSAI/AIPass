@@ -3,7 +3,7 @@
 # Description: Handler for internal module registry operations
 # Version: 2.1.0
 # Created: 2026-03-09
-# Modified: 2026-10-22
+# Modified: 2026-11-15
 # =============================================
 
 """Handler for internal module registry operations."""
@@ -18,7 +18,6 @@ from pathlib import Path
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.generic_adapter import capture_main
-from aipass.drone.apps.handlers.module_root import module_file
 from aipass.drone.apps.handlers.router_handler import caller_stamp
 
 
@@ -28,7 +27,7 @@ _INTERNAL_MODULES: dict[str, str] = {
 }
 
 
-_ROUTING_CONFIG_PATH: Path = module_file(__file__).parent / "routing_config.json"
+_ROUTING_CONFIG_PATH: Path = Path(__file__).resolve().parent / "routing_config.json"
 
 
 @dataclass

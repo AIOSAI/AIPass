@@ -18,10 +18,7 @@ _HANDLERS_SPELLINGS = (
 )
 _THIRD_PARTY_DIRS = ("/site-packages/", "/dist-packages/")
 
-try:
-    _THIS_FILE = str(Path(__file__).resolve())
-except OSError:
-    _THIS_FILE = str(__file__)
+_THIS_FILE = str(Path(__file__).resolve())
 # Exact prefixes, never a substring: a directory that merely shares a branch's name is not that branch.
 _BRANCH_ROOT = _THIS_FILE.rsplit("/", 3)[0] + "/"
 _FLEET_ROOT = _THIS_FILE.rsplit("/", 4)[0] + "/"

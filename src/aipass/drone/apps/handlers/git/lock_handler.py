@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lock_handler.py
 # Description: Atomic lock management for git PR workflow
-# Version: 1.1.5
+# Version: 1.2.0
 # Created: 2026-03-17
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from aipass.prax import logger
+from aipass.drone.apps.handlers.exceptions import RepoRootError
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.router_handler import caller_cwd, registries_in
 
@@ -51,6 +52,7 @@ def find_repo_root() -> Path:
     Any ``*_REGISTRY.json`` marks a root: external projects name theirs after themselves.
     With no CWD it never answers "unknown" (callers build a lock path from it): it
     uses find_registry's order, AIPASS_HOME then the walk up from this file.
+    Raises RepoRootError when the CWD is in no git repository and below no registry.
     """
     cwd = caller_cwd()
     current = cwd
@@ -82,12 +84,13 @@ def find_repo_root() -> Path:
             text=True,
             cwd=str(cwd),
         )
-        if result.returncode == 0 and result.stdout.strip():
-            return Path(result.stdout.strip())
     except (OSError, subprocess.SubprocessError) as exc:
-        logger.warning("find_repo_root: git rev-parse fallback failed, using CWD: %s", exc)
-
-    return cwd
+        logger.error("find_repo_root: git rev-parse could not run in %s: %s", cwd, exc)
+        raise RepoRootError(f"cannot find the repository root of {cwd}: git rev-parse could not run: {exc}") from exc
+    if result.returncode == 0 and result.stdout.strip():
+        return Path(result.stdout.strip())
+    logger.error("find_repo_root: %s is in no git repository and below no *_REGISTRY.json", cwd)
+    raise RepoRootError(f"{cwd} is not inside a git repository and no *_REGISTRY.json is above it")
 
 
 def release_lock(force: bool = False) -> dict:

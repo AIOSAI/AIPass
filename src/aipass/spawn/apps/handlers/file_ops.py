@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: file_ops.py
 # Description: Template copy and file operations
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-05
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Template copy and file rename operations."""
@@ -27,6 +27,16 @@ def ensure_directory(path):
     if path is None:
         raise ValueError("ensure_directory received None path — caller passed invalid target")
     Path(path).mkdir(parents=True, exist_ok=True)
+
+
+def copy_undecodable(source, dest):
+    """Copy a file that is not UTF-8 text byte for byte; one carrying a {{ placeholder would ship unrendered, so it raises."""
+    source = Path(source)
+    if b"{{" in source.read_bytes():
+        raise ValueError(
+            f"{source} is not UTF-8 text but carries a {{{{...}}}} placeholder; refusing to copy it unrendered"
+        )
+    shutil.copy2(source, dest)
 
 
 def copy_template(template_dir, target_dir, replacements):
@@ -62,8 +72,8 @@ def copy_template(template_dir, target_dir, replacements):
                 atomic_write_text(dest, content)
                 copied.append(listed)
             except (UnicodeDecodeError, UnicodeEncodeError) as e:
-                logger.warning(f"[spawn] Text read/write failed for {listed}, falling back to binary copy: {e}")
-                shutil.copy2(item, dest)
+                logger.warning(f"[spawn] {listed} is not UTF-8 text, copying it byte for byte: {e}")
+                copy_undecodable(item, dest)
                 copied.append(f"{listed} (binary)")
 
     try:

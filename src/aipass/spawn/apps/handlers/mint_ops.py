@@ -3,7 +3,7 @@
 # Description: The mint of a new citizen from the template, step by step
 # Version: 1.2.0
 # Created: 2026-09-28
-# Modified: 2026-10-31
+# Modified: 2026-11-15
 # =============================================
 
 """The mint body: a validated target becomes a registered citizen."""
@@ -238,11 +238,8 @@ def mint_citizen(
     if not test_template_result["success"]:
         receipt_issues.append(f"Test template receipt not stamped: {test_template_result['error']}")
 
-    try:
-        registry_branch_path = target.relative_to(reg_path.parent).as_posix()
-    except ValueError as e:
-        logger.warning("Cannot relativize path %s to registry %s: %s", target, reg_path.parent, e)
-        registry_branch_path = target.as_posix()
+    # Containment was refused at the gate above, so this cannot raise.
+    registry_branch_path = target.relative_to(reg_path.parent).as_posix()
     registry_updated = add_to_registry(
         reg_path,
         branch_upper,

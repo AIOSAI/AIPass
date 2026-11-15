@@ -27,7 +27,6 @@
       "file": "Relative path to the file",
       "standard": "Which standard to bypass (imports, cli, naming, etc.)",
       "lines": "Optional array of line numbers",
-      "pattern": "Optional regex pattern to match",
       "reason": "Why this bypass exists"
     }
   }

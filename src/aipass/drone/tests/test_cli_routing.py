@@ -3,7 +3,7 @@
 # Description: CLI Routing Tests for Drone (adapted from universal template)
 # Version: 1.1.1
 # Created: 2026-03-27
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/drone.py, the drone CLI entry point and its routing."""
@@ -27,7 +27,7 @@ from aipass.drone.apps.drone import (
 )
 from aipass.drone.apps.handlers.executor import CommandResult
 from aipass.drone.apps.handlers import registry_handler
-from aipass.drone.apps.modules import BranchNotFoundError, RegistryError
+from aipass.drone.apps.modules import BranchNotFoundError, RegistryError, RepoRootError
 from aipass.drone.cli import main as cli_main
 
 
@@ -1130,3 +1130,32 @@ class TestInertTimeoutIsReported:
         assert "--drone-timeout 5 not applied" in capsys.readouterr().err
         assert mock_module.call_args.args[1] == ["status"], "the flag itself must not reach the module"
         mock_route.assert_not_called()
+
+
+class TestMainModuleThatCannotLoad:
+    """A drone module whose import fails is reported with its real error and exit 1, never 'unknown command'."""
+
+    def test_the_import_error_is_named(self, capsys: pytest.CaptureFixture[str], monkeypatch) -> None:
+        """Mutant: the old warning-only arm falls through to 'unknown command'."""
+        # None in sys.modules makes the import itself raise ImportError, with no import machinery patched.
+        monkeypatch.setitem(sys.modules, "aipass.drone.apps.modules.commands", None)
+        with patch("sys.argv", ["drone", "commands"]):
+            rc = main()
+        err = capsys.readouterr().err
+        assert rc == 1
+        assert "module 'commands' failed to import:" in err
+        assert "unknown command" not in err
+
+
+class TestMainRepoRootRefusal:
+    """A git verb run outside any repository is refused by name, not a traceback."""
+
+    def test_the_named_error_reaches_stderr(self, capsys: pytest.CaptureFixture[str]) -> None:
+        with (
+            patch("sys.argv", ["drone", "@git", "status"]),
+            patch(f"{_DRONE}.is_module", return_value=True),
+            patch(f"{_DRONE}.route_module_command", side_effect=RepoRootError("/tmp/x is not inside a git repository")),
+        ):
+            rc = main()
+        assert rc == 1
+        assert "drone: /tmp/x is not inside a git repository" in capsys.readouterr().err

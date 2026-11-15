@@ -3,7 +3,7 @@
 # Description: Registry sync handler — implementation logic for registry repair
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-10-31
+# Modified: 2026-11-15
 # =============================================
 
 """Registry synchronization handler for branch lifecycle management.
@@ -26,6 +26,7 @@ from aipass.spawn.apps.handlers.registry import (
     registry_lock,
     save_registry,
     branches_as_list,
+    entry_path,
     fix_passport_registry_id,
     pick_owner_branch,
 )
@@ -403,7 +404,7 @@ def check_owner_identity(registry_path=None):
         issues.append({"flag": "multi_ci_cure", "detail": f"Multiple ci_cure holders: {', '.join(ci_cure_holders)}"})
 
     for owner in owners:
-        owner_path = (project_root / owner.get("path", "")).resolve()
+        owner_path = (project_root / entry_path(owner)).resolve()
         if not owner_path.is_dir():
             issues.append(
                 {
@@ -413,7 +414,7 @@ def check_owner_identity(registry_path=None):
             )
 
     for owner in owners:
-        owner_dir = project_root / owner.get("path", "")
+        owner_dir = project_root / entry_path(owner)
         passport_path = owner_dir / ".trinity" / "passport.json"
         is_manager = False
         if owner in inside and passport_path.exists():
@@ -438,7 +439,7 @@ def check_owner_identity(registry_path=None):
 
     if metadata_id:
         for branch in inside:
-            branch_dir = project_root / branch.get("path", "")
+            branch_dir = project_root / entry_path(branch)
             passport_path = branch_dir / ".trinity" / "passport.json"
             if not passport_path.exists():
                 continue
@@ -536,7 +537,7 @@ def fix_owner_identity(registry_path=None, dry_run=False):
         if not metadata_id:
             passport_id_counts: dict[str, int] = {}
             for branch in inside:
-                branch_dir = project_root / branch.get("path", "")
+                branch_dir = project_root / entry_path(branch)
                 passport_path = branch_dir / ".trinity" / "passport.json"
                 if not passport_path.exists():
                     continue
@@ -610,7 +611,7 @@ def fix_owner_identity(registry_path=None, dry_run=False):
 
         passport_actions: list[str] = []
         for branch in inside:
-            branch_dir = project_root / branch.get("path", "")
+            branch_dir = project_root / entry_path(branch)
             passport_path = branch_dir / ".trinity" / "passport.json"
             if not passport_path.exists():
                 continue
@@ -638,7 +639,7 @@ def fix_owner_identity(registry_path=None, dry_run=False):
         # LEGACY_CLASSES is the same table refuse_legacy_class() quotes, so a rename is never applied
         # here and refused there.
         for branch in inside:
-            branch_dir = project_root / branch.get("path", "")
+            branch_dir = project_root / entry_path(branch)
             passport_path = branch_dir / ".trinity" / "passport.json"
             if not passport_path.exists():
                 continue

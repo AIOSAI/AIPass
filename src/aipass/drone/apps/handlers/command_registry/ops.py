@@ -3,7 +3,7 @@
 # Description: Registry CRUD operations for custom command shortcuts
 # Version: 1.0.3
 # Created: 2026-03-17
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Registry CRUD Operations for Custom Commands.
@@ -24,12 +24,11 @@ from typing import Any, Iterator
 from aipass.prax import logger
 from aipass.drone.apps.handlers.exceptions import RegistryError
 from aipass.drone.apps.handlers.json import json_handler
-from aipass.drone.apps.handlers.module_root import module_file
 
 MODULE_NAME = "command_registry"
 
 # ops.py -> command_registry/ -> handlers/ -> apps/ -> drone/
-_BRANCH_ROOT: Path = module_file(__file__).parents[3]
+_BRANCH_ROOT: Path = Path(__file__).resolve().parents[3]
 REGISTRY_FILE: Path = _BRANCH_ROOT / "drone_command_registry.json"
 
 

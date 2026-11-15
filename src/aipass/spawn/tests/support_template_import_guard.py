@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: support_template_import_guard.py
 # Description: Shared child-script worlds for the template import guard tests (split from test_template_import_guard.py)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Shared worlds for the tests of templates/citizen/apps/handlers/__init__.py (no test_ prefix: never collected)."""
@@ -39,46 +39,11 @@ _CONTROL_PROBE = """
         print("CONTROL_DEAD")
 """
 
-# <=3.10 pathlib captured os.path.realpath at first import, so rebinding it alone is inert there.
-# A staticmethod on the class only: a plain function eats the path into self, an instance attribute shadows it.
-_ARM_PATHLIB_ACCESSOR = """
-    import pathlib as _pathlib
-
-    if hasattr(_pathlib, "_NormalAccessor"):
-        _pathlib._NormalAccessor.realpath = staticmethod(_no_realpath)
-"""
-
-_DENY_REALPATH = (
-    """
-    import errno, os, os.path
-    from pathlib import Path as _ProbePath
-
-    def _no_realpath(*args, **kwargs):
-        raise FileNotFoundError(errno.ENOENT, "No such file or directory")
-
-    # os.path IS posixpath, so on 3.11+ this reaches pathlib's own
-    # resolve() too. On 3.10 it does not — see _ARM_PATHLIB_ACCESSOR.
-    os.path.realpath = _no_realpath
-"""
-    + _ARM_PATHLIB_ACCESSOR
-    + _CONTROL_PROBE
-)
-
 
 def _require_live_world(result, world: str = "getcwd-denied"):
-    """Skip rather than pass when the faked world did not actually break.
-
-    Each world names its own cause: an inert realpath-denied world is a bug and fails, never skips."""
+    """Skip rather than pass when the faked world did not actually break."""
     lines = result.stdout.split()
     if "CONTROL_DEAD" in lines:
-        if world == "realpath-denied":
-            pytest.fail(
-                "the realpath-denied world went inert, and there is no known "
-                "platform reason for that one — os.path.realpath is denied "
-                "directly and the captured-accessor route is patched for "
-                "<=3.10. This is a bug in the world, not a platform difference: "
-                f"{result.stdout!r} {result.stderr[-400:]}"
-            )
         pytest.skip(
             "world not exercised: the injected os.getcwd failure does not reach "
             "Path.resolve() on this host, so nothing is claimed either way"
@@ -171,7 +136,7 @@ _ARM_THE_ROUTE = """
     print("ROUTE_ARMED" if _seen else "ROUTE_DARK")
 """
 
-# A stand-in declares which real hosts it can speak from, measured in the child, and is UNAVAILABLE elsewhere.
+# The host fingerprint every child prints first.
 _REPORT_HOST = """
     import pathlib
 
@@ -214,81 +179,3 @@ def _compose(*chunks: str) -> str:
 def _child_script(*chunks: str) -> str:
     """Every child starts with the host fingerprint. One rule, no exceptions."""
     return _compose(_REPORT_HOST, *chunks)
-
-
-def _host_line(result) -> list:
-    """The child's own HOST fingerprint: flavour kind, accessor.
-
-    The last one: a child that simulates a foreign host re-reports, and that host is in force."""
-    fingerprints = [line for line in result.stdout.splitlines() if line.startswith("HOST ")]
-    return fingerprints[-1].split()[1:] if fingerprints else []
-
-
-# The host's parsing dialect, measured not versioned: 3.10/3.11 call _flavour.parse_parts, which no
-# module-shaped flavour has. Rows with a module-shaped flavour skip by name unless "module-tolerant".
-_REPORT_PARSING_DIALECT = """
-    import pathlib, posixpath
-
-    class _ModuleShapedFlavour:
-        sep = posixpath.sep
-        altsep = ""
-
-        def __getattr__(self, name):
-            return getattr(posixpath, name)
-
-    try:
-        pathlib.PurePosixPath._flavour = _ModuleShapedFlavour()
-    except (AttributeError, TypeError) as _exc:
-        print("PARSING", "unknown:" + type(_exc).__name__)
-    else:
-        try:
-            pathlib.PurePosixPath("/parsing/probe/only")
-        except AttributeError as _exc:
-            _text = str(_exc)
-            _asked = _text.rsplit("'", 2)[-2] if _text.count("'") >= 2 else "something"
-            print("PARSING", "demands:" + _asked)
-        else:
-            print("PARSING", "module-tolerant")
-"""
-
-
-def _measure_host() -> dict:
-    """Run the child's OWN fingerprint chunk once, and read the answer back.
-
-    Never an in-process pathlib read: that would be a second spelling of the host, free to drift."""
-    result = _run(_child_script(), cwd=Path(__file__).parent)
-    host = _host_line(result)
-    if len(host) != 2:
-        return {"flavour": "unknown", "accessor": "unknown"}
-    return {"flavour": host[0], "accessor": host[1]}
-
-
-def _parsing_answer(result) -> str:
-    """The child's dialect answer, or "unknown" — fails closed, never defaults to tolerant."""
-    for line in result.stdout.splitlines():
-        if line.startswith("PARSING "):
-            return line.split(None, 1)[1]
-    return "unknown"
-
-
-def _measure_parsing_dialect() -> str:
-    """What this host's pathlib asks a flavour for while parsing. One child, once."""
-    return _parsing_answer(_run(_child_script(_REPORT_PARSING_DIALECT), cwd=Path(__file__).parent))
-
-
-_HOST_FACTS = _measure_host()
-_HOST_FACTS["parsing"] = _measure_parsing_dialect()
-
-
-def _simulation_unavailable(requires: dict, host: dict) -> str:
-    """Which REAL hosts a simulation can speak from — the third verdict, one level up.
-
-    Empty string means it can speak; anything else is the reason it cannot."""
-    for fact in sorted(requires):
-        allowed = requires[fact]
-        if host.get(fact) not in allowed:
-            return (
-                f"this simulation can only speak from a host whose {fact} is one of "
-                f"{sorted(allowed)}; this host reports {host.get(fact)!r}"
-            )
-    return ""

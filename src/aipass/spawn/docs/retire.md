@@ -43,6 +43,8 @@ place, and exits 1.
 2. A registry entry carrying `owner: true`.
 3. A passport with `citizenship.registered: true`.
 
+A layer that cannot be read (a corrupt registry or passport) answers protected, and the delete is refused.
+
 Since `create` writes `registered: true`, a branch is protected from the moment it exists,
 and a plain `delete` refuses it, naming the flag that retires it.
 

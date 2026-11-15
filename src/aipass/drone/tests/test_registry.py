@@ -3,7 +3,7 @@
 # Description: Tests for the registry module orchestrator
 # Version: 1.0.3
 # Created: 2026-04-26
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/registry.py: introspection, help, and the load, branches and lookup commands."""
@@ -15,7 +15,6 @@ from unittest.mock import patch
 
 import pytest
 
-from aipass.cli.apps.modules import display
 from aipass.drone.apps.modules.registry import handle_command, print_help, print_introspection
 
 _REG = "aipass.drone.apps.modules.registry"
@@ -31,19 +30,6 @@ class TestPrintIntrospection:
         captured = capsys.readouterr()
         assert "registry" in captured.out.lower()
         assert "handler" in captured.out.lower()
-
-    def test_fallback_console(self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
-        """Falls back to rich.Console when CLI console unavailable; mutant killed: the fallback arm removed.
-
-        @cli's display without its ``console`` export is the edge: ``from ... import
-        console`` then raises ImportError, with no sys.modules entry replaced.
-        """
-        monkeypatch.delattr(display, "console")
-        with patch(f"{_REG}.logger") as log:
-            print_introspection()
-        captured = capsys.readouterr()
-        assert "registry" in captured.out.lower()
-        log.warning.assert_called_once_with("CLI console not available, using fallback")
 
 
 class TestPrintHelp:

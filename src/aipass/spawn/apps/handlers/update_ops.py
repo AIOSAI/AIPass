@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: update_ops.py
 # Description: Update handler — path-based template sync engine (P1 rewrite, TDPLAN-0006)
-# Version: 2.6.0
+# Version: 2.7.0
 # Created: 2026-03-07
-# Modified: 2026-11-09
+# Modified: 2026-11-15
 # =============================================
 
 """Update handler — path-based template sync engine.
@@ -12,7 +12,6 @@ Reference: docs/update_engine.md
 """
 
 import json
-import shutil
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -28,7 +27,7 @@ from aipass.spawn.apps.handlers.meta_ops import (
     save_branch_meta,
 )
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
-from aipass.spawn.apps.handlers.file_ops import SKIP_NAMES
+from aipass.spawn.apps.handlers.file_ops import SKIP_NAMES, copy_undecodable
 from aipass.spawn.apps.handlers.placeholders import build_replacements_dict, replace_placeholders
 from aipass.spawn.apps.handlers.registry import find_registry, fleet_rows, load_registry, branches_as_list
 from aipass.spawn.apps.handlers.update_ignore import IGNORE_NAME, is_ignored, read_ignore
@@ -225,7 +224,7 @@ def update_branch(
                     atomic_write_text(dest, content)
                 except (UnicodeDecodeError, UnicodeEncodeError) as enc_err:
                     logger.warning("[update] Binary file, copying directly: %s (%s)", resolved_path, enc_err)
-                    shutil.copy2(template_file, dest)
+                    copy_undecodable(template_file, dest)
             additions_detail.append({"template_path": resolved_path, "type": "file"})
             counts["additions"] += 1
             if dest.suffix == ".md":

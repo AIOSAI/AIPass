@@ -3,7 +3,7 @@
 # Description: Internal module registry for drone
 # Version: 1.0.2
 # Created: 2026-03-09
-# Modified: 2026-09-28
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -44,13 +44,7 @@ __all__ = [
 
 def print_introspection():
     """Display module introspection info."""
-    try:
-        from aipass.cli.apps.modules.display import console
-    except ImportError:
-        logger.warning("CLI console not available, using fallback")
-        from rich.console import Console
-
-        console = Console()
+    from aipass.cli.apps.modules.display import console
 
     console.print()
     console.print("[bold cyan]module_registry Module[/bold cyan]")

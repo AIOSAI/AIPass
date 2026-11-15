@@ -3,7 +3,7 @@
 # Description: Tests for the custom command registry
 # Version: 1.0.5
 # Created: 2026-03-17
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/commands.py and the command registry handlers it drives."""
@@ -256,6 +256,16 @@ class TestLookup:
         result = lookup.lookup_command("nonexistent")
 
         assert result is None
+
+    def test_lookup_raises_when_the_registry_cannot_load(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Mutant: the old catch-all answers None, and a broken registry reads as 'no such command'."""
+
+        def _broken():
+            raise RegistryError("command registry x is not JSON")
+
+        monkeypatch.setattr(lookup, "load_registry", _broken)
+        with pytest.raises(RegistryError, match="not JSON"):
+            lookup.lookup_command("audit")
 
 
 class TestMultiWordMatching:

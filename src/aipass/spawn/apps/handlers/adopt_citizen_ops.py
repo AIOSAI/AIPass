@@ -3,7 +3,7 @@
 # Description: adopt-citizen handler — plan and apply moving a citizen whole into another project
 # Version: 1.0.0
 # Created: 2026-11-08
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Move an existing citizen, memory and registry row with ids kept, into another project root.
@@ -25,6 +25,7 @@ from aipass.spawn.apps.handlers.json import json_handler
 from aipass.spawn.apps.handlers.passport_migration import repo_root
 from aipass.spawn.apps.handlers.registry import (
     branches_as_list,
+    entry_path,
     fleet_rows,
     load_registry,
     registry_lock,
@@ -132,7 +133,7 @@ def plan_adoption(citizen, target_root):
         blocked.append(f"'{name}' is a core citizen ({CORE_REGISTRY}); a core citizen never leaves AIPass")
         return plan
     source_root = src_reg.resolve().parent
-    source_dir = (source_root / row.get("path", "")).resolve()
+    source_dir = (source_root / entry_path(row)).resolve()
     plan["source_dir"] = str(source_dir)
     passport_path = source_dir / ".trinity" / "passport.json"
     passport = json_handler.read_json(passport_path) if passport_path.is_file() else None
@@ -327,6 +328,6 @@ def _prove(name, dest, reg_path):
     citizen_id = passport.get("citizenship", {}).get("citizen_id")
     return {
         "citizen_id_matches_row": bool(row) and citizen_id == row.get("registry_id"),
-        "registry_resolves_dest": bool(row) and (reg_path.parent / row.get("path", "")).resolve() == dest.resolve(),
+        "registry_resolves_dest": bool(row) and (reg_path.parent / entry_path(row)).resolve() == dest.resolve(),
         "drone_resolution": "not proven here: drone finds the name once its root is declared (see follow-ups)",
     }

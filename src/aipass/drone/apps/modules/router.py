@@ -3,7 +3,7 @@
 # Description: Command routing logic for the drone module
 # Version: 1.0.2
 # Created: 2026-03-09
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -120,13 +120,7 @@ def route_command(
 
 def print_introspection():
     """Display module introspection info."""
-    try:
-        from aipass.cli.apps.modules.display import console
-    except ImportError:
-        logger.warning("CLI console not available, using fallback")
-        from rich.console import Console
-
-        console = Console()
+    from aipass.cli.apps.modules.display import console
 
     console.print()
     console.print("[bold cyan]router Module[/bold cyan]")

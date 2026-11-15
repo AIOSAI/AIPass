@@ -3,7 +3,7 @@
 # Description: Git workflow module — PR, status, sync, lock management
 # Version: 1.18.1
 # Created: 2026-03-17
-# Modified: 2026-11-11
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -1403,15 +1403,9 @@ def _tier_commands(tier: str) -> list[str]:
 
 
 def _get_console():
-    try:
-        from aipass.cli.apps.modules.display import console
+    from aipass.cli.apps.modules.display import console
 
-        return console
-    except ImportError:
-        logger.warning("CLI console not available, using fallback")
-        from rich.console import Console
-
-        return Console()
+    return console
 
 
 def print_introspection() -> None:

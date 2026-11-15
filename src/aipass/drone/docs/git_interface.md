@@ -170,7 +170,9 @@ and logs the operation through the json service as `uncommit`. Pinned by `TestUn
 `commit --all` stages the whole repo, which is the correct default since dispatched agents work
 across several branch directories. Before it stages, it runs ruff `check` as a gate over whichever
 of `src/` and `tests/` exist at the repo root (an external project keeps its tests under
-`src/<pkg>/`), and a lint-dirty tree is refused with nothing changed. Only after the gate passes do
+`src/<pkg>/`), and a lint-dirty tree is refused with nothing changed. ruff is looked for beside the
+running Python first, then on PATH, then in `<repo>/.venv/bin`; when none has it the commit is refused
+by name (a repo with neither `src/` nor `tests/` has nothing to lint and passes). Only after the gate passes do
 `check --fix` and `format` run, and only on the Python files `git status` lists as changed; the
 result's stdout names every file they rewrote. Then pytest runs for every branch whose files changed, mapping a changed file to
 its branch by walking up for `.trinity/`. Templates ship complete branch skeletons, so the

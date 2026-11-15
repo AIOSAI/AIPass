@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_handler.py
 # Description: Handler for registry file operations
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-09
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -290,6 +290,7 @@ def find_registry() -> Path:
             if hit is not None:
                 if _registry_matches_credential(hit):
                     return hit
+                logger.info("find_registry: skipping %s, its id does not match the caller's passport", hit)
                 continue
 
     hit = _get_aipass_home_registry_path()
@@ -410,17 +411,17 @@ def _load_registry_data(registry_path: Path) -> Dict[str, Any]:
     try:
         data = _read_registry_json(registry_path)
     except PermissionError as e:
-        raise RegistryPermissionError(f"Permission denied reading registry: {e}")
+        raise RegistryPermissionError(f"Permission denied reading registry {registry_path}: {e}")
     except json.JSONDecodeError as e:
-        raise RegistryCorruptError(f"Registry file is corrupted: {e}")
+        raise RegistryCorruptError(f"Registry file {registry_path} is corrupted: {e}")
     except Exception as e:
-        raise RegistryCorruptError(f"Failed to read registry: {e}")
+        raise RegistryCorruptError(f"Failed to read registry {registry_path}: {e}")
 
     if not isinstance(data, dict):
-        raise RegistryCorruptError("Registry must be a JSON object")
+        raise RegistryCorruptError(f"Registry {registry_path} must be a JSON object")
 
     if "branches" not in data:
-        raise RegistryCorruptError("Registry missing 'branches' field")
+        raise RegistryCorruptError(f"Registry {registry_path} missing 'branches' field")
 
     branches_raw = data["branches"]
     if isinstance(branches_raw, list):
@@ -442,7 +443,7 @@ def _load_registry_data(registry_path: Path) -> Dict[str, Any]:
             branches_dict[name] = entry
         data["branches"] = branches_dict
     elif not isinstance(branches_raw, dict):
-        raise RegistryCorruptError("Registry 'branches' must be a list or dict")
+        raise RegistryCorruptError(f"Registry {registry_path} 'branches' must be a list or dict")
 
     return data
 
@@ -565,7 +566,7 @@ def get_all_branches(
         primary = load_registry()
         for name, branch in primary.get("branches", {}).items():
             merged[name] = branch
-    except (RegistryNotFoundError, RegistryCorruptError, RegistryPermissionError) as exc:
+    except RegistryNotFoundError as exc:
         logger.warning("get_all_branches: primary registry unavailable: %s", exc)
 
     home_path = _get_aipass_home_registry_path()
@@ -576,7 +577,7 @@ def get_all_branches(
             for name, branch in home_data.get("branches", {}).items():
                 if name not in merged:
                     merged[name] = branch
-        except (RegistryNotFoundError, RegistryCorruptError, RegistryPermissionError) as exc:
+        except RegistryNotFoundError as exc:
             logger.warning("get_all_branches: AIPass home registry unavailable: %s", exc)
 
     # The one place both sides of a collision are visible, so the shadowing is named here.
@@ -614,7 +615,7 @@ def get_branch_by_name(name: str) -> Optional[Dict[str, Any]]:
         branch = registry.get("branches", {}).get(lower_name)
         if branch is not None:
             return branch
-    except (RegistryNotFoundError, RegistryCorruptError, RegistryPermissionError) as exc:
+    except RegistryNotFoundError as exc:
         logger.warning("get_branch_by_name: primary registry unavailable for '%s': %s", name, exc)
 
     home_path = _get_aipass_home_registry_path()
@@ -626,7 +627,7 @@ def get_branch_by_name(name: str) -> Optional[Dict[str, Any]]:
             if branch is not None:
                 return branch
             # A miss here is not an answer: returning it would hide the declared roots below.
-        except (RegistryNotFoundError, RegistryCorruptError, RegistryPermissionError) as exc:
+        except RegistryNotFoundError as exc:
             logger.warning("get_branch_by_name: AIPass home registry unavailable for '%s': %s", name, exc)
 
     for entry in _external_branches():
@@ -647,7 +648,7 @@ def get_branch_with_registry(name: str) -> Optional[tuple]:
         branch = registry.get("branches", {}).get(lower_name)
         if branch is not None:
             return branch, primary_path
-    except (RegistryNotFoundError, RegistryCorruptError, RegistryPermissionError) as exc:
+    except RegistryNotFoundError as exc:
         logger.warning("get_branch_with_registry: primary registry unavailable for '%s': %s", name, exc)
         primary_path = None
 
@@ -658,7 +659,7 @@ def get_branch_with_registry(name: str) -> Optional[tuple]:
             branch = home_data.get("branches", {}).get(lower_name)
             if branch is not None:
                 return branch, home_path
-        except (RegistryNotFoundError, RegistryCorruptError, RegistryPermissionError) as exc:
+        except RegistryNotFoundError as exc:
             logger.warning("get_branch_with_registry: AIPass home registry unavailable for '%s': %s", name, exc)
 
     for entry in _external_branches():

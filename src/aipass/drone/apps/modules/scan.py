@@ -3,7 +3,7 @@
 # Description: Module orchestrator for branch command scanning
 # Version: 1.0.2
 # Created: 2026-03-17
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Module orchestrator for branch command scanning.
@@ -59,13 +59,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
 
 def print_introspection() -> None:
     """Display module introspection info."""
-    try:
-        from aipass.cli.apps.modules.display import console
-    except ImportError:
-        logger.warning("CLI console not available, using fallback")
-        from rich.console import Console
-
-        console = Console()
+    from aipass.cli.apps.modules.display import console
 
     console.print()
     console.print("[bold cyan]scan Module[/bold cyan]")
@@ -87,13 +81,7 @@ def print_introspection() -> None:
 
 def print_help() -> None:
     """Print help for the scan module."""
-    try:
-        from aipass.cli.apps.modules.display import console
-    except ImportError:
-        logger.warning("CLI console not available, using fallback")
-        from rich.console import Console
-
-        console = Console()
+    from aipass.cli.apps.modules.display import console
 
     console.print("scan -- Branch command scanning")
     console.print()
@@ -116,12 +104,9 @@ def scan(target: str) -> list[dict] | None:
         branch_path = resolve_branch(target)
     except Exception as exc:
         logger.warning("scan: could not resolve '%s': %s", target, exc)
-        try:
-            from aipass.cli.apps.modules import err_console
+        from aipass.cli.apps.modules import err_console
 
-            err_console.print(f"scan: could not resolve '{target}': {exc}")
-        except ImportError as exc:
-            logger.warning("CLI err_console not available, skipping user-facing error: %s", exc)
+        err_console.print(f"scan: could not resolve '{target}': {exc}")
         return None
 
     help_errors: list[str] = []

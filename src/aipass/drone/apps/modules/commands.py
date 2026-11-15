@@ -3,7 +3,7 @@
 # Description: Module orchestrator for custom command shortcuts
 # Version: 1.0.2
 # Created: 2026-03-17
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """Module orchestrator for custom command shortcuts."""
@@ -129,13 +129,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
 
 def print_introspection() -> None:
     """Display module introspection info."""
-    try:
-        from aipass.cli.apps.modules.display import console
-    except ImportError:
-        logger.warning("CLI console not available, using fallback")
-        from rich.console import Console
-
-        console = Console()
+    from aipass.cli.apps.modules.display import console
 
     console.print()
     console.print("[bold cyan]commands Module[/bold cyan]")
@@ -153,13 +147,7 @@ def print_introspection() -> None:
 
 def print_help() -> None:
     """Print help for the commands module."""
-    try:
-        from aipass.cli.apps.modules.display import console
-    except ImportError:
-        logger.warning("CLI console not available, using fallback")
-        from rich.console import Console
-
-        console = Console()
+    from aipass.cli.apps.modules.display import console
 
     console.print("commands -- Custom command shortcuts")
     console.print()

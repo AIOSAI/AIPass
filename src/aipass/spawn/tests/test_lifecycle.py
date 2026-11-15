@@ -3,7 +3,7 @@
 # Description: Tests for spawn lifecycle commands (delete, retire-project, sync-registry)
 # Version: 1.3.0
 # Created: 2026-03-07
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/delete_ops.py and apps/handlers/sync_registry_ops.py."""
@@ -1152,7 +1152,7 @@ class TestHandleDelete:
             handle_delete(["--dry-run", "--yes", "@spawn"])
 
         combined = "".join(capsys.readouterr())
-        assert "Delete FAILED" in combined
+        assert "Delete refused" in combined
         assert "[dim]" not in combined
         assert "[/dim]" not in combined
         assert "(dry-run)" in combined

@@ -3,7 +3,7 @@
 # Description: Branch deletion — thin CLI layer for archive and deregister
 # Version: 1.3.1
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """Delete orchestrator for branch lifecycle management."""
@@ -115,7 +115,7 @@ def _print_summary(result: dict, dry_run: bool) -> None:
     elif result.get("unconfirmed"):
         error(f"Delete not run {mode}{branch}")
     else:
-        error(f"Delete FAILED {mode}{branch}")
+        error(f"Delete {'refused' if dry_run else 'FAILED'} {mode}{branch}")
 
     archive_path = result.get("archive_path", "")
     if archive_path:

@@ -3,24 +3,16 @@
 # Description: Rich output formatting for custom command registry
 # Version: 1.0.0
 # Created: 2026-03-17
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Rich output formatting for custom command registry operations."""
 
 from __future__ import annotations
 
-from aipass.prax import logger
-
-try:
-    from aipass.cli.apps.modules import console
-except ImportError:
-    logger.warning("CLI console not available, falling back to default Rich Console")
-    from rich.console import Console
-
-    console = Console()
-
 from rich.table import Table
+
+from aipass.cli.apps.modules import console
 
 from aipass.drone.apps.handlers.json import json_handler
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lookup.py
 # Description: Command lookup and matching for custom command shortcuts
-# Version: 1.0.3
+# Version: 1.1.0
 # Created: 2026-03-17
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """Command Lookup and Matching for Custom Commands."""
@@ -20,13 +20,8 @@ MODULE_NAME = "command_lookup"
 
 
 def lookup_command(name: str) -> dict[str, Any] | None:
-    """Look up a custom command by exact name."""
-    try:
-        registry = load_registry()
-        return registry.get("commands", {}).get(name)
-    except Exception as exc:
-        logger.error("[%s] Failed to look up command '%s': %s", MODULE_NAME, name, exc)
-        return None
+    """Look up a custom command by exact name; None is no such command, and a registry that cannot load raises."""
+    return load_registry().get("commands", {}).get(name)
 
 
 def match_command(args: list[str]) -> tuple[dict[str, Any], list[str]] | None:

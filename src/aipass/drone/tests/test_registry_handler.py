@@ -3,7 +3,7 @@
 # Description: Registry loading, lookup and credential verification
 # Version: 1.1.0
 # Created: 2026-03-14
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/registry_handler.py: registry loading, lookup and credential verification."""
@@ -240,6 +240,17 @@ class TestLoadRegistry:
 
         with pytest.raises(RegistryCorruptError, match="missing 'branches'"):
             load_registry()
+
+    @pytest.mark.parametrize("lookup", ["get_all_branches", "get_branch_by_name", "get_branch_with_registry"])
+    def test_a_corrupt_primary_raises_naming_the_file_and_never_reaches_home(self, registry_dir: Path, lookup: str):
+        """Mutant: the old (NotFound, Corrupt, Permission) catch logs and answers from the home registry."""
+        bad_file = registry_dir / "BAD_REGISTRY.json"
+        bad_file.write_text("{not valid json!!!", encoding="utf-8")
+        set_registry_path(bad_file)
+        args = () if lookup == "get_all_branches" else ("alpha",)
+
+        with pytest.raises(RegistryCorruptError, match=str(bad_file)):
+            getattr(registry_handler, lookup)(*args)
 
     def test_branches_wrong_type_raises_corrupt_error(self, registry_dir: Path):
         """branches field that is neither list nor dict triggers RegistryCorruptError."""

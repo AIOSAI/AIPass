@@ -3,7 +3,7 @@
 # Description: Tests for owner resolver and registry authority
 # Version: 1.0.2
 # Created: 2026-07-10
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/registry.py's owner-resolution functions."""
@@ -438,6 +438,23 @@ class TestIsProtectedLayers:
         protected, reason = is_protected("baud", branch_dir=branch, registry_path=reg)
         assert protected is True
         assert reason == "active citizen"
+
+    def test_an_unreadable_registry_answers_protected(self, tmp_path):
+        """Mutant: the old except logs INFO and answers (False, ''), letting the delete through blind."""
+        reg = tmp_path / "AIPASS_REGISTRY.json"
+        reg.write_text("{not json", encoding="utf-8")
+        protected, reason = is_protected("baud", registry_path=reg)
+        assert protected is True
+        assert reason.startswith("protection unknown: the registry could not be read")
+
+    def test_an_unreadable_passport_answers_protected(self, tmp_path):
+        reg = self._registry(tmp_path, "baud", owner=False)
+        branch = tmp_path / "baud"
+        (branch / ".trinity").mkdir(parents=True)
+        (branch / ".trinity" / "passport.json").write_text("{not json", encoding="utf-8")
+        protected, reason = is_protected("baud", branch_dir=branch, registry_path=reg)
+        assert protected is True
+        assert reason.startswith("protection unknown: passport")
 
     def test_unregistered_branch_is_not_protected(self, tmp_path):
         """All three layers miss: an unregistered passport is deletable."""

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_file_ops.py
 # Description: Tests for file_ops handler
-# Version: 1.0.4
+# Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/file_ops.py."""
@@ -171,6 +171,21 @@ class TestCopyTemplate:
         result = (target / "image.bin").read_bytes()
         assert result == binary_data
         assert any("image.bin" in c and "binary" in c for c in copied)
+
+    def test_copy_template_refuses_an_undecodable_file_with_a_placeholder(
+        self, tmp_path: Path, mock_json_handler
+    ) -> None:
+        """Mutant: the old binary lane copies it, and the newborn ships {{BRANCH}} unrendered."""
+        _ = mock_json_handler
+        template = tmp_path / "template"
+        template.mkdir()
+        (template / "latin1.md").write_bytes("caf\xe9 {{BRANCH}}\n".encode("latin-1"))
+        target = tmp_path / "target"
+        target.mkdir()
+
+        with pytest.raises(ValueError, match="latin1.md is not UTF-8 text but carries"):
+            copy_template(template, target, REPLACEMENTS)
+        assert not (target / "latin1.md").exists()
 
 
 class TestWalk:

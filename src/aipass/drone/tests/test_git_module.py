@@ -3,7 +3,7 @@
 # Description: Tests for the @git module — routing, help, auth, scope footer, merge gate, gh verbs, untrack, release, label, alerts
 # Version: 1.6.1
 # Created: 2026-04-21
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/git_module.py: command routing, help, the auth gate and the verbs it fronts."""
@@ -512,7 +512,7 @@ class TestScopeFooter:
         monkeypatch.chdir(tmp_path)
         fake = _sp.CompletedProcess(args=["git"], returncode=128, stdout="", stderr="fatal: not a git repository")
         with patch("aipass.drone.apps.handlers.git.status_handler.subprocess.run", return_value=fake):
-            result = get_branch_status(tmp_path)
+            result = get_branch_status(tmp_path, repo_root=tmp_path)
 
         assert result["ok"] is False
         assert "git status error" in result["message"]

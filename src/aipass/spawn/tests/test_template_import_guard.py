@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_template_import_guard.py
 # Description: What the newborn's handler guard must survive on its very first import
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-08-30
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for templates/citizen/apps/handlers/__init__.py, the newborn's import-time access guard."""
@@ -13,7 +13,6 @@
 # sentry: no-test-needed(documentation) — docstrings on the guard's helper functions in the template
 
 import ast
-import importlib
 import subprocess
 import sys
 import textwrap
@@ -27,7 +26,6 @@ from aipass.spawn.tests.support_template_import_guard import (
     _ARM_THE_ROUTE,
     _BUILD_PROBE_PATH,
     _CONTROL_PROBE,
-    _DENY_REALPATH,
     _EMULATE_310,
     _PATHLIB_ROUTE_PROBE,
     _child_script,
@@ -130,7 +128,6 @@ _DELETE_CWD = (
 
 PORTABLE_WORLDS = {
     "getcwd-denied": _INJECT_DEAD_CWD,
-    "realpath-denied": _DENY_REALPATH,
 }
 
 _NO_WORLD_AT_ALL = (
@@ -407,108 +404,8 @@ def test_newborn_admits_its_own_code(class_name, tmp_path):
     assert result.stdout.strip() == "ADMITTED"
 
 
-def _unguarded_module_level_resolves(source: str) -> list:
-    """Line numbers of resolve() calls that run at import and are not guarded (module level, outside any try)."""
-    tree = ast.parse(source)
-
-    guarded = {
-        getattr(node, "lineno")
-        for block in ast.walk(tree)
-        if isinstance(block, ast.Try)
-        for node in ast.walk(block)
-        if hasattr(node, "lineno")
-    }
-
-    # Walk what RUNS at import: function bodies are pruned, defaults and decorators are not.
-    # Limit: a module-level call into a local function is not followed (needs a call graph).
-    found = []
-    pending: list[ast.AST] = list(tree.body)
-    while pending:
-        node = pending.pop()
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            pending.extend(getattr(node, "decorator_list", []))
-            args = getattr(node, "args", None)
-            if args is not None:
-                pending.extend(args.defaults)
-                pending.extend(d for d in args.kw_defaults if d is not None)
-            continue
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "resolve"
-            and node.lineno not in guarded
-        ):
-            found.append(node.lineno)
-        pending.extend(ast.iter_child_nodes(node))
-
-    return sorted(found)
-
-
-class TestImportTimeRootDerivationSurvivesADeadCwd:
-    """A newborn must not inherit a cwd read that runs at import.
-
-    At module level a resolve() is guarded;
-    inside a function it stays and raises, because a wrong-but-plausible root is worse."""
-
-    def test_no_unguarded_module_level_resolve_anywhere_in_the_template(self):
-        """The species, not the site — so a newborn cannot re-inherit the idiom."""
-        offenders = []
-        for path in _swept_py_files(get_template_dir("specialist")):
-            # Render first: skipping unparseable placeholder files would exempt the likeliest offenders.
-            offenders += [
-                f"{path.name}:{line}"
-                for line in _unguarded_module_level_resolves(_render(path.read_text(encoding="utf-8")))
-            ]
-
-        assert offenders == [], (
-            f"unguarded module-level resolve() in the template — this runs at import on every newborn: {offenders}"
-        )
-
-    @pytest.mark.parametrize(
-        "label,source,expected",
-        [
-            (
-                "module-level unguarded — the defect",
-                "from pathlib import Path\nROOT = Path(__file__).resolve().parents[3]\n",
-                [2],
-            ),
-            (
-                "module-level guarded — the cure",
-                "from pathlib import Path\ntry:\n    ROOT = Path(__file__).resolve().parents[3]\n"
-                "except OSError:\n    ROOT = Path(__file__).parents[3]\n",
-                [],
-            ),
-            (
-                "inside a function — deliberately out of scope",
-                "from pathlib import Path\ndef root():\n    return Path(__file__).resolve().parents[3]\n",
-                [],
-            ),
-            (
-                "default argument — written in a def, RUN at import",
-                "from pathlib import Path\ndef root(base=Path(__file__).resolve()):\n    return base\n",
-                [2],
-            ),
-            (
-                "keyword-only default — same, one syntax over",
-                "from pathlib import Path\ndef root(*, base=Path(__file__).resolve()):\n    return base\n",
-                [2],
-            ),
-            (
-                "decorator — also evaluated at import",
-                "from pathlib import Path\n@register(Path(__file__).resolve())\ndef root():\n    pass\n",
-                [2],
-            ),
-        ],
-    )
-    def test_the_detector_can_tell_the_three_cases_apart(self, label, source, expected):
-        """The detector's own control — it must be able to say yes AND no."""
-        assert _unguarded_module_level_resolves(source) == expected, label
-
-
-class TestOptionalPeerImportsAreWideEnough:
-    """A peer branch being broken is allowed; dying of it is not.
-
-    A peer's import can raise OSError, so the fallback catches it; not Exception, so a real bug stays loud."""
+class TestABrokenMemoryStopsTheMint:
+    """@memory ships in the same package, so a meta-tab import that fails is a fault, never empty tabs."""
 
     @staticmethod
     def _deny(module_prefix, exc):
@@ -523,60 +420,19 @@ class TestOptionalPeerImportsAreWideEnough:
 
         return _Denier
 
-    @staticmethod
-    def _todos_meta_line(branch_root):
-        """The local.json line carrying todos_meta, whole, as it stands on disk."""
-        text = (branch_root / ".trinity" / "local.json").read_text(encoding="utf-8")
-        return next(line for line in text.splitlines() if '"todos_meta"' in line)
-
     @pytest.mark.parametrize(
         "exc",
-        [
-            FileNotFoundError(2, "No such file or directory"),
-            PermissionError(13, "Permission denied"),
-            ImportError("@memory is not installed"),
-        ],
-        ids=["dead-cwd", "unreadable", "absent"],
+        [ImportError("@memory is not installed"), PermissionError(13, "Permission denied"), ValueError("peer bug")],
+        ids=["absent", "unreadable", "bug"],
     )
-    def test_meta_tabs_fall_back_when_memory_is_broken_or_absent(self, exc, monkeypatch, tmp_path):
-        """Through the public mint; the empty-tab fallback leaves the template's todos_meta line as is."""
+    def test_the_mint_raises_before_the_copy(self, exc, monkeypatch, tmp_path):
+        """Mutant: the old (ImportError, OSError) catch answers {} and mints a citizen with empty tabs."""
         denier = self._deny("aipass.memory", exc)
         monkeypatch.setattr(sys, "meta_path", [denier] + sys.meta_path)
         for name in [m for m in sys.modules if m.startswith("aipass.memory")]:
             monkeypatch.delitem(sys.modules, name, raising=False)
 
-        try:
-            result = core.spawn_agent(
-                str(tmp_path / "newbie"),
-                role="Test",
-                purpose="meta-tab fallback",
-                registry_path=str(tmp_path / "AIPASS_REGISTRY.json"),
-            )
-        except (ImportError, OSError) as err:
-            pytest.fail(f"a peer raising {type(exc).__name__} took spawn's mint down instead of falling back: {err}")
-
-        assert result["success"] is True
-        template_root = get_template_dir(get_available_classes()[0])
-        assert self._todos_meta_line(tmp_path / "newbie") == self._todos_meta_line(template_root)
-
-    def test_the_denier_actually_denies(self, monkeypatch):
-        """Negative control: an inert finder would make the pins above vacuous."""
-        denier = self._deny("aipass.memory", FileNotFoundError(2, "denied"))
-        monkeypatch.setattr(sys, "meta_path", [denier] + sys.meta_path)
-        for name in [m for m in sys.modules if m.startswith("aipass.memory")]:
-            monkeypatch.delitem(sys.modules, name, raising=False)
-
-        with pytest.raises(FileNotFoundError):
-            importlib.import_module("aipass.memory.apps.modules.door_tab_renderer")
-
-    def test_a_real_programming_error_is_still_fatal(self, monkeypatch, tmp_path):
-        """The width is OSError, not Exception — a broken peer must stay loud."""
-        denier = self._deny("aipass.memory", ValueError("peer has a bug"))
-        monkeypatch.setattr(sys, "meta_path", [denier] + sys.meta_path)
-        for name in [m for m in sys.modules if m.startswith("aipass.memory")]:
-            monkeypatch.delitem(sys.modules, name, raising=False)
-
-        with pytest.raises(ValueError, match="peer has a bug"):
+        with pytest.raises(type(exc)):
             core.spawn_agent(
                 str(tmp_path / "newbie"),
                 role="Test",
