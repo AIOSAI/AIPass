@@ -3,7 +3,7 @@
 # Description: Gap detection, missed-window enumeration, catch-up queue and drain policy
 # Version: 1.1.0
 # Created: 2026-09-08
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -15,6 +15,8 @@ Reference: docs/recovery_and_catch_up.md
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Tuple
+
+import psutil
 
 from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
@@ -39,11 +41,7 @@ class BootTimeUnavailable(Exception):
 def boot_time() -> datetime:
     """When did this host last boot? Raises BootTimeUnavailable if it cannot be known."""
     try:
-        import psutil
-
         return datetime.fromtimestamp(psutil.boot_time())
-    except ImportError:
-        logger.info("[recovery] psutil unavailable, trying /proc/stat")
     except (OSError, ValueError, OverflowError) as e:
         logger.warning("[recovery] psutil.boot_time() unreadable: %s", e)
 

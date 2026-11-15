@@ -3,7 +3,7 @@
 # Description: Daemon runstate tracking and due-logic for decentralized scheduler
 # Version: 1.8.0
 # Created: 2026-06-15
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -12,13 +12,13 @@ Daemon runstate — tracks last_run/next_run per job and evaluates due-ness.
 
 import json
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import AbstractSet, Optional
 
 from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
-from aipass.daemon.apps.handlers.module_root import module_file
 
-_DAEMON_ROOT = module_file(__file__).parents[3]  # src/aipass/daemon/
+_DAEMON_ROOT = Path(__file__).resolve().parents[3]  # src/aipass/daemon/
 RUNSTATE_FILE = _DAEMON_ROOT / "daemon_json" / "daemon_runstate.json"
 
 

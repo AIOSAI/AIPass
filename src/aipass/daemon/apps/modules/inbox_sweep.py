@@ -3,7 +3,7 @@
 # Description: Fleet inbox sweep — wake branches sitting on mail unread past 24h
 # Version: 1.4.0
 # Created: 2026-08-11
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -99,12 +99,7 @@ def _apply_wake_policy(entries: List[dict]) -> None:
     The scanner reports mailbox state; eligibility to be woken is decided here,
     against the same blocklist wake_branch itself enforces.
     """
-    try:
-        from aipass.ai_mail.apps.modules.door_wake import is_wake_blocked
-    # OSError, not only ImportError: the import raises FileNotFoundError under a dead working directory.
-    except (ImportError, OSError) as e:
-        logger.warning("[inbox_sweep] Wake blocklist unavailable, skipping policy check: %s", e)
-        return
+    from aipass.ai_mail.apps.modules.door_wake import is_wake_blocked
 
     for entry in entries:
         if entry["skip_reason"] is None and is_wake_blocked(entry["owner"]):
@@ -248,22 +243,14 @@ def run_sweep(dry_run: bool = False, stale_hours: int = DEFAULT_STALE_HOURS, lim
 
 
 def _parse_int_flag(args: List[str], flag: str, default: int) -> int:
-    """Read a positive integer following `flag`. Falls back to default; below 1 a slice would bypass the cap."""
+    """Read a positive integer following `flag`, or default when absent; below 1 a slice would bypass the cap."""
     if flag not in args:
         return default
     position = args.index(flag)
-    if position + 1 >= len(args):
-        logger.info("[inbox_sweep] %s given without a value, using %d", flag, default)
-        return default
-    try:
-        value = int(args[position + 1])
-    except ValueError:
-        logger.info("[inbox_sweep] %s value %r is not an integer, using %d", flag, args[position + 1], default)
-        return default
-    if value < 1:
-        logger.info("[inbox_sweep] %s value %d is below 1, using %d", flag, value, default)
-        return default
-    return value
+    raw = args[position + 1] if position + 1 < len(args) else ""
+    if not raw.isdecimal() or int(raw) < 1:
+        raise ValueError(f"{flag} needs a whole number of 1 or more, got {raw!r}")
+    return int(raw)
 
 
 def handle_command(command: str, args: List[str]) -> bool:

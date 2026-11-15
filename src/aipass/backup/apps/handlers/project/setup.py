@@ -3,7 +3,7 @@
 # Description: Project setup handler — scaffold .backup/ directory in target
 # Version: 1.1.2
 # Created: 2026-04-16
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """Project setup handler."""
@@ -11,13 +11,12 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..path.module_paths import branch_root
 from ..audit import trail
 from ..json import json_handler
 from ..path import builder
 from .config import DEFAULTS
 
-_TEMPLATE_PATH = branch_root(__file__, 3) / "templates" / "backupignore.template"
+_TEMPLATE_PATH = Path(__file__).resolve().parents[3] / "templates" / "backupignore.template"
 
 
 def _build_backupignore() -> str:

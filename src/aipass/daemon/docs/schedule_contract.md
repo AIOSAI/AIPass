@@ -66,6 +66,9 @@ a minute 0-59 for `hourly`) is refused at discovery and logged with the file and
 When a schedule file cannot be read, or one of its jobs is refused, that owner's existing
 runstate rows are kept: the tick prunes rows only for owners whose file was read whole, so a
 half-read schedule never erases its jobs' history.
+
+Every refused file or job is also told to the user, with its reason: `drone @daemon queue` lists
+it as a **Refused, not scheduled** warning (and `--json` under `refused`), and each tick prints it.
 | `rotation` | `time: "HH:MM"` | Daily window — but wakes the next citizen on the fleet roster, not the owner. See [docs/rounds.md](rounds.md). |
 
 ### Optional schedule fields

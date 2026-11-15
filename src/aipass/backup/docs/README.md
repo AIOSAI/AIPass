@@ -15,5 +15,5 @@ live command surface is `drone @backup` and `drone @backup --help`.
 | [drive_sync.md](drive_sync.md) | The optional Drive lane and what is verified |
 | [cli.md](cli.md) | Router behaviour, flags by verb, and the legacy entry form |
 | [module_fence.md](module_fence.md) | The handlers access guard and its test rules |
-| [path_resolution.md](path_resolution.md) | Why nothing here calls `resolve()` at import |
+| [path_resolution.md](path_resolution.md) | What reads the cwd, the dead-cwd pins, and where backups land |
 | [tests.md](tests.md) | Running the suite, and what it is careful about |

@@ -3,7 +3,7 @@
 # Description: Tests for registry-led citizen discovery and .daemon/ schedule job discovery
 # Version: 1.3.1
 # Created: 2026-06-15
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/schedule/discovery.py — citizens from the registries, jobs from their .daemon/."""
@@ -1034,6 +1034,17 @@ class TestSkippedOwners:
         (one_branch / "schedule.json").write_text(json.dumps({"jobs": [KEEP, bad]}), encoding="utf-8")
         discover_jobs(skipped_owners=skipped)
         assert skipped == {"@testbranch"}
+
+    def test_a_refused_job_and_an_unreadable_file_are_told_with_their_reason(self, one_branch):
+        refusals = []
+        bad = {"id": "bad", "schedule": {"type": "biweekly"}, "prompt": "x"}
+        (one_branch / "a_bad.json").write_text("{oops", encoding="utf-8")
+        (one_branch / "schedule.json").write_text(json.dumps({"jobs": [KEEP, bad]}), encoding="utf-8")
+        assert [j["id"] for j in discover_jobs(refusals=refusals)] == ["keep"]
+        assert refusals == [
+            f"{one_branch / 'a_bad.json'}: not a readable schedule (bad JSON, not an object, or no jobs list)",
+            f"Job 'bad' has invalid schedule type 'biweekly' in {one_branch / 'schedule.json'}",
+        ]
 
     def test_a_clean_owner_is_not_named(self, one_branch):
         skipped = set()

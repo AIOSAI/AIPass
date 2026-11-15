@@ -30,8 +30,7 @@ src/aipass/daemon/
 │   │   │                          # red_flag_detector, report_generator
 │   │   ├── cli/arg_gate.py        # Refuses unknown verbs and arguments by name
 │   │   ├── update/data_loader.py  # Data loading for the digest
-│   │   ├── json/json_handler.py   # The json shim every branch shares
-│   │   └── module_root.py         # Module paths that survive a dead cwd
+│   │   └── json/json_handler.py   # The json shim every branch shares
 │   └── extensions/                # Extension point (empty)
 ├── .daemon/schedule.json          # My own jobs, same contract as every citizen's
 ├── daemon_json/                   # Tracking data, including daemon_runstate.json

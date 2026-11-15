@@ -3,7 +3,7 @@
 # Description: Tests for the drone @daemon run module
 # Version: 1.3.1
 # Created:2026-06-15
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/run.py — the decentralized scheduler tick behind drone @daemon run."""
@@ -193,7 +193,7 @@ class TestPrunePersistence:
         """A citizen mid-edit (bad JSON, a refused job) must not lose its history, or its once jobs re-fire."""
         runstate = {"jobs": {"@backup/once": {"completed": "2026-09-01T00:00:00"}, "@commons/live": {}}}
 
-        def discover(skipped_owners):
+        def discover(skipped_owners, refusals):
             skipped_owners.add("@backup")
             return [live_job()]
 

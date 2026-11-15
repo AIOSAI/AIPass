@@ -3,7 +3,7 @@
 # Description: DAEMON Data Loading Handler
 # Version: 1.2.0
 # Created: 2026-01-29
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -11,13 +11,13 @@ Handler for loading DAEMON data from inbox and local files.
 """
 
 import json
+from pathlib import Path
 from typing import Dict, Any, List
 
 from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
-from aipass.daemon.apps.handlers.module_root import module_file
 
-_DAEMON_ROOT = module_file(__file__).parents[3]  # src/aipass/daemon/
+_DAEMON_ROOT = Path(__file__).resolve().parents[3]  # src/aipass/daemon/
 INBOX_PATH = _DAEMON_ROOT / ".ai_mail.local" / "inbox.json"
 
 

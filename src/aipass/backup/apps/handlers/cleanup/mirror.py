@@ -3,26 +3,17 @@
 # Description: Mirror cleanup handler — removes snapshot files whose source no longer exists
 # Version: 2.1.0
 # Created: 2026-06-12
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Mirror cleanup handler — removes snapshot files whose source no longer exists."""
 
-import stat
 from pathlib import Path
 
 from aipass.prax import logger
 
 from ..audit import trail
 from ..report.result import BackupResult
-
-
-def _make_writable(path: Path) -> None:
-    """Best-effort chmod to make a file writable before deletion."""
-    try:
-        path.chmod(stat.S_IWRITE | stat.S_IREAD)
-    except OSError as e:
-        logger.info(f"[cleanup] Could not chmod {path}: {e}")
 
 
 def _should_delete(backup_file: Path, backup_path: Path, source_dir: Path) -> str | None:
@@ -55,7 +46,6 @@ def _delete_stale_files(
                 result.files_deleted += 1
                 continue
 
-            _make_writable(backup_file)
             backup_file.unlink()
             result.files_deleted += 1
         except PermissionError as e:

@@ -6,51 +6,9 @@
   },
   "bypass": [
     {
-      "file": "apps/handlers/drive/client.py",
-      "standard": "handlers",
-      "reason": "Auth routing requires importing @api gateway module -- per Phase 4 spec",
-      "pattern": "Handler imports modules"
-    },
-    {
-      "file": "apps/handlers/drive/client.py",
-      "standard": "diagnostics",
-      "reason": "Type errors from dynamic import guard for Google API -- get_drive_service returns object, Drive API methods unresolvable at static analysis time",
-      "pattern": "type errors"
-    },
-    {
-      "file": "apps/handlers/drive/upload.py",
-      "standard": "diagnostics",
-      "reason": "googleapiclient.http is a runtime dependency not installed in dev -- guarded by try/except ImportError",
-      "pattern": "could not be resolved"
-    },
-    {
-      "file": "apps/handlers/drive/client.py",
-      "standard": "unused_function",
-      "reason": "Internal helpers called at runtime by upload handler -- not statically reachable from module layer",
-      "pattern": "unused function"
-    },
-    {
       "file": "apps/handlers/drive/tracker.py",
       "standard": "unused_function",
       "reason": "clean_tracker is called during sync when limit=0 -- runtime path not statically reachable",
-      "pattern": "unused function"
-    },
-    {
-      "file": "apps/handlers/path/builder.py",
-      "standard": "unused_function",
-      "reason": "Legacy path builders (build_versioned_path, build_log_dir, build_drive_path) kept for backward compat and future use",
-      "pattern": "unused function"
-    },
-    {
-      "file": "apps/handlers/project/config.py",
-      "standard": "unused_function",
-      "reason": "save_project_config is public API surface for settings module (deferred)",
-      "pattern": "unused function"
-    },
-    {
-      "file": "apps/handlers/project/registry.py",
-      "standard": "unused_function",
-      "reason": "list_projects is public API surface for status/discovery commands",
       "pattern": "unused function"
     },
     {

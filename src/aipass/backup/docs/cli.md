@@ -23,7 +23,9 @@ never falls through to a real backup.
 point, so its process CWD is its own branch directory. Drone exports
 `AIPASS_CALLER_CWD`; `handlers/path/caller.py` re-anchors every user-supplied
 relative path to it, so `drone @backup share docs/notes.md` means the caller's
-`docs/notes.md`. Absolute paths are untouched.
+`docs/notes.md`. Absolute paths are untouched. Without `AIPASS_CALLER_CWD`
+(a direct run outside drone) a relative path is refused with an error; it is
+never resolved against backup's own directory.
 
 ## Flags, by verb
 

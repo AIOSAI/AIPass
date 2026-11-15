@@ -19,6 +19,7 @@ It reads every active branch's `.ai_mail.local/inbox.json`, finds mailboxes hold
 | Managers | Never woken — reported as skipped, their mail lands live |
 | Blocklist | `@devpulse` and anything in ai_mail's `WAKE_BLOCKLIST` is skipped |
 | Cap | 5 wakes per pass (`--limit N`); entries are oldest-first, and deferred branches are named in the output, not silently dropped |
+| Bad value | `--hours` or `--limit` with no value, a non-number or below 1 is refused with an error; nothing runs |
 | Wake model | `sonnet`, staggered 2s apart |
 
 **A hand tool, not scheduled.** Waking up to five agents every morning costs tokens for little, and the nightly rounds take each citizen's inbox to zero, one citizen a night. Run it by hand; `drone @daemon inbox-sweep --dry-run` shows who is sitting on stale mail without waking anyone.

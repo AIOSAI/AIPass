@@ -3,7 +3,7 @@
 # Description: Drive sync module — uploads the snapshot store to Google Drive
 # Version: 2.6.3
 # Created: 2026-04-17
-# Modified: 2026-10-31
+# Modified: 2026-11-15
 # =============================================
 
 """Drive Sync Module — orchestrates file upload to Google Drive.
@@ -15,6 +15,8 @@ Reference: docs/drive_sync.md
 import sys
 import time
 from pathlib import Path
+
+from rich.progress import Progress
 
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, mark_command_failed
@@ -254,23 +256,18 @@ def _drive_sync_run(
     task = None
 
     if show_panels:
-        try:
-            from rich.progress import Progress
+        progress = Progress(console=console)
+        progress.start()
+        task = progress.add_task(
+            "Uploading to Drive...",
+            total=len(files_to_upload),
+        )
 
-            progress = Progress(console=console)
-            progress.start()
-            task = progress.add_task(
-                "Uploading to Drive...",
-                total=len(files_to_upload),
-            )
+        def _advance():
+            if progress is not None and task is not None:
+                progress.advance(task)
 
-            def _advance():
-                if progress is not None and task is not None:
-                    progress.advance(task)
-
-            progress_fn = _advance
-        except ImportError:
-            logger.info("Rich progress not available for Drive upload display")
+        progress_fn = _advance
 
     try:
         batch_result = upload_batch(

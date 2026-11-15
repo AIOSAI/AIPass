@@ -3,7 +3,7 @@
 # Description: Project registry handler — load/register/lookup backup projects
 # Version: 1.2.0
 # Created: 2026-04-16
-# Modified: 2026-10-21
+# Modified: 2026-11-15
 # =============================================
 
 """Project registry handler."""
@@ -12,9 +12,8 @@ from pathlib import Path
 
 from ..audit import trail
 from ..json import json_handler
-from ..path.module_paths import branch_root
 
-REGISTRY_PATH = branch_root(__file__, 3) / "backup_json" / "project_registry.json"
+REGISTRY_PATH = Path(__file__).resolve().parents[3] / "backup_json" / "project_registry.json"
 
 
 def _read_registry() -> dict:

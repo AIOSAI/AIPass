@@ -121,7 +121,7 @@ Depth lives in [docs/](docs/), one page per lane or handler group:
 | [drive_sync.md](docs/drive_sync.md) | The Drive lane, and what is verified |
 | [cli.md](docs/cli.md) | Router behaviour, flags by verb, legacy entry form |
 | [module_fence.md](docs/module_fence.md) | The handlers access guard |
-| [path_resolution.md](docs/path_resolution.md) | Why nothing here resolves at import |
+| [path_resolution.md](docs/path_resolution.md) | What reads the cwd, and where backups land |
 | [tests.md](docs/tests.md) | Running the suite |
 
 ---

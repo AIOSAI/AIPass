@@ -3,7 +3,7 @@
 # Description: Prune handler — finds and removes stored copies whose project path the ignore spec now matches
 # Version: 1.0.1
 # Created: 2026-10-16
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """Prune handler — stored copies of paths the ignore spec now matches.
@@ -13,7 +13,6 @@ Reference: docs/store_cleanup.md
 
 import os
 import shutil
-import stat
 from pathlib import Path
 
 import pathspec
@@ -124,14 +123,6 @@ def find_prunable(project_root: str) -> dict:
     return found
 
 
-def _make_writable(path: Path) -> None:
-    """Best-effort chmod so a read-only stored copy can be removed."""
-    try:
-        path.chmod(stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
-    except OSError as e:
-        logger.info(f"[prune] Could not chmod {path}: {e}")
-
-
 def _remove(lane: str, item: dict) -> None:
     """Remove one candidate: a snapshot file, or a versioned file-folder's files and diffs.
 
@@ -139,13 +130,11 @@ def _remove(lane: str, item: dict) -> None:
     diffs belongs to a later project directory of the same name, and stays.
     """
     if lane == "snapshots":
-        _make_writable(item["path"])
         item["path"].unlink()
         return
     folder: Path = item["path"]
     for entry in folder.iterdir():
         if entry.is_file() or entry.is_symlink():
-            _make_writable(entry)
             entry.unlink()
     diffs = folder / f"{item['name']}_diffs"
     if diffs.is_dir():

@@ -3,7 +3,7 @@
 # Description: Unified job queue view (drone @daemon queue)
 # Version: 1.3.2
 # Created: 2026-06-25
-# Modified: 2026-11-10
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console
+from aipass.cli.apps.modules import console, warning
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.cli.arg_gate import gate
 from aipass.daemon.apps.handlers.schedule.discovery import discover_jobs
@@ -210,6 +210,12 @@ def _print_catch_up_queue(runstate: dict) -> None:
     console.print()
 
 
+def _print_refusals(refusals: list) -> None:
+    """Name every schedule file or job discovery refused: it is in no table above and never fires."""
+    for refusal in refusals:
+        warning(f"Refused, not scheduled: {refusal}")
+
+
 def _build_json_output(entries: list, runstate: Optional[dict] = None) -> dict:
     """Build frozen-schema JSON output for outside readers.
 
@@ -232,10 +238,12 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     if not args:
         json_handler.log_operation("queue_command", {"json": False})
-        jobs = discover_jobs()
+        refusals: list = []
+        jobs = discover_jobs(refusals=refusals)
         runstate = load_runstate()
         entries = _build_queue(jobs, runstate)
         _print_rich_table(entries)
+        _print_refusals(refusals)
         _print_catch_up_queue(runstate)
         logger.info("[queue] Queue displayed (%d jobs)", len(entries))
         return True
@@ -248,16 +256,19 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     json_handler.log_operation("queue_command", {"json": "--json" in args})
 
-    jobs = discover_jobs()
+    refusals = []
+    jobs = discover_jobs(refusals=refusals)
     runstate = load_runstate()
     entries = _build_queue(jobs, runstate)
 
     if "--json" in args:
         output = _build_json_output(entries, runstate)
+        output["refused"] = refusals
         # Rich would wrap at the console width, parse [] as markup and colour the JSON; each corrupts machine output.
         console.print(json.dumps(output, indent=2), soft_wrap=True, markup=False, highlight=False)
     else:
         _print_rich_table(entries)
+        _print_refusals(refusals)
         _print_catch_up_queue(runstate)
 
     logger.info("[queue] Queue displayed (%d jobs)", len(entries))

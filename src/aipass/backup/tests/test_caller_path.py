@@ -3,7 +3,7 @@
 # Description: Tests for caller-CWD path resolution across user-facing commands
 # Version: 1.0.8
 # Created: 2026-08-08
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/path/caller.py and caller-CWD resolution."""
@@ -63,19 +63,21 @@ class TestResolveCallerPath:
         assert resolve_caller_path(str(target)) == target.resolve()
         assert resolve_caller_path(target) == Path(target).resolve()
 
-    def test_unset_caller_env_resolves_against_process_cwd(self, tmp_path: Path, monkeypatch) -> None:
-        """Without the env var (direct invocation), process CWD is the caller."""
+    def test_unset_caller_env_refuses_a_relative_path(self, tmp_path: Path, monkeypatch) -> None:
+        """Without the env var a relative path raises, never resolves against the process cwd."""
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
 
-        assert resolve_caller_path("rel.txt") == (tmp_path / "rel.txt").resolve()
+        with pytest.raises(RuntimeError, match="AIPASS_CALLER_CWD is not set"):
+            resolve_caller_path("rel.txt")
 
-    def test_empty_caller_env_means_process_cwd_not_root(self, tmp_path: Path, monkeypatch) -> None:
-        """An empty AIPASS_CALLER_CWD is treated as unset, not as '/'."""
+    def test_empty_caller_env_raises_not_root_or_cwd(self, tmp_path: Path, monkeypatch) -> None:
+        """An empty AIPASS_CALLER_CWD is treated as unset: it raises, never '/' or the process cwd."""
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("AIPASS_CALLER_CWD", "")
 
-        assert caller_cwd() == tmp_path.resolve()
+        with pytest.raises(RuntimeError, match="AIPASS_CALLER_CWD is not set"):
+            caller_cwd()
 
     def test_caller_cwd_returns_the_exported_dir(self, tmp_path: Path, monkeypatch) -> None:
         """caller_cwd() returns exactly what drone exported."""

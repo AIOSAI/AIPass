@@ -3,7 +3,7 @@
 # Description: Tests for TDPLAN-0008 Phase 1 — scheduler bot daemon layer
 # Version: 1.2.2
 # Created: 2026-06-25
-# Modified: 2026-11-10
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/queue.py, apps/modules/run.py and handlers/schedule/ — TDPLAN-0008 Phase 1."""
@@ -63,7 +63,7 @@ def interval_job():
 
 def _queue_json(monkeypatch, capsys, jobs, runstate):
     """What `drone @daemon queue --json` prints for these jobs and this runstate, parsed."""
-    monkeypatch.setattr(queue_mod, "discover_jobs", lambda: jobs)
+    monkeypatch.setattr(queue_mod, "discover_jobs", lambda **_: jobs)
     monkeypatch.setattr(queue_mod, "load_runstate", lambda: runstate)
     capsys.readouterr()
     assert handle_command("queue", ["--json"]) is True
@@ -158,13 +158,30 @@ class TestQueueJsonSchema:
     ):
         """Shipped defect: Rich highlighted the frozen JSON under a terminal."""
         long_id = "x" * 300
-        monkeypatch.setattr(queue_mod, "discover_jobs", lambda: [{**interval_job, "id": long_id}])
+        monkeypatch.setattr(queue_mod, "discover_jobs", lambda **_: [{**interval_job, "id": long_id}])
         monkeypatch.setattr(queue_mod, "load_runstate", lambda: {"jobs": {}})
         handle_command("queue", ["--json"])
 
         out = capsys.readouterr().out
         assert "\x1b" not in out
         assert json.loads(out)["jobs"][0]["id"] == long_id
+
+    def test_a_refused_job_is_told_in_the_table_and_the_json(self, interval_job, monkeypatch, capsys):
+        """A job discovery refused shows where jobs are listed, not only in the log."""
+
+        def discover(refusals):
+            refusals.append("Job 'bad' has invalid schedule type 'biweekly' in /x/.daemon/schedule.json")
+            return [interval_job]
+
+        monkeypatch.setattr(queue_mod, "discover_jobs", discover)
+        monkeypatch.setattr(queue_mod, "load_runstate", lambda: {"jobs": {}})
+        capsys.readouterr()
+        handle_command("queue", [])
+        assert "Refused, not scheduled: Job 'bad' has invalid schedule type 'biweekly'" in capsys.readouterr().err
+        handle_command("queue", ["--json"])
+        assert json.loads(capsys.readouterr().out)["refused"] == [
+            "Job 'bad' has invalid schedule type 'biweekly' in /x/.daemon/schedule.json"
+        ]
 
     def test_job_fields(self, interval_job, monkeypatch, capsys):
         """Each job in output has all frozen-schema fields."""

@@ -48,7 +48,7 @@ apps/
     ├── drive/             # auth, upload, tracker, remote listing, share, never-leaves floor, quota
     ├── ignore/            # .backupignore spec + whitelist + the *.tmp floor
     ├── json/              # the fleet's json shim — @prax service, byte-identical
-    ├── path/              # store paths, caller cwd, module_paths safe resolve
+    ├── path/              # store paths, caller cwd
     ├── project/           # config, registry, setup
     ├── report/            # result formatting
     ├── scan/              # walk, filter, run ceiling
@@ -77,7 +77,6 @@ Branch top level: `apps/` `docs/` `docs.local/` `dropbox/` `artifacts/` `templat
  - Run the suite from `src/aipass/backup/`, where `pytest.ini` lives.
  - `handlers/__init__.py` guards against cross-branch imports with a path-based kinship check, not a hardcoded module name. Fabricated filenames in its tests stay under `tmp_path` or the coverage report goes red with no test failure.
  - The audit trail honours AIPASS_TEST_LOG_DIR; `handlers/json/` is the byte-identical fleet shim — never add a name to it.
- - No `resolve()` reached at import anywhere: `handlers/path/module_paths.py` is the one door, stdlib-only on purpose.
  - The "Last backups" and "Backups now" panels read the project's own changelog, the same source as `status --json`.
  - Drive is the truth for what is remote: every Drive run lists live files first, heals the tracker, adopts by name. A listing with no answer is a failed run.
  - A filename over 50 characters gets a shortened store folder; restore finds it through the builder. The layout lives in `handlers/path/builder.py` alone; prune reads it back through `versioned_rel_path()`.

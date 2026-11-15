@@ -3,7 +3,7 @@
 # Description: Fleet inbox sweep tests — stale unread mail detection, wake policy and waking
 # Version: 1.1.1
 # Created:2026-08-11
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/inbox_sweep.py and the handlers/monitoring/inbox_scanner.py it drives."""
@@ -507,15 +507,17 @@ class TestCliRouting:
         kwargs = sweep.call_args.kwargs
         assert kwargs == {"dry_run": True, "stale_hours": 48, "limit": 2}
 
-    def test_bad_flag_value_falls_back_to_default(self):
+    def test_bad_flag_value_is_refused(self):
         with patch.object(inbox_sweep, "run_sweep", return_value={}) as sweep:
-            inbox_sweep.handle_command("inbox-sweep", ["--hours", "soon"])
-        assert sweep.call_args.kwargs["stale_hours"] == DEFAULT_STALE_HOURS
+            with pytest.raises(ValueError, match="--hours needs a whole number of 1 or more, got 'soon'"):
+                inbox_sweep.handle_command("inbox-sweep", ["--hours", "soon"])
+        sweep.assert_not_called()
 
-    def test_dangling_flag_falls_back_to_default(self):
+    def test_dangling_flag_is_refused(self):
         with patch.object(inbox_sweep, "run_sweep", return_value={}) as sweep:
-            inbox_sweep.handle_command("inbox-sweep", ["--limit"])
-        assert sweep.call_args.kwargs["limit"] == inbox_sweep.MAX_WAKES
+            with pytest.raises(ValueError, match="--limit needs a whole number"):
+                inbox_sweep.handle_command("inbox-sweep", ["--limit"])
+        sweep.assert_not_called()
 
 
 # ── Schedule entry ────────────────────────────────────
@@ -554,8 +556,9 @@ class TestScheduleEntry:
 
 
 @pytest.mark.parametrize("value", ["0", "-1"])
-def test_a_limit_below_one_falls_back_to_the_cap(value):
+def test_a_limit_below_one_is_refused(value):
     """A negative slice, wakeable[:-1], woke all but one branch past MAX_WAKES."""
     with patch.object(inbox_sweep, "run_sweep") as sweep:
-        assert inbox_sweep.handle_command("inbox-sweep", ["--dry-run", "--limit", value]) is True
-    assert sweep.call_args.kwargs["limit"] == inbox_sweep.MAX_WAKES
+        with pytest.raises(ValueError, match="--limit needs a whole number of 1 or more"):
+            inbox_sweep.handle_command("inbox-sweep", ["--dry-run", "--limit", value])
+    sweep.assert_not_called()

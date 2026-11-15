@@ -3,7 +3,7 @@
 # Description: Decentralized .daemon/ schedule file discovery
 # Version: 2.6.1
 # Created: 2026-06-15
-# Modified: 2026-10-28
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -21,10 +21,9 @@ from aipass.daemon.apps.handlers.json import json_handler
 
 # @memory's PUBLIC fleet gateway: its handlers/ are private and fail the cross-branch checklist.
 from aipass.memory.apps.modules import fleet
-from aipass.daemon.apps.handlers.module_root import module_file
 from aipass.daemon.apps.handlers.schedule import command_job
 
-_REPO_ROOT = module_file(__file__).parents[6]  # up to repo root
+_REPO_ROOT = Path(__file__).resolve().parents[6]  # up to repo root
 _REGISTRY_FILE = _REPO_ROOT / "AIPASS_REGISTRY.json"
 _PROJECTS_DIR_NAME = "projects"
 
@@ -188,72 +187,75 @@ def _time_problem(schedule: dict) -> str:
     return ""
 
 
-def _validate_job(job: dict, file_path: Path) -> bool:
-    """Validate a single job dict. Returns True if valid."""
+def _refused(refusals: Optional[list], message: str, *args) -> bool:
+    """Log a job refusal at warning, hand its text to the caller that shows it, and answer False."""
+    logger.warning(message, *args)
+    if refusals is not None:
+        refusals.append(message.removeprefix("[discovery] ") % args)
+    return False
+
+
+def _validate_job(job: dict, file_path: Path, refusals: Optional[list] = None) -> bool:
+    """Validate a single job dict. Returns True if valid; a refusal's text also lands in *refusals*."""
     missing = REQUIRED_JOB_KEYS - set(job.keys())
     if missing:
-        logger.warning("[discovery] Job missing keys %s in %s", missing, file_path)
-        return False
+        return _refused(refusals, "[discovery] Job missing keys %s in %s", missing, file_path)
 
     actions = [key for key in JOB_ACTION_KEYS if key in job]
     if len(actions) != 1:
-        logger.warning(
+        return _refused(
+            refusals,
             "[discovery] Job '%s' must carry exactly one of prompt or command, found %s in %s",
             job.get("id"),
             " and ".join(actions) or "neither",
             file_path,
         )
-        return False
 
     schedule = job.get("schedule")
     if not isinstance(schedule, dict):
-        logger.warning("[discovery] Job '%s' has non-dict schedule in %s", job.get("id"), file_path)
-        return False
+        return _refused(refusals, "[discovery] Job '%s' has non-dict schedule in %s", job.get("id"), file_path)
 
     sched_type = schedule.get("type", "")
     if sched_type not in VALID_SCHEDULE_TYPES:
-        logger.warning(
-            "[discovery] Job '%s' has invalid schedule type '%s' in %s", job.get("id"), sched_type, file_path
+        return _refused(
+            refusals, "[discovery] Job '%s' has invalid schedule type '%s' in %s", job.get("id"), sched_type, file_path
         )
-        return False
 
     # Refused here, not in every reader: a non-number stops the whole tick, <=0 never fires,
     # NaN fails the chained bound and Infinity overflows timedelta. Absent reads as 60.
     interval = schedule.get("interval_minutes")
     if sched_type == "interval" and "interval_minutes" in schedule:
         if isinstance(interval, bool) or not isinstance(interval, (int, float)) or not 0 < interval < float("inf"):
-            logger.warning(
+            return _refused(
+                refusals,
                 "[discovery] Job '%s' refused in %s: interval_minutes %r is not a positive number",
                 job.get("id"),
                 file_path,
                 interval,
             )
-            return False
 
     problem = _time_problem(schedule)
     if problem:
-        logger.warning("[discovery] Job '%s' refused in %s: %s", job.get("id"), file_path, problem)
-        return False
+        return _refused(refusals, "[discovery] Job '%s' refused in %s: %s", job.get("id"), file_path, problem)
 
     if "command" not in job:
         wake = job.get("wake")
         if isinstance(wake, dict) and "provider" in wake and wake["provider"] not in VALID_WAKE_PROVIDERS:
-            logger.warning(
+            return _refused(
+                refusals,
                 "[discovery] Job '%s' refused in %s: wake.provider %r is not one of %s",
                 job["id"],
                 file_path,
                 wake["provider"],
                 ", ".join(VALID_WAKE_PROVIDERS),
             )
-            return False
         if command_job.notify_email(job):
             logger.warning("[discovery] Job '%s' in %s: notify.email works on command jobs only", job["id"], file_path)
         return True
 
     problem = command_job.command_job_problem(job)
     if problem:
-        logger.warning("[discovery] Command job '%s' refused in %s: %s", job.get("id"), file_path, problem)
-        return False
+        return _refused(refusals, "[discovery] Command job '%s' refused in %s: %s", job.get("id"), file_path, problem)
     if "wake" in job:
         logger.warning("[discovery] Command job '%s' in %s: wake block ignored, nobody is woken", job["id"], file_path)
     return True
@@ -280,7 +282,7 @@ def _load_schedule_file(file_path: Path) -> Optional[dict]:
     return data
 
 
-def _jobs_for_citizen(citizen: dict, skipped_owners: set) -> List[dict]:
+def _jobs_for_citizen(citizen: dict, skipped_owners: set, refusals: Optional[list] = None) -> List[dict]:
     """Return one citizen's validated jobs; an unreadable file or refused job adds it to *skipped_owners*."""
     daemon_dir = citizen["path"] / ".daemon"
     if not daemon_dir.is_dir():
@@ -294,10 +296,16 @@ def _jobs_for_citizen(citizen: dict, skipped_owners: set) -> List[dict]:
         data = _load_schedule_file(sched_file)
         if data is None:
             skipped_owners.add(citizen["email"])
+            if refusals is not None:
+                refusals.append(f"{sched_file}: not a readable schedule (bad JSON, not an object, or no jobs list)")
             continue
 
         for job in data["jobs"]:
-            if not isinstance(job, dict) or not _validate_job(job, sched_file):
+            if not isinstance(job, dict):
+                skipped_owners.add(citizen["email"])
+                _refused(refusals, "[discovery] A job in %s is not an object", sched_file)
+                continue
+            if not _validate_job(job, sched_file, refusals):
                 skipped_owners.add(citizen["email"])
                 continue
 
@@ -325,8 +333,11 @@ def _jobs_for_citizen(citizen: dict, skipped_owners: set) -> List[dict]:
     return jobs
 
 
-def discover_jobs(skipped_owners: Optional[set] = None) -> list:
-    """Sweep every active citizen's .daemon/*.json; *skipped_owners* collects owners that did not read cleanly."""
+def discover_jobs(skipped_owners: Optional[set] = None, refusals: Optional[list] = None) -> list:
+    """Sweep every active citizen's .daemon/*.json.
+
+    *skipped_owners* collects owners that did not read cleanly; *refusals* the text of each refused file or job.
+    """
     if skipped_owners is None:
         skipped_owners = set()
     citizens = active_citizens()
@@ -339,7 +350,7 @@ def discover_jobs(skipped_owners: Optional[set] = None) -> list:
     for citizen in citizens:
         if citizen["dir_name"] in SKIP_DIRS or citizen["dir_name"].startswith("."):
             continue
-        jobs.extend(_jobs_for_citizen(citizen, skipped_owners))
+        jobs.extend(_jobs_for_citizen(citizen, skipped_owners, refusals))
 
     logger.info("[discovery] Discovered %d job(s) across %d branch(es)", len(jobs), len({j["owner"] for j in jobs}))
     json_handler.log_operation("discover_jobs", {"count": len(jobs)})

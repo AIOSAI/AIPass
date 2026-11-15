@@ -3,7 +3,7 @@
 # Description: Tests for error resilience in snapshot.py, versioned.py, the document handlers and audit trail
 # Version: 1.1.5
 # Created: 2026-06-12
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for error resilience in apps/modules/snapshot.py, versioned.py, the document handlers and audit trail."""
@@ -473,7 +473,7 @@ class TestAuditLog:
         absent = trail.log_path()
 
         assert absent.is_absolute(), f"an empty seam answered a relative path: {absent}"
-        assert absent == trail.branch_root(trail.__file__, 3) / "logs" / trail.LOG_FILENAME
+        assert absent == Path(trail.__file__).resolve().parents[3] / "logs" / trail.LOG_FILENAME
 
         redirected = tmp_path / "seam"
         monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(redirected))

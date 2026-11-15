@@ -37,7 +37,7 @@
     {
       "file": "apps/handlers/schedule/recovery.py",
       "standard": "logged_fallback",
-      "lines": [110, 197, 239, 243, 399],
+      "lines": [108, 195, 237, 241, 397],
       "reason": "Catch-up lane, built and OFF (RECOVERY_LANE_LIVE False) (daemon, fleet green leg 5). Each answer is the documented decision: an unparseable last_tick is no history, so no gap (181, as a missing one); an unreadable hourly time enumerates no windows, as the due check refuses the same value (286); an unreadable max-age bound or instant is unlimited, since one late wake with an honest header costs less than a window dropped unreported (350, 354); an unreadable instant has no age to print, '' (563, a header suffix)."
     },
     {
@@ -55,13 +55,13 @@
     {
       "file": "apps/handlers/schedule/discovery.py",
       "standard": "logged_fallback",
-      "lines": [149, 155],
+      "lines": [148, 154],
       "reason": "citizen_class_for (daemon, fleet green legs 2 and 3): None means 'unreadable' on every path that returns it (an unreadable .trinity or passport, a passport or identity that is not a dict); no passport can hold None, and an absent passport answers ''. The checker reads the guard returns as a success path, but they are the same answer for the same case. Callers (inbox sweep, rounds roster) leave a None citizen out."
     },
     {
       "file": "apps/handlers/schedule/discovery.py",
       "standard": "logged_fallback",
-      "lines": [270],
+      "lines": [272],
       "reason": "_load_schedule_file (daemon, fleet green leg 5): None means 'this schedule file cannot be used', for an unreadable file and a malformed one alike; the one caller, discover_jobs, skips that file with a warning naming it, so one bad file cannot stop the fleet's tick. A raise would stop discovery for every citizen."
     },
     {
@@ -73,38 +73,8 @@
     {
       "file": "apps/modules/timer_install.py",
       "standard": "logged_fallback",
-      "lines": [100, 104],
+      "lines": [99, 103],
       "reason": "_run_systemctl (daemon, fleet green leg 5): every False this seam returns is a failure the user was already shown through cli error(), the non-zero exit on the success path included, so the caller cannot mistake it for an answer; True only on success (or not loaded, when asked) and None only for not found, when asked (leg 4b)."
-    },
-    {
-      "file": "apps/modules/schedule.py",
-      "standard": "naming",
-      "reason": "False positive: send_email_direct is a function alias assigned at module level, not a constant",
-      "pattern": "send_email_direct"
-    },
-    {
-      "file": "apps/handlers/monitoring/memory_health.py",
-      "standard": "naming",
-      "reason": "False positive: trinity_dir, required_checks, optional_checks are local variables inside functions, not module-level constants",
-      "pattern": "trinity_dir|required_checks|optional_checks"
-    },
-    {
-      "file": "apps/handlers/monitoring/activity_collector.py",
-      "standard": "naming",
-      "reason": "False positive: all_files, last_activity are local variables inside functions, not module-level constants",
-      "pattern": "all_files|last_activity"
-    },
-    {
-      "file": "apps/handlers/monitoring/red_flag_detector.py",
-      "standard": "naming",
-      "reason": "False positive: result, time_diff, counts are local variables inside functions, not module-level constants",
-      "pattern": "result|time_diff|counts"
-    },
-    {
-      "file": "apps/handlers/monitoring/report_generator.py",
-      "standard": "naming",
-      "reason": "False positive: red_flags, activity, health_data are local variables inside functions, not module-level constants",
-      "pattern": "red_flags|activity|health_data"
     },
     {
       "file": "apps/daemon.py",

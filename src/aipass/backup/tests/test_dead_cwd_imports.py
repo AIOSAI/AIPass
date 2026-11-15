@@ -1,27 +1,24 @@
 # =================== AIPass ====================
 # Name: test_dead_cwd_imports.py
-# Description: Dead-cwd import defect — safe path helper, the denied-cwd world, the fence with its cwd removed
+# Description: Dead-cwd imports — the denied-cwd world, the fence with its cwd removed
 # Version: 2.0.4
 # Created: 2026-08-31
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
-"""Tests for apps/handlers/path/module_paths.py and the fence in apps/handlers/__init__.py under a dead cwd."""
+"""Tests that backup imports, and its fence in apps/handlers/__init__.py decides, under a dead cwd."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(ruff) — that handlers/__init__.py and handlers/path/module_paths.py lint clean
-# sentry: no-test-needed(documentation) — the docstrings of module_file() and branch_root()
+# sentry: no-test-needed(ruff) — that handlers/__init__.py lints clean
 # sentry: no-test-needed(stdlib) — linecache.getline(), which fills the fence message's Blocked: line
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from aipass.backup.apps.handlers.path import module_paths
 from aipass.backup.tests import support_fence
 
 # World A (getcwd denied) convicts an import-time cwd read. Probes run as -c, never stdin:
@@ -116,82 +113,6 @@ class TestImportsSurviveADeadCwd:
     def test_no_module_dies_at_import(self) -> None:
         """Every probed module imports with the cwd denied."""
         assert _run_probe("A")["red"] == {}
-
-
-class _ResolveDeniedPath(type(Path())):
-    """A ``Path`` whose ``resolve()`` refuses, standing in for the dead cwd.
-
-    Subclasses the concrete class: on Python 3.10/3.11 a direct ``Path`` subclass cannot be built.
-    """
-
-    def resolve(self, strict: bool = False) -> Path:
-        """Refuse the way a deleted cwd refuses: OSError, not a crash."""
-        raise OSError(2, "cwd denied")
-
-
-class TestSafePathHelper:
-    """module_file degrades to the raw absolute spelling, never to a crash."""
-
-    def test_returns_resolved_path_normally(self, tmp_path: Path) -> None:
-        """In a healthy world a symlinked module file collapses to the real file it names."""
-        base = Path(os.path.realpath(tmp_path))
-        real = base / "real" / "mod.py"
-        real.parent.mkdir()
-        real.write_text("", encoding="utf-8")
-        link = base / "link"
-        link.symlink_to(real.parent, target_is_directory=True)
-
-        assert module_paths.module_file(str(link / "mod.py")) == base / "real" / "mod.py"
-
-    def test_falls_back_when_resolve_raises(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """An OSError from resolve() yields the same file's absolute spelling, not an exception."""
-        # Spelled from the fixture, not the product's abspath: a cwd answer must fail.
-        module = tmp_path / "branch" / "apps" / "handlers" / "mod.py"
-        monkeypatch.setattr(module_paths, "_REPORTED_DEGRADED", set())
-        monkeypatch.setattr(module_paths, "Path", _ResolveDeniedPath)
-
-        assert module_paths.module_file(str(module)) == tmp_path / "branch" / "apps" / "handlers" / "mod.py"
-
-    def test_branch_root_climbs_without_resolve(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """branch_root lands on the exact ancestor the fixture built when resolve() is unavailable."""
-        branch = tmp_path / "branch"
-        module = branch / "apps" / "handlers" / "mod.py"
-        monkeypatch.setattr(module_paths, "_REPORTED_DEGRADED", set())
-        monkeypatch.setattr(module_paths, "Path", _ResolveDeniedPath)
-
-        assert module_paths.branch_root(str(module), 2) == branch
-
-
-class TestDegradedResolutionIsAnnouncedOnce:
-    """A dead cwd fails EVERY resolve, so the report is once per file, not per call."""
-
-    def test_two_degraded_resolutions_of_one_file_write_one_line(
-        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """module_file called twice on the same file announces once."""
-        monkeypatch.setattr(module_paths, "_REPORTED_DEGRADED", set())
-        monkeypatch.setattr(module_paths, "Path", _ResolveDeniedPath)
-
-        module_paths.module_file(__file__)
-        module_paths.module_file(__file__)
-
-        out, err = capsys.readouterr()
-        assert out == "", "the degraded report belongs on stderr, which drone piping relies on"
-        assert err.count("cwd unreadable") == 1
-        assert Path(__file__).name in err
-
-    def test_a_second_file_gets_its_own_line(
-        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """Once-per-file, not once-per-process: a different file is still reported."""
-        monkeypatch.setattr(module_paths, "_REPORTED_DEGRADED", set())
-        monkeypatch.setattr(module_paths, "Path", _ResolveDeniedPath)
-
-        module_paths.module_file(__file__)
-        module_paths.module_file(str(Path(__file__).parent / "conftest.py"))
-
-        _out, err = capsys.readouterr()
-        assert err.count("cwd unreadable") == 2
 
 
 #: The kin probe in a child whose cwd was removed: ALLOWED.

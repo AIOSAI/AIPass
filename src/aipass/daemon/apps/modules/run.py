@@ -3,7 +3,7 @@
 # Description: Manual one-tick scheduler command (drone @daemon run)
 # Version: 1.9.0
 # Created: 2026-06-15
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -14,6 +14,7 @@ Reference: docs/scheduler_tick.md
 
 import sys
 import time
+from pathlib import Path
 from typing import List
 
 from aipass.prax import logger
@@ -46,9 +47,8 @@ from aipass.daemon.apps.handlers.schedule import command_job
 from aipass.daemon.apps.handlers.schedule.job_reference import job_reference_lines
 from aipass.daemon.apps.handlers.schedule import recovery
 from aipass.daemon.apps.handlers.schedule import tick_lock
-from aipass.daemon.apps.handlers.module_root import module_file
 
-_DAEMON_ROOT = module_file(__file__).parents[2]  # src/aipass/daemon/
+_DAEMON_ROOT = Path(__file__).resolve().parents[2]  # src/aipass/daemon/
 LOCK_FILE = _DAEMON_ROOT / "daemon_json" / "schedule.lock"
 
 HANDLED_COMMANDS = {"run"}
@@ -333,8 +333,11 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
 
     _log("Discovering .daemon/ schedule files...")
     skipped_owners: set = set()
-    jobs = discover_jobs(skipped_owners=skipped_owners)
+    refusals: list = []
+    jobs = discover_jobs(skipped_owners=skipped_owners, refusals=refusals)
     results["discovered"] = len(jobs)
+    for refusal in refusals:
+        _log(f"Refused, not scheduled: {refusal}")
 
     if not jobs:
         _log("No jobs discovered.")

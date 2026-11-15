@@ -3,7 +3,7 @@
 # Description: Rounds firing + status surface (drone @daemon rotation)
 # Version: 1.4.0
 # Created: 2026-08-12
-# Modified: 2026-10-26
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -104,13 +104,7 @@ def _apply_wake_blocklist(roster: List[dict]) -> List[dict]:
 
     The handler excludes @devpulse structurally; this re-checks the live blocklist.
     """
-    try:
-        from aipass.ai_mail.apps.modules.door_wake import is_wake_blocked
-    # OSError, not only ImportError: the import raises FileNotFoundError under a dead working directory.
-    # Fail-open by design: an unfiltered roster, logged.
-    except (ImportError, OSError) as e:
-        logger.warning("[rotation] Wake blocklist unavailable, roster unfiltered: %s", e)
-        return roster
+    from aipass.ai_mail.apps.modules.door_wake import is_wake_blocked
 
     kept = []
     for entry in roster:

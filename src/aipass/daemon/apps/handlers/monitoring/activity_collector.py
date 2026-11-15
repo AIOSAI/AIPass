@@ -3,7 +3,7 @@
 # Description: Branch Activity Data Collector
 # Version: 0.4.0
 # Created: 2026-01-30
-# Modified: 2026-11-09
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -16,12 +16,11 @@ from typing import Dict, List, Any, Optional
 
 from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
-from aipass.daemon.apps.handlers.module_root import module_file
 
 # @memory's PUBLIC fleet gateway: who counts as a citizen is @memory's answer, one registry reader fleet-wide.
 from aipass.memory.apps.modules import fleet
 
-_REPO_ROOT = module_file(__file__).parents[6]  # src/aipass/daemon/apps/handlers/monitoring -> repo root
+_REPO_ROOT = Path(__file__).resolve().parents[6]  # src/aipass/daemon/apps/handlers/monitoring -> repo root
 MEMORY_FILE_PATTERNS = ["local.json", "observations.json", "passport.json", "README.md", "DASHBOARD.local.json"]
 CODE_FILE_EXTENSION = ".py"
 
