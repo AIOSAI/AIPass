@@ -3,7 +3,7 @@
 # Description: json_structure_check: declaration-only and bootstrap modules (split from test_checkers_batch7.py)
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/json_structure_check.py."""

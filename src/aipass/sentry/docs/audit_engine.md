@@ -213,7 +213,9 @@ byte for byte. A dead rule matches nothing, so pruning one moves no score.
 Prune also convicts a rule that **covers nothing**: it matches a file, yet its checker answers the
 same with the rule removed (a line pin that drifted, a finding that was cured). A file-wide rule
 always changes the answer to "bypassed", so a rule also covers nothing when every file it is handed
-passes clean without it. Each such rule
+passes clean without it. A checker is handed only the files the audit hands it (`branch_audit.files_handed`,
+the audit's own routing: an entry_point checker sees only the entry file), so a rule over files outside
+its checker's scope covers nothing. Each such rule
 costs two checker runs over its files, so the lane runs in prune only, never in the audit. A
 checker with a post-pass or observe lane is not judged this way.
 

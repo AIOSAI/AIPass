@@ -3,7 +3,7 @@
 # Description: Unit tests for the standards_audit module and the sentry-audit CI gate
 # Version: 1.4.0
 # Created: 2026-03-24
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/standards_audit.py and the sentry-audit CI gate."""

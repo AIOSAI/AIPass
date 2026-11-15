@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_imports.py
 # Description: imports_check sub-functions and rulings (split from test_checkers_batch7.py)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/imports_check.py."""
@@ -132,22 +132,56 @@ class TestCheckNoSysPath:
 
 
 class TestCheckPraxLogger:
-    """Tests for check_prax_logger."""
+    """check_prax_logger convicts stdlib logging, never the absence of a prax import."""
 
-    def test_prax_import_passes(self, tmp_path):
-        """File with from aipass.prax import logger passes."""
-        lines = _lines("from aipass.prax import logger\n")
-        result = check_prax_logger(lines, (tmp_path / "test.py").as_posix())
+    def _check(self, source: str, tmp_path) -> dict:
+        result = check_prax_logger(_lines(source), (tmp_path / "test.py").as_posix())
         assert result is not None
-        assert result["passed"] is True
+        return result
 
-    def test_missing_prax_import_fails(self, tmp_path):
-        """File without prax logger import fails."""
-        lines = _lines("import os\nimport sys\n")
-        result = check_prax_logger(lines, (tmp_path / "test.py").as_posix())
-        assert result is not None
+    def test_a_file_that_never_logs_passes_without_a_prax_import(self, tmp_path):
+        assert self._check("import os\nimport sys\n\nprint(os.sep, sys.argv)\n", tmp_path)["passed"] is True
+
+    def test_a_stdlib_level_call_fails_and_names_its_line(self, tmp_path):
+        result = self._check("import logging\n\n\ndef f():\n    logging.info('x')\n", tmp_path)
         assert result["passed"] is False
-        assert "Prax logger" in result["message"]
+        assert "lines [5]" in result["message"]
+
+    def test_a_stdlib_get_logger_fails(self, tmp_path):
+        assert self._check("import logging\nLOG = logging.getLogger(__name__)\n", tmp_path)["passed"] is False
+
+    def test_a_level_call_on_a_bound_stdlib_logger_fails(self, tmp_path):
+        source = "from logging import getLogger\nlog = getLogger(__name__)\n\n\ndef f():\n    log.warning('x')\n"
+        result = self._check(source, tmp_path)
+        assert result["passed"] is False
+        assert "lines [2, 6]" in result["message"]
+
+    def test_a_self_attribute_bound_to_a_stdlib_logger_fails(self, tmp_path):
+        source = (
+            "import logging as lg\n\n\nclass C:\n    def __init__(self):\n"
+            "        self.log = lg.getLogger('c')\n\n    def run(self):\n        self.log.error('x')\n"
+        )
+        assert "lines [6, 9]" in self._check(source, tmp_path)["message"]
+
+    def test_the_failure_message_offers_both_spellings(self, tmp_path):
+        message = self._check("import logging\nlogging.error('x')\n", tmp_path)["message"]
+        assert "from aipass.prax import logger" in message
+        assert "from aipass import prax" in message
+
+    def test_a_level_call_on_a_non_logging_name_is_not_convicted(self, tmp_path):
+        source = "import argparse\nimport logging\n\nparser = argparse.ArgumentParser()\nparser.error('x')\n"
+        assert self._check(source, tmp_path)["passed"] is True
+
+    def test_logging_named_only_inside_a_string_is_not_convicted(self, tmp_path):
+        assert self._check("SAMPLE = 'import logging; logging.info(1)'\n", tmp_path)["passed"] is True
+
+    def test_an_unparseable_file_fails_rather_than_reading_as_passed(self, tmp_path):
+        result = self._check("def broken(:\n", tmp_path)
+        assert result["passed"] is False
+        assert result["message"].startswith("Unparseable source")
+
+    def test_logging_constants_alone_are_not_convicted(self, tmp_path):
+        assert self._check("import logging\nLEVEL = logging.WARNING\n", tmp_path)["passed"] is True
 
 
 class TestCheckPraxLoggerAcceptsBothBindings:
@@ -159,44 +193,14 @@ class TestCheckPraxLoggerAcceptsBothBindings:
         return result
 
     def test_the_rebindable_module_form_passes(self, tmp_path):
-        assert self._check("from aipass import prax\n", tmp_path)["passed"] is True
+        assert self._check("from aipass import prax\nprax.logger.info('x')\n", tmp_path)["passed"] is True
 
-    def test_the_object_form_still_passes(self, tmp_path):
-        assert self._check("from aipass.prax import logger\n", tmp_path)["passed"] is True
+    def test_the_object_form_passes(self, tmp_path):
+        assert self._check("from aipass.prax import logger\nlogger.info('x')\n", tmp_path)["passed"] is True
 
-    def test_prax_inside_a_multi_name_import_counts(self, tmp_path):
-        assert self._check("from aipass import cli, prax\n", tmp_path)["passed"] is True
-
-    def test_an_aliased_prax_still_counts(self, tmp_path):
-        assert self._check("from aipass import prax as p\n", tmp_path)["passed"] is True
-
-    def test_a_sibling_package_is_not_mistaken_for_prax(self, tmp_path):
-        # `from aipass import cli` must NOT satisfy a prax-logging rule.
-        assert self._check("from aipass import cli\n", tmp_path)["passed"] is False
-
-    def test_a_name_that_merely_starts_with_prax_is_not_prax(self, tmp_path):
-        # Substring matching would accept this; the check splits the import
-        # list and compares whole names.
-        assert self._check("from aipass import praxis\n", tmp_path)["passed"] is False
-
-    def test_prax_imported_from_somewhere_that_is_not_aipass_does_not_count(self, tmp_path):
-        # Found by mutation: deleting the "from aipass import " prefix guard
-        # killed no test, so any package exporting a name `prax` would have
-        # satisfied an AIPASS logging rule.
-        assert self._check("from thirdparty import prax\n", tmp_path)["passed"] is False
-
-    def test_a_commented_out_import_does_not_count(self, tmp_path):
-        assert self._check("# from aipass import prax\n", tmp_path)["passed"] is False
-
-    def test_a_commented_out_object_form_import_does_not_count_either(self, tmp_path):
-        # The module form is rejected by the source-package guard even without the comment skip, so only the
-        # OBJECT form exercises it.
-        assert self._check("# from aipass.prax import logger\n", tmp_path)["passed"] is False
-
-    def test_the_failure_message_offers_both_spellings(self, tmp_path):
-        message = self._check("import os\n", tmp_path)["message"]
-        assert "from aipass.prax import logger" in message
-        assert "from aipass import prax" in message
+    def test_a_prax_logger_beside_an_unused_stdlib_import_passes(self, tmp_path):
+        source = "import logging\nfrom aipass.prax import logger\n\nlogger.setLevel(logging.INFO)\nlogger.info('x')\n"
+        assert self._check(source, tmp_path)["passed"] is True
 
 
 class TestImportsHandlerIndependence:

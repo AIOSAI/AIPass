@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_audit.py
 # Description: Branch Audit Handler
-# Version: 2.9.0
+# Version: 2.10.0
 # Created: 2026-03-05
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 """Branch Audit Handler — auto-discovers checkers from handlers/*_standards/ packs via glob."""
 
@@ -11,7 +11,7 @@ import copy
 import functools
 import importlib.util
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.bypass import dead_rules, ignore_handler, inert
 from aipass.sentry.apps.handlers.aipass_standards import applicability
@@ -351,6 +351,30 @@ def _entry_point_pass(
         return _crashed_result(name, e)
 
 
+def _routed(
+    checker, entry_file: str, all_files: List[Dict[str, str]], files_with_init: List[Dict[str, str]]
+) -> Tuple[bool, List[Dict[str, str]]]:
+    """For one file-lane checker: whether the entry pass runs it, and the files its all_files scan hands it."""
+    runs_on_entry_file = applicability.applies_to_file(checker, entry_file)
+    if getattr(checker, "AUDIT_SCOPE", "entry_point") != "all_files" or not all_files:
+        return runs_on_entry_file, []
+    scan_files = files_with_init if getattr(checker, "INCLUDE_INIT_FILES", False) else all_files
+    return runs_on_entry_file, [f for f in scan_files if applicability.applies_to_file(checker, f["file"])]
+
+
+def files_handed(branch: Dict[str, str], checkers: Dict[str, Any]) -> Dict[str, List[str]]:
+    """Every file the audit hands each file-lane checker, by the same routing ``audit_branch`` uses."""
+    entry_file = branch["entry_file"]
+    files_with_init = _collect_py_files(Path(branch["path"]), include_init=True)
+    all_files = [f for f in files_with_init if f["name"] != "__init__.py"]
+    handed: Dict[str, List[str]] = {}
+    for name, checker in checkers.items():
+        runs_on_entry_file, scan_files = _routed(checker, entry_file, all_files, files_with_init)
+        paths = [entry_file] if runs_on_entry_file else []
+        handed[name] = paths + [f["file"] for f in scan_files if f["file"] != entry_file]
+    return handed
+
+
 def _run_all_files(
     checker,
     name: str,
@@ -540,7 +564,7 @@ def audit_branch(
         # Branch-level checkers above are exempt: they walk the tree themselves.
         # A tests-only standard fails on the entry file; skip the entry pass, not
         # the checker, or the all_files scan below never hands it a test file.
-        runs_on_entry_file = applicability.applies_to_file(checker, entry_file)
+        runs_on_entry_file, scan_files = _routed(checker, entry_file, all_files, files_with_init)
         if not runs_on_entry_file and scope != "all_files":
             continue
         r = _entry_point_pass(
@@ -558,8 +582,6 @@ def audit_branch(
         if r.get("not_applicable") is not True:
             scores[name] = r.get("score", 0)
         if scope == "all_files" and all_files:
-            scan_files = files_with_init if getattr(checker, "INCLUDE_INIT_FILES", False) else all_files
-            scan_files = [f for f in scan_files if applicability.applies_to_file(checker, f["file"])]
             # The entry pass above already judged entry_file; served from its fresh result, not recomputed.
             reuse: set = set(unchanged_files or ())
             if runs_on_entry_file and "error" not in r:

@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_bypass.py
 # Description: Unit tests for handlers/bypass/
-# Version: 1.5.1
+# Version: 1.5.2
 # Created: 2026-03-24
 # Modified: 2026-11-15
 # =============================================
@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from aipass.sentry.apps.handlers.aipass_standards import trigger_check
+from aipass.sentry.apps.handlers.aipass_standards import skip_dirs, trigger_check
 from aipass.sentry.apps.handlers.bypass import inert
 from aipass.sentry.apps.handlers.bypass import bypass_handler
 from aipass.sentry.apps.handlers.bypass.bypass_handler import load_bypass_rules
@@ -774,13 +774,19 @@ def prune_branch(tmp_path, monkeypatch):
     (branch / "apps").mkdir(parents=True)
     (branch / "apps" / "live.py").write_text("pass\n", encoding="utf-8")
     (branch / "apps" / "quiet.py").write_text("pass\n", encoding="utf-8")
+    entry = branch / "apps" / "planted.py"
+    entry.write_text("pass\n", encoding="utf-8")
     (branch / ".sentry").mkdir()
+    # tmp_path sits under the system temp root, which the audit's corpus drops as throwaway.
+    monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
     bypass_file = branch / ".sentry" / "bypass.json"
     bypass_file.write_text(json.dumps({"metadata": {}, "bypass": PRUNE_RULES, "notes": {}}, indent=2), encoding="utf-8")
     monkeypatch.setattr(
-        bypass_module, "discover_branches", lambda include_private=False: [{"name": "PLANTED", "path": str(branch)}]
+        bypass_module,
+        "discover_branches",
+        lambda include_private=False: [{"name": "PLANTED", "path": str(branch), "entry_file": str(entry)}],
     )
-    checkers = {"naming": SimpleNamespace(check_module=_planted_naming)}
+    checkers = {"naming": SimpleNamespace(check_module=_planted_naming, AUDIT_SCOPE="all_files")}
     monkeypatch.setattr(bypass_module, "discover_checkers", lambda pack_path=None: checkers)
     return bypass_module, bypass_file
 
@@ -847,13 +853,41 @@ def test_a_file_wide_rule_is_dead_only_over_a_file_clean_without_it(prune_branch
     monkeypatch.setattr(
         bypass_module,
         "discover_checkers",
-        lambda pack_path=None: {"naming": SimpleNamespace(check_module=_planted_file_wide)},
+        lambda pack_path=None: {"naming": SimpleNamespace(check_module=_planted_file_wide, AUDIT_SCOPE="all_files")},
     )
     rule = {"file": rule_file, "standard": "naming", "reason": "whole file"}
     bypass_file.write_text(json.dumps({"bypass": [rule]}, indent=2), encoding="utf-8")
     bypass_module.handle_command("bypass", ["prune", "@planted"])
     assert json.loads(bypass_file.read_text(encoding="utf-8"))["bypass"] == ([] if dead else [rule])
     assert (f"removed [0] {rule_file} / naming: covers nothing" in _printed(capsys)) is dead
+
+
+def _planted_entry_only(path, bypass_rules=None):
+    """An entry_point checker that fails every file it is handed unless a rule waives it."""
+    waived = utils_is_bypassed(path, "cli_flags", None, bypass_rules)
+    return {"passed": waived, "score": 100 if waived else 0, "checks": [{"name": "c", "passed": waived}]}
+
+
+@pytest.mark.parametrize(
+    ("rule_file", "dead"), [("apps/live.py", True), ("apps/planted.py", False)], ids=["outside_scope", "entry_file"]
+)
+def test_a_rule_over_a_file_the_audit_never_hands_its_checker_covers_nothing(
+    prune_branch, capsys, monkeypatch, rule_file, dead
+):
+    """An entry_point checker sees only the entry file; prune handing it apps/live.py kept a rule that waives nothing."""
+    bypass_module, bypass_file = prune_branch
+    monkeypatch.setattr(
+        bypass_module,
+        "discover_checkers",
+        lambda pack_path=None: {
+            "cli_flags": SimpleNamespace(check_module=_planted_entry_only, AUDIT_SCOPE="entry_point")
+        },
+    )
+    rule = {"file": rule_file, "standard": "cli_flags", "reason": "whole file"}
+    bypass_file.write_text(json.dumps({"bypass": [rule]}, indent=2), encoding="utf-8")
+    bypass_module.handle_command("bypass", ["prune", "@planted"])
+    assert json.loads(bypass_file.read_text(encoding="utf-8"))["bypass"] == ([] if dead else [rule])
+    assert (f"removed [0] {rule_file} / cli_flags: covers nothing" in _printed(capsys)) is dead
 
 
 def test_an_unknown_branch_is_refused_with_exit_3(prune_branch):

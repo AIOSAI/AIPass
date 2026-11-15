@@ -405,6 +405,30 @@
       "reason": "None is 'line count unknown' and the caller never convicts a rule on it (the docstring says so). The warning names the file, so a dead rule is kept, never deleted on a guess."
     },
     {
+      "file": "apps/handlers/bypass/dead_rules.py",
+      "standard": "fallback",
+      "functions": ["bypass_markers"],
+      "reason": "A file outside the branch root is named by its whole path, which is the documented answer, not a stand-in. The marker is still reported."
+    },
+    {
+      "file": "apps/handlers/audit/branch_audit.py",
+      "standard": "fallback",
+      "functions": ["_rel_path"],
+      "reason": "Docstring contract: a path outside root is shown as its absolute path. The finding is still reported, only its label changes."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/imports_check.py",
+      "standard": "fallback",
+      "functions": ["filter_docstrings"],
+      "reason": "Unparseable source is returned unblanked (docstring contract) and check_prax_logger fails it as 'Unparseable source', so nothing reads as passed."
+    },
+    {
+      "file": "apps/modules/checklist.py",
+      "standard": "logged_fallback",
+      "lines": [200],
+      "reason": "A file outside its branch root cannot be on that branch's audit ignore list, so None (not ignored) is the true answer, not a stand-in. The info line names both paths."
+    },
+    {
       "file": "apps/handlers/aipass_standards/fallback_check.py",
       "standard": "fallback",
       "lines": [316],

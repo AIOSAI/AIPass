@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: imports_check.py
 # Description: Imports Standards Checker Handler
-# Version: 2.4.1
+# Version: 2.5.1
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -12,6 +12,7 @@ Imports Standards Checker Handler
 Reference: imports.md
 """
 
+import ast
 import re
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -26,6 +27,7 @@ from aipass.sentry.apps.handlers.aipass_standards.prose_lines import Unparseable
 # logger sub-rule is the one exception and gates itself below.
 APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
+PRAX_ROUTER = ("prax", "apps", "modules", "logger.py")
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
@@ -87,6 +89,8 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     is_small_file = len([line for line in lines if line.strip() and not line.strip().startswith("#")]) < 20
     # A door re-exports and logs nothing, whatever its length.
     is_door = path.name.startswith("door_") and path.parent.name == "modules"
+    # The router itself: stdlib logging is what prax routes INTO, so it cannot route through prax.
+    is_router = path.parts[-4:] == PRAX_ROUTER
 
     if not is_init_file:
         checks.append(check_no_aipass_root(import_lines, module_path, bypass_rules))
@@ -94,9 +98,9 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not is_init_file:
         checks.append(check_no_sys_path(import_lines, module_path, bypass_rules))
 
-    exempt = is_init_file or is_small_file or is_door or is_handler
+    exempt = is_init_file or is_small_file or is_door or is_handler or is_router
     if not exempt and not applicability.is_test_path(module_path):
-        prax_check = check_prax_logger(import_lines, module_path, bypass_rules)
+        prax_check = check_prax_logger(lines, module_path, bypass_rules)
         if prax_check:
             checks.append(prax_check)
 
@@ -203,42 +207,66 @@ def check_no_sys_path(lines: List[str], file_path: str = "", bypass_rules: list 
 def check_prax_logger(lines: List[str], file_path: str = "", bypass_rules: list | None = None) -> Optional[Dict]:
     """Check that logging is routed through the `aipass.prax` namespace.
 
-    A test file is never asked (the caller gates on ``applicability.is_test_path``): the rule is about
-    ROUTING, and a test does not log. ``from aipass.prax import logger`` and ``from aipass import prax``
-    both pass: they route identically, and which form is recommended is @prax's contract (imports.md).
+    Convicts stdlib logging use (``logging.getLogger``, ``logging.info(...)``, a level call on a name
+    bound to a stdlib logger), never the absence of an import: a file that logs nothing owes no prax
+    import. A test file is never asked (the caller gates on ``applicability.is_test_path``). Both prax
+    bindings imports.md allows route identically, so neither is convicted. Takes the WHOLE file:
+    log calls sit in function bodies, past the import section.
     """
     if is_bypassed(file_path, "imports", None, bypass_rules):
         return {"name": "Prax logger import", "passed": True, "message": "Bypassed by bypass rules"}
 
-    for i, line in enumerate(lines, 1):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
+    try:
+        tree = ast.parse("\n".join(lines))
+    except SyntaxError as exc:
+        logger.warning("imports: unparseable, logging routing not judged: %s", exc)
+        return {"name": "Prax logger import (recommended)", "passed": False, "message": f"Unparseable source: {exc}"}
+
+    hits = _stdlib_log_lines(tree)
+    if hits:
+        return {
+            "name": "Prax logger import (recommended)",
+            "passed": False,
+            "message": (
+                f"stdlib logging on lines {hits[:5]}: route it through prax "
+                "('from aipass.prax import logger' or 'from aipass import prax')"
+            ),
+        }
+    return {"name": "Prax logger import", "passed": True, "message": "No stdlib logging (any log call routes via prax)"}
+
+
+_LOG_CALLS = frozenset({"debug", "info", "warning", "warn", "error", "exception", "critical", "log", "getLogger"})
+
+
+def _stdlib_log_lines(tree: ast.AST) -> List[int]:
+    """Lines that log through stdlib `logging`, directly or via a name bound to its loggers."""
+    bound = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            bound.update(a.asname or "logging" for a in node.names if a.name.split(".")[0] == "logging")
+        elif isinstance(node, ast.ImportFrom) and node.module == "logging" and not node.level:
+            bound.update(a.asname or a.name for a in node.names if a.name in _LOG_CALLS)
+    if not bound:
+        return []
+
+    # `log = logging.getLogger(...)` / `self.log = getLogger(...)`: the target is a stdlib logger too.
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(node.value, ast.Call):
+            callee = ast.unparse(node.value.func)
+            if any(callee == name or callee.startswith(name + ".") for name in bound):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                bound.update(ast.unparse(t) for t in targets if isinstance(t, (ast.Name, ast.Attribute)))
+
+    hits = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
             continue
-        if "from aipass.prax" in stripped and "logger" in stripped:
-            return {"name": "Prax logger import", "passed": True, "message": f"Found on line {i} (object form)"}
-        if _imports_prax_module(stripped):
-            return {"name": "Prax logger import", "passed": True, "message": f"Found on line {i} (module form)"}
-
-    return {
-        "name": "Prax logger import (recommended)",
-        "passed": False,
-        "message": (
-            "Prax logger import not found (either form: 'from aipass.prax import logger' or 'from aipass import prax')"
-        ),
-    }
-
-
-def _imports_prax_module(stripped: str) -> bool:
-    """True for `from aipass import prax`, the rebindable module binding.
-
-    Matched on the comma-separated import LIST so `from aipass import cli`
-    never counts, and `from aipass import cli, prax` does.
-    """
-    source, separator, imported = stripped.partition(" import ")
-    if not separator or source.strip() != "from aipass":
-        return False
-    names = imported.split("#")[0].split(",")
-    return "prax" in [name.strip().split(" as ")[0].strip() for name in names]
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr in _LOG_CALLS and ast.unparse(func.value) in bound:
+            hits.add(node.lineno)
+        elif isinstance(func, ast.Name) and func.id in bound:
+            hits.add(node.lineno)
+    return sorted(hits)
 
 
 def check_handler_independence(

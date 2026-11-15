@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dead_rules.py
 # Description: Bypass rules that match nothing, and inline bypass comments nothing reads
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-09-25
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Bypass hygiene: rules that can never match, rules that cover nothing, and comments that claim a rule.
@@ -115,10 +115,12 @@ def dead_rules(
     rules: List[Dict[str, Any]],
     known_standards: Set[str],
     checkers: Optional[Dict[str, Any]] = None,
+    handed_by: Optional[Dict[str, List[str]]] = None,
 ) -> List[Dict[str, Any]]:
     """Every rule in the list that can never match, with its index, fields, why, and its own reason.
 
-    With ``checkers`` (standard -> checker module), a rule that matches but waives nothing is dead too.
+    With ``checkers`` (standard -> checker module), a rule that matches but waives nothing is dead too;
+    ``handed_by`` (standard -> the files the audit hands that checker) limits each checker to its own files.
     """
     if not rules:
         return []
@@ -127,7 +129,8 @@ def dead_rules(
     for index, rule in enumerate(rules):
         why = why_dead(rule, handed, known_standards)
         if why is None and checkers and rule.get("standard") in checkers:
-            why = covers_nothing(branch_path, rules, index, checkers[rule["standard"]], handed)
+            own = handed if handed_by is None else handed_by.get(rule["standard"], [])
+            why = covers_nothing(branch_path, rules, index, checkers[rule["standard"]], own)
         if why is not None:
             dead.append(
                 {
@@ -171,7 +174,11 @@ def _dump_style(config: Dict[str, Any], text: str) -> Optional[Tuple[bool, bool]
 
 
 def prune(
-    branch_path: Path, known_standards: Set[str], dry_run: bool = True, checkers: Optional[Dict[str, Any]] = None
+    branch_path: Path,
+    known_standards: Set[str],
+    dry_run: bool = True,
+    checkers: Optional[Dict[str, Any]] = None,
+    handed_by: Optional[Dict[str, List[str]]] = None,
 ) -> Dict[str, Any]:
     """Remove the dead rules from a branch's bypass.json; with dry_run, write nothing.
 
@@ -181,7 +188,7 @@ def prune(
     text = bypass_file.read_text(encoding="utf-8")
     config = json.loads(text)
     rules = config.get("bypass", [])
-    convicted = dead_rules(branch_path, rules, known_standards, checkers)
+    convicted = dead_rules(branch_path, rules, known_standards, checkers, handed_by)
     dead = [entry for entry in convicted if not entry["blank"]]
     outcome: Dict[str, Any] = {
         "file": str(bypass_file),

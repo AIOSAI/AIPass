@@ -19,7 +19,7 @@ import json
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
-# Prax logger (system-wide - nearly always imported)
+# Prax logger (when the file logs; stdlib logging fails the check)
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 # Services (CLI, etc.)
@@ -88,7 +88,20 @@ This registers the `aipass` namespace so all `from aipass.{module}...` imports w
 
 ---
 
-## Prax Logger Import (Nearly Always)
+## Prax Logger Import (When the File Logs)
+
+**The rule:** a file that logs routes its log calls through prax. The check convicts
+stdlib logging, never the absence of an import (owner's ruling, 2026-11-15):
+
+- **FAILS** when the file imports stdlib `logging` and logs with it (`logging.getLogger(...)`,
+  `logging.info(...)`, `from logging import getLogger`), or calls a level method
+  (`debug` / `info` / `warning` / `warn` / `error` / `exception` / `critical` / `log`) on a name
+  bound to a stdlib logger (`log = logging.getLogger(__name__)`, `self.log = ...`).
+- **PASSES** when the file has no log calls (no prax import is required, so an unused one
+  is dead code, not compliance), or its log calls go through either prax binding below.
+- Read from the AST of the whole file: a `logging` call inside a string is no call, and
+  `parser.error(...)` on a non-logger name is not convicted. Test files, handlers, doors,
+  `__init__.py` and files under 20 code lines are not asked.
 
 **The most common import in the system:**
 
@@ -100,7 +113,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 - **System-wide logging** for all branches that subscribe
 - **Service provider model** - Prax provides logging as a service
 - **Consistent import pattern** - Same everywhere for easy recognition
-- **Nearly universal** - Used in almost every module and handler
+- **Nearly universal** - Used in almost every file that logs
 
 **Usage:**
 ```python
@@ -617,7 +630,7 @@ from aipass.sentry.apps.handlers.json import json_handler
 
 | Import Type | Pattern | Required? |
 |-------------|---------|-----------|
-| Prax logger | `from aipass.prax.apps.modules.logger import system_logger as logger` or `from aipass.prax import logger` | **Nearly always** |
+| Prax logger | `from aipass.prax.apps.modules.logger import system_logger as logger` or `from aipass.prax import logger` | **When the file logs**; an unused one is not required |
 | CLI service | `from aipass.cli.apps.modules import console, header` | When needed |
 | API service | `from aipass.api.apps.modules import llm_call` | When needed |
 | **Drone** | `subprocess.run(["drone", "cmd", ...])` | **CLI only - NEVER import** |
@@ -633,7 +646,7 @@ from aipass.sentry.apps.handlers.json import json_handler
 
 **Namespace pattern:** `from aipass.{module}...` - never bare imports or hardcoded paths
 
-**Prax logger:** Nearly always imported - canonical or shorthand form both valid
+**Prax logger:** Imported by every file that logs - canonical or shorthand form both valid; stdlib `logging` use fails, a file that never logs owes no import
 
 **Service imports:** CLI, API, Memory imported as libraries; Drone invoked via CLI only
 

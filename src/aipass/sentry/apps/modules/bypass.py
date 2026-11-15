@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: bypass.py
 # Description: Bypass Module — prune the bypass rules that can never match
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-09-25
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Bypass Module
@@ -25,7 +25,7 @@ from aipass.sentry.apps.handlers.json import json_handler
 from aipass.cli import console, header
 from aipass.cli.apps.modules import error as display_error, success, warning
 
-from aipass.sentry.apps.handlers.audit.branch_audit import discover_checkers
+from aipass.sentry.apps.handlers.audit.branch_audit import discover_checkers, files_handed
 from aipass.sentry.apps.handlers.audit.discovery import discover_branches
 from aipass.sentry.apps.handlers.bypass import dead_rules
 from aipass.sentry.apps.handlers.cli.help_flags import wants_help
@@ -109,7 +109,9 @@ def _handle_prune(args: List[str]) -> None:
     checkers = discover_checkers()
     known = set(checkers) | {"diagnostics"}
     try:
-        outcome = dead_rules.prune(Path(branch["path"]), known, dry_run=dry_run, checkers=checkers)
+        outcome = dead_rules.prune(
+            Path(branch["path"]), known, dry_run=dry_run, checkers=checkers, handed_by=files_handed(branch, checkers)
+        )
     except (OSError, json.JSONDecodeError) as exc:
         logger.error("[bypass] prune @%s could not run: %s", wanted, exc)
         _refuse(f"@{wanted}: {exc}", EXIT_LANE_FAILED)

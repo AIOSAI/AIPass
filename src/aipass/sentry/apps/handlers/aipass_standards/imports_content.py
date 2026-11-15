@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: imports_content.py
 # Description: Import Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -33,7 +33,7 @@ def get_imports_standards() -> str:
         "   • Grouped by category, alphabetical",
         "   • json, datetime, typing, pathlib, etc.",
         "",
-        "[bold]3. Prax logger (nearly always)[/bold]",
+        "[bold]3. Prax logger (when the file logs; stdlib logging fails)[/bold]",
         "   • [dim]from aipass.prax.apps.modules.logger import system_logger as logger[/dim]",
         "",
         "[bold]4. Services (CLI, etc.)[/bold]",

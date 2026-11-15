@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch2.py
 # Description: Tests for checker handlers batch 2
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-29
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/error_handling_check.py and seven batch-2 sibling checkers."""
@@ -377,12 +377,13 @@ sys.path.insert(0, "/some/path")
 
 
 class TestTheLoggerSubRuleIsProductionOnly:
-    """A test file owes no logger; the checker's other five sub-rules still run."""
+    """A test file may log through stdlib; the checker's other five sub-rules still run."""
 
     # Over twenty code lines on purpose: the logger sub-rule already exempts
     # small files, so a short sample would pass for the wrong reason and the
     # production half of this class would prove nothing.
-    NO_LOGGER = """\
+    STDLIB_LOGGER = """\
+import logging
 import os
 from pathlib import Path
 
@@ -409,6 +410,7 @@ def describe(base):
 
 
 def record(base):
+    logging.getLogger(__name__).info("described %s", base)
     json_handler.log_operation("described", {"base": str(base), "detail": describe(base)})
     return True
 """
@@ -417,13 +419,13 @@ def record(base):
         """The same source, written at whichever path the test is about."""
         target = tmp_path.joinpath(*parts)
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(self.NO_LOGGER, encoding="utf-8")
+        target.write_text(self.STDLIB_LOGGER, encoding="utf-8")
         return str(target)
 
-    def test_a_test_file_without_a_logger_scores_a_hundred(self, tmp_path: Path) -> None:
+    def test_a_test_file_logging_through_stdlib_scores_a_hundred(self, tmp_path: Path) -> None:
         assert check_imports(self._in(tmp_path, "tests", "test_thing.py"))["score"] == 100
 
-    def test_a_conftest_without_a_logger_scores_a_hundred(self, tmp_path: Path) -> None:
+    def test_a_conftest_logging_through_stdlib_scores_a_hundred(self, tmp_path: Path) -> None:
         """conftest.py is a test file by name, wherever it sits."""
         assert check_imports(self._in(tmp_path, "conftest.py"))["score"] == 100
 
@@ -434,11 +436,38 @@ def record(base):
         failed = [c["name"] for c in result["checks"] if not c["passed"]]
         assert failed == ["Prax logger import (recommended)"]
 
+    def test_a_production_file_that_never_logs_owes_no_prax_import(self, tmp_path: Path) -> None:
+        """The defect: absence of a prax import was convicted, so branches kept dead imports."""
+        target = tmp_path / "apps" / "modules" / "quiet.py"
+        target.parent.mkdir(parents=True)
+        quiet = self.STDLIB_LOGGER.replace("import logging\n", "")
+        quiet = quiet.replace('    logging.getLogger(__name__).info("described %s", base)\n', "")
+        target.write_text(quiet, encoding="utf-8")
+
+        assert check_imports(str(target))["score"] == 100
+
+    @pytest.mark.parametrize(
+        ("parts", "failed"),
+        [
+            (("prax", "apps", "modules", "logger.py"), []),
+            (("flow", "apps", "modules", "logger.py"), ["Prax logger import (recommended)"]),
+        ],
+        ids=["the_router", "a_namesake"],
+    )
+    def test_only_prax_s_own_router_may_log_through_stdlib(self, tmp_path: Path, parts: tuple, failed: list) -> None:
+        """prax/apps/modules/logger.py is what prax routes INTO; any other logger.py is convicted."""
+        target = tmp_path.joinpath(*parts)
+        target.parent.mkdir(parents=True)
+        target.write_text(self.STDLIB_LOGGER, encoding="utf-8")
+
+        checks = check_imports(str(target))["checks"]
+        assert [check["name"] for check in checks if not check["passed"]] == failed
+
     def test_a_test_file_is_still_convicted_for_hacking_sys_path(self, tmp_path: Path) -> None:
         """The other sub-rules did not move: only the logger one is gated."""
         target = tmp_path / "tests" / "test_hacky.py"
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text('import sys\nsys.path.insert(0, "x")\n' + self.NO_LOGGER, encoding="utf-8")
+        target.write_text('import sys\nsys.path.insert(0, "x")\n' + self.STDLIB_LOGGER, encoding="utf-8")
 
         result = check_imports(str(target))
 
@@ -450,12 +479,14 @@ class TestADoorOwesNoLogger:
     """A door re-exports and logs nothing, whatever its length (DPLAN-0404)."""
 
     NAMES = [f"name_{n:02d}" for n in range(20)]
+    # It logs through stdlib, so only the door exemption can keep the logger row from failing.
     DOOR = (
+        "import logging\n"
         "from aipass.spawn.apps.handlers.registry import (\n"
         + "".join(f"    {name},\n" for name in NAMES)
         + ")\n\n__all__ = "
         + repr(NAMES)
-        + "\n"
+        + "\nlogging.getLogger(__name__).info('loaded')\n"
     )
 
     @pytest.mark.parametrize(

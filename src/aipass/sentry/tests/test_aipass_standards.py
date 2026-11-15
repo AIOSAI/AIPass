@@ -3,7 +3,7 @@
 # Description: Unit tests for handlers/aipass_standards/
 # Version: 1.6.0
 # Created: 2026-03-24
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/naming_check.py and its json, host and calendar siblings."""

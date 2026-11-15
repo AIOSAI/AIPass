@@ -3,7 +3,7 @@
 # Description: Unit tests for branch_audit.py: checker discovery, the corpus, the file lane, diagnostics
 # Version: 1.4.2
 # Created: 2026-04-26
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/audit/branch_audit.py."""
