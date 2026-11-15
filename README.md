@@ -31,7 +31,7 @@
   <a href="https://aipass.ai">aipass.ai</a>
 </p>
 
-> **AIPass is Linux only.** It runs on Linux: native, WSL2, and a Docker image to come. AIPass stays open source and in daily development, the developer's lifetime project. If this changes how you use it, open a [discussion](https://github.com/AIOSAI/AIPass/discussions) or an [issue](https://github.com/AIOSAI/AIPass/issues) with `transition` in the title and tell us your setup. We will help you find your path: WSL2, Docker when it lands, or a fork.
+> **AIPass is Linux only.** It is built and tested on Ubuntu: native, WSL2, and a Docker image to come. AIPass stays open source and in daily development, the developer's lifetime project. If this changes how you use it, open a [discussion](https://github.com/AIOSAI/AIPass/discussions) or an [issue](https://github.com/AIOSAI/AIPass/issues) with `transition` in the title and tell us your setup. We will help you find your path: WSL2, Docker when it lands, or a fork.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/AIOSAI/AIPass/main/assets/demo.gif" alt="Terminal demo: the fleet listed, a memory an agent kept a month ago found by meaning, and an agent audited at 100%" width="760">
@@ -40,7 +40,7 @@
 
 ## Install
 
-**You need:** Python 3.10+, [Claude Code](https://code.claude.com/docs) on a Claude plan that includes it, and Linux (native or WSL2). [Codex](https://github.com/openai/codex) and [OpenCode](https://opencode.ai) if you want them: with a binary on your PATH, install sets it up as another CLI for the same agents, and each agent runs on any of them, your choice per task.
+**You need:** Python 3.10+, [Claude Code](https://code.claude.com/docs) on a Claude plan that includes it, and Ubuntu (native or WSL2). [Codex](https://github.com/openai/codex) and [OpenCode](https://opencode.ai) if you want them: with a binary on your PATH, install sets it up as another CLI for the same agents, and each agent runs on any of them, your choice per task.
 
 ```bash
 pipx install aipass
@@ -231,7 +231,7 @@ curl -fsSL https://github.com/AIOSAI/baud/releases/latest/download/install.sh | 
 
 **Stable.** Built by one human and the AIPass agents, with a handful of outside contributions. From here the work is fine-tuning.
 
-Linux is the platform, native or WSL2: the daily driver, the one CI proves.
+Ubuntu is the platform, native or WSL2: the daily driver, the one CI proves.
 
 **Version:** <a href="https://pypi.org/project/aipass/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/aipass?color=007ec6"></a> **Python:** <a href="https://pypi.org/project/aipass/"><img alt="Python versions" src="https://img.shields.io/pypi/pyversions/aipass?color=007ec6"></a> **Agents:** 18 core + user-created.
 
@@ -252,7 +252,7 @@ Linux is the platform, native or WSL2: the daily driver, the one CI proves.
 - [Claude Code](https://code.claude.com/docs) on a Claude plan that includes it (Pro, Max, Team or Enterprise)
 - [Codex](https://github.com/openai/codex) optional: with its binary on PATH, install wires it as a second CLI for the same agents (`/codex` and `$claude` switch a seat between the two)
 - [OpenCode](https://opencode.ai) optional: with its binary on PATH, install adds the AIPass plugin so the same agents run on it (`/opencode` from Claude Code, `$opencode` from Codex, `/claude` and `/codex` back); signed out, it runs on OpenCode's free models
-- Linux, native or [WSL2](https://learn.microsoft.com/windows/wsl/install): the platform CI tests.
+- Ubuntu, native or [WSL2](https://learn.microsoft.com/windows/wsl/install): the platform CI tests. Other Linux distributions are untested.
 - `sudo` access optional (used for `/usr/local/bin` symlinks — falls back to `~/.local/bin` without it)
 - Node.js + npm optional (install uses them to add the `@anthropic-ai/sandbox-runtime` kernel sandbox; without them the sandbox is reported as optional and not set up, AIPass runs without it, and `aipass doctor` says how to add it later)
 - API keys / OAuth optional (OpenRouter, Google — only for optional add-on integrations)

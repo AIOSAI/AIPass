@@ -6,7 +6,7 @@ AIPass: autonomous agents (citizens) with identity, memory, and a mailbox, servi
 
 # Platform: Linux only
 
-AIPass runs on Linux: native or WSL2, a Docker image to come. The owner's lifetime project, daily driver, open source forever. A user the move to Linux only affects: open a GitHub discussion or issue with `transition` in the title and their setup; we help them find a path (WSL2, Docker later, a fork).
+AIPass runs on Linux, built and tested on Ubuntu: native or WSL2, a Docker image to come. The owner's lifetime project, daily driver, open source forever. A user the move to Linux only affects: open a GitHub discussion or issue with `transition` in the title and their setup; we help them find a path (WSL2, Docker later, a fork).
 
 # Terminology
 
