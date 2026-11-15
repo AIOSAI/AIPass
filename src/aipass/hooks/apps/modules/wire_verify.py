@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: wire_verify.py
-# Version: 1.9.3
+# Version: 1.10.0
 # Description: Wire verification — cross-checks provider settings vs project hook config
 # Branch: hooks
 # Layer: apps/modules
@@ -33,6 +33,7 @@ from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config import gates
 from aipass.hooks.apps.handlers.config.opencode_paths import opencode_plugin_path
 from aipass.hooks.apps.handlers.config.loader import aipass_home, config_unavailable_reason, find_project_config
+from aipass.hooks.apps.handlers.config import codex_trust
 from aipass.hooks.apps.modules.context_window import codex_hooks_path
 from aipass.hooks.apps.modules.engine import PROJECT_ROW, own_hooks
 from aipass.hooks.apps.handlers.json import files as json_files
@@ -119,6 +120,34 @@ def _build_provider_index(provider_hooks, errors):
     return index
 
 
+def _codex_rows(codex_hooks):
+    """(event, group index, handler index, group, handler) for every row of a Codex hooks.json."""
+    for event, groups in codex_hooks.items():
+        for gi, group in enumerate(groups):
+            for hi, handler in enumerate(group.get("hooks", [])):
+                yield event, gi, hi, group, handler
+
+
+def _check_codex_trust(codex_path, codex_hooks, errors) -> None:
+    """ERROR for every Codex row it will skip without a word: changed since approval, never approved, or disabled."""
+    config = Path(codex_path).with_name("config.toml")
+    try:
+        state = codex_trust.hook_state(config)
+    except (OSError, ValueError) as exc:
+        logger.info("[WIRE_VERIFY] cannot read Codex config: %s", exc)
+        errors.append(f"Cannot read {config}: {exc}, so no Codex hook's approval can be checked")
+        return
+    fix = "Fix: the owner opens /hooks in an interactive codex session and trusts it, then proves it with codex exec"
+    for event, gi, hi, group, handler in _codex_rows(codex_hooks):
+        row = state.get(f"{codex_path}:{codex_trust.event_label(event)}:{gi}:{hi}", {})
+        gates = " and no gate runs" if event == "PreToolUse" else ""
+        if row.get("enabled") is False:
+            errors.append(f"{event} (Codex) row {gi}: disabled in Codex, so it never runs{gates}. {fix}")
+        elif row.get("trusted_hash") != codex_trust.hook_hash(event, group, handler):
+            status = "changed since the owner approved it" if row.get("trusted_hash") else "never approved"
+            errors.append(f"{event} (Codex) row {gi}: {status}, so Codex skips it without a word{gates}. {fix}")
+
+
 def _codex_wired(codex_path, errors) -> frozenset[str]:
     """Every ``Event:hook`` a Codex hooks.json sends through the Codex bridge; none when there is no file.
 
@@ -134,6 +163,7 @@ def _codex_wired(codex_path, errors) -> frozenset[str]:
         return frozenset()
     codex_hooks = _read_provider_hooks(errors, codex_path)
     _check_guarded_tools(codex_hooks, errors, _CODEX_MARKER, _CODEX_GUARDED_TOOLS, " (Codex)")
+    _check_codex_trust(codex_path, codex_hooks, errors)
     wired: set[str] = set()
     for entries in codex_hooks.values():
         for entry in entries:
@@ -472,7 +502,9 @@ def handle_command(command, args) -> bool:
             "OpenCode also in ~/.opencode/bin); a CLI not installed is not checked. It also reads a Seed head's"
         )
         CONSOLE.print("hooks.json ($SEED_HOME, else ~/.config/seed) for one seed.py row per Seed event. It")
-        CONSOLE.print("verifies every enabled handler has a working provider bridge entry.")
+        CONSOLE.print("verifies every enabled handler has a working provider bridge entry. A Codex row that Codex")
+        CONSOLE.print("will skip (changed since approval, never approved, or disabled, per the config.toml beside")
+        CONSOLE.print("its hooks.json) is an ERROR: approve it in /hooks in an interactive codex session.")
         CONSOLE.print("Exits non-zero on any ERROR finding.")
         return True
 

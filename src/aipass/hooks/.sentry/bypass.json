@@ -1798,6 +1798,11 @@
         141
       ],
       "reason": "The refusal path takes no logger (prax can be what broke). An exception whose own message raises still denies: the deny text names its type and says the message could not be read, and the same line lands in logs/bridge.log at ERROR, which medic reads."
+    },
+    {
+      "file": "apps/handlers/config/codex_trust.py",
+      "standard": "json_structure",
+      "reason": "json.dumps builds the exact bytes Codex hashes (sorted, compact), the input to sha256; no JSON file is read or written, and json_handler would change the bytes."
     }
   ],
   "notes": {

@@ -127,7 +127,7 @@ What each CLI does when a PreToolUse hook exits with no answer, and what the AIP
 | CLI | Hook exits 1, nothing on stdout | Exits 2, nothing on stdout | Exits 0 with a deny document | Bridge dies, AIPass row |
 |---|---|---|---|---|
 | Claude Code | runs the tool (*run*) | refuses (hook contract) | refuses (hook contract) | refuses, shows `HOOKS BROKEN: claude.py exited 1 without an answer` (*run*) |
-| Codex 0.164 | runs the tool, "PreToolUse Failed" (*run*) | runs the tool (*run*) | refuses, "PreToolUse Blocked" (*run*) | refuses: the guard prints the deny document (contract, from the cell to its left) |
+| Codex 0.164 | runs the tool, "PreToolUse Failed" (*run*) | runs the tool (*run*) | refuses, "PreToolUse Blocked" (*run*) | refuses, "PreToolUse Blocked" with `HOOKS BROKEN: codex.py exited without an answer` (*run*) |
 | OpenCode | refuses: the plugin reads any non-zero exit as broken (`opencode_plugin.ts`, its Node test) | refuses | refuses | refuses, no guard needed |
 | Seed | refuses, "is broken: exited 1" (*run*, Seed's own runner) | refuses (*run*) | refuses | refuses, no guard needed |
 
@@ -136,7 +136,17 @@ The bridge code refuses every break it lives to see; a shell guard on the PreToo
 - Claude Code: `claude.py PreToolUse ; c=$?; [ $c -eq 0 ] || [ $c -eq 2 ] || { echo "HOOKS BROKEN: claude.py exited $c ..." >&2; exit 2; }; exit $c`. Exits 0 and 2 pass through untouched, so a normal refusal is never stamped broken; any other exit becomes exit 2 with the HOOKS BROKEN line.
 - Codex: `codex.py PreToolUse || printf '%s' '<deny document>'`: any non-zero exit prints the deny document, the one answer Codex refuses on.
 
-Codex keeps a `trusted_hash` per hook in its user config (`[hooks.state]`) and skips, without a word, a hook whose command no longer matches it. A changed PreToolUse row runs no gate at all in Codex until the owner re-approves it in an interactive `codex` session, while PostToolUse and the rest still fire, so nothing looks wrong. After any edit to a Codex hook row, prove it fires: a `codex exec` that runs one shell command lists `hook: PreToolUse`.
+## Changing a hook row
+
+Codex runs a hook row only while the owner's approval matches it. Each approval is a `trusted_hash` in the `config.toml` beside `hooks.json`, under `[hooks.state."<hooks.json path>:<event_snake>:<group>:<handler>"]`. It is the sha256 of the sorted, compact JSON of `{event_name, matcher, hooks: [handler]}`, the handler normalized with `async` (false) and `timeout` (600 when unset). A row whose command, matcher or timeout changed, a row never approved, and a row marked `enabled = false` are skipped without a word: `codex exec` prints nothing about them, and every other row still fires, so a skipped PreToolUse row leaves Codex with no gate while nothing looks wrong. The order for any Codex row change is:
+
+1. Edit the row (manifest and `~/.codex/hooks.json`, the owner's seat).
+2. Approve it: the owner opens `/hooks` in an interactive `codex` session and trusts it.
+3. Prove it: `drone @hooks verify` has no `(Codex) row` ERROR, and a `codex exec` that runs one shell command lists `hook: PreToolUse`.
+
+`drone @hooks verify` (`wire_verify.codex_hook_hash`) recomputes the hash for every Codex row and reports one that will not run as an ERROR naming the event, the row and why: `changed since the owner approved it`, `never approved`, or `disabled in Codex`. It reads `config.toml` and nothing else in the Codex home; an unreadable `config.toml` is an ERROR.
+
+Claude Code and OpenCode have no approval step, and neither skips a changed hook (*run*, headless: `claude -p --settings`, `opencode run`, both shared server and `--standalone`). A session keeps the hook it loaded at start for its whole life, silently; the next session runs the changed one. A row edit reaches a live seat only when that seat restarts.
 
 ---
 
