@@ -3,7 +3,7 @@
 # Description: Tests for config_loader handler (FPLAN-0271 Phase 1)
 # Version: 1.3.0
 # Created: 2026-06-13
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/json/config_loader.py and the budget arithmetic it seeds."""

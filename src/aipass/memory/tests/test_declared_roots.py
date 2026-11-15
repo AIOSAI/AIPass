@@ -3,7 +3,7 @@
 # Description: Pins the declared-roots anchor and the external tier it opens
 # Version: 1.0.2
 # Created: 2026-08-30
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/monitor/registry_scope.py — the declared-roots anchor and the external tier."""

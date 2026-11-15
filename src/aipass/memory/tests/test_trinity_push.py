@@ -3,7 +3,7 @@
 # Description: Red-first pins for the trinity push — the archive-verify-prune law above all
 # Version: 1.3.1
 # Created: 2026-08-27
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/templates/trinity_push.py and the push lane that drives it."""

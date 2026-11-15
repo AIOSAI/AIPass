@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for memory tests — write fence, infrastructure stand-ins, live-fleet guards
 # Version: 1.3.0
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-14
 # Category: memory/tests
 # =============================================
 

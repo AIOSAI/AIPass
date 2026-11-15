@@ -3,7 +3,7 @@
 # Description: memory watcher handler — lifecycle, status, on_modified callback, branch-path walk
 # Version: 1.1.1
 # Created: 2026-04-25
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # Category: memory/tests
 # =============================================
 

@@ -3,7 +3,7 @@
 # Description: Tests for auto_process background spawn, single-flight lock and run_once
 # Version: 1.1.1
 # Created: 2026-08-14
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # Category: memory/tests
 # =============================================
 

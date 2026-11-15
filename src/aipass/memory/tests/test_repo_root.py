@@ -3,7 +3,7 @@
 # Description: Pins for handlers/repo_root.py - one repo-root answer, never the cwd
 # Version: 1.3.0
 # Created: 2026-08-31
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/repo_root.py."""

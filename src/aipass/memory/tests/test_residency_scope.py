@@ -3,7 +3,7 @@
 # Description: Red-first pins for passport-declared residency as the fleet classifier (DPLAN-0319)
 # Version: 1.1.0
 # Created: 2026-08-28
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/monitor/registry_scope.py and the callers that classify through it."""

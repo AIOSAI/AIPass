@@ -3,7 +3,7 @@
 # Description: Red-first pins for marker 7 — self-healing triggers and the aftercare rulings
 # Version: 1.2.2
 # Created: 2026-08-27
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/rollover.py, apps/modules/templates.py and the handlers they drive."""
