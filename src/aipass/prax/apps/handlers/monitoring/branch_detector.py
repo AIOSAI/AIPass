@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_detector.py
 # Description: Branch Attribution Handler
-# Version: 0.3.0
+# Version: 0.3.1
 # Created: 2025-11-23
-# Modified: 2026-11-08
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -92,7 +92,7 @@ class BranchDetector:
         # shortcut: a sibling whose name extends a branch's (grow vs grow-kit) prefix-matches; upgrade if one exists.
         best = None
         for registered_path, branch_name in self.branch_map.items():
-            encoded = re.sub(r"[^A-Za-z0-9]", "-", registered_path.rstrip("/\\"))
+            encoded = re.sub(r"[^A-Za-z0-9]", "-", registered_path.rstrip("/"))
             if project_folder == encoded or project_folder.startswith(encoded + "-"):
                 if best is None or len(encoded) > len(best[0]):
                     best = (encoded, branch_name)

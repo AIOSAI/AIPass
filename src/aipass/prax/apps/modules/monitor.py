@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: monitor.py
 # Description: Unified Monitoring Module
-# Version: 0.5.1
+# Version: 0.5.2
 # Created: 2025-11-23
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """PRAX Monitor Module - Mission Control for Autonomous Branches."""
@@ -21,6 +21,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, header, error
 
 from aipass.prax.apps.handlers.json import json_handler
+from aipass.prax.apps.handlers.fleet import fleet_rows
 
 from aipass.prax.apps.handlers.monitoring.unified_stream import print_event, print_command_separator, print_hook_event
 from aipass.prax.apps.handlers.monitoring.event_queue import MonitoringEvent, MonitoringQueue
@@ -28,8 +29,6 @@ from aipass.prax.apps.handlers.monitoring import instance_lock
 from aipass.prax.apps.handlers.monitoring.pid_cache import get_pid_for_branch as _get_pid_for_branch
 from aipass.prax.apps.handlers.cli.help_flags import wants_help
 from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument, refuse, unknown_option
-
-import json as _json
 
 
 _stop_event = threading.Event()  # Thread-safe shutdown signal
@@ -363,27 +362,26 @@ def _get_watch_directories(repo_root: Path) -> list[tuple[Path, bool]]:
     """
     dirs: list[tuple[Path, bool]] = []
 
-    registry_path = repo_root / "AIPASS_REGISTRY.json"
-    if registry_path.exists():
-        try:
-            data = _json.loads(registry_path.read_text(encoding="utf-8"))
-            for branch in data.get("branches", []):
-                branch_path = repo_root / branch.get("path", "")
-                if not branch_path.exists():
-                    continue
-                apps_dir = branch_path / "apps"
-                if apps_dir.exists():
-                    dirs.append((apps_dir, True))
-                dirs.append((branch_path, False))
-                trinity_dir = branch_path / ".trinity"
-                if trinity_dir.exists():
-                    dirs.append((trinity_dir, False))
-        except (ValueError, OSError) as e:
-            logger.warning(
-                f"[monitor] Could not read the branch registry ({type(e).__name__}), so the live "
-                f"monitor will watch no branch folders for file changes — only the CLI session "
-                f"folders. The log feed is unaffected and the registry file was not modified."
-            )
+    try:
+        rows = fleet_rows(repo_root)
+    except Exception as e:
+        rows = []
+        logger.warning(
+            f"[monitor] Could not read the fleet ({type(e).__name__}: {e}), so the live "
+            f"monitor will watch no branch folders for file changes — only the CLI session "
+            f"folders. The log feed is unaffected and no file was modified."
+        )
+    for row in rows:
+        branch_path = row["path"]
+        if not branch_path.exists():
+            continue
+        apps_dir = branch_path / "apps"
+        if apps_dir.exists():
+            dirs.append((apps_dir, True))
+        dirs.append((branch_path, False))
+        trinity_dir = branch_path / ".trinity"
+        if trinity_dir.exists():
+            dirs.append((trinity_dir, False))
 
     claude_projects = Path.home() / ".claude" / "projects"
     if claude_projects.exists():

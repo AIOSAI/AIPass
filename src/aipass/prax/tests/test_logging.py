@@ -3,7 +3,7 @@
 # Description: Tests for prax logging subsystem
 # Version: 1.4.1
 # Created: 2026-03-29
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/logging/introspection.py and setup.py."""

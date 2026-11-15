@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: filesystem_handler.py
 # Description: FileSystem Event Handler
-# Version: 0.3.0
+# Version: 0.3.1
 # Created: 2026-03-08
-# Modified: 2026-10-24
+# Modified: 2026-11-14
 # =============================================
 
 """PRAX Filesystem Event Handler"""
@@ -156,27 +156,17 @@ class MonitoringFileHandler(FileSystemEventHandler):
 
     @staticmethod
     def _branch_from_cwd(cwd: str) -> Optional[str]:
-        """Extract branch name from a CWD path like /path/to/src/aipass/devpulse."""
+        """The detector's label for a session's CWD; path shape (aipass/<name>, src/<name>) only when it has none."""
         if not cwd:
             return None
+        result = detect_branch_from_path(cwd)
+        if result and result != "UNKNOWN":
+            return result
         parts = Path(cwd).parts
         if "aipass" in parts:
             idx = parts.index("aipass")
             if idx + 1 < len(parts):
                 return parts[idx + 1].upper()
-        # External project under ~/Projects/: branch_detector gives the full label (AIPL/POLYGLOT)
-        projects_base = Path.home() / "Projects"
-        try:
-            Path(cwd).relative_to(projects_base)
-            result = detect_branch_from_path(cwd)
-            if result and result != "UNKNOWN":
-                return result
-        except ValueError:
-            logger.info(
-                f"[monitor] Live monitor file watcher is ignoring a folder outside "
-                f"the watched area (~/Projects/): {cwd}"
-            )
-        # Fallback: check src/{name} for branches outside aipass namespace
         if "src" in parts:
             idx = parts.index("src")
             if idx + 1 < len(parts):

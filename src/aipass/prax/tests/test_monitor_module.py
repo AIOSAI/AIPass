@@ -3,7 +3,7 @@
 # Description: Tests for the unified monitoring module
 # Version: 1.1.1
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/monitor.py."""
@@ -224,7 +224,7 @@ class TestGetWatchDirectories:
         apps_dir.mkdir(parents=True)
         trinity_dir.mkdir(parents=True)
 
-        registry = {"branches": [{"name": "flow", "path": "src/aipass/flow"}]}
+        registry = {"branches": [{"name": "flow", "path": "src/aipass/flow", "status": "active"}]}
         registry_file = tmp_path / "AIPASS_REGISTRY.json"
         registry_file.write_text(json.dumps(registry), encoding="utf-8")
 
@@ -246,7 +246,7 @@ class TestGetWatchDirectories:
     def test_skips_nonexistent_branch_paths(self, tmp_path):
         """Branches whose path doesn't exist on disk are skipped."""
         mod = _import_monitor()
-        registry = {"branches": [{"name": "ghost", "path": "src/aipass/ghost"}]}
+        registry = {"branches": [{"name": "ghost", "path": "src/aipass/ghost", "status": "active"}]}
         registry_file = tmp_path / "AIPASS_REGISTRY.json"
         registry_file.write_text(json.dumps(registry), encoding="utf-8")
 
@@ -278,7 +278,7 @@ class TestGetWatchDirectories:
         branch_dir.mkdir(parents=True)
         trinity_dir.mkdir(parents=True)
 
-        registry = {"branches": [{"name": "minimal", "path": "src/aipass/minimal"}]}
+        registry = {"branches": [{"name": "minimal", "path": "src/aipass/minimal", "status": "active"}]}
         registry_file = tmp_path / "AIPASS_REGISTRY.json"
         registry_file.write_text(json.dumps(registry), encoding="utf-8")
 
@@ -289,6 +289,19 @@ class TestGetWatchDirectories:
         assert (branch_dir / "apps") not in paths
         assert branch_dir in paths
         assert trinity_dir in paths
+
+    def test_a_declared_root_citizen_is_watched_and_an_undeclared_one_is_not(self, fleet, tmp_path):
+        """The fleet comes through memory's door: @grow outside the repo is watched, the stray is not."""
+        mod = _import_monitor()
+        (fleet.grow / "apps").mkdir()
+
+        with patch("pathlib.Path.home", return_value=tmp_path / "fakehome"):
+            result = mod._get_watch_directories(fleet.root)
+
+        assert (fleet.grow / "apps", True) in result
+        assert (fleet.grow, False) in result
+        assert (fleet.flow, False) in result
+        assert not any(fleet.rogue in (p, *p.parents) for p, _r in result)
 
 
 class TestPrintIntrospection:
@@ -1101,7 +1114,7 @@ class TestGetWatchDirectoriesEdgeCases:
         assert isinstance(result, list)
         assert result == []
         _doubled("logger").warning.assert_called_once()
-        assert "Could not read the branch registry (JSONDecodeError)" in _doubled("logger").warning.call_args.args[0]
+        assert "Could not read the fleet (RegistryUnreadable" in _doubled("logger").warning.call_args.args[0]
 
     def test_includes_codex_sessions(self, tmp_path):
         """~/.codex/sessions is included when it exists."""

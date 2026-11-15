@@ -40,12 +40,16 @@ Real-time unified console showing:
 Interactive commands inside the monitor: `help`, `status`, `quit`/`exit`/`q`.
 
 **Who counts as a branch.** Names and paths come from declarations, never from
-path shape. Three sources, in precedence order: `AIPASS_REGISTRY.json` for
-`src/aipass/*` branches; then a sweep of `projects/*/*_REGISTRY.json` for in-repo
-project citizens; then, for any file still unresolved, the nearest
-`.trinity/passport.json` walking up to the repo root. A relative registry path
-is resolved against *its own registry's* directory, not the process CWD. First registration wins, so a project cannot
-claim a name AIPass already uses.
+path shape. The citizens are memory's door rows (core `AIPASS_REGISTRY.json`,
+in-repo residents, and the roots `AIPASS_ROOTS.json` declares), read through a
+60-second cache; then, for any file still unresolved, the nearest
+`.trinity/passport.json` walking up to the repo root. First registration wins, so
+a project cannot claim a name AIPass already uses. The same rows decide what is
+watched: each citizen's `apps/` recursively, its root and `.trinity/` flat, so a
+declared-root citizen outside the repo is watched like a core one. A Codex
+session is labelled by asking the detector about its CWD, wherever it lives; the
+`aipass/<name>` and `src/<name>` path shapes answer only when the detector has
+no label.
 
 The project sweep resolves whoever the registries *declare*, not whoever has a
 directory. Path

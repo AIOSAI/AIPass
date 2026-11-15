@@ -3,7 +3,7 @@
 # Description: Repo-Root Resolution Pins
 # Version: 1.2.2
 # Created: 2026-08-31
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # Category: prax/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -151,6 +151,7 @@ class TestSourceRoot:
     def test_a_relative_start_is_refused_not_resolved(self):
         """Resolving it would read the working directory this module exists to avoid."""
         assert repo_root_mod.source_root(Path("relative/a.py")) == repo_root_mod.source_root()
+
 
 class TestFindRepoRoot:
     """Marker first, source root second, working directory never."""

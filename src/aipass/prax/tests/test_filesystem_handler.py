@@ -3,7 +3,7 @@
 # Description: Unit tests for filesystem_handler.py
 # Version: 1.3.0
 # Created: 2026-04-26
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/monitoring/filesystem_handler.py, its watchdog events."""

@@ -214,7 +214,7 @@
       "file": "apps/handlers/monitoring/filesystem_handler.py",
       "standard": "logged_fallback",
       "lines": [
-        199
+        189
       ],
       "reason": "prax, leg 7: None means 'this session file names no working directory', which is what an unreadable session file tells the caller as well; the caller then labels the event by the next means. The read is a display hint and the failure is logged at the line above."
     },
@@ -242,9 +242,9 @@
       "file": "tests/test_repo_root.py",
       "standard": "through_the_command",
       "lines": [
-        526
+        527
       ],
-      "reason": "prax, leg 14. 526: load's lane of the repo root; its one public reader, get_system_logs_dir outside a pytest session, ends in a mkdir of the live system_logs, so the lane is asked by name (prax, leg 5, HELD; re-read this leg, unchanged)."
+      "reason": "prax, leg 14. 527: load's lane of the repo root; its one public reader, get_system_logs_dir outside a pytest session, ends in a mkdir of the live system_logs, so the lane is asked by name (prax, leg 5, HELD; re-read this leg, unchanged)."
     },
     {
       "file": "apps/handlers/monitoring/instance_lock.py",

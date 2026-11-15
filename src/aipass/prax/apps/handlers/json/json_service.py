@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: json_service.py
 # Description: The fleet's one JSON handler service (prax-owned)
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-09-03
 # Modified: 2026-11-14
 # =============================================

@@ -3,7 +3,7 @@
 # Description: Tests for the monitor single-instance lock
 # Version: 2.0.0
 # Created: 2026-07-10
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/monitoring/instance_lock.py."""
@@ -20,6 +20,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from aipass.prax.apps.handlers.monitoring import instance_lock as mod
+
 
 @pytest.fixture(autouse=True)
 def lock_world(monkeypatch, tmp_path):
