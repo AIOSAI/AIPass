@@ -373,15 +373,15 @@ def _handle_agent(sub_args: List[str]) -> bool:
     console.print(f"[bold]watchdog agent[/bold] {agent_id} -> state={state} elapsed={elapsed}s reason={reason}")
     if state == "completed_silent":
         try:
-            seat = _dispatches.seat_email()
+            reply_to = f" via drone @ai_mail email {_dispatches.seat_email()}"
         except _dispatches.RegisterUnavailable as exc:
             logger.info("[watchdog] no sealed seat for the reply hint: %s", exc)
-            seat = "@devpulse"
+            reply_to = ""
         console.print(
             f"watchdog: {agent_id} stopped (state={state}) -- CHECK DELIVERABLES. "
             f'Next: drone @ai_mail dispatch {agent_id} "check in" '
             '"You finished your last task but did not send a reply. '
-            f'Please reply with your results now via drone @ai_mail email {seat}."'
+            f'Please reply with your results now{reply_to}."'
         )
     elif state == "completed_replied":
         console.print(f"watchdog: {agent_id} stopped (state={state}). Reply detected — check inbox.")

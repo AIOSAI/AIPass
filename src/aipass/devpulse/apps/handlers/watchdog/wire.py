@@ -334,8 +334,15 @@ def arm_wire(
 
     my_target = stdout_target()
     my_session = session_dir_of(my_target)
-    # The statusline matches the conversation id; the tasks-dir name is only a fallback.
-    session_name = _dispatches.seat_session_id() or (my_session.name if my_session is not None else None)
+    # The statusline matches the conversation id; the tasks-dir name never matches it, so say so.
+    session_name = _dispatches.seat_session_id()
+    if session_name is None:
+        session_name = my_session.name if my_session is not None else None
+        _stdout_event(
+            f"WARNING: no conversation id for this seat; wire registered as {session_name!r}, "
+            "the statusline will not show it armed"
+        )
+        logger.warning("[watchdog.wire] seat session id unknown, registered as %s", session_name)
 
     # A continuous wire refuses when it cannot see its wrapper, or sees a run_in_background
     # file that is heard only on exit. The refusal itself exits, so it is heard; --once stays legal.
@@ -359,23 +366,28 @@ def arm_wire(
         logger.error("[watchdog.wire] refused continuous arm under run_in_background stdout=%s", my_target)
         raise SystemExit(1)
 
-    _sweep_wires(storage_path, seat)
-    _sweep_stale_daemons(storage_path)
+    try:
+        _sweep_wires(storage_path, seat)
+        _sweep_stale_daemons(storage_path)
 
-    # A takeover sends SIGTERM; the finally below must still deregister.
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+        # A takeover sends SIGTERM; the finally below must still deregister.
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 
-    handle = _registry.register(
-        _WIRE_KIND,
-        metadata={
-            "session": session_name,
-            "seat": seat,
-            "wrapper": _wrapper_of(my_target),
-            "tasks_dir": my_session.name if my_session is not None else None,
-            "stdout": str(my_target) if my_target is not None else None,
-        },
-        storage_path=storage_path,
-    )
+        handle = _registry.register(
+            _WIRE_KIND,
+            metadata={
+                "session": session_name,
+                "seat": seat,
+                "wrapper": _wrapper_of(my_target),
+                "tasks_dir": my_session.name if my_session is not None else None,
+                "stdout": str(my_target) if my_target is not None else None,
+            },
+            storage_path=storage_path,
+        )
+    except _registry.RegistryUnreadable as exc:
+        _stdout_event(f"BASELINE DEAD: watch registry unreadable — {exc}")
+        logger.error("[watchdog.wire] watch registry unreadable: %s", exc)
+        raise SystemExit(1) from exc
     json_handler.log_operation("arm_wire", {"handle": handle, "session": session_name, "once": once})
 
     feed_cursor_file = _feed.cursor_file_for(root, seat=seat)
@@ -390,7 +402,12 @@ def arm_wire(
         _touch_heartbeat()
         last_heartbeat = time.monotonic()
 
-        feed_records, feed_state = _feed.drain_feed(feed_cursor_file, feed_file_path=feed_source, state=feed_state)
+        try:
+            feed_records, feed_state = _feed.drain_feed(feed_cursor_file, feed_file_path=feed_source, state=feed_state)
+        except _feed.CursorUnreadable as exc:
+            _stdout_event(f"BASELINE DEAD: feed cursor unreadable — {exc}")
+            logger.error("[watchdog.wire] feed cursor unreadable: %s", exc)
+            raise SystemExit(1) from exc
         missed = _partition_mine(feed_records, seat)
         for record in missed:
             _stdout_event(f"MISSED {_feed.format_feed_event(record)} [completed while no wire was up]")

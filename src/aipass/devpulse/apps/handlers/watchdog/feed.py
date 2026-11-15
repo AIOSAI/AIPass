@@ -72,27 +72,23 @@ def _digest(raw_line: str) -> str:
     return hashlib.sha256(raw_line.encode("utf-8", errors="replace")).hexdigest()[:_DIGEST_CHARS]
 
 
-def _read_cursor(cursor_file: Path) -> dict:
-    """Load the delivery cursor. An unreadable cursor starts fresh, never wedges.
+class CursorUnreadable(RuntimeError):
+    """The cursor exists but cannot be read; a fresh start would seed (absorb) every undelivered line."""
 
-    Fresh means the next drain seeds: every line on disk is absorbed, not delivered, unless the
-    caller passes ``seed_if_new=False``.
-    """
+
+def _read_cursor(cursor_file: Path) -> dict:
+    """Load the delivery cursor. A missing cursor is a first drain (it seeds); an unreadable one raises."""
     try:
         data = json.loads(cursor_file.read_text(encoding="utf-8"))
     except FileNotFoundError:
         logger.debug("[watchdog.feed] no cursor at %s — first drain for this reader", cursor_file)
         return {"seen": [], "seeded": False}
     except (OSError, json.JSONDecodeError, ValueError) as exc:
-        logger.warning(
-            "[watchdog.feed] cursor unreadable %s — starting fresh, disk lines are seeded: %s", cursor_file, exc
-        )
-        return {"seen": [], "seeded": False}
+        raise CursorUnreadable(f"feed cursor {cursor_file} unreadable: {exc}") from exc
 
-    seen = data.get("seen")
+    seen = data.get("seen") if isinstance(data, dict) else None
     if not isinstance(seen, list):
-        logger.warning("[watchdog.feed] cursor has no usable digest list — starting fresh, lines on disk are seeded")
-        return {"seen": [], "seeded": False}
+        raise CursorUnreadable(f"feed cursor {cursor_file} has no digest list")
 
     return {
         "seen": [d for d in seen if isinstance(d, str)],

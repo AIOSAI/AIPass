@@ -40,6 +40,17 @@ def store_path(tmp_path):
     return tmp_path / "watchdog_active.json"
 
 
+@pytest.mark.parametrize("body", ["{not json", "[]", '{"watches": {}}'])
+def test_an_unreadable_registry_raises_and_is_never_overwritten(store_path, body):
+    """Writing an empty store over it would drop every live wire."""
+    store_path.write_text(body, encoding="utf-8")
+
+    with pytest.raises(watch_registry.RegistryUnreadable):
+        watch_registry.register("agent", storage_path=store_path)
+
+    assert store_path.read_text(encoding="utf-8") == body
+
+
 def test_register_creates_entry_and_returns_handle(store_path):
     handle = watch_registry.register(
         "agent",

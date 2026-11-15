@@ -3,7 +3,7 @@
 # Description: Tests for the watchdog timer handler + router integration
 # Version: 1.0.2
 # Created: 2026-04-14
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/watchdog/timer.py and the watchdog timer command that drives it."""
@@ -193,6 +193,16 @@ def test_timer_list_mixes_active_and_history(store_path):
     alpha_entry = next(a for a in snapshot["active"] if a["name"] == "alpha")
     assert alpha_entry["elapsed_so_far_seconds"] >= 0
     assert "human" in alpha_entry
+
+
+@pytest.mark.parametrize("body", ["{not json", "[]", '{"active": []}'])
+def test_an_unreadable_timer_store_raises_and_is_never_overwritten(store_path, body):
+    store_path.write_text(body, encoding="utf-8")
+
+    with pytest.raises(RuntimeError):
+        timer_handler.timer_start("alpha", storage_path=store_path)
+
+    assert store_path.read_text(encoding="utf-8") == body
 
 
 def test_timer_list_empty_store(store_path):

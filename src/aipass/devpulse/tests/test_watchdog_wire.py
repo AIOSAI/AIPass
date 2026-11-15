@@ -611,7 +611,8 @@ def test_wire_records_conversation_id_from_env(tmp_path, monkeypatch):
     assert seen["tasks_dir"] == "runtime-xyz"
 
 
-def test_wire_falls_back_to_tasks_dir_without_env(tmp_path, monkeypatch):
+def test_wire_falls_back_to_tasks_dir_without_env(tmp_path, capsys, monkeypatch):
+    """The tasks-dir name never matches the statusline, so the wire says so on stdout."""
     root = _repo(tmp_path)
     store = _store(tmp_path)
     _write_feed(root, [])
@@ -623,6 +624,7 @@ def test_wire_falls_back_to_tasks_dir_without_env(tmp_path, monkeypatch):
     wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
 
     assert seen["session"] == "runtime-xyz"
+    assert "the statusline will not show it armed" in capsys.readouterr().out
 
 
 def _codex_pointer_cwd(tmp_path: Path, monkeypatch, thread_id: str) -> None:
@@ -984,6 +986,36 @@ def test_a_death_found_mid_follow_is_announced_on_the_next_check(tmp_path, capsy
 
     assert result["dead"] == 1
     assert "DEAD @prax [dead-mid]" in capsys.readouterr().out
+
+
+def test_an_unreadable_feed_cursor_is_a_dead_baseline(tmp_path, capsys):
+    root = _repo(tmp_path)
+    _write_feed(root, [_completion("prax", "never-absorbed")])
+    cursor = watch_feed.cursor_file_for(root, seat=SEAT)
+    cursor.parent.mkdir(parents=True, exist_ok=True)
+    cursor.write_text("{not json", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        wire.arm_wire(repo_root=root, storage_path=_store(tmp_path), max_ticks=1, wire_poll=0)
+
+    assert exc.value.code == 1
+    assert "BASELINE DEAD: feed cursor unreadable" in capsys.readouterr().out
+    assert cursor.read_text(encoding="utf-8") == "{not json"
+
+
+def test_an_unreadable_watch_registry_is_a_dead_baseline(tmp_path, capsys):
+    root = _repo(tmp_path)
+    _write_feed(root, [])
+    store = _store(tmp_path)
+    store.parent.mkdir(parents=True, exist_ok=True)
+    store.write_text("{not json", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
+
+    assert exc.value.code == 1
+    assert "BASELINE DEAD: watch registry unreadable" in capsys.readouterr().out
+    assert store.read_text(encoding="utf-8") == "{not json"
 
 
 def test_an_unreadable_register_does_not_kill_the_wire(tmp_path, capsys, monkeypatch):

@@ -34,10 +34,6 @@ done
 if [ -z "$branch" ]; then
     if [[ "$dir" == *"/src/aipass/"* ]]; then
         branch=$(echo "$dir" | sed 's|.*/src/aipass/||' | cut -d/ -f1)
-    elif [[ "$dir" == *"/src/commons"* ]]; then
-        branch="commons"
-    elif [[ "$dir" == *"/src/skills"* ]]; then
-        branch="skills"
     elif [[ "$dir" == *"/AIPass"* ]]; then
         branch="root"
     fi

@@ -3,7 +3,7 @@
 # Description: Tests for the shared owner-capability caller guard (#681)
 # Version: 1.2.0
 # Created: 2026-07-10
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/owner/guard.py through guard_owner_caller, against a stubbed sealed registry."""
@@ -189,6 +189,17 @@ class TestOwnerDecision:
         """An unresolved caller (empty email) is rejected when owner is sealed, even inside the devpulse tree."""
         _patch_registry(monkeypatch, "@devpulse")
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path / "devpulse"))
+        assert guard_mod.guard_owner_caller("watchdog") is False
+
+
+class TestNoRail:
+    """Without the drone rail there is no caller: the process cwd (devpulse/ under drone) never stands in."""
+
+    def test_no_caller_cwd_refuses_even_unsealed_inside_devpulse(self, monkeypatch, tmp_path):
+        _patch_registry(monkeypatch, None)
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
+        (tmp_path / "devpulse").mkdir()
+        monkeypatch.chdir(tmp_path / "devpulse")
         assert guard_mod.guard_owner_caller("watchdog") is False
 
 

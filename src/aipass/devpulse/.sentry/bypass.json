@@ -7,21 +7,9 @@
   "bypass": [
     {
       "standard": "through_the_command",
-      "file": "tests/test_watchdog_agent.py",
-      "lines": [704],
-      "reason": "Pins a cache guarantee no public answer shows: an unchanged transcript is parsed once, then every tick reuses the verdict. The counter wraps the real _tail_lines and returns its answer, so the verdicts asserted are the product's."
-    },
-    {
-      "standard": "through_the_command",
       "file": "tests/test_watchdog_dispatches.py",
       "lines": [91],
       "reason": "An identity pin, not a reach: seat_email's owner lookup must BE guard.owner_address, one implementation of 'who owns this project' (the 2026-08-21 two-answers bug). No behaviour shows the difference until a second copy drifts."
-    },
-    {
-      "standard": "through_the_command",
-      "file": "tests/test_watchdog_registry.py",
-      "lines": [500, 512, 513],
-      "reason": "The default store location is the contract (next to the code that owns it, from any cwd). Its public routes, register() and wake_in() with no store named, write the live .watchdog/ of the seat running the suite, which the conftest seal exists to prevent (2026-09-27, a test armed a real wire). The test carries live_default_store and only resolves the path."
     },
     {
       "standard": "logged_fallback",
@@ -37,27 +25,9 @@
     },
     {
       "standard": "logged_fallback",
-      "file": "apps/modules/watchdog.py",
-      "lines": [249, 277, 340],
-      "reason": "CLI handler contract, as compass.py: each True follows a cli error(), which marks the command failed and sets the exit."
-    },
-    {
-      "standard": "logged_fallback",
-      "file": "apps/devpulse.py",
-      "lines": [129],
-      "reason": "Router contract: a module that raised is reported through cli error() (exit non-zero, 'A defect in the module, not an unknown command'); True stops the router from answering 'Unknown command' on top of it."
-    },
-    {
-      "standard": "logged_fallback",
       "file": "apps/handlers/owner/admin_grant.py",
-      "lines": [53, 132],
+      "lines": [52, 131],
       "reason": "Fail closed. 53: a key file that exists but is not hex reads as no key, so nothing is signed or verified (logged as an error). 132: an unreadable caller passport answers '', which matches no seat, so the ceremony refuses. Neither can grant anything."
-    },
-    {
-      "standard": "logged_fallback",
-      "file": "apps/handlers/owner/guard.py",
-      "lines": [78, 84],
-      "reason": "owner_address answers None for 'no owner resolved' by contract (docstring): its callers are refusal-message builders, which word it as 'no owner is sealed or readable', and the watchdog dispatch register, which raises RegisterUnavailable on it. The access decision does not read it: _owner_decision refuses an unreadable registry on its own (2026-10-04)."
     },
     {
       "standard": "logged_fallback",
@@ -68,31 +38,13 @@
     {
       "standard": "logged_fallback",
       "file": "apps/handlers/release_notify/managers.py",
-      "lines": [107],
+      "lines": [106],
       "reason": "None is 'cannot read this passport', and its one caller (discover_managers) lists that path in skipped with reason 'passport unreadable - see the log', which the run reports. Never counted as a non-manager."
-    },
-    {
-      "standard": "logged_fallback",
-      "file": "apps/handlers/watchdog/agent.py",
-      "lines": [174, 179, 182, 185, 213, 380],
-      "reason": "174/182: liveness fails safe to alive (a check that cannot run never declares a running agent dead; the lock and timeout still end the watch). 179: ProcessLookupError is the answer 'dead', not a failure. 185: any other os.kill error is an invalid pid, dead. 213: an unreadable transcript tail feeds only the advisory stall signal, never the exit verdict. 380: FileNotFoundError between exists() and read is a lock released in that instant, absent. The unreadable lock itself answers {} (held), 2026-10-04."
-    },
-    {
-      "standard": "logged_fallback",
-      "file": "apps/handlers/watchdog/registry.py",
-      "lines": [174, 217, 220],
-      "reason": "Liveness, as agent.py: an unreadable /proc status is not proof of a zombie, ps answers (174); ProcessLookupError is the answer absent (217); PermissionError means the process exists, another user's (220). A probe that cannot run raises (is_pid_alive on Windows), never assumes alive. A wrong 'alive' costs a slower reap; a wrong 'dead' would drop a live watch."
-    },
-    {
-      "standard": "logged_fallback",
-      "file": "apps/handlers/watchdog/wire.py",
-      "lines": [109],
-      "reason": "None is the documented 'stdout target unknown', the same answer /proc gives for an unreadable fd/1 (_stdout_target docstring); the wrapper is then classified as having no session, never as a wrong one."
     },
     {
       "standard": "json_structure",
       "file": "devpulse_json/compass",
-      "reason": "compass/ is the devpulse-owned Compass decision store (SQLite/FTS5 \u2014 db + wal + shm) which needs its own directory. Legitimate data subdir, not operator-config (custom_config/) nor auto-gen root data. Sanctioned exception per #643."
+      "reason": "compass/ is the devpulse-owned Compass decision store (SQLite/FTS5 — db + wal + shm) which needs its own directory. Legitimate data subdir, not operator-config (custom_config/) nor auto-gen root data. Sanctioned exception per #643."
     },
     {
       "standard": "json_structure",
@@ -102,27 +54,17 @@
     {
       "standard": "cli",
       "file": "apps/handlers/watchdog/presenter.py",
-      "reason": "Watchdog presentation layer \u2014 console.print() IS the output. Same sanctioned shape as the feedback display handlers below: every function here renders a handler result dict for the operator and decides nothing. Split out of apps/modules/watchdog.py on 2026-08-22, which had reached 692 lines across r2/r3/r4 and broke the 600-line module ceiling; the display functions were the cohesive third that shared no state with the routing code."
+      "reason": "Watchdog presentation layer — console.print() IS the output. Same sanctioned shape as the feedback display handlers below: every function here renders a handler result dict for the operator and decides nothing. Split out of apps/modules/watchdog.py on 2026-08-22, which had reached 692 lines across r2/r3/r4 and broke the 600-line module ceiling; the display functions were the cohesive third that shared no state with the routing code."
     },
     {
       "standard": "cli",
       "file": "apps/handlers/feedback/compose.py",
-      "reason": "Feedback handler \u2014 console.print() IS the output. Display functions are the handler's purpose."
+      "reason": "Feedback handler — console.print() IS the output. Display functions are the handler's purpose."
     },
     {
       "standard": "cli",
       "file": "apps/handlers/feedback/inbox.py",
-      "reason": "Feedback handler \u2014 console.print() IS the output. Display functions are the handler's purpose."
-    },
-    {
-      "standard": "naming",
-      "file": "apps/handlers/watchdog/registry.py",
-      "reason": "_FileLock uses Python _PrivateClass convention (underscore prefix + PascalCase)."
-    },
-    {
-      "standard": "imports",
-      "file": "apps/handlers/feedback/compose.py",
-      "reason": "_AIPASS_ROOT fallback for ai_mail inbox resolution. Known gap \u2014 needs registry-based path resolution."
+      "reason": "Feedback handler — console.print() IS the output. Display functions are the handler's purpose."
     },
     {
       "standard": "unused_function",

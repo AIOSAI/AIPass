@@ -3,7 +3,7 @@
 # Description: Tests for the watchdog feed handler (FPLAN-0451 P2 — push replaces poll)
 # Version: 1.1.0
 # Created: 2026-08-21
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/watchdog/feed.py, reading completions off @ai_mail's notification feed."""
@@ -195,15 +195,16 @@ class TestTrim:
 
 
 class TestResilience:
-    def test_corrupt_cursor_replays_rather_than_wedging(self, feed_file, cursor):
-        """Duplicates over silence — wire.py's doctrine, held here too."""
+    @pytest.mark.parametrize("body", ["{not json", '{"seen": 5}', "[]"])
+    def test_an_unreadable_cursor_raises_and_is_left_as_found(self, feed_file, cursor, body):
+        """A fresh start would seed, absorbing every undelivered line; the cursor must stop the drain instead."""
         _write(feed_file, [_event(minute=0)])
-        cursor.write_text("{not json", encoding="utf-8")
+        cursor.write_text(body, encoding="utf-8")
 
-        records, state = feed.drain_feed(cursor, feed_file_path=feed_file, seed_if_new=False)
+        with pytest.raises(feed.CursorUnreadable):
+            feed.drain_feed(cursor, feed_file_path=feed_file)
 
-        assert len(records) == 1
-        assert state["seeded"] is True
+        assert cursor.read_text(encoding="utf-8") == body
 
     def test_unparseable_line_is_stepped_over(self, feed_file, cursor):
         """Junk must never wedge delivery at the same position forever."""

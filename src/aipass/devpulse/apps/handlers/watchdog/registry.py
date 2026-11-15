@@ -48,22 +48,22 @@ def _empty_store() -> dict:
     return {"version": _STORAGE_VERSION, "watches": []}
 
 
+class RegistryUnreadable(RuntimeError):
+    """The registry file exists but cannot be read as a registry; writing over it would drop live watches."""
+
+
 def _load_store_unlocked(storage_path: Path) -> dict:
-    """Load the registry without locking — caller is responsible for locking."""
+    """Load the registry without locking — caller is responsible for locking. A missing file is an empty registry."""
     if not storage_path.exists():
         return _empty_store()
     try:
         data = json.loads(storage_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("[watchdog.registry] could not load %s: %s", storage_path, exc)
-        return _empty_store()
-
-    if not isinstance(data, dict):
-        return _empty_store()
+        raise RegistryUnreadable(f"watch registry {storage_path} unreadable: {exc}") from exc
+    if not isinstance(data, dict) or not isinstance(data.get("watches", []), list):
+        raise RegistryUnreadable(f"watch registry {storage_path} is not a registry object: {type(data).__name__}")
     data.setdefault("version", _STORAGE_VERSION)
     data.setdefault("watches", [])
-    if not isinstance(data["watches"], list):
-        data["watches"] = []
     return data
 
 
