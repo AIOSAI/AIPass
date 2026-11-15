@@ -19,7 +19,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Claude Code sandboxing needs the sandbox runtime on PATH (plus bwrap above).
-RUN npm install -g @anthropic-ai/sandbox-runtime
+# Codex and OpenCode go in before the install, which wires every CLI it finds on PATH.
+RUN npm install -g @anthropic-ai/sandbox-runtime @openai/codex@0.169.0 opencode-ai@1.19.5
 
 # The aipass CLI writes its logs beside its own code, so its environment belongs to the user.
 RUN useradd -m -s /bin/bash aipass && install -d -o aipass -g aipass /opt/aipass
