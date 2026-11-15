@@ -36,7 +36,7 @@ Every branch is built the same: `src/aipass/<name>/`, mail `@<name>` — `.trini
  - @trigger — event bus, error detection (medic), log watching, error registry; detects and dispatches, owners fix.
  - @api — external API gateway: clients, OAuth, keys.
  - @cli — shared Rich rendering for terminal output.
- - @skills — self-contained skill units any agent can run (Telegram).
+ - @skills — self-contained skill units any agent can run (inbox check, system status, screen lock).
  - @daemon — task scheduler; each branch owns its `.daemon/schedule.json`.
  - @commons — the social space: post, comment, vote.
  - @backup — local-first snapshots, versioning, restore; `.backup/` also holds @memory rollover and @flow archives.
