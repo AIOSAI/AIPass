@@ -29,8 +29,7 @@ prax/
 │   │   ├── logging/            # Setup, rotation, introspection, direct logger, jsonl
 │   │   ├── monitoring/         # Event queue, branch detect/scope, log watcher, rate tracker,
 │   │   │                       #   filters, commons feed, instance lock, pid cache
-│   │   ├── registry/           # Module registry load/save
-│   │   └── status/             # STATUS.md sync handler
+│   │   └── registry/           # Module registry load/save
 │   ├── plugins/                # devpulse_dashboard: git, session and dispatch sections
 │   └── integrations/           # Per-integration prompt and config
 ├── templates/                  # DASHBOARD.template.json — the dashboard schema

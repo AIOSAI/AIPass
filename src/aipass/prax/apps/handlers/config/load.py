@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: load.py
 # Description: Load Logging Configuration Handler
-# Version: 1.5.1
+# Version: 1.5.2
 # Created: 2025-11-07
-# Modified: 2026-11-01
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -19,13 +19,12 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Union
 
 from aipass.prax.apps.handlers.repo_root import find_repo_root
-from aipass.prax.apps.handlers.repo_root import resolved_file
 
 logger = logging.getLogger(__name__)
 
 MODULE_NAME = "load"
 
-PRAX_ROOT = resolved_file(Path(__file__)).parents[3]  # config/load.py → handlers/ → apps/ → prax/
+PRAX_ROOT = Path(__file__).resolve().parents[3]  # config/load.py → handlers/ → apps/ → prax/
 ECOSYSTEM_ROOT = PRAX_ROOT.parent  # prax/ → aipass/ (contains all sibling modules)
 PRAX_JSON_DIR = PRAX_ROOT / "prax_json"
 
@@ -280,7 +279,8 @@ def load_log_config() -> Dict[str, Any]:
                 }
                 return result
     except (json.JSONDecodeError, OSError) as e:
-        logger.info(f"Log config load error (using defaults): {e}")
+        # Not a raise: this runs inside every logger call fleet-wide, the hooks' included.
+        logger.error(f"[config] {PRAX_LOGGER_CONFIG_FILE} is unreadable, its settings are IGNORED until fixed: {e}")
 
     return {
         "system_logs": DEFAULT_SYSTEM_LOGS,

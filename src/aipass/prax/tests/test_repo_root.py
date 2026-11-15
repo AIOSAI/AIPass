@@ -24,7 +24,6 @@
 # registry-less cwd crashed or misrouted almost every import. A ninth private copy is caught by an AST sweep.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(error_handling) — resolved_file answering the unresolved path on OSError, covered by that row
 # sentry: no-test-needed(error_handling) — find_repo_root walking past an unreadable directory, covered by that row
 
 import ast
@@ -70,22 +69,6 @@ try:
 except FileNotFoundError:
     pass
 """
-
-# inspect's getmodule() calls realpath outside a try, so realpath is denied too.
-# It convicts a module-level resolve(), not inspect.stack().
-_DENY_REALPATH = (
-    _INJECT_DEAD_CWD
-    + """
-import os.path as _ospath
-
-
-def _no_realpath(*_args, **_kwargs):
-    raise FileNotFoundError(2, "No such file or directory")
-
-
-_ospath.realpath = _no_realpath
-"""
-)
 
 _DELETE_CWD = """
 import os as _os, shutil as _shutil, tempfile as _tempfile
@@ -229,16 +212,12 @@ class TestFindRepoRoot:
 
 WORLDS = [
     pytest.param(_INJECT_DEAD_CWD, id="getcwd-denied"),
-    pytest.param(_DENY_REALPATH, id="realpath-denied"),
 ]
 
 
 @pytest.mark.parametrize("world", WORLDS)
 class TestDeadCwd:
-    """The working directory cannot be read and something imports.
-
-    realpath-denied is red on Linux pre-cure.
-    """
+    """The working directory cannot be read and something imports."""
 
     def test_the_resolver_answers_without_a_working_directory(self, world):
         result = _run_without_a_working_directory(
@@ -333,17 +312,6 @@ class TestCallerPathResolution:
         found = introspection.detect_external_project(str(real))
         assert found is not None
         assert found[1] == real.resolve().parent
-
-    def test_an_unresolvable_absolute_path_is_an_answer_not_a_crash(self, monkeypatch, tmp_path):
-        """Branch detection is a routing hint: not knowing the caller must never break its import."""
-        _a_project_around(tmp_path, monkeypatch)
-
-        def boom(self, *_args, **_kwargs):
-            raise OSError("no cwd")
-
-        monkeypatch.setattr(Path, "resolve", boom)
-        unresolvable = str(tmp_path / "unresolvable.py")
-        assert introspection.detect_external_project(unresolvable) is None
 
 
 class TestBothConstructionsAgree:
@@ -714,18 +682,18 @@ class TestCallerAttributionWithoutAWorkingDirectory:
 class TestTheFenceSurvivesADeadWorkingDirectory:
     """The v2 fence, from its kin seat, in a process whose cwd was removed.
 
-    The fence resolves frame paths through realpath. The cwd is denied by injection.
+    The fence resolves frame paths with the cwd denied by injection.
     """
 
-    def test_the_kin_probe_is_allowed_with_its_cwd_gone_and_realpath_denied(self):
+    def test_the_kin_probe_is_allowed_with_its_cwd_gone(self):
         """Arming probe first: the denial bites in this child, so the claim is about it."""
         probe = Path(__file__).resolve().parent / "support_fence.py"
-        script = _DENY_REALPATH + textwrap.dedent(
+        script = _INJECT_DEAD_CWD + textwrap.dedent(
             f"""
                 import os, runpy, sys
                 sys.path.insert(0, {REPO_SRC!r})
                 try:
-                    os.path.realpath("x")
+                    os.getcwd()
                     print("ARM INERT")
                 except OSError:
                     print("ARM BITES")

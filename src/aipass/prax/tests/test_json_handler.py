@@ -349,26 +349,31 @@ class TestEnsureJsonExists:
 
         assert json.loads((sandbox / "keep_config.json").read_text(encoding="utf-8")) == original
 
-    def test_an_unreadable_document_is_regenerated(self, handle, sandbox):
+    @pytest.mark.parametrize(
+        "content",
+        ["{not json", "", json.dumps(["a", "list"])],
+        ids=["unreadable", "empty", "misshaped"],
+    )
+    def test_a_bad_document_raises_and_is_never_overwritten(self, handle, sandbox, content):
+        """A corrupt config read as absent and replaced by the default loses the owner's keys."""
         sandbox.mkdir(parents=True, exist_ok=True)
-        (sandbox / "broken_config.json").write_text("{not json", encoding="utf-8")
+        target = sandbox / "broken_config.json"
+        target.write_text(content, encoding="utf-8")
 
-        assert handle.ensure_json_exists("broken", "config") is True
-        assert json.loads((sandbox / "broken_config.json").read_text(encoding="utf-8"))["module_name"] == "broken"
+        with pytest.raises(json_service.InvalidDocument, match="not overwritten"):
+            handle.ensure_json_exists("broken", "config")
 
-    def test_an_empty_document_is_regenerated(self, handle, sandbox):
+        assert target.read_text(encoding="utf-8") == content
+
+    def test_a_misshaped_log_on_disk_answers_false_and_is_left_as_it_was(self, handle, sandbox):
+        """log_operation is telemetry: a bad document is refused without raising and without a rewrite."""
         sandbox.mkdir(parents=True, exist_ok=True)
-        (sandbox / "empty_config.json").write_text("", encoding="utf-8")
+        target = sandbox / "bad_log.json"
+        target.write_text(json.dumps({"not": "a list"}), encoding="utf-8")
 
-        assert handle.ensure_json_exists("empty", "config") is True
-        assert json.loads((sandbox / "empty_config.json").read_text(encoding="utf-8"))["module_name"] == "empty"
+        assert handle.log_operation("probe", module_name="bad") is False
 
-    def test_a_structurally_invalid_document_is_regenerated(self, handle, sandbox):
-        sandbox.mkdir(parents=True, exist_ok=True)
-        (sandbox / "wrong_config.json").write_text(json.dumps(["a", "list"]), encoding="utf-8")
-
-        assert handle.ensure_json_exists("wrong", "config") is True
-        assert isinstance(json.loads((sandbox / "wrong_config.json").read_text(encoding="utf-8")), dict)
+        assert json.loads(target.read_text(encoding="utf-8")) == {"not": "a list"}
 
     def test_ensure_module_jsons_creates_all_three(self, handle, sandbox):
         assert handle.ensure_module_jsons("trio") is True
@@ -531,19 +536,16 @@ class TestTheDataLegIsHealedNotReplaced:
             "last_updated": date.today().isoformat(),
         }
 
-    def test_the_config_leg_is_still_regenerated_not_merged(self, handle, sandbox):
-        """The heal is the data leg's alone: an invalid config comes back as the default."""
-        # The default, as the same door writes it for a missing document.
-        assert handle.ensure_json_exists("stray", "config") is True
-        default = json.loads((sandbox / "stray_config.json").read_text(encoding="utf-8"))
-        (sandbox / "stray_config.json").write_text(
-            json.dumps({"module_name": "stray", "stray": True}), encoding="utf-8"
-        )
+    def test_the_config_leg_is_refused_not_merged(self, handle, sandbox):
+        """The heal is the data leg's alone: an invalid config raises and keeps its keys."""
+        sandbox.mkdir(parents=True, exist_ok=True)
+        stray = {"module_name": "stray", "stray": True}
+        (sandbox / "stray_config.json").write_text(json.dumps(stray), encoding="utf-8")
 
-        assert handle.ensure_json_exists("stray", "config") is True
+        with pytest.raises(json_service.InvalidDocument):
+            handle.ensure_json_exists("stray", "config")
 
-        written = json.loads((sandbox / "stray_config.json").read_text(encoding="utf-8"))
-        assert written == default
+        assert json.loads((sandbox / "stray_config.json").read_text(encoding="utf-8")) == stray
 
     def test_a_data_document_that_cannot_be_written_back_is_left_as_it_was(self, handle, sandbox):
         """json.load reads NaN, the writer refuses it: the document is left as it was, the log leg works."""

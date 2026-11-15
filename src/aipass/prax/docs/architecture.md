@@ -37,7 +37,7 @@ modules import the gate directly; the entry point imports it re-exported through
 `apps/modules/__init__.py`, since an entry point never reaches into handlers.
 
 Help still wins over the gate everywhere: `wants_help(args)` runs first, so
-`status sync -h` and `dashboard refrsh --help` explain themselves rather than
+`status bogus -h` and `dashboard refrsh --help` explain themselves rather than
 failing. A question is never a bad argument.
 
 ## The exit seam
@@ -65,7 +65,6 @@ that left branches stale does not exit 0.
 5. **Multi-CLI monitoring** — Watches Claude Code JSONL and Codex JSONL session files. Extracts agent activity (thinking, tool use, responses) with model detection and branch resolution.
 6. **Runaway-log detection** — Rate tracker measures byte growth per log file, estimates lines/min from byte deltas. Sustained thresholds: WARNING (>100 lines/min for 2 min), CRITICAL (>10 lines/sec for 1 min). Fires `runaway_log_detected` on the trigger event bus. State persists to disk across process restarts. Per-file suppression available.
 7. **Dashboard** — Template-based per-branch dashboard files. Refreshes from central files (`*.central.json`). Write-through API for services to update sections directly.
-8. **STATUS sync** — `status sync` scans every branch's `STATUS.local.md` and builds the aggregate, then writes nothing. See the status module below.
 
 ## Asking for help never does the thing
 
@@ -94,13 +93,5 @@ gate.
 
 ```bash
 drone @prax status                       # System health (modules, loggers, last discovery scan)
-drone @prax status sync                  # Scans branch STATUS.local.md files — writes nothing (see below)
 drone @prax status --help                # Status usage
 ```
-
-**`status sync` scans and declines to write.** The STATUS flow is
-decommissioned: branch state lives in `DASHBOARD.local.json`, and the automatic
-path has no trigger registration. The engine stays revivable, so the scan, the
-registry read and the aggregate are all still built, and nothing is written: the
-call returns `status: "declined"` with the reason, and the command says so rather
-than reporting a write.

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: operations.py
 # Description: Dashboard Operations Handler
-# Version: 0.6.0
+# Version: 0.6.1
 # Created: 2026-02-25
-# Modified: 2026-10-24
+# Modified: 2026-11-14
 # =============================================
 
 """Dashboard Operations Handler"""
@@ -23,9 +23,8 @@ from aipass.prax.apps.modules.logger import get_direct_logger
 logger = get_direct_logger()
 
 from aipass.prax.apps.handlers.json import json_handler
-from aipass.prax.apps.handlers.repo_root import resolved_file
 
-_PRAX_ROOT = resolved_file(Path(__file__)).parents[3]  # .../prax/
+_PRAX_ROOT = Path(__file__).resolve().parents[3]  # .../prax/
 
 # The one copy of the dashboard caps, in chars (len()); other branches import them
 # via aipass.prax.apps.modules.dashboard. Reference: docs/dashboard_caps.md

@@ -576,15 +576,9 @@ def _rate_tracker_worker():
     from aipass.prax.apps.handlers.monitoring.rate_tracker import scan_rates, configure, SCAN_INTERVAL
     from aipass.prax.apps.handlers.config.load import get_system_logs_dir
 
-    try:
-        from aipass.trigger.apps.modules.core import trigger
+    from aipass.trigger.apps.modules.core import trigger
 
-        event_cb = trigger.fire
-    except ImportError as exc:
-        logger.info("[monitor] trigger not available for rate tracker: %s", exc)
-        event_cb = None
-
-    configure(logs_dir=get_system_logs_dir(), event_callback=event_cb)
+    configure(logs_dir=get_system_logs_dir(), event_callback=trigger.fire)
 
     while not _stop_event.is_set():
         try:

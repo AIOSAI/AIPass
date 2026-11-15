@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_health.py
 # Description: PRAX Log Health Command — rate overview
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-07-14
-# Modified: 2026-10-24
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -126,14 +126,10 @@ def _display_rates(results: list, is_scan: bool) -> None:
 
 
 def _get_event_callback():
-    """Return trigger.fire if available, else None."""
-    try:
-        from aipass.trigger.apps.modules.core import trigger
+    """trigger.fire, imported at call time: trigger imports prax's logger."""
+    from aipass.trigger.apps.modules.core import trigger
 
-        return trigger.fire
-    except (ImportError, OSError) as exc:
-        logger.info("[log-health] trigger not available: %s", exc)
-        return None
+    return trigger.fire
 
 
 def handle_command(command: str, args: List[str]) -> bool:

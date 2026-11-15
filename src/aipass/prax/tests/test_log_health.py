@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_log_health.py
 # Description: Tests for the log-health command module
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-08-13
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/log_health.py."""
@@ -24,7 +24,6 @@ import pytest
 
 from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
 from aipass.prax.apps.modules import log_health
-from aipass.trigger.apps.modules import core as trigger_core
 
 
 @pytest.fixture
@@ -124,15 +123,3 @@ def test_a_trailing_argument_after_scan_is_refused():
     with pytest.raises(UnknownArgument) as refusal:
         log_health.handle_command("log-health", ["scan", "--dry-run"])
     assert refusal.value.token == "--dry-run"
-
-
-def test_a_trigger_that_raises_oserror_on_import_is_no_callback(monkeypatch):
-    """trigger's cwd guard raises OSError at import; log-health still runs without a callback."""
-
-    def no_cwd(name):
-        raise OSError("no readable cwd")
-
-    # From-import falls through to the module's __getattr__ once trigger is gone, as a failed import would.
-    monkeypatch.delattr(trigger_core, "trigger")
-    monkeypatch.setattr(trigger_core, "__getattr__", no_cwd, raising=False)
-    assert log_health._get_event_callback() is None

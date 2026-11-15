@@ -91,7 +91,7 @@ modules beside it and routes each command to the one that claims it. `apps/modul
 one thin orchestrator per verb — `logger`, `monitor`, `dashboard`, `status`, `log_audit`,
 `log_health` and `discover`. `apps/handlers/` holds the implementation, one directory per
 concern: logging setup and rotation, monitoring threads, dashboard refresh and template,
-discovery and the registry, the central-file reader, the CLI predicates, the status sync, the
+discovery and the registry, the central-file reader, the CLI predicates, the
 config resolution, the background watchers, and the json service every branch shares.
 
 External branches import `aipass.prax` or `aipass.prax.apps.modules.*` only; handlers are
@@ -116,7 +116,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | [docs/log_audit.md](docs/log_audit.md) | Health summaries, growth rates, truncation, and the weekly sweep the daemon runs |
 | [docs/discovery.md](docs/discovery.md) | The scheduled scan behind the module registry, and the watcher's own events |
 | [docs/json_service.md](docs/json_service.md) | The config/data/log triplet every branch writes through, and its test seam |
-| [docs/architecture.md](docs/architecture.md) | How a command reaches a handler: router, unknown-argument gate, exit seam, help behaviour, status sync |
+| [docs/architecture.md](docs/architecture.md) | How a command reaches a handler: router, unknown-argument gate, exit seam, help behaviour |
 | [docs/tests.md](docs/tests.md) | How the suite is organised, what the fixtures guarantee, how to run it |
 
 ---

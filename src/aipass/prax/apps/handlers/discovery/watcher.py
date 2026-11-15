@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: watcher.py
 # Description: File System Watching
-# Version: 1.7.0
+# Version: 1.7.1
 # Created: 2025-11-26
-# Modified: 2026-10-28
+# Modified: 2026-11-14
 # =============================================
 
 """PRAX File Watcher (Handler)
@@ -33,15 +33,10 @@ logger = logging.getLogger(__name__)
 
 
 def _get_trigger() -> Any:
-    """The trigger bus, or None when this host cannot hand us one.
+    """The trigger bus. Imported here, never at module level: trigger imports prax's logger, which imports
+    this module mid-init. An import failure raises to the fire site, which logs it."""
+    from aipass.trigger.apps.modules.core import trigger
 
-    Imported here, never at module level: trigger imports prax's logger, which imports
-    this module mid-init. OSError too: trigger's guard raises it with no readable cwd."""
-    try:
-        from aipass.trigger.apps.modules.core import trigger
-    except (ImportError, OSError) as e:
-        logger.info(f"[watcher] trigger module not available, falling back: {e}")
-        return None
     return trigger
 
 
@@ -130,17 +125,15 @@ class PythonFileWatcher(FileSystemEventHandler):
 
         save_module_registry(modules)
 
-        trigger = _get_trigger()
-        if trigger is not None:
-            try:
-                trigger.fire(
-                    "module_discovered",
-                    module_name=module_name,
-                    file_path=str(py_file),
-                    relative_path=str(relative_path),
-                )
-            except Exception as e:
-                logger.warning(f"[watcher] trigger.fire('module_discovered') failed for {module_name}: {e}")
+        try:
+            _get_trigger().fire(
+                "module_discovered",
+                module_name=module_name,
+                file_path=str(py_file),
+                relative_path=str(relative_path),
+            )
+        except Exception as e:
+            logger.warning(f"[watcher] trigger.fire('module_discovered') failed for {module_name}: {e}")
 
 
 def start_file_watcher():
@@ -197,12 +190,10 @@ def _report_watcher_death() -> None:
         "steady memory growth (see DPLAN-0305). Restart this process to recover."
     )
 
-    trigger = _get_trigger()
-    if trigger is not None:
-        try:
-            trigger.fire("file_watcher_died", watch_root=str(ECOSYSTEM_ROOT), queued_events=queued)
-        except Exception as e:  # a failed trigger must not silence the log line above
-            logger.warning(f"[watcher] trigger.fire('file_watcher_died') failed: {e}")
+    try:
+        _get_trigger().fire("file_watcher_died", watch_root=str(ECOSYSTEM_ROOT), queued_events=queued)
+    except Exception as e:  # a failed trigger must not silence the log line above
+        logger.warning(f"[watcher] trigger.fire('file_watcher_died') failed: {e}")
 
     try:
         json_handler.log_operation(

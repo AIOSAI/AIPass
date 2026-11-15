@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_logger_module.py
 # Description: Unit tests for PRAX logger module (public API)
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/logger.py."""
@@ -531,9 +531,10 @@ class TestNullLoggerFallback:
         inner.warning.assert_called_once_with("warning via fallback")
         inner.error.assert_called_once_with("error via fallback")
 
-    def test_append_jsonl_degrades_to_none(self):
-        """A broken logger chain leaves append_jsonl importable and falsy, never raising."""
-        assert _load_lazily("append_jsonl") is None
+    def test_append_jsonl_raises_when_the_chain_is_broken(self):
+        """No silent None: a caller that cannot append is told why, at the import."""
+        with pytest.raises(ImportError, match="logger chain broken"):
+            _load_lazily("append_jsonl")
 
     def test_fallback_is_not_built_when_the_logger_imports(self):
         """The fallback is the broken path only: a healthy prax hands back the real SystemLogger."""

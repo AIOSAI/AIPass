@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commons_feed.py
 # Description: Commons Live Social Feed (read-only monitor view)
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-07-21
-# Modified: 2026-10-24
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -32,7 +32,6 @@ from rich.markup import escape as rich_escape
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, header, error, warning
 from aipass.prax.apps.handlers.json import json_handler
-from aipass.prax.apps.handlers.repo_root import resolved_file
 
 # =============================================================================
 # CONFIGURATION
@@ -41,7 +40,7 @@ from aipass.prax.apps.handlers.repo_root import resolved_file
 POLL_INTERVAL = 1.5
 BACKFILL_LIMIT = 10
 
-_PRAX_ROOT = resolved_file(Path(__file__)).parents[3]  # monitoring/ -> handlers/ -> apps/ -> prax/
+_PRAX_ROOT = Path(__file__).resolve().parents[3]  # monitoring/ -> handlers/ -> apps/ -> prax/
 _ECOSYSTEM_ROOT = _PRAX_ROOT.parent
 
 CURSOR_TABLES = ("posts", "comments", "votes", "reactions")

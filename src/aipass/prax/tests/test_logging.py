@@ -31,7 +31,6 @@ from aipass.prax.apps.handlers.logging.introspection import (
     detect_external_project,
     get_caller_info,
 )
-from aipass.prax.apps.handlers.repo_root import resolved_file
 
 
 def _ask_for_the_caller(ask):
@@ -94,7 +93,7 @@ class TestIsPraxInternal:
 
 def _aipass_package_root() -> Path:
     """src/aipass, found from introspection's own file with the resolver it uses."""
-    return resolved_file(Path(introspection.__file__)).parents[4]
+    return Path(introspection.__file__).resolve().parents[4]
 
 
 class TestDetectBranchFromPath:

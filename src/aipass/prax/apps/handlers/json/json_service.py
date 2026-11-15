@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: json_service.py
 # Description: The fleet's one JSON handler service (prax-owned)
-# Version: 1.3.0
+# Version: 2.0.0
 # Created: 2026-09-03
 # Modified: 2026-11-14
 # =============================================
@@ -147,7 +147,7 @@ def _get_caller_module_name() -> str:
     """Name the module that called ``log_operation``, or "unknown" when no module is behind the frame.
 
     Frame depth 2 is exact: the branch shim BINDS log_operation and never wraps it, or every entry is renamed.
-    sys._getframe, never inspect.stack(): inspect reaches os.getcwd() via realpath.
+    sys._getframe, never inspect.stack(): inspect resolves every frame's file, and a relative one reads os.getcwd().
     """
     try:
         caller_frame = sys._getframe(2)
@@ -169,7 +169,7 @@ def _get_caller_module_name() -> str:
 def for_module(file: "str | os.PathLike") -> "JsonHandle":
     """Build the handle for the branch that owns ``file``.
 
-    ``parents[3]`` is the branch root; no resolve(), which needs a working directory.
+    ``parents[3]`` is the branch root; no resolve(), which would follow a symlink to the wrong branch.
     """
     return JsonHandle(Path(file).parents[3])
 
@@ -251,7 +251,7 @@ class JsonHandle:
         return self.json_dir / f"{module_name}_{json_type}.json"
 
     def ensure_json_exists(self, module_name: str, json_type: str) -> bool:
-        """Ensure a module's typed document exists and is structurally valid.
+        """Create a module's typed document if absent; InvalidDocument if it exists unreadable or misshaped.
 
         A dict "data" document missing base keys is healed in place, never replaced: other writers share it.
         """
@@ -277,6 +277,9 @@ class JsonHandle:
                 logger.warning("json_service: cannot heal '%s' without losing its keys: %s", json_path, exc)
                 return False
 
+        if existing is not None or json_path.exists():
+            raise InvalidDocument(f"{json_path}: unreadable or misshaped, not overwritten")
+
         return self.write_json(json_path, _default_document(json_type, module_name))
 
     def ensure_module_jsons(self, module_name: str) -> bool:
@@ -286,13 +289,13 @@ class JsonHandle:
         return True
 
     def load_json(self, module_name: str, json_type: str) -> Optional[Any]:
-        """Load a module's typed document, creating it if absent; the in-code default if still unreadable."""
+        """Load a module's typed document, creating it if absent; InvalidDocument if unreadable or misshaped."""
         self.ensure_json_exists(module_name, json_type)
 
-        data = self.read_json(self.get_json_path(module_name, json_type))
+        json_path = self.get_json_path(module_name, json_type)
+        data = self.read_json(json_path)
         if data is None:
-            logger.warning("json_service: '%s/%s' unreadable after ensure — using the default", module_name, json_type)
-            return _default_document(json_type, module_name)
+            raise InvalidDocument(f"{json_path}: unreadable after ensure")
 
         return data
 
@@ -321,7 +324,8 @@ class JsonHandle:
     ) -> bool:
         """Append a timestamped entry to a module's operations log, then bump its data document.
 
-        Telemetry on watchdog and display threads: a write failure answers False, never raises.
+        Telemetry on watchdog and display threads: a failure answers False, never raises. A misshaped
+        document on disk is logged at ERROR and left as it is.
         """
         if module_name is None:
             module_name = _get_caller_module_name()
@@ -343,8 +347,9 @@ class JsonHandle:
                 log = log[-max_entries:]
 
             logged = self.save_json(module_name, "log", log)
-        except InvalidDocument:
-            raise
+        except InvalidDocument as exc:
+            logger.error("json_service: log_operation('%s') refused for '%s': %s", operation, module_name, exc)
+            return False
         except (OSError, TypeError, ValueError) as exc:
             logger.warning("json_service: log_operation('%s') failed for '%s': %s", operation, module_name, exc)
             return False

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: jsonl_writer.py
 # Description: JSONL append with size-based rotation
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-07-10
-# Modified: 2026-10-24
+# Modified: 2026-11-14
 # =============================================
 
 """PRAX JSONL Writer
@@ -46,13 +46,12 @@ def append_jsonl(
 
 
 def _rotate_with_backup(filepath: Path) -> None:
-    """Rename file to .1 backup; fall back to unlink on failure."""
+    """Rename file to .1 backup; a failed rename keeps the file and appending goes on."""
     backup = filepath.parent / f"{filepath.name}.1"
     try:
         os.replace(str(filepath), str(backup))
     except OSError as exc:
-        logger.warning("JSONL rotation rename failed for %s: %s — unlinking instead", filepath, exc)
-        _unlink_safe(filepath)
+        logger.error("JSONL rotation rename failed for %s, file kept and still appended: %s", filepath, exc)
 
 
 def _unlink_safe(filepath: Path) -> None:

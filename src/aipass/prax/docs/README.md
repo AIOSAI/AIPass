@@ -30,5 +30,5 @@ something breaks. Work in progress, research and dated one-offs belong in
 - [json_service.md](json_service.md) — the config/data/log triplet every branch
   writes through, and its test seam.
 - [architecture.md](architecture.md) — how a command reaches a handler: router,
-  unknown-argument gate, exit seam, help behaviour, status sync.
+  unknown-argument gate, exit seam, help behaviour.
 - [tests.md](tests.md) — how the suite is organised and how to run it.

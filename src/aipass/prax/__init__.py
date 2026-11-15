@@ -48,13 +48,12 @@ def __getattr__(name: str) -> Any:
     if name == "logger":
         try:
             value = importlib.import_module(_LOGGER_MODULE).system_logger
-        except Exception:
+        except Exception as exc:
+            # The caller keeps running on stderr logging; the cause is named, never swallowed.
             value = NullLogger()
+            value.error("Prax SystemLogger import failed: %r", exc)
     elif name == "append_jsonl":
-        try:
-            value = importlib.import_module(_LOGGER_MODULE).append_jsonl
-        except Exception:
-            value = None
+        value = importlib.import_module(_LOGGER_MODULE).append_jsonl
     elif name == "json_handler":
         # No fallback: a broken json service is an error, not a silent no-op.
         value = importlib.import_module(_JSON_MODULE)

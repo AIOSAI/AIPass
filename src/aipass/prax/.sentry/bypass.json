@@ -57,7 +57,7 @@
     {
       "file": "apps/handlers/discovery/watcher.py",
       "standard": "handlers",
-      "reason": "Architectural — imports config.load (shared infrastructure) and trigger.modules.core (optional cross-branch integration with graceful fallback)."
+      "reason": "Architectural — imports config.load (shared infrastructure) and trigger.modules.core, imported at call time because trigger imports prax's logger; a failed import is logged at the fire site."
     },
     {
       "file": "apps/handlers/monitoring/log_watcher.py",
@@ -78,11 +78,6 @@
       "file": "apps/modules/monitor.py",
       "standard": "modules",
       "reason": "Monitor is a 3-thread architecture (display, file watcher, log watcher) that is tightly coupled by design. The threads share state (queues, positions dict, stop events) making splitting impractical without introducing complex inter-module synchronization. Direct JSON read of registry at line 344 is a one-time startup operation for branch discovery — routing through json_handler would add unnecessary dependency for a simple registry read."
-    },
-    {
-      "file": "apps/modules/monitor.py",
-      "standard": "imports",
-      "reason": "False positive — stdlib imports (lines 49-55) are correctly before aipass imports (lines 58+). Checker misidentifies docstring content as import lines."
     },
     {
       "file": "apps/handlers/monitoring/monitoring_filters.py",
@@ -161,14 +156,6 @@
       "reason": "Shim pattern — module-level names are BOUND METHODS of the fleet json service's JsonHandle, not constants. Lowercase is correct for callable bindings, and the file is byte-identical in all 18 branches by the owner's ruling (2026-09-03), hashed by sentry. Matches the identical bypass in spawn/, canary/ and memory/."
     },
     {
-      "file": "apps/modules/status.py",
-      "standard": "logged_fallback",
-      "lines": [
-        96
-      ],
-      "reason": "prax, leg 7: True is the handler contract's 'this module owned the command', not an answer. The failure reaches the caller through error() on the line above, which is what marks the run failed for the exit seam in prax.py main(). The checker's error() exemption reads a success-path return, not the handler's own."
-    },
-    {
       "file": "apps/prax.py",
       "standard": "logged_fallback",
       "lines": [
@@ -180,7 +167,7 @@
       "file": "apps/handlers/monitoring/commons_feed.py",
       "standard": "logged_fallback",
       "lines": [
-        463
+        432
       ],
       "reason": "prax, leg 7: True is the command's 'handled'. The failure was already shown to the operator through error() two lines above (then the relay is stopped), the same as the db-missing guard's return True; error() is what marks the run failed."
     },
@@ -196,7 +183,7 @@
       "file": "apps/handlers/logging/introspection.py",
       "standard": "logged_fallback",
       "lines": [
-        106
+        105
       ],
       "reason": "prax, leg 7: the docstring names None as the answer 'the caller cannot be located — an answer, not a failure'. A path that will not resolve is a caller that cannot be located; branch detection is a routing hint and must never raise into the caller's import."
     },
@@ -229,37 +216,18 @@
       "reason": "prax, leg 10 (file-wide: this checker passes no line; the one patch is at 741). The subject is how many times the handler stats one file per event. Path.stat is wrapped, not replaced: the wrapper counts calls on that one path and returns the real answer for every path, for the test's span only (monkeypatch). A stat seam in the handler would be a door for this test alone."
     },
     {
-      "file": "tests/test_dashboard_merge.py",
-      "standard": "through_the_command",
-      "lines": [
-        201,
-        202,
-        203
-      ],
-      "reason": "prax, leg 14. These calls were always here; the _load helper hid them from the checker until this leg bound the modules by import. The file's subject is four copies of one quick_status calculator, and the defect it pins is the drift between them, so each copy is called by name in the parametrize table; a public door mixes in the merge and the other writers and could not tell which copy drifted. The other private calls the helper hid (the pusher's structural step, the differ's per-branch diff) now go through push_dashboard_template and diff_dashboard_template on a tmp world."
-    },
-    {
       "file": "tests/test_repo_root.py",
       "standard": "through_the_command",
       "lines": [
-        527
+        495
       ],
-      "reason": "prax, leg 14. 527: load's lane of the repo root; its one public reader, get_system_logs_dir outside a pytest session, ends in a mkdir of the live system_logs, so the lane is asked by name (prax, leg 5, HELD; re-read this leg, unchanged)."
-    },
-    {
-      "file": "apps/handlers/monitoring/instance_lock.py",
-      "standard": "logged_fallback",
-      "lines": [
-        65,
-        74
-      ],
-      "reason": "prax, leg 15. True is the fail-safe answer: a PID the check could not read (70) or may not signal (79, the process exists) is held alive, so try_acquire never steals a lock it could not check and agent_status_writer never marks an unchecked agent dead. The failure is logged beside 70."
+      "reason": "prax, leg 14. 495: load's lane of the repo root; its one public reader, get_system_logs_dir outside a pytest session, ends in a mkdir of the live system_logs, so the lane is asked by name (prax, leg 5, HELD; re-read this leg, unchanged)."
     },
     {
       "file": "apps/handlers/discovery/watcher.py",
       "standard": "logged_fallback",
       "lines": [
-        247
+        238
       ],
       "reason": "prax, leg 15. Fail-safe True: the liveness check exists to report a death, its one caller (logger.py get_status) ignores the answer, and nothing restarts or is taken on True. The failure is logged as a warning beside it."
     },
@@ -275,17 +243,9 @@
       "file": "apps/handlers/dashboard/refresh.py",
       "standard": "logged_fallback",
       "lines": [
-        246
+        216
       ],
       "reason": "prax, leg 15. The dashboard is rebuilt from its sources; {} only loses the carried-forward section, which is logged as a WARNING naming the file. A raise would leave a corrupt dashboard that no refresh could heal."
-    },
-    {
-      "file": "apps/handlers/dashboard/status.py",
-      "standard": "logged_fallback",
-      "lines": [
-        185
-      ],
-      "reason": "prax, leg 16. _declared_path's None means this registry resolves nothing, the same answer as a registry that does not declare the name, and the caller then asks the next registry in either case; the unreadable file is logged as a warning saying it resolves nothing."
     },
     {
       "file": "tests/test_monitor_module.py",
@@ -306,11 +266,6 @@
       "reason": "prax, leg 11 (file-wide: this checker passes no line; the patches are at 89, 104, 127). The subject is the growth rate between two scans, which scan_rates measures with time.time(). The tests move the clock 10 s forward for the second scan, in a with-block undone at its end; waiting 10 real seconds is the only alternative, and a clock seam in rate_tracker would be a door for the tests alone."
     },
     {
-      "file": "tests/test_repo_root.py",
-      "standard": "stdlib_patch",
-      "reason": "prax, leg 11 (file-wide: this checker passes no line; the one patch is at 588). The subject is that a path that will not resolve (resolve raising OSError, as a deleted cwd does) answers None and never takes down the caller's import. No platform makes Path.resolve raise on demand under tmp_path; monkeypatch undoes it at the test's end."
-    },
-    {
       "file": "tests/test_log_watcher.py",
       "standard": "stdlib_patch",
       "reason": "prax, leg 11 (file-wide: this checker passes no line; the one patch is at 928). The subject is initialize_positions surviving a .log file whose stat fails. The wrapper raises only for .log paths and returns the real stat for every other path, in a with-block; no platform makes stat fail on demand on a file that exists."
@@ -324,11 +279,6 @@
       "file": "tests/test_logging_handlers.py",
       "standard": "stdlib_patch",
       "reason": "prax, leg 11 (file-wide: this checker passes no line; the patches are at 118-119 and 777-778 since prax, leg 13). The subject is the handler surviving a rollover that fails on a full or locked disk; doRollover is made to raise the test's own OSError, in a with-block. No platform fails a rollover on demand under tmp_path. The sys.stderr patch at 862 was cured to capsys this leg."
-    },
-    {
-      "file": "tests/test_instance_lock.py",
-      "standard": "stdlib_patch",
-      "reason": "prax, leg 10 (file-wide: this checker passes no line; the patches are at 62-107 and 171). The subject is try_acquire's liveness verdict, which branches on sys.platform and asks os.kill(pid, 0) on POSIX. The patches pin each branch on every CI platform and assert the pid passed; a real os.kill would signal a real process, and a platform or kill seam in the lock would be a door for the tests alone. Line 171 makes the /proc boot-id read fail the way a platform without /proc does. Each patch is a with-block, undone at its end."
     },
     {
       "file": "tests/test_pid_cache.py",
@@ -387,10 +337,10 @@
       "file": "apps/handlers/dashboard/operations.py",
       "standard": "logged_fallback",
       "lines": [
-        137,
-        185
+        136,
+        184
       ],
-      "reason": "143: _load_for_write's docstring names None as 'unreadable'; its success path returns a dict, never None, and the error is logged beside it. 191: write_section's False means 'not written', the same answer a failed save gives, logged at error; callers retry or report, neither treats False as written."
+      "reason": "136: _load_for_write's docstring names None as 'unreadable'; its success path returns a dict, never None, and the error is logged beside it. 184: write_section's False means 'not written', the same answer a failed save gives, logged at error; callers retry or report, neither treats False as written."
     },
     {
       "file": "apps/plugins/devpulse_dashboard/dispatch_section.py",
@@ -414,14 +364,6 @@
       "file": "handlers/json/json_service.py",
       "standard": "dead_code",
       "reason": "Reached by string, not by an import statement: aipass/prax/__init__.py resolves it with importlib.import_module inside its PEP 562 __getattr__, which is what keeps the module out of every consumer's import graph until it is asked for. A scan keyed on import statements cannot see that edge. The entry point 'from aipass.prax import json_handler' is the fleet's only sanctioned import."
-    },
-    {
-      "file": "tests/test_log_health.py",
-      "standard": "through_the_command",
-      "lines": [
-        138
-      ],
-      "reason": "No public route shows the answer: handle_command hands _get_event_callback's result to rate_tracker.configure, which ignores a None, so a run with no trigger looks the same as a run never configured. The subject is the OSError guard (trigger's cwd guard raises it at import); put to devpulse as a product question."
     }
   ],
   "notes": {

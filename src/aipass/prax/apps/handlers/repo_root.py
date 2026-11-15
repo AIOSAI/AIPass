@@ -1,20 +1,12 @@
 # =================== AIPass ====================
 # Name: repo_root.py
 # Description: Repo-Root Resolution That Never Reads The Process CWD
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-11-14
 # =============================================
 
-"""
-Repo-Root Resolution Handler
-
-The walk runs at import time fleet-wide (module-level loggers), so it never reads
-the process cwd: a deleted cwd raises, and the gitignored registry is absent on
-every clean checkout. The fallback derives from ``__file__``; the last resort is
-the filesystem root. Reached from inside logger construction, so this module
-imports nothing from prax and uses stdlib ``logging`` only.
-"""
+"""Repo-root walk that never reads the process cwd: it runs at import time inside logger construction, so stdlib logging only."""
 
 import logging
 from pathlib import Path, PurePath
@@ -26,24 +18,7 @@ REGISTRY_MARKER = "AIPASS_REGISTRY.json"
 SOURCE_DIR_NAME = "src"
 
 
-def resolved_file(path: Path) -> Path:
-    """``Path.resolve()`` that cannot need a working directory.
-
-    The input is already absolute, so the unresolved path is a correct fallback.
-    """
-    try:
-        return path.resolve()
-    except OSError as exc:
-        # debug, not warning: the unresolved absolute path is a correct answer.
-        logger.debug("[repo_root] %s could not be resolved (%s); using it unresolved", path, exc)
-        return path
-
-
-try:
-    _THIS_FILE = Path(__file__).resolve()
-except OSError as _exc:
-    logger.debug("[repo_root] this module's own path could not be resolved (%s); using it unresolved", _exc)
-    _THIS_FILE = Path(__file__)
+_THIS_FILE = Path(__file__).resolve()
 
 # Announce the fallback once per process: every module reaches this during import.
 _ANNOUNCED: set = set()

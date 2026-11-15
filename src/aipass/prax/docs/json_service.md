@@ -16,15 +16,15 @@ from aipass.prax import json_handler          # the entry point, the only sancti
 ```
 
 - `apps/handlers/json/json_service.py` — the implementation. Stdlib only, so it
-  imports without the logger graph. No `resolve()`, no `getcwd()`, no
-  `inspect.stack()`: it runs with a deleted working directory.
+  imports without the logger graph. No `getcwd()` and no `inspect.stack()`: it
+  runs with a deleted working directory. No `resolve()` either: a symlinked
+  path names the branch it is under, not the one it points to.
 - `apps/handlers/json/json_handler.py` — prax's own shim, byte-identical in
   every branch; sentry accepts it by hash, not by substring. It BINDS the
   service's callables and never wraps them: a wrapper would add a stack frame and
   silently rename every entry in the operations log.
 - The default document is in code, not a template file — a default that lives in
-  a file can go missing, and a handler whose default is missing stops
-  self-healing exactly when it is needed.
+  a file can go missing exactly when a new module needs it.
 
 **What the entry point hands you.** `from aipass.prax import json_handler` gives
 you the **service module** — `for_module()`, `JsonHandle`, `InvalidDocument`,
@@ -51,11 +51,14 @@ staged write per call. `rate_tracker` keeps its `files` in that same
 `rate_tracker_data.json`, and its save sets only `files` (and `module_name` when
 absent) on the document it loaded, so `created` and the counters survive a scan.
 
-**Healing is per module, per call — there is no sweep.** `ensure_json_exists`
-regenerates exactly one document (`<module>_<type>.json`) when it is missing,
-empty, unreadable or structurally invalid. The one exception is a data document
-that parses as a dict: it is healed in place (missing base keys added, every
-other key kept) rather than regenerated. `ensure_module_jsons` does the
+**A missing document is created; a bad one is refused, never overwritten.**
+`ensure_json_exists` writes the default for exactly one document
+(`<module>_<type>.json`) when it does not exist. One that exists but is empty,
+unreadable or structurally invalid raises `InvalidDocument` naming the path, and
+the file is left as it is: overwriting it with the default would lose the keys
+its owner wrote. `load_json` raises the same way. The one heal is a data document
+that parses as a dict: missing base keys are added in place, every other key
+kept. `ensure_module_jsons` does the
 three types for one module. Nothing walks a directory and nothing repairs
 another module's documents: a self-heal that ranges wider than the call that
 triggered it would rewrite state nobody asked about, in a process that may only
@@ -72,9 +75,10 @@ number is meaningless, pytest has already imported prax's world.
 **Return semantics:** `save_json` raises `WriteFailed` rather than answering
 `False` (a lost document must not look like success) and `InvalidDocument`
 rather than `False` (a caller bug is not a disk failure). `write_json` answers
-`bool`. `log_operation` is telemetry and answers `False` on a write failure — it
-runs on the monitor's display and watchdog threads, where a raising writer is
-silent half-death.
+`bool`. `log_operation` is telemetry and answers `False` on a write failure or a
+refused document (logged at ERROR, the file untouched) — it runs on the
+monitor's display and watchdog threads, where a raising writer is silent
+half-death.
 
 ## Write rules
 

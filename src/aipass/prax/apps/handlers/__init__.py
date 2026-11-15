@@ -1,6 +1,5 @@
-"""Prax handlers package - the fence.
+"""The fence: another branch reaches these handlers only through aipass.prax.apps.modules, never directly.
 
-Another branch reaches these handlers only through aipass.prax.apps.modules; this refuses a foreign importer.
 Frames are kin (this branch), transport (importlib, stdlib such as unittest.mock, site-packages) or foreign.
 The first foreign frame is refused unless kin code imported on its behalf and its line does not name the handlers.
 Fires only on a process's first import; the wall is drone @sentry audit (handlers, encapsulation).
@@ -18,10 +17,7 @@ _HANDLERS_SPELLINGS = (
 )
 _THIRD_PARTY_DIRS = ("/site-packages/", "/dist-packages/")
 
-try:
-    _THIS_FILE = str(Path(__file__).resolve())
-except OSError:
-    _THIS_FILE = str(__file__)
+_THIS_FILE = str(Path(__file__).resolve())
 # Exact prefixes, never a substring: a directory that merely shares a branch's name is not that branch.
 _BRANCH_ROOT = _THIS_FILE.rsplit("/", 3)[0] + "/"
 _FLEET_ROOT = _THIS_FILE.rsplit("/", 4)[0] + "/"
