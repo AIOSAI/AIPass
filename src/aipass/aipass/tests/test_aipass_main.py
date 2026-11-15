@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_aipass_main.py
 # Description: Tests for aipass.py entry point / CLI main
-# Version: 1.4.5
+# Version: 1.5.0
 # Created: 2026-05-12
 # Modified: 2026-11-14
 # =============================================
@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import importlib.metadata
-import re
 import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -56,15 +55,15 @@ class TestDiscoverModules:
         on_disk = sorted(p.stem for p in modules_dir.glob("*.py") if not p.name.startswith("_"))
         assert sorted(m.__name__.rsplit(".", 1)[1] for m in result) == on_disk
         commands = sorted(str(getattr(m, "COMMAND", "")) for m in result)
-        assert len(result) >= 11, f"discover_modules found {len(result)}: {commands}"
+        assert len(result) >= 8, f"discover_modules found {len(result)}: {commands}"
         assert "doctor" in commands
-        assert "help" in commands
+        assert "init" in commands
 
     def test_modules_have_handle_command(self) -> None:
         """Every discovered module has a handle_command callable."""
         modules = discover_modules()
         # The floor: an empty MODULES_DIR would pass the loop below without running it.
-        assert len(modules) >= 11, f"discover_modules found {len(modules)} - the loop below proves nothing"
+        assert len(modules) >= 8, f"discover_modules found {len(modules)} - the loop below proves nothing"
         for mod in modules:
             assert hasattr(mod, "handle_command")
             assert callable(mod.handle_command)
@@ -315,18 +314,6 @@ class TestMain:
         assert "Run 'aipass --help' for usage and examples" in out
         assert "Usage:" not in out
 
-    def test_help_word_routes_to_module(self) -> None:
-        """'help' as only arg routes to help_chat module, not root help."""
-        mod = MagicMock()
-        mod.handle_command.return_value = True
-        mod.__name__ = "aipass.aipass.apps.modules.help_chat"
-        mod.COMMAND = "help"
-        with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "help"]):
-            with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[mod]):
-                result = main()
-        assert result == 0
-        mod.handle_command.assert_called_once_with("help", [])
-
     def test_trailing_help_after_positional_shows_help(self) -> None:
         """`aipass trust <path> --help` prints help — it must NOT run the verb.
 
@@ -384,16 +371,16 @@ class TestMain:
 
     def test_introspection_shows_public_commands(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Mutant: no public command collected -> red."""
-        mod = types.ModuleType("aipass.aipass.apps.modules.help_chat")
-        mod.__doc__ = "Help chatbot"
-        mod.COMMAND = "help"  # type: ignore[attr-defined]
+        mod = types.ModuleType("aipass.aipass.apps.modules.doctor")
+        mod.__doc__ = "Doctor"
+        mod.COMMAND = "doctor"  # type: ignore[attr-defined]
         mod.handle_command = lambda c, a: True  # type: ignore[attr-defined]
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass"]):
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[mod]):
                 main()
         out, _err = capsys.readouterr()
         assert "Commands:" in out
-        assert "README-backed Q&A" in out
+        assert "System health — structure, registry, hooks, tests" in out
 
     def test_introspection_hides_non_public(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Mutant: modules listed by file stem, public filter dropped -> red."""
@@ -496,9 +483,9 @@ class TestMain:
 
     def test_help_shows_command_constant(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Mutant: introspection names modules by file stem -> red."""
-        mod = types.ModuleType("aipass.aipass.apps.modules.help_chat")
-        mod.__doc__ = "Help chatbot"
-        mod.COMMAND = "help"  # type: ignore[attr-defined]
+        mod = types.ModuleType("aipass.aipass.apps.modules.new_project")
+        mod.__doc__ = "New project"
+        mod.COMMAND = "new"  # type: ignore[attr-defined]
         mod.handle_command = lambda c, a: True  # type: ignore[attr-defined]
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass"]):
             with patch(
@@ -507,13 +494,13 @@ class TestMain:
             ):
                 main()
         out, _err = capsys.readouterr()
-        assert "README-backed Q&A" in out
-        assert "help_chat" not in out
+        assert "Create a project inside AIPass" in out
+        assert "new_project" not in out
 
     def test_introspection_skips_no_command_module(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Mutant: a module without COMMAND listed by file stem -> red."""
-        mod = types.ModuleType("aipass.aipass.apps.modules.doctor")
-        mod.__doc__ = "Doctor module"
+        mod = types.ModuleType("aipass.aipass.apps.modules.trust")
+        mod.__doc__ = "Trust module"
         mod.handle_command = lambda c, a: True  # type: ignore[attr-defined]
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass"]):
             with patch(
@@ -523,72 +510,22 @@ class TestMain:
                 main()
         out, _err = capsys.readouterr()
         assert "Commands:" not in out
-        assert "doctor" not in out
+        assert "trust" not in out
 
-    def test_multiword_unknown_routes_to_help(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Mutant: 'answering as' notice not printed -> red."""
+    def test_multiword_unknown_is_an_error_not_a_question(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Unknown multi-word input is refused: no module is asked to answer it as help.
+
+        Mutant: restoring the catch-all that re-routed it to `help` -> exit 0 and a help call -> red.
+        """
         mod = MagicMock()
         mod.handle_command.side_effect = lambda c, a: c == "help"
-        mod.__name__ = "aipass.aipass.apps.modules.help_chat"
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "what", "is", "drone"]):
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[mod]):
                 result = main()
         out, _err = capsys.readouterr()
-        assert result == 0
-        mod.handle_command.assert_any_call("help", ["what", "is", "drone"])
-        assert "answering as: aipass help what is drone" in out
-
-    def test_multiword_question_help_cannot_answer_exits_2(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """The catch-all help reports error() and returns True: that is exit 2, not 0.
-
-        Mutant: catch-all `return resolve_exit(True)` -> `return 0` -> red.
-        """
-
-        def _help_refuses(command: str, args: list[str]) -> bool:
-            if command != "help":
-                return False
-            cli_error("Could not extract keywords from question. Try rephrasing.")
-            return True
-
-        mod = MagicMock()
-        mod.handle_command.side_effect = _help_refuses
-        mod.__name__ = "aipass.aipass.apps.modules.help_chat"
-        with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "the", "a"]):
-            with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[mod]):
-                result = main()
-        _out, err = capsys.readouterr()
-        assert result == 2
-        assert "Could not extract keywords" in err
-
-    def test_multiword_with_flag_stays_unknown(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """A mistyped command carrying flags must NOT become a help search.
-
-        Mutant: final 'Unknown command' line not printed -> red.
-        """
-        mod = MagicMock()
-        mod.handle_command.side_effect = lambda c, a: c == "help"
-        mod.__name__ = "aipass.aipass.apps.modules.help_chat"
-        with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "doctr", "--fix"]):
-            with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[mod]):
-                result = main()
-        out, _err = capsys.readouterr()
         assert result == 1
-        assert out == "Unknown command: doctr\n"
-
-    def test_single_unknown_word_stays_unknown(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """One unknown token keeps the loud error — no silent help fallback.
-
-        Mutant: final 'Unknown command' line not printed -> red.
-        """
-        mod = MagicMock()
-        mod.handle_command.side_effect = lambda c, a: c == "help"
-        mod.__name__ = "aipass.aipass.apps.modules.help_chat"
-        with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "xyzzy"]):
-            with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[mod]):
-                result = main()
-        out, _err = capsys.readouterr()
-        assert result == 1
-        assert out == "Unknown command: xyzzy\n"
+        assert out == "Unknown command: what\n"
+        mod.handle_command.assert_called_once_with("what", ["is", "drone"])
 
     def test_handler_crash_surfaces_error(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Handler crash prints the real error, not 'Unknown command'.
@@ -671,8 +608,12 @@ class TestHelpAgreesWithCode:
         assert "doctor --fix --json" in text
         assert "JSON output for structure scan" not in text
 
-    def test_help_names_init_run_not_bare_init(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Bare `init` prints usage; `init run` is what walks the stages."""
+    def test_help_names_no_retired_command(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """help, profile, handoff, feedback and `init run` were retired 2026-11-14: help must not offer them.
+
+        Mutant: leaving the `init run` help line in place -> red.
+        """
         text = self._help_text(capsys)
-        assert "init run" in text
-        assert re.search(r"aipass init(?! run)", text) is None
+        for retired in ("help <question>", "profile", "handoff", "feedback", "init run"):
+            assert retired not in text
+        assert "init [target]" in text

@@ -2,12 +2,10 @@
 #
 # AIPass setup script
 # Creates a venv, installs the package in editable mode, and verifies CLI entry points.
-# On interactive terminals it then ends in a conversation with the AIPass concierge —
-# the cold install ends in chat, not project creation (DPLAN-0274). Project creation
-# stays a separate, later step: `aipass init run`.
+# It ends in `aipass install --finish`: the doctor, the install report and the final screen.
 #
-# Usage: ./setup.sh [--no-chat] [--no-symlink] [--force-symlink]
-#   --no-chat        skip the welcome-chat ending (build only)
+# Usage: ./setup.sh [--no-finish] [--no-symlink] [--force-symlink]
+#   --no-finish      skip the doctor/report tail (`aipass install` passes it and runs the tail itself)
 #   --no-symlink     do not create/modify global drone/aipass CLI symlinks
 #   --force-symlink  repoint a global symlink even if it points at a different install (#660)
 #
@@ -19,14 +17,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # --- Args ---
-# Mirrors the `aipass install` handoff: --no-chat skips the welcome chat,
-# default (auto) ends in chat on interactive terminals only — CI/headless skip.
-RUN_CHAT="auto"
+RUN_FINISH="yes"
 SKIP_SYMLINK="no"
 FORCE_SYMLINK="no"
 for arg in "$@"; do
     case "$arg" in
-        --no-chat)       RUN_CHAT="no" ;;
+        --no-finish)     RUN_FINISH="no" ;;
         --no-symlink)    SKIP_SYMLINK="yes" ;;
         --force-symlink) FORCE_SYMLINK="yes" ;;
         *) echo "WARN: unknown argument '$arg' (ignored)" ;;
@@ -35,8 +31,8 @@ done
 
 # --- Collected action-needed items (round-2 install UX: a0f2351e Catch 2) ---
 # Anything printed mid-run that needs a follow-up command gets appended here,
-# then re-printed as ONE highlighted block right before the welcome chat —
-# scrolling output buries sudo hints and skipped-identity notices otherwise.
+# then printed as ONE block at the end and written to .aipass/setup_attention.txt
+# for the install report — scrolling output buries sudo hints otherwise.
 ACTION_NEEDED=()
 
 print_action_needed() {
@@ -82,12 +78,10 @@ for v in 3.13 3.12 3.11 3.10; do
         break
     fi
 done
-# Fall back to python3, then python
+# Fall back to python3 (bare `python` is not probed: Python 2 on old hosts)
 if [ -z "$PYTHON" ]; then
     if command -v python3 &>/dev/null && python3 -c "import sys" &>/dev/null 2>&1; then
         PYTHON="python3"
-    elif command -v python &>/dev/null && python -c "import sys" &>/dev/null 2>&1; then
-        PYTHON="python"
     fi
 fi
 
@@ -182,7 +176,7 @@ if command -v node &>/dev/null && [ -f "$SRT_RESOLVER" ]; then
         if command -v npm &>/dev/null; then
             NPM_PREFIX=$(npm root -g 2>/dev/null)
             echo "    Attempting: npm install -g @anthropic-ai/sandbox-runtime (into ${NPM_PREFIX:-npm global prefix})"
-            if npm install -g @anthropic-ai/sandbox-runtime 2>/dev/null; then
+            if npm install -g @anthropic-ai/sandbox-runtime; then
                 echo "    srt       ... installed"
             else
                 echo "    Install failed (may need sudo). Run manually:"
@@ -317,26 +311,11 @@ resolve_git_identity() {
 }
 resolve_git_identity
 
-# --- User's display name (round-2 install UX, 43ff5873: collected once here so
-# the registry — and later the concierge greeting — already has it; the chat's
-# own name-ask becomes a fallback for whenever this is skipped or empty) ---
+# --- User's display name: git user.name, else $USER, never asked (the owner: no
+# questions about the user). Stored as registry metadata.user; the install report
+# carries it as user_name and devpulse greets by it. ---
 resolve_user_name() {
-    USER_NAME=""
-    if is_interactive; then
-        if [ -n "$GIT_NAME" ]; then
-            read -r -p "What should we call you? [$GIT_NAME] (Enter to accept, or 'skip'): " USER_NAME
-            if [ -z "$USER_NAME" ]; then
-                USER_NAME="$GIT_NAME"
-            elif [ "$USER_NAME" = "skip" ]; then
-                USER_NAME=""
-            fi
-        else
-            read -r -p "What should we call you? (Enter to skip): " USER_NAME
-            # set -e trap: a bare `[ ... ] && ...` as the function's last command
-            # returns 1 when the test fails, killing the whole install silently.
-            if [ "$USER_NAME" = "skip" ]; then USER_NAME=""; fi
-        fi
-    fi
+    USER_NAME="${GIT_NAME:-${USER:-}}"
 }
 resolve_user_name
 
@@ -522,7 +501,7 @@ bootstrap_branch "trigger"  "$SCRIPT_DIR/src/aipass/trigger" "specialist" "Event
 bootstrap_branch "spawn"    "$SCRIPT_DIR/src/aipass/spawn" "specialist" "Branch lifecycle management"
 bootstrap_branch "devpulse" "$SCRIPT_DIR/src/aipass/devpulse" "manager" "Orchestration hub and coordination"
 bootstrap_branch "memory"   "$SCRIPT_DIR/src/aipass/memory" "specialist" "Vector memory bank"
-bootstrap_branch "aipass"   "$SCRIPT_DIR/src/aipass/aipass" "specialist" "Concierge — init, doctor, profile, onboarding"
+bootstrap_branch "aipass"   "$SCRIPT_DIR/src/aipass/aipass" "specialist" "Machine concierge — host and OS diagnosis, doctor, installer, fleet health"
 bootstrap_branch "hooks"    "$SCRIPT_DIR/src/aipass/hooks" "specialist" "Hook engine — hook dispatch and per-project config"
 bootstrap_branch "backup"   "$SCRIPT_DIR/src/aipass/backup" "specialist" "Local-first backups, snapshots and restore"
 bootstrap_branch "commons"  "$SCRIPT_DIR/src/aipass/commons" "specialist" "Community social space — posts, comments, votes"
@@ -570,6 +549,64 @@ if [ -f "$MEMORY_CONFIG_EXAMPLE" ] && [ ! -f "$MEMORY_CONFIG_FILE" ]; then
     echo "  memory_bank.config.json seeded from example"
 fi
 
+# --- Enroll this install in the hook trust registry (the owner's ruling, compass #221) ---
+# The hook engine only loads .aipass/hooks.json for projects listed in
+# ~/.aipass/trusted_projects.json. That gate exists to stop a FOREIGN project's
+# hostile hooks.json from running — it was never meant to distrust the config
+# this installer just wired up. Without this step a non-interactive install
+# finishes "clean" with every hook silently dead ("No .aipass/hooks.json found").
+# enroll() is idempotent (dict-key assignment + stale prune), so re-running
+# setup.sh refreshes the hash instead of duplicating the entry.
+echo ""
+echo "Enrolling this install in the hook trust registry ..."
+if "$VENV_PYTHON" - "$SCRIPT_DIR" << 'PYEOF'
+import sys
+
+from aipass.hooks.apps.modules.door_trust_registry import enroll
+
+sys.exit(0 if enroll(sys.argv[1]) else 1)
+PYEOF
+then
+    echo "  trusted -> $SCRIPT_DIR"
+else
+    echo "  WARN: could not enroll $SCRIPT_DIR — hooks stay inactive until it is trusted"
+    ACTION_NEEDED+=("Hook trust enrollment failed — run: aipass trust $SCRIPT_DIR")
+fi
+
+# --- Machine changes outside this checkout (owner rule: one explanation, one yes/no) ---
+# On a tty one question covers the block below; on no it is skipped whole. With no
+# tty, AIPASS_NON_INTERACTIVE or CI set it runs unasked, as before (CI, Docker).
+confirm_machine_changes() {
+    MACHINE_CHANGES="yes"
+    if ! is_interactive || [ -n "${CI:-}" ]; then
+        return 0
+    fi
+    echo ""
+    echo "Setup now changes these things outside $SCRIPT_DIR:"
+    echo "  - ~/.claude/settings.json: AIPass hooks, env and deny rules (backed up first)"
+    echo "  - ~/.claude/commands/memo.md"
+    echo "  - ~/.bashrc: a claude() boot shim, AIPASS_HOME, and a PATH line if needed; ~/.profile: AIPASS_HOME"
+    echo "  - Codex hooks and config pins, the OpenCode plugin (only if they are installed)"
+    echo "  - drone/aipass symlinks in /usr/local/bin (sudo) or ~/.local/bin"
+    local answer=""
+    read -r -p "Make these changes? [Y/n]: " answer || answer="n"
+    case "$answer" in
+        ""|y|Y|yes|Yes|YES) return 0 ;;
+    esac
+    MACHINE_CHANGES="no"
+    echo "  Skipped. Until you run $SCRIPT_DIR/setup.sh again and answer yes:"
+    echo "    - Claude Code, Codex and OpenCode run without AIPass hooks: no memory injection, no gates"
+    echo "    - 'drone' and 'aipass' are not on PATH: use $SCRIPT_DIR/.venv/bin/drone"
+    echo "    - projects outside this checkout cannot find it (no AIPASS_HOME in your shell)"
+    ACTION_NEEDED+=("Machine changes skipped (hooks, shell rc, symlinks): run $SCRIPT_DIR/setup.sh and answer yes to make them")
+}
+confirm_machine_changes
+
+SYMLINK_SKIPPED=0
+LINUX_SYMLINK_DIR=""
+# === Gated block start: runs only when MACHINE_CHANGES=yes (not re-indented: heredocs) ===
+if [ "$MACHINE_CHANGES" = "yes" ]; then
+
 # --- Install Claude Code hooks ---
 # One door writes ~/.claude/settings.json at install: refresh_provider_hooks below
 # (hooks, env, permissions, scalars), which backs the file up and leaves a receipt
@@ -595,30 +632,6 @@ else
     echo "Skipping Claude hooks (bridge not found at src/aipass/hooks/apps/handlers/bridges/claude.py)"
 fi
 
-# --- Enroll this install in the hook trust registry (the owner's ruling, compass #221) ---
-# The hook engine only loads .aipass/hooks.json for projects listed in
-# ~/.aipass/trusted_projects.json. That gate exists to stop a FOREIGN project's
-# hostile hooks.json from running — it was never meant to distrust the config
-# this installer just wired up. Without this step a non-interactive install
-# finishes "clean" with every hook silently dead ("No .aipass/hooks.json found").
-# enroll() is idempotent (dict-key assignment + stale prune), so re-running
-# setup.sh refreshes the hash instead of duplicating the entry.
-echo ""
-echo "Enrolling this install in the hook trust registry ..."
-if "$VENV_PYTHON" - "$SCRIPT_DIR" << 'PYEOF'
-import sys
-
-from aipass.hooks.apps.modules.door_trust_registry import enroll
-
-sys.exit(0 if enroll(sys.argv[1]) else 1)
-PYEOF
-then
-    echo "  trusted -> $SCRIPT_DIR"
-else
-    echo "  WARN: could not enroll $SCRIPT_DIR — hooks stay inactive until it is trusted"
-    ACTION_NEEDED+=("Hook trust enrollment failed — run: aipass trust $SCRIPT_DIR")
-fi
-
 # --- Install claude() boot shim (attach-if-live / start-in-tmux) ---
 # Ships via the .gitignore negation (#666). Idempotent: the installer checks for
 # its marker before appending to the shell rc, and resolves the venv Python from
@@ -636,9 +649,14 @@ COMMANDS_SRC="$SCRIPT_DIR/.claude/templates"
 COMMANDS_DST="$HOME/.claude/commands"
 if [ -f "$COMMANDS_SRC/memo.md" ]; then
     mkdir -p "$COMMANDS_DST"
-    cp -n "$COMMANDS_SRC/memo.md" "$COMMANDS_DST/memo.md" 2>/dev/null && \
-        echo "  memo.md -> $COMMANDS_DST/ (installed)" || \
+    if [ -e "$COMMANDS_DST/memo.md" ]; then
         echo "  memo.md -> $COMMANDS_DST/ (already exists, skipped)"
+    elif cp "$COMMANDS_SRC/memo.md" "$COMMANDS_DST/memo.md"; then
+        echo "  memo.md -> $COMMANDS_DST/ (installed)"
+    else
+        echo "  memo.md -> $COMMANDS_DST/ FAILED (see the error above)"
+        ACTION_NEEDED+=("/memo command not installed: cp $COMMANDS_SRC/memo.md $COMMANDS_DST/memo.md")
+    fi
 fi
 
 # --- Install Codex CLI hooks ---
@@ -715,13 +733,10 @@ if [ -f "$HOME/.profile" ]; then
     fi
 fi
 
-export AIPASS_HOME="$SCRIPT_DIR"
-
 # --- Create global symlinks for CLI tools ---
 # #660: never SILENTLY hijack a global 'drone'/'aipass' that points at a
 # DIFFERENT install. safe_symlink skips a different-target link (loud warning)
 # unless --force-symlink; --no-symlink opts out of symlinking entirely.
-SYMLINK_SKIPPED=0
 safe_symlink() {
     # safe_symlink <src> <dest> [sudo]  ->  0 linked · 1 skipped(diff target) · 2 ln failed
     local src="$1" dest="$2" use_sudo="${3:-}" existing=""
@@ -756,8 +771,6 @@ if [ "$SKIP_SYMLINK" = "yes" ]; then
 else
     echo "Creating global symlinks ..."
     VENV_BIN="$SCRIPT_DIR/.venv/bin"
-    LINUX_SYMLINK_DIR=""
-
     for cmd in drone aipass; do
         if [ -f "$VENV_BIN/$cmd" ]; then
             rc=0
@@ -786,11 +799,17 @@ else
                 elif [ "$rc" -eq 2 ]; then
                     echo "  WARN: Could not create symlink for $cmd"
                     echo "  Manual fix: ln -sf $VENV_BIN/$cmd $LOCAL_BIN/$cmd"
+                    ACTION_NEEDED+=("No global '$cmd' command: both symlinks failed. Run: ln -sf $VENV_BIN/$cmd $LOCAL_BIN/$cmd")
                 fi
             fi
         fi
     done
 fi
+
+fi
+# === Gated block end ===
+
+export AIPASS_HOME="$SCRIPT_DIR"
 
 if [ "$SYMLINK_SKIPPED" -gt 0 ]; then
     echo ""
@@ -799,34 +818,38 @@ if [ "$SYMLINK_SKIPPED" -gt 0 ]; then
     ACTION_NEEDED+=("$SYMLINK_SKIPPED global symlink(s) left untouched — rerun with --force-symlink to repoint them here")
 fi
 
+# --- Action items for the install report (read by `aipass install --finish`) ---
+mkdir -p "$SCRIPT_DIR/.aipass"
+{
+    if [ ${#ACTION_NEEDED[@]} -gt 0 ]; then printf '%s\n' "${ACTION_NEEDED[@]}"; fi
+    if [ "$GIT_IDENTITY_SKIPPED" = "yes" ]; then
+        echo "Git identity skipped: commits fail until git config --global user.name and user.email are set"
+    fi
+} > "$SCRIPT_DIR/.aipass/setup_attention.txt"
+
 # --- Result ---
 echo ""
 if [ "$FAIL" -eq 0 ]; then
     echo "=== Setup complete ==="
     echo ""
-    if [ "${LINUX_SYMLINK_DIR:-}" = "/usr/local/bin" ]; then
-        echo "drone is available globally via /usr/local/bin symlink."
-    else
-        echo "drone is available via ~/.local/bin symlink (on PATH)."
-    fi
+    case "$LINUX_SYMLINK_DIR" in
+        /usr/local/bin) echo "drone is available globally via /usr/local/bin symlink." ;;
+        "") echo "drone has no global symlink: run $SCRIPT_DIR/.venv/bin/drone, or put that directory on PATH." ;;
+        *) echo "drone is available via $LINUX_SYMLINK_DIR symlink (on PATH in a new shell)." ;;
+    esac
     echo "sentry is accessed via: drone @sentry"
     echo "No venv activation needed for CLI commands."
     echo ""
-    echo "CLI integrations:"
-    echo "  Claude Code: hooks installed to ~/.claude/settings.json"
-    { command -v opencode &>/dev/null || [ -x "$HOME/.opencode/bin/opencode" ]; } && echo "  OpenCode:    plugin installed to ~/.config/opencode/plugins/aipass.ts"
-    command -v codex &>/dev/null && echo "  Codex CLI:   hooks merged into ${CODEX_HOME:-~/.codex}/hooks.json, pins in its config.toml (trust them once in codex)"
-    echo ""
+    if [ "$MACHINE_CHANGES" = "yes" ]; then
+        echo "CLI integrations:"
+        echo "  Claude Code: hooks installed to ~/.claude/settings.json"
+        { command -v opencode &>/dev/null || [ -x "$HOME/.opencode/bin/opencode" ]; } && echo "  OpenCode:    plugin installed to ~/.config/opencode/plugins/aipass.ts"
+        command -v codex &>/dev/null && echo "  Codex CLI:   hooks merged into ${CODEX_HOME:-~/.codex}/hooks.json, pins in its config.toml (trust them once in codex)"
+        echo ""
+    fi
 
-    # Last thing on screen before the chat launches — everything collected
-    # above (sudo hints, skipped identity, untouched symlinks) in one place.
     print_action_needed
 
-    # --- End in a welcome chat (DPLAN-0274: cold install ends in a conversation,
-    # not project creation — commit 71e5198d / TDPLAN-0014 built the chat machinery
-    # this reuses: `aipass install --chat-only` composes the same prompt via
-    # install.py's _build_install_prompt and launches it via launch_inline. Nothing
-    # is recomposed here in bash, no prompt text is duplicated.
     AIPASS_BIN=""
     if [ -f "$SCRIPT_DIR/.venv/bin/aipass" ]; then
         AIPASS_BIN="$SCRIPT_DIR/.venv/bin/aipass"
@@ -834,25 +857,15 @@ if [ "$FAIL" -eq 0 ]; then
         AIPASS_BIN="$(command -v aipass)"
     fi
 
-    if [ "$RUN_CHAT" = "no" ]; then
-        echo "Skipping the welcome chat (--no-chat). Run 'claude' in $SCRIPT_DIR when ready, or 'aipass init run' in a fresh directory to start a project."
+    if [ "$RUN_FINISH" = "no" ]; then
+        :   # aipass install runs the tail itself
     elif [ -z "$AIPASS_BIN" ]; then
-        echo "WARN: aipass binary not found — open a new terminal and run 'aipass install --chat-only --path $SCRIPT_DIR'."
+        echo "ERROR: aipass binary not found: no health check, no install report. Open a new terminal and run: aipass install --finish --path $SCRIPT_DIR"
+        exit 1
     elif [ ! -t 0 ] || [ -n "${CI:-}" ]; then
-        echo "Non-interactive shell — skipping the welcome chat. Run 'claude' in $SCRIPT_DIR when ready, or 'aipass init run' in a fresh directory to start a project."
+        "$AIPASS_BIN" install --finish --non-interactive --path "$SCRIPT_DIR"
     else
-        # --path (not --here): setup.sh can be invoked from any CWD, but the home
-        # it built is always its own directory. ACTION_NEEDED items + the
-        # identity-skip flag pass through as env vars — composition of the
-        # concierge's opener stays in install.py's _build_install_prompt, the
-        # ONE place that builds it (round-2 install UX, a0f2351e/43ff5873).
-        if [ ${#ACTION_NEEDED[@]} -eq 0 ]; then
-            export AIPASS_ACTION_NEEDED=""
-        else
-            export AIPASS_ACTION_NEEDED="$(printf '%s\n' "${ACTION_NEEDED[@]}")"
-        fi
-        [ "$GIT_IDENTITY_SKIPPED" = "yes" ] && export AIPASS_IDENTITY_SKIPPED="1"
-        "$AIPASS_BIN" install --chat-only --path "$SCRIPT_DIR"
+        "$AIPASS_BIN" install --finish --path "$SCRIPT_DIR"
     fi
 else
     echo "=== Setup finished with errors ==="

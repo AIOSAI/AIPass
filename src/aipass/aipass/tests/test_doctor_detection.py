@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_doctor_detection.py
 # Description: Tests for doctor's system detection and progress helpers
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-08
 # Modified: 2026-11-14
 # =============================================
@@ -22,12 +22,11 @@ from aipass.aipass.apps.handlers.system_detect.system_detector import (
     detect_claude_code,
     detect_cpu,
     detect_git,
+    detect_install_method,
     detect_os,
     detect_python,
     detect_ram,
     detect_shell,
-    detect_docker,
-    detect_tmux,
 )
 from aipass.aipass.apps.handlers.ui.progress import (
     GLYPH_FAIL,
@@ -286,23 +285,27 @@ class TestDetectCpu:
         assert result["count"] >= 1
 
 
-class TestDetectOptionalTools:
-    def test_tmux_found(self, tmp_path, monkeypatch) -> None:
-        """True when tmux binary is on PATH."""
-        _on_path(tmp_path, "tmux")
-        monkeypatch.setenv("PATH", str(tmp_path))
-        assert detect_tmux() is True
+class TestDetectInstallMethod:
+    """The install kind read off where the module sits: the path is handed in through the module's __file__."""
 
-    def test_tmux_not_found(self, tmp_path, monkeypatch) -> None:
-        """False when tmux is absent from PATH."""
-        monkeypatch.setenv("PATH", str(tmp_path))
-        assert detect_tmux() is False
-
-    def test_docker_found(self, tmp_path, monkeypatch) -> None:
-        """True when docker binary is on PATH."""
-        _on_path(tmp_path, "docker")
-        monkeypatch.setenv("PATH", str(tmp_path))
-        assert detect_docker() is True
+    @pytest.mark.parametrize(
+        ("layout", "expected"),
+        [("dev", "dev"), ("clone", "clone"), ("empty_git", "unknown"), ("site", "pip")],
+    )
+    def test_reads_the_tree_around_the_module(self, tmp_path, monkeypatch, layout, expected) -> None:
+        """Mutant: an empty .git counted as a repo -> red at empty_git. Mutant: pyproject check dropped -> red at clone."""
+        root = tmp_path / ("lib/site-packages" if layout == "site" else "proj")
+        module = root / "src" / "pkg" / "system_detector.py"
+        module.parent.mkdir(parents=True)
+        module.write_text("", encoding="utf-8")
+        if layout != "site":
+            (root / ".git").mkdir()
+        if layout in ("dev", "clone"):
+            (root / ".git" / "HEAD").write_text("ref: refs/heads/dev\n", encoding="utf-8")
+        if layout == "dev":
+            (root / "pyproject.toml").write_text("", encoding="utf-8")
+        monkeypatch.setattr(system_detector, "__file__", str(module))
+        assert detect_install_method() == expected
 
 
 class TestProgressHelpers:

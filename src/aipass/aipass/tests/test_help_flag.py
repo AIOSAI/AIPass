@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_help_flag.py
 # Description: Tests for the help_flag predicate + per-module help-gate canaries
-# Version: 1.2.4
+# Version: 1.3.0
 # Created: 2026-08-13
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/help_flag.py and every module's help gate."""
@@ -21,7 +21,7 @@ import pytest
 
 from aipass.aipass.apps.aipass import discover_modules
 from aipass.aipass.apps.handlers.help_flag import wants_help
-from aipass.aipass.apps.modules import help_chat, init_flow, trust
+from aipass.aipass.apps.modules import init_flow, trust
 
 # Ensure encoding='utf-8' appears (PATTERN check)
 _ENCODING = "utf-8"
@@ -93,12 +93,8 @@ _GATE_CASES = [
     ("new_project", "new", ["myapp", "--help"]),
     ("adopt", "adopt", ["myapp", "--help"]),
     ("install", "install", ["run", "--help"]),
-    ("feedback", "feedback", ["on", "--help"]),
     ("doctor", "doctor", ["--fix", "--help"]),
-    ("profile", "profile", ["set", "name", "--help"]),
     ("read", "read", ["drone", "--help"]),
-    ("handoff", "handoff", ["launch", "--help"]),
-    ("help_chat", "help", ["what", "is", "drone", "--help"]),
     ("baud", "baud", ["install", "--help"]),
 ]
 
@@ -238,26 +234,6 @@ class TestTrustEnrollmentCanary:
 
         assert handled is True
         assert _stub_every_doing_path["aipass.aipass.apps.modules.trust.enroll"].called
-
-
-class TestHelpChatBareWordOptOut:
-    """`aipass help` OWNS the bare word — pin both directions."""
-
-    def test_bare_help_word_is_answered_not_usage(self, _stub_every_doing_path) -> None:
-        """`aipass help help` is a question about help, not a usage dump."""
-        with patch.object(help_chat, "print_help", MagicMock()) as mock_help:
-            handled = help_chat.handle_command("help", ["help"])
-
-        assert handled is True
-        mock_help.assert_not_called()
-
-    def test_dashed_flag_still_shows_usage(self, _stub_every_doing_path) -> None:
-        """The opt-out must not disarm --help for the help verb itself."""
-        with patch.object(help_chat, "print_help", MagicMock()) as mock_help:
-            handled = help_chat.handle_command("help", ["what", "is", "drone", "--help"])
-
-        assert handled is True
-        mock_help.assert_called_once()
 
 
 class TestOwnershipCheckRunsFirst:

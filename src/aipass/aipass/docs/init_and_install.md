@@ -2,76 +2,97 @@
 
 # init and install
 
-*The two setup doors: `aipass install` brings AIPass onto a machine,
-`aipass init` walks a human through configuring it.*
+*`aipass install` brings AIPass onto a machine and ends at the doctor's report;
+`aipass init` scaffolds and updates projects.*
 
 `aipass --help` is the authority on the top-level surface, and each command's
-own `--help` on its flags. This page carries what the help pages do not: the
-entry forms that route in the code, and which of them the help text still
-misses.
+own `--help` on its flags. This page carries what the help pages do not: what
+each step does, the report it leaves, and the entry forms that route in the
+code but no help page names.
 
 ## `aipass install` — one-command bootstrap
 
-Clone, `setup.sh`, hooks, the phone face, then a concierge welcome chat. Five
-steps, each reported as it runs.
+Five steps, each reported as it runs: resolve the home and fetch AIPass,
+`setup.sh` (run with `--no-finish`, so the doctor and the report run once, in
+the install's own process), verify the `drone` and `aipass` binaries and the
+registry owner, phone face + baud-cli, and the Health check: the full doctor
+with its fix step.
 
 | Form | What it does |
 |---|---|
-| `install` | The whole bootstrap into the default home |
+| `install` | The whole bootstrap into the default home, ending at the report |
 | `install --path DIR` / `--here` | Choose the install home |
 | `install --source PATH\|URL` | Clone AIPass from this path or URL instead of the public repo (a local path clones its committed HEAD; for the install sandbox) |
-| `install --non-interactive` | Headless — no prompts, no chat |
-| `install --no-chat` / `--chat-only` | Install without the chat, or the chat alone |
+| `install --non-interactive` | Headless: no questions, stdin closed for `setup.sh`, no pairing QR, the default home `~/AIPass` |
+| `install --finish` | The Health check and the report alone, no clone and no `setup.sh`; `setup.sh`'s tail calls it |
 | `install --no-symlink` / `--force-symlink` | Control the global CLI symlinks |
-| `install --force-global-home` | Allow installing into `/tmp` — unsafe, deliberately not advertised |
+| `install --force-global-home` | Allow installing into `/tmp`: unsafe, never the default |
 | `install --no-baud` | Skip the phone face + baud-cli step |
-| `install --dry-run` | Walk the steps, no side effects |
+| `install --baud-tag TAG` | The baud release to install, default latest |
+| `install --dry-run` | Walk the steps, no side effects, no install lock |
+
+The Health check is the one place the install may change the machine beyond
+its own tree: the provider settings (hooks, env, permissions for Claude Code,
+Codex and OpenCode). On a terminal the plan and its diff print and you are
+asked once, `[y/N]`. With no terminal, or under `--non-interactive`, nothing is
+written and the row says so and names `aipass doctor --fix --yes`. A no prints
+what will not work without the wiring and the command that wires it later,
+`aipass doctor --fix`. See [`doctor.md`](doctor.md#the-provider-wiring-door).
+
+The install then ends on its final screen and launches nothing:
+
+- `AIPass installed at <home>`, then every doctor row that is not a pass,
+  after the fix step, plus one `Setup` row per line `setup.sh` wrote to
+  `<home>/.aipass/setup_attention.txt`. Each line reads
+  `<severity>: <label>: <detail> -> <remediation>`.
+- The report, overwritten each install, at
+  `<home>/src/aipass/devpulse/dropbox/install_report.json`: `kind`
+  (`aipass_install_report`), `version`, `written_at`, `home`, `aipass_version`,
+  `user_name` (from `AIPASS_REGISTRY.json`), `outcome`, the doctor's
+  `pass`/`warn`/`error` counts, and the `attention` rows.
+- One command that opens devpulse in its directory on that report:
+  `cd <home>/src/aipass/devpulse && claude "Read dropbox/install_report.json: ..."`.
+- A closing note: devpulse is the seat you talk to about projects; aipass is the
+  machine concierge for host problems.
+
+A report that cannot be written is an error and exit 1. A dry run prints where
+the report would go and writes nothing.
 
 The phone-face step is best-effort: offline, a private repo or a missing token
 prints one line plus the retry command and the install carries on. See
 [`baud_phone_face.md`](baud_phone_face.md).
 
-With the face in, the install ends on the phone: bind, boot unit, server, guide.
-Where no boot unit will bring the server up (no user systemd, a unit that failed
-or could not be reached), the install starts it detached and says so on the
-Server line. On a terminal, when the server answers on a tailnet address, the
-print pauses: press Enter when the phone's camera is ready, and only then does
-@api's pairing door mint a one-use code (label `phone`, scope `operate`, five
-minutes); the last block is its QR, its url and the expiry. EOF or Ctrl-C at the
-pause is a stated skip. Otherwise, or when the door refuses, and always under
-`--non-interactive` (what `install.sh` runs; it does its own pause and pair), the
-print names `drone @api host-api pair phone --scope operate` instead. The QR
-prints before the welcome chat opens. A dry run mints and starts nothing.
+With the face in, the phone print runs after the Health check: bind, boot unit,
+server, guide. Where no boot unit will bring the server up (no user systemd, a
+unit that failed or could not be reached), the install starts it detached and
+says so on the Server line. On a terminal, when the server answers on a tailnet
+address, the print pauses: press Enter when the phone's camera is ready, and
+only then does @api's pairing door mint a one-use code (label `phone`, scope
+`operate`, five minutes); the block ends with its QR, its url and the expiry.
+EOF or Ctrl-C at the pause is a stated skip. Otherwise, or when the door
+refuses, and always under `--non-interactive` (what `install.sh` runs; it does
+its own pause and pair), the print names
+`drone @api host-api pair phone --scope operate` instead. A dry run mints and
+starts nothing.
 
 Code: [`apps/modules/install.py`](../apps/modules/install.py).
 
-## `aipass init` — guided setup
+## `aipass init` — project scaffold and update
 
-Bare `init` prints usage; it does **not** start the setup. `init run` walks the
-ten stages — welcome, system detect, profile, style questions, tool choice,
-first agent, ping sweep, smoke test, handoff, done — and every stage saves its
-answer, so the run is resumable.
+Bare `init` prints usage.
 
 | Form | What it does |
 |---|---|
-| `init run` | The guided setup, resumable |
-| `init run --non-interactive` | CI/headless run |
-| `init run --name/--cli/--style/--template <v>` | Pre-fill a stage answer |
-| `init run --dry-run` | Walk all stages, write nothing |
-| `init --list` | List the available project templates |
-| `init <template>` | The guided setup with that template pre-selected, e.g. `init python` |
-| `init <path> [name]` | Scaffold AIPass files into an existing path |
+| `init [target] [name]` | Scaffold AIPass files into `target` (default: the current directory); takes no flags |
 | `init agent <name>` | Create an agent via `drone @spawn` |
 | `init update [target]` | The scaffold-update plan, then apply it + owner-tier repo auth |
 | `init update --dry-run` | Print the plan and write nothing — exit 0 current, exit 2 pending |
 | `init update --json` | The same plan as a JSON document, for machines |
+| `init run` | Refused, exit 1: there is no guided setup; the error names `aipass init [target] [name]` |
 
-The last three are the update ritual, and it has rules of its own — read
-[`scaffold_update.md`](scaffold_update.md) before applying one.
-
-A bare template name, `init <path>`, and `init agent` all route in
-[`apps/modules/init_flow.py`](../apps/modules/init_flow.py) but are absent from
-`init --help`, as is the `--style` flag that `init run` accepts.
+The update forms are the update ritual, and it has rules of its own — read
+[`scaffold_update.md`](scaffold_update.md) before applying one. The routing is
+in [`apps/modules/init_flow.py`](../apps/modules/init_flow.py).
 
 Scaffolding itself lives in
 [`apps/handlers/init/`](../apps/handlers/init) — `bootstrap.py`,

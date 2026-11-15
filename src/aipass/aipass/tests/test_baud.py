@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_baud.py
 # Description: Tests for aipass baud's command line: each value flag reaches the function it feeds
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-10-08
 # Modified: 2026-11-14
 # =============================================
@@ -797,17 +797,17 @@ class TestThePauseBeforeTheCode:
         assert out.rstrip().endswith(_PAIR_PLAN_NONE)
 
 
-class TestInstallEndsOnThePhone:
-    def test_a_dry_run_install_passes_the_tag_and_ends_on_the_phone_lines(
+class TestInstallPhoneThenReport:
+    def test_a_dry_run_install_passes_the_tag_and_prints_the_phone_lines_before_the_report_line(
         self, tmp_path, monkeypatch, capsys, tailscale
     ):
-        """--baud-tag reaches baud's install as tag; on --no-chat the phone's dry-run lines are the last print."""
+        """--baud-tag reaches baud's install as tag; the phone's dry-run lines come right before the report line."""
         answer, runs = tailscale
         answer(_TAILNET_IP)
         installs: list[dict] = []
         monkeypatch.setattr(baud, "install_phone_face", lambda **kw: installs.append(kw) or 0)
         monkeypatch.setattr(baud, "_api_host_config", lambda: _ApiStore())
-        args = ["--dry-run", "--no-chat", "--non-interactive", "--path", str(tmp_path / "AIPass")]
+        args = ["--dry-run", "--non-interactive", "--path", str(tmp_path / "AIPass")]
         args += ["--baud-tag", "v0.2.1", "--force-global-home"]
         # tmp_path is a throwaway home; install reads its override from sys.argv, as a user types it.
         monkeypatch.setattr(sys, "argv", ["aipass", "install", *args])
@@ -816,6 +816,9 @@ class TestInstallEndsOnThePhone:
         assert exc.value.code == 0
         assert installs == [{"tag": "v0.2.1", "dry_run": True, "best_effort": True}]
         out = capsys.readouterr().out.rstrip()
-        assert out.endswith(_PAIR_PLAN_NONE)
+        report = tmp_path / "AIPass" / "src" / "aipass" / "devpulse" / "dropbox" / "install_report.json"
+        phone, report_line = out.rsplit("\n", 1)
+        assert phone.rstrip().endswith(_PAIR_PLAN_NONE)
+        assert report_line == f"[dry-run] would write the install report: {report}"
         assert not runs.exists()
         assert not (tmp_path / "AIPass").exists()

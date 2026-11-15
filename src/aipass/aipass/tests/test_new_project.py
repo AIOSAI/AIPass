@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_new_project.py
 # Description: Tests for aipass new — project creation handler
-# Version: 1.5.1
+# Version: 1.5.2
 # Created: 2026-07-17
 # Modified: 2026-11-14
 # =============================================
@@ -875,7 +875,7 @@ def test_aipass_print_introspection(capsys: pytest.CaptureFixture[str]):
     entry.print_introspection([])
     out, _err = capsys.readouterr()
     printed = " ".join(out.split())
-    assert "AIPASS \u2014 Concierge & Setup" in printed
+    assert "AIPASS \u2014 machine concierge" in printed
     assert "--help" in printed
 
 

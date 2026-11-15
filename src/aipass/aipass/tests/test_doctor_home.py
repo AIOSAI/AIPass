@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_doctor_home.py
 # Description: Tests for doctor's home, owner-seating, preflight, citizen-count, shared-skills, shadow and smoke rows
-# Version: 1.6.1
+# Version: 1.6.2
 # Created: 2026-10-08
 # Modified: 2026-11-14
 # =============================================
@@ -284,50 +284,20 @@ class TestFixOwnerSeating:
 
 
 class TestRunDoctorPreflight:
-    """Tests for run_doctor_preflight — doctor-before-hello (round-2 addendum 2)."""
+    """run_doctor_preflight: the install's doctor --fix, returning the groups and their counts."""
 
-    def test_returns_error_count_and_empty_items_when_hooks_wired(self) -> None:
+    def test_returns_the_groups_after_the_fix_and_their_counts(self) -> None:
+        """Mutant: the counts dropped for (0, 0, 0) -> red. Mutant: non_interactive not passed on -> red."""
         groups = {
-            "System": [],
-            "Identity": [],
-            "Services": [CheckResult("hooks", GLYPH_PASS, "9 provider hooks wired", "")],
-            "Community": [],
-            "Structure": [],
-            "Sandbox": [],
-        }
-        with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value=groups):
-            error_count, hook_action_items = run_doctor_preflight()
-        assert error_count == 0
-        assert hook_action_items == []
-
-    def test_still_broken_hooks_surfaced_as_action_items(self) -> None:
-        groups = {
+            "System": [CheckResult("python", GLYPH_PASS, "3.12", "")],
             "Services": [
-                CheckResult("hooks", GLYPH_WARN, "2 hook(s) missing from provider settings: Stop, Notification", ""),
+                CheckResult("hooks", GLYPH_WARN, "2 hook(s) missing", "aipass doctor --fix"),
                 CheckResult("wire verify", GLYPH_FAIL, "verify failed", ""),
             ],
         }
-        with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value=groups):
-            _error_count, hook_action_items = run_doctor_preflight()
-        assert any("hooks:" in item for item in hook_action_items)
-        assert any("wire verify:" in item for item in hook_action_items)
-
-    def test_passing_checks_excluded_from_action_items(self) -> None:
-        groups = {"Services": [CheckResult("hooks", GLYPH_PASS, "9 provider hooks wired", "")]}
-        with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value=groups):
-            _error_count, hook_action_items = run_doctor_preflight()
-        assert hook_action_items == []
-
-    def test_fix_true_and_the_install_door_passed_through_to_compute_groups(self) -> None:
-        with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value={}) as mock_compute:
-            run_doctor_preflight(fix=True)
-        mock_compute.assert_called_once_with(fix=True, door="install")
-
-    def test_error_count_reflects_fail_glyphs(self) -> None:
-        groups = {"System": [CheckResult("test", GLYPH_FAIL, "bad", "")]}
-        with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value=groups):
-            error_count, _hook_action_items = run_doctor_preflight()
-        assert error_count == 1
+        with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value=groups) as compute:
+            assert run_doctor_preflight(non_interactive=True) == (groups, (1, 1, 1))
+        compute.assert_called_once_with(fix=True, door="install", non_interactive=True)
 
 
 class TestDroneCitizenCount:

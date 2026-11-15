@@ -86,17 +86,10 @@ OpenCode picks its own default. OpenCode needs no config pins: AIPass launches
 it with `--auto`. Doctor never runs `opencode run`, which spends free quota and
 starts a server.
 
-**Handing off to a CLI.** `aipass handoff launch --cli codex` and an init run
-that chose Codex start `codex --dangerously-bypass-approvals-and-sandbox`, the
-posture dispatch uses, because the hooks are the gates on every CLI. The way
-back printed after the session is `codex resume --last` from the agent's
-directory; Claude Code's is `claude --continue`. `aipass handoff launch --cli
-opencode` runs `PATH="$HOME/.opencode/bin:$PATH" opencode --standalone --auto
---prompt "<prompt>"`, the shape of BAUD's rooms: the PATH prefix because the
-curl installer's bin is on PATH only through `~/.bashrc`, and `--standalone` so
-the seat gets a private server with its own environment. Without it the TUI
-joins the user's shared server, which keeps the environment of whoever started
-it, and `AIPASS_HOME` never reaches the hooks.
+**Opening a new project's agent.** `aipass new <name>`, when it creates the
+agent and runs on a terminal, replaces its process with `claude` in the agent's
+directory, and prints the way back after the session:
+`cd <agent dir> && claude --continue`.
 
 **The session pointer and the handoff.** Each interactive session start writes
 the branch's resume target, with the CLI running it, to

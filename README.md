@@ -47,7 +47,7 @@ pipx install aipass
 aipass install
 ```
 
-The first line puts two commands on your PATH, `aipass` and `drone`. The second clones AIPass into `~/AIPass` (`--path` to choose), builds its environment, sets up the 18 agents, runs a health check, and ends with the AIPass concierge on screen, greeting you and saying what your machine still needs. It also starts a server on your machine for BAUD, the phone face; `--no-baud` skips that.
+The first line puts two commands on your PATH, `aipass` and `drone`. The second clones AIPass into `~/AIPass` (`--path` to choose), builds its environment, sets up the 18 agents, runs a health check, and ends on an install report: what still needs attention, and the command that wakes devpulse on it. It also starts a server on your machine for BAUD, the phone face; `--no-baud` skips that.
 
 To work on AIPass itself, install from a clone instead (this route skips the phone step):
 
@@ -59,21 +59,16 @@ Install adds AIPass hooks and deny rules to your user-level Claude Code settings
 
 ## Start here
 
-1. **Make a project, or adopt one you have.** `aipass new` builds a new project around a resident manager agent, makes the first commit, and ends in a conversation with that agent. `aipass init run`, run inside a directory you already have, does a guided setup and ends with the CLI you chose (`claude` by default, or `codex`) open in it; its `aipass_framework` template adds the first agent on the way.
+Talk to **devpulse**, the admin seat: run `claude` in `src/aipass/devpulse` in your AIPass folder. Hand it the install report first; after that, say what you want in plain words and it plans the work and dispatches it to the agent that owns the code. Talk to **aipass**, the machine concierge, about the host itself (Wi-Fi drops, a USB port not working, a CPU running hot): run `claude` in `src/aipass/aipass`, or its CLI, `aipass --help`.
 
-   ```bash
-   aipass new my-project --template python   # New project: scaffold, resident manager agent, first commit
-   aipass init run                           # A directory you already have: run inside it, guided setup
-   ```
-
-2. **Talk to your manager.** Run `claude` in the manager's directory and say what you want in plain words, such as "Add a CSV export to the report command." It writes a plan, sends the work to the agent that owns that code, and reports back when it lands. The same two steps by hand:
-
-   ```bash
-   drone @flow create . "Add CSV export"            # A work plan that carries the context
-   drone @ai_mail dispatch @agent "Subject" "Body"  # Send the task and wake the agent
-   ```
-
-3. **Grow it and check it.** Add an agent with `drone @spawn create src/my_project/analyst --role "Analyst" --purpose "Reports"`. Run `drone @sentry audit aipass` for the same standards checks AIPass's own agents pass in CI, and `aipass doctor` for the health of the install.
+```bash
+aipass new my-project --template python   # projects/my-project: own git repo, scaffold, resident manager agent
+aipass adopt <path>                       # an existing directory becomes a project
+aipass init [target]                      # scaffold only; add an agent with: aipass init agent <name>
+drone @flow create . "Add CSV export"     # a work plan that carries the context
+drone @ai_mail dispatch @agent "Subject" "Body"   # send a task and wake the agent
+drone @sentry audit aipass                # the standards checks AIPass's own agents pass in CI
+```
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/AIOSAI/AIPass/main/assets/baud-agent.png" alt="An agent's card in BAUD: what it is doing, its mail, plans and todos" width="240">
@@ -153,7 +148,7 @@ The boring stuff works. One human and these agents built it, and use it every da
 <details>
 <summary>The full list</summary>
 
-Install builds the environment, puts `aipass` and `drone` on your PATH, and sets up the 18 agents. It runs a health check that fixes what it can. In an interactive shell it ends in a conversation with the AIPass concierge, which greets you and walks you through what your machine still needs. On the way it may ask for your git identity (only if it is not set globally), your name, and whether the session should ask before system-changing commands. A non-interactive shell finishes with defaults and no prompts, and skips both the health check and the conversation; `--no-chat` skips them in any shell.
+Install builds the environment, puts `aipass` and `drone` on your PATH, and sets up the 18 agents. It ends on a health check that fixes what it can, an install report in devpulse's dropbox, and a final screen with what still needs attention. In a terminal it asks where AIPass should live (unless `--path`), your git identity (only if it is not set globally), one yes or no before the changes outside the repo listed below (on no it skips them, says what will not work, and `./setup.sh` makes them later), and Enter before the phone pairing code. Your name comes from git's `user.name`, else your login. A non-interactive shell asks nothing and makes the changes; on the clone route `--no-finish` skips the health check and the report.
 
 Install changes a few things outside the repo, and you should know what. It adds AIPass deny rules to your user-level Claude Code settings (no raw git writes: `commit`, `push`, `reset`, `rebase`, `merge`, `config` and the destructive `checkout`, `restore`, `stash` and `branch` forms; no reading `~/.secrets/`), and these apply to every Claude Code project on the machine. It merges its hooks with any you already have. It adds a `claude` shell function that, inside an agent directory, boots that agent's seat, attaching to it if one is already live. It sets `git config --global pull.rebase true` when it sets your git identity. It installs the `@anthropic-ai/sandbox-runtime` npm package if it is missing. `sudo` may ask once to place the `/usr/local/bin` symlinks. Re-running install rebuilds `.venv`. The list below names every file it touches.
 
@@ -183,7 +178,7 @@ No cloud accounts, no external services — everything to clean up is on your ma
 >
 > **devpulse** is the admin seat. Run `claude` in `src/aipass/devpulse` in your AIPass folder (`~/AIPass` by default) to talk a project through before you create it, solve a problem, or get help with setup. It can dispatch any agent on your machine, your project managers included, and edit files and run git across projects.
 >
-> **aipass** is the concierge for the machine itself: setup, updates and installs, and machine problems like a wifi connection that keeps dropping or a fan that never stops. Run `claude` in `src/aipass/aipass`.
+> **aipass** is the machine concierge: host and OS diagnosis, the doctor, the installer, and host problems like a Wi-Fi connection that keeps dropping or a fan that never stops. Run `claude` in `src/aipass/aipass`.
 >
 > The other sixteen maintain AIPass, and your agents call their services (mail, plans, memory, gates) without you running them.
 
@@ -194,7 +189,7 @@ AIPass ships with 18 agents. Each has its own README and a `docs/` folder under 
 
 ```
 devpulse (orchestrator: the one you talk to)
-   ├── aipass   : concierge: setup, updates, machine problems (init, doctor)
+   ├── aipass   : machine concierge: host/OS diagnosis, doctor, installer
    ├── drone    : command routing and @agent resolution
    ├── sentry   : quality standards, checked across all agents
    ├── prax     : monitoring, logs, runaway-log detection

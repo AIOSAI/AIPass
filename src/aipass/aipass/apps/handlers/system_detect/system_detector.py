@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: system_detector.py
 # Description: Pure system detection logic for aipass doctor
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-04-16
-# Modified: 2026-11-01
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -197,13 +197,3 @@ def detect_install_method() -> str:
             return "clone"
 
     return "unknown"
-
-
-def detect_tmux() -> bool:
-    """True if tmux is available on PATH."""
-    return shutil.which("tmux") is not None
-
-
-def detect_docker() -> bool:
-    """True if docker is available on PATH."""
-    return shutil.which("docker") is not None

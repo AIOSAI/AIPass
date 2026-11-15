@@ -41,7 +41,7 @@ Code: [`apps/modules/trust.py`](../apps/modules/trust.py).
 `aipass new <name>` creates a project in `projects/`: its own repo (`main` and
 `dev`, left on `dev`), the AIPass scaffold, and a resident manager-class agent.
 `--template python` adds a pyproject and `src/`; `--no-agent` leaves the agent
-out. The templates are listed by `aipass init --list`.
+out. `aipass new --help` lists the templates: `empty` and `python`.
 
 Code: [`apps/modules/new_project.py`](../apps/modules/new_project.py) and
 [`apps/handlers/new_project/`](../apps/handlers/new_project) — registry,

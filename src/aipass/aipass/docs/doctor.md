@@ -126,18 +126,25 @@ config folder, or says OpenCode picks its own default. Doctor never runs
 Nothing is written before you see it. `doctor --fix` and plain `doctor` print
 the planned changes, one line each, then a unified diff per file, and ask
 once: `Apply these N changes to the provider settings? [y/N]`. Anything but
-`y` writes nothing. With no terminal to ask on, `doctor --fix` writes nothing
-and its row says `not applied: no tty — aipass doctor --fix --yes`; `--yes`
-writes without the question. The install tail never asks: it runs inside the
-one Enter you already gave the installer. Each receipt records the consent:
-`y (tty)`, `--yes` or `install`. Code: [`apps/handlers/provider_wire.py`](../apps/handlers/provider_wire.py),
+`y` writes nothing. Under `--fix` a no also warns what will not work: Claude Code, Codex and
+OpenCode run without AIPass's hooks, so no memory or prompt injection, no
+safety gates on git, edits and rm, no standards checks on edits; it names
+`aipass doctor --fix` to wire them later, and the row says
+`not applied: declined`. With no terminal to ask on, `doctor --fix` writes
+nothing and its row says `not applied: no tty — aipass doctor --fix --yes`;
+`--yes` writes without the question. The install's Health check runs the same
+step, its wire receipt naming the door `install`: it asks on a terminal, and with no terminal or
+under `--non-interactive` it writes nothing and its row says
+`not applied: no tty` or `not applied: --non-interactive`, each naming
+`aipass doctor --fix --yes`. Each receipt records the door and the consent,
+`y (tty)` or `--yes`. Code: [`apps/handlers/provider_wire.py`](../apps/handlers/provider_wire.py),
 [`apps/handlers/provider_reconcile.py`](../apps/handlers/provider_reconcile.py)
 and [`apps/modules/_doctor_wire.py`](../apps/modules/_doctor_wire.py).
 
 ## Every write to your provider settings backs up first
 
 Before any of these doors writes the personal settings file (`doctor --fix`,
-the install tail's doctor run, setup.sh's settings refresh, the stale-deny cleanup),
+the install's Health check, setup.sh's settings refresh, the stale-deny cleanup),
 it copies the file into `~/.claude/.backup/settings/` as
 `settings.json.<date>T<time>.<door>`. A write to Codex's `hooks.json`, or of
 the OpenCode plugin, backs up to `.backup/settings/` beside that file the same way. Then, after the write, it adds one line to

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_doctor.py
 # Description: Tests for aipass doctor: the command, the run and the provider checks
-# Version: 1.9.0
+# Version: 1.9.1
 # Created: 2026-04-16
 # Modified: 2026-11-14
 # =============================================
@@ -1369,7 +1369,7 @@ class TestPreflightWireDoor:
         (tmp_path / ".claude" / "settings.json").write_text(json.dumps({"env": {}}), encoding="utf-8")
         monkeypatch.setattr(f"{mod}._find_manifest", lambda: manifest)
 
-        with _home_at(tmp_path):
+        with patch("sys.stdin", _Stdin("y\n", tty=True)), _home_at(tmp_path):
             run_doctor_preflight()
 
         folder = tmp_path / ".claude" / ".backup" / "settings"
@@ -1384,7 +1384,7 @@ class TestPreflightWireDoor:
 
 
 class TestDoctorFixAsks:
-    """doctor --fix shows the settings plan and asks once; --yes and install never ask (FPLAN-0646)."""
+    """doctor --fix shows the settings plan and asks once; --yes never asks, unattended never writes (FPLAN-0646)."""
 
     @staticmethod
     def _world(tmp_path, monkeypatch) -> "tuple":
@@ -1482,16 +1482,23 @@ class TestDoctorFixAsks:
         assert any(re.match(r'-\s+"Bash\(rm -r \*\)"', line) for line in lines)
         assert any(re.match(r'\+\s+"Edit\(~/\.claude/\*\*\)"', line) for line in lines)
 
-    def test_f_the_install_preflight_never_asks(self, tmp_path, monkeypatch, capsys) -> None:
-        """Install with no tty writes without the question; the receipts carry the install consent.
-        Mutant: ask inside the install door -> no tty means nothing written, red."""
-        settings, original, folder = self._world(tmp_path, monkeypatch)
-        with patch("sys.stdin", _Stdin("", tty=False)), _home_at(tmp_path):
-            run_doctor_preflight()
+    @pytest.mark.parametrize(
+        ("tty", "non_interactive", "why"),
+        [(False, False, _doctor_wire.NOT_APPLIED_NO_TTY), (True, True, _doctor_wire.NOT_APPLIED_NON_INTERACTIVE)],
+    )
+    def test_f_an_unattended_install_writes_nothing_and_its_row_names_why(
+        self, tmp_path, monkeypatch, tty, non_interactive, why
+    ) -> None:
+        """Mutant: the install door's old auto-consent -> written, red. Mutant: non_interactive ignored -> y read, red."""
+        settings, original, _folder = self._world(tmp_path, monkeypatch)
+        stdin = _Stdin("y\n", tty=tty)
+        with patch("sys.stdin", stdin), _home_at(tmp_path):
+            groups, _counts = run_doctor_preflight(non_interactive=non_interactive)
 
-        assert settings.read_bytes() != original
-        assert "Apply these" not in capsys.readouterr().out
-        assert self._consents(folder) == ["consent: install", "consent: install"]
+        (row,) = [r for r in groups["Services"] if r.label == _doctor_wire.SETTINGS_FIX_LABEL]
+        assert (row.glyph, row.detail, row.remediation) == (GLYPH_WARN, why, "aipass doctor --fix --yes")
+        assert settings.read_bytes() == original
+        assert stdin.read() == "y\n"
 
     def test_g_an_unparseable_settings_file_is_a_fail_row_and_stays_byte_identical(self, tmp_path, monkeypatch) -> None:
         """A JSON typo in the settings file refuses the plan; the row FAILs and nothing is written."""

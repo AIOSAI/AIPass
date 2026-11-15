@@ -1,1 +1,1 @@
-"""AIPass concierge — user-facing front door (help, doctor, init, profile, handoff)."""
+"""AIPass machine concierge — host diagnosis, doctor, installer, project scaffold (init, new, adopt)."""

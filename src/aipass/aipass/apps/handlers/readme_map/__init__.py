@@ -1,15 +1,12 @@
 # =================== AIPass ====================
 # Name: readme_map/__init__.py
 # Description: Branch-name to README-path lookup and live README reads
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-11-14
 # =============================================
 
-"""readme_map — branch-name → README-path lookup for help_chat live reads.
-
-Only the path map is cached; content never is: every read hits the current file.
-"""
+"""readme_map — branch-name → README-path lookup for `aipass read`; the map is cached, content never."""
 
 from __future__ import annotations
 
@@ -75,19 +72,6 @@ def list_branches() -> list[str]:
 
     Reflects the filesystem as it was when the cached map was first built."""
     return list(_get_map().keys())
-
-
-def read_readme_lines(branch: str) -> list[str] | None:
-    """Live-read README.md for a branch. Returns list of lines, or None on error."""
-    readme_path = get_readme_path(branch)
-    if readme_path is None:
-        return None
-    try:
-        with open(readme_path, encoding="utf-8") as fh:
-            return fh.readlines()
-    except OSError as exc:
-        logger.error("[readme_map] Could not read %s: %s", readme_path, exc)
-        return None
 
 
 def read_readme_at(readme_path: Path) -> str | None:

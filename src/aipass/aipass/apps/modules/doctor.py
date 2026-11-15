@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.14.0
+# Version: 1.15.0
 # Created: 2026-04-16
-# Modified: 2026-10-28
+# Modified: 2026-11-14
 # =============================================
 
 """aipass doctor — system health aggregation."""
@@ -438,8 +438,7 @@ def check_provider_manifest(
 ) -> List[CheckResult]:
     """Check provider settings against manifest. Returns hook/env/permission results.
 
-    Public: init_flow's report reads the manifest gaps through it. The --fix write lives in
-    fix_provider_settings. settings_path is a test seam; product callers pass none.
+    The --fix write lives in fix_provider_settings. settings_path is a test seam; product callers pass none.
     """
     if settings_path is None:
         settings_path = Path.home() / ".claude" / "settings.json"
@@ -1150,12 +1149,13 @@ def _compute_doctor_groups(
     fix: bool = False,
     door: str = DOOR_DOCTOR_FIX,
     yes: bool = False,
+    non_interactive: bool = False,
 ) -> Dict[str, List[CheckResult]]:
     """Run all six check groups (optionally auto-fixing). Returns them by group name.
 
-    With *fix*, the settings step shows its plan and asks once before writing:
-    *yes* skips the question, door ``install`` never asks, and *door*
-    names the writer in the settings backup and receipt.
+    With *fix*, the settings step shows its plan and asks once before writing: *yes* skips
+    the question, *non_interactive* writes nothing, and *door* names the writer in the
+    settings backup and receipt.
     """
     group_specs = [
         ("System", _check_system),
@@ -1174,7 +1174,10 @@ def _compute_doctor_groups(
             progress.remove_task(task_id)
 
     if fix:
-        settings_rows = [CheckResult(*row) for row in fix_provider_settings(_find_manifest(), door=door, yes=yes)]
+        settings_rows = [
+            CheckResult(*row)
+            for row in fix_provider_settings(_find_manifest(), door=door, yes=yes, non_interactive=non_interactive)
+        ]
         manifest_results = check_provider_manifest()
         if manifest_results:
             groups["Services"] = merge_manifest_rows(groups.get("Services", []), manifest_results)
@@ -1267,26 +1270,21 @@ def run_doctor(
     return error_count
 
 
-def run_doctor_preflight(fix: bool = True) -> tuple[int, List[str]]:
-    """Run doctor automatically in the install tail, before the concierge says hello.
+def run_doctor_preflight(
+    non_interactive: bool = False,
+) -> tuple[Dict[str, List[CheckResult]], tuple[int, int, int]]:
+    """The install's health check: doctor --fix under the install door, printed.
 
-    Hook wiring is P1: a still-broken hooks/wire-verify result comes back separately for the
-    top of the ACTION NEEDED block. Returns (error_count, hook_action_items).
+    Returns the groups after the fix and their (pass, warn, error) counts, for the install report.
     """
     console.print()
-    console.print("[bold cyan]Running aipass doctor...[/bold cyan]")
+    console.print("[bold cyan]Running aipass doctor --fix...[/bold cyan]")
     console.print()
 
-    groups = _compute_doctor_groups(fix=fix, door=DOOR_INSTALL)
-    _pass_count, _warn_count, error_count = _print_doctor_groups(groups)
-
-    logger.info("[doctor] preflight complete — errors=%d", error_count)
-
-    hook_labels = {"hooks", "wire verify"}
-    hook_action_items = [
-        f"{r.label}: {r.detail}" for r in groups.get("Services", []) if r.label in hook_labels and r.glyph != GLYPH_PASS
-    ]
-    return error_count, hook_action_items
+    groups = _compute_doctor_groups(fix=True, door=DOOR_INSTALL, non_interactive=non_interactive)
+    counts = _print_doctor_groups(groups)
+    logger.info("[doctor] install health check complete — pass=%d warn=%d error=%d", *counts)
+    return groups, counts
 
 
 def print_introspection() -> None:

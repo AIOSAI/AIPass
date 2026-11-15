@@ -77,7 +77,7 @@ docker run --rm -v "$AIPASS_HOME/tests/docker_dev_verify.sh":/verify.sh:ro \
 ### Phase 7b — idempotency (verified by independent audit 2026-08-28)
 - [ ] A SECOND install in the same container changes zero `.trinity` json bytes,
       prints "exists (skipped)" for all 18, leaves AIPASS_REGISTRY.json
-      byte-identical. Run the second pass as `bash setup.sh --no-chat` or with
+      byte-identical. Run the second pass as `bash setup.sh --no-finish` or with
       `AIPASS_HOME` exported — the `./aipass` launcher post-install forwards to
       the Python wizard, which without a tty and without `$AIPASS_HOME` prompts
       for a home and cancels on EOF (environment fact: setup.sh exports it to
