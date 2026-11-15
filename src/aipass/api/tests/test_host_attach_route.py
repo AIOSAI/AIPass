@@ -3,7 +3,7 @@
 # Description: Tests for the attach route and its seats — opening, socket auth, watches, outside rooms, the ping
 # Version: 1.0.3
 # Created: 2026-10-08
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for the WS /v1/room/attach route in apps/handlers/host/server.py and open_attach/open_monitor in attach.py."""
@@ -338,6 +338,28 @@ class TestTheSocketRefusesBeforeItSpawns:
                         pass
 
                 assert not spawn.called
+
+    def test_a_token_store_that_cannot_be_read_closes_on_1011_and_logs_an_error(self, store: Any) -> None:
+        """An outage is 'ours' (1011), never a refused token (1008), and an ERROR line is what pages the owner."""
+        from fastapi.testclient import TestClient
+        from starlette.websockets import WebSocketDisconnect
+
+        outage = host_tokens.secrets_store.SecretsUnavailable("tokens.json is not a tokens document")
+
+        with (
+            patch(PATCH_SERVER_LOGGER) as log,
+            patch(PATCH_SERVER_JSON),
+            patch.object(host_tokens, "load_tokens", side_effect=outage),
+            patch.object(host_attach, "open_attach") as spawn,
+        ):
+            client = TestClient(host_server.create_app())
+            with pytest.raises(WebSocketDisconnect) as closed:
+                client.websocket_connect("/v1/room/attach?branch=api", subprotocols=["aipass.bearer", "x"]).__enter__()
+
+        assert closed.value.code == 1011
+        assert closed.value.reason == host_denials.SENTENCES["auth_unavailable"]
+        assert log.error.call_count == 1
+        assert not spawn.called
 
     def test_an_authenticated_caller_gets_a_readable_refusal(self, store: Any, seated: Any) -> None:
         """A refusal the operator can ACT on has to reach the screen."""

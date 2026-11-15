@@ -3,7 +3,7 @@
 # Description: Host API Server Handler — FastAPI app factory, auth dependency
 # Version: 1.2.1
 # Created: 2026-08-14
-# Modified: 2026-11-06
+# Modified: 2026-11-15
 # =============================================
 # pyright: reportMissingImports=false, reportInvalidTypeForm=false, reportOptionalCall=false
 # pyright: reportArgumentType=false
@@ -875,6 +875,10 @@ def create_app() -> Any:
             logger.warning("[host_api] socket refused for %s: %s", branch or "<no branch>", e)
             _audit_socket_refusal(websocket, str(e))
             await websocket.close(code=1008, reason=str(e))
+            return
+        except host_tokens.secrets_store.SecretsUnavailable as e:
+            logger.error("[host_api] the token store cannot be read, every socket closes 1011: %s", e)
+            await websocket.close(code=1011, reason=host_denials.SENTENCES["auth_unavailable"])
             return
 
         # Accepted BEFORE the remaining checks: a browser shows a close reason only on an established socket.
