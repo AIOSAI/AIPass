@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.15.0
+# Version: 1.15.1
 # Created: 2026-04-16
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """aipass doctor — system health aggregation."""
@@ -1272,8 +1272,9 @@ def run_doctor(
 
 def run_doctor_preflight(
     non_interactive: bool = False,
+    yes: bool = False,
 ) -> tuple[Dict[str, List[CheckResult]], tuple[int, int, int]]:
-    """The install's health check: doctor --fix under the install door, printed.
+    """The install's health check: doctor --fix under the install door, printed; *yes* is install's --yes.
 
     Returns the groups after the fix and their (pass, warn, error) counts, for the install report.
     """
@@ -1281,7 +1282,7 @@ def run_doctor_preflight(
     console.print("[bold cyan]Running aipass doctor --fix...[/bold cyan]")
     console.print()
 
-    groups = _compute_doctor_groups(fix=True, door=DOOR_INSTALL, non_interactive=non_interactive)
+    groups = _compute_doctor_groups(fix=True, door=DOOR_INSTALL, yes=yes, non_interactive=non_interactive)
     counts = _print_doctor_groups(groups)
     logger.info("[doctor] install health check complete — pass=%d warn=%d error=%d", *counts)
     return groups, counts

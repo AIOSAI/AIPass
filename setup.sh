@@ -574,11 +574,19 @@ else
 fi
 
 # --- Machine changes outside this checkout (owner rule: one explanation, one yes/no) ---
-# On a tty one question covers the block below; on no it is skipped whole. With no
-# tty, AIPASS_NON_INTERACTIVE or CI set it runs unasked, as before (CI, Docker).
+# On a tty one question covers the block below; on no it is skipped whole. AIPASS_YES=1
+# (aipass install --yes) is the yes given up front. With no tty, AIPASS_NON_INTERACTIVE
+# or CI and no AIPASS_YES, nobody was asked, so it is a no: never a silent yes.
 confirm_machine_changes() {
     MACHINE_CHANGES="yes"
+    if [ "${AIPASS_YES:-}" = "1" ]; then
+        return 0
+    fi
     if ! is_interactive || [ -n "${CI:-}" ]; then
+        MACHINE_CHANGES="no"
+        echo ""
+        echo "  Machine changes skipped: no terminal to ask on and no --yes."
+        ACTION_NEEDED+=("Machine changes skipped (no --yes): hooks, shell rc, AIPASS_HOME, symlinks. Run: aipass install --yes, or $SCRIPT_DIR/setup.sh on a terminal")
         return 0
     fi
     echo ""

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor_home.py
 # Description: Tests for doctor's home, owner-seating, preflight, citizen-count, shared-skills, shadow and smoke rows
-# Version: 1.6.2
+# Version: 1.6.3
 # Created: 2026-10-08
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/doctor.py and _doctor_smoke.py: home, seating, preflight, drone, skills, shadows, gitignore, smoke."""
@@ -287,7 +287,7 @@ class TestRunDoctorPreflight:
     """run_doctor_preflight: the install's doctor --fix, returning the groups and their counts."""
 
     def test_returns_the_groups_after_the_fix_and_their_counts(self) -> None:
-        """Mutant: the counts dropped for (0, 0, 0) -> red. Mutant: non_interactive not passed on -> red."""
+        """Mutant: the counts dropped for (0, 0, 0) -> red. Mutant: non_interactive or yes not passed on -> red."""
         groups = {
             "System": [CheckResult("python", GLYPH_PASS, "3.12", "")],
             "Services": [
@@ -296,8 +296,8 @@ class TestRunDoctorPreflight:
             ],
         }
         with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value=groups) as compute:
-            assert run_doctor_preflight(non_interactive=True) == (groups, (1, 1, 1))
-        compute.assert_called_once_with(fix=True, door="install", non_interactive=True)
+            assert run_doctor_preflight(non_interactive=True, yes=True) == (groups, (1, 1, 1))
+        compute.assert_called_once_with(fix=True, door="install", yes=True, non_interactive=True)
 
 
 class TestDroneCitizenCount:

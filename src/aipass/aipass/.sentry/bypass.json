@@ -134,8 +134,8 @@
     {
       "file": "apps/modules/install.py",
       "standard": "logged_fallback",
-      "lines": [141, 194, 607],
-      "reason": "141: _clear_stale_lock answers whether the lock is now free. FileNotFoundError means another process removed it first, so it IS free (True is the fact); an unlink that fails returns False and refuses (caller acquire, install.py:166). 194: _pid_alive, a PermissionError from signal 0 means the process exists under another user, so True is the answer. 607: run_install's Ctrl-C at home resolution returns 1, the documented code for nothing installed; handle_command passes it to sys.exit, and no caller branches on cancel versus failure. Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-13 after DPLAN-0408 moved them; again 2026-10-24 (FPLAN-0665 moved them 4 down)."
+      "lines": [169, 222, 667],
+      "reason": "169: _clear_stale_lock answers whether the lock is now free. FileNotFoundError means another process removed it first, so it IS free (True is the fact); an unlink that fails returns False and refuses (caller acquire, install.py:194). 222: _pid_alive, a PermissionError from signal 0 means the process exists under another user, so True is the answer. 667: run_install's Ctrl-C at home resolution returns 1, the documented code for nothing installed; handle_command passes it to sys.exit, and no caller branches on cancel versus failure. Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-13 after DPLAN-0408 moved them; again 2026-10-24 (FPLAN-0665 moved them 4 down)."
     },
     {
       "file": "apps/modules/doctor.py",
@@ -182,7 +182,7 @@
     {
       "file": "tests/test_install.py",
       "standard": "through_the_command",
-      "lines": [31, 1237, 1269],
+      "lines": [31, 1351, 1383],
       "reason": "Ruling (c), fleet green leg 7: run_install, the one public door, clones the repo (_clone_repo), runs setup.sh (_run_setup), fixes ownership (_check_and_fix_owner), fetches baud (_install_phone_face), then runs the health check and the final screen (_finish, which writes the install report and reads _registry_user_name and _setup_attention); _resolve_home and _looks_like_aipass_tree prompt and probe before the clone. Every helper is pinned with the far side stubbed (lines re-pinned 2026-10-15, DPLAN-0409 C3). _resolve_source (--source) is a pure check before the clone, also pinned through run_install. Re-pinned 2026-11-14 (FPLAN-0924; 1269 is a second _clone_repo pin)."
     },
     {

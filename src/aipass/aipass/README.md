@@ -24,13 +24,17 @@ aipass init <dir> [name]            # scaffold a project in <dir>
 **Install.** `aipass install` is the one-command bootstrap in five steps: home,
 `setup.sh`, verify, phone face + baud-cli, and a health check that runs the full
 doctor with its fix step. The provider settings change is shown and asked once
-on a terminal; with no terminal, or `--non-interactive`, nothing is written and
-the row names `aipass doctor --fix --yes`. The install ends on a final screen:
+on a terminal; `--yes` gives that consent up front and exports `AIPASS_YES=1`
+to `setup.sh`. With no terminal, or `--non-interactive` without `--yes`, nothing
+is written and the row names `aipass doctor --fix --yes`. The install ends on a final screen:
 `AIPass installed at <home>` and every row that is not a pass, including what
 `setup.sh` left in `<home>/.aipass/setup_attention.txt`. It writes that list to
 `<home>/src/aipass/devpulse/dropbox/install_report.json`, prints one command
 that wakes devpulse on the report, and launches nothing. `aipass install --finish`
 is that last step alone, the doctor and the report; `setup.sh` ends with it.
+A phone face that was asked for (no `--no-baud`) and did not install fails the
+install: the final screen says a requested step failed, the report records
+`"outcome": "step_failed"` and `"failed_steps": ["phone face"]`, and the exit is 1.
 With a phone face installed, the install starts the phone server itself when
 nothing else will, and on a terminal waits for Enter and shows a pairing QR.
 `--source PATH|URL` clones AIPass from a local checkout's committed HEAD or

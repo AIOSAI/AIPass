@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_install.py
 # Description: Tests for aipass install — one-command bootstrap (DPLAN-0233)
-# Version: 1.5.1
+# Version: 1.6.0
 # Created: 2026-07-05
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/install.py (DPLAN-0233) and the install command it drives."""
@@ -80,11 +80,20 @@ _REAL_PREFLIGHT = doctor.run_doctor_preflight
 @pytest.fixture(autouse=True)
 def doctor_stays_stubbed(monkeypatch):
     """Step 5's doctor --fix is stubbed: unstubbed it reads and rewires this host's provider settings."""
-    calls: list[bool] = []
+    calls: list[dict] = []
     monkeypatch.setattr(
-        doctor, "run_doctor_preflight", lambda non_interactive=False: calls.append(non_interactive) or ({}, (0, 0, 0))
+        doctor,
+        "run_doctor_preflight",
+        lambda non_interactive=False, yes=False: (
+            calls.append({"non_interactive": non_interactive, "yes": yes}) or ({}, (0, 0, 0))
+        ),
     )
     return calls
+
+
+def _installed_in(home: Path, monkeypatch) -> None:
+    """install.py reads as inside `home`, an install from the home's own venv: the lock event fires in-process."""
+    monkeypatch.setattr(_install, "__file__", str(home / "x" / "install.py"))
 
 
 class TestLooksLikeAipassTree:
@@ -194,12 +203,14 @@ class TestInstallLock:
         assert str(install_lock_path(home)) in message
         assert str(os.getpid()) in message
 
-    def test_release_frees_the_home(self, tmp_path: Path) -> None:
+    def test_release_frees_the_home(self, tmp_path: Path, monkeypatch) -> None:
         """After release the next install can claim it, and the removal is announced once.
 
         Mutant: `"install_lock_released"` -> `"released"` in release_install_lock -> red.
+        Mutant: the in-home check inverted -> the in-process fire never runs -> red.
         """
         home = tmp_path / "AIPass"
+        _installed_in(home, monkeypatch)
         lock = acquire_install_lock(home)
         with patch(_BUS) as bus:
             release_install_lock(lock)
@@ -209,12 +220,13 @@ class TestInstallLock:
         assert not install_lock_path(home).exists()
         assert acquire_install_lock(home) is not None
 
-    def test_stale_lock_from_a_dead_pid_is_taken_over(self, tmp_path: Path) -> None:
+    def test_stale_lock_from_a_dead_pid_is_taken_over(self, tmp_path: Path, monkeypatch) -> None:
         """A crashed install must not wedge the home forever.
 
         Mutant: `return acquire_install_lock(home, _retry=False)` -> `return None` -> red.
         """
         home = tmp_path / "AIPass"
+        _installed_in(home, monkeypatch)
         lock = install_lock_path(home)
         lock.parent.mkdir(parents=True, exist_ok=True)
         lock.write_text("999999999 2026-09-07T00:00:00+00:00\n", encoding="utf-8")
@@ -255,6 +267,36 @@ class TestInstallLock:
         bus.fire.assert_not_called()
         assert lock.read_text(encoding="utf-8") == "garbage\n"
         assert f"(lock: {lock})" in err.call_args[0][0]
+
+    # A POSIX shell stub stands in for the home's drone.
+    @pytest.mark.skipif(sys.platform == "win32", reason="the drone stub is a POSIX shell script")
+    def test_a_bootstrap_outside_the_home_fires_through_the_homes_drone_from_the_home(self, tmp_path: Path) -> None:
+        """Mutant: `cwd=str(home)` dropped -> the drone runs from pytest's cwd -> red."""
+        home = tmp_path / "AIPass"
+        record = tmp_path / "drone_argv.txt"
+        drone = home / ".venv" / "bin" / "drone"
+        drone.parent.mkdir(parents=True)
+        drone.write_text(f'#!/bin/sh\n{{ pwd -P; printf "%s\\n" "$@"; }} > "{record}"\n', encoding="utf-8")
+        drone.chmod(0o755)
+        lock = acquire_install_lock(home)
+        with patch(_BUS) as bus:
+            release_install_lock(lock)
+        bus.fire.assert_not_called()
+        assert record.read_text(encoding="utf-8").splitlines() == [
+            str(home.resolve()), "@trigger", "fire", "file_deleted", f"path={lock}", "reason=install_lock_released"
+        ]  # fmt: skip
+
+    def test_a_bootstrap_with_no_drone_yet_warns_and_fires_nothing(self, tmp_path: Path, caplog) -> None:
+        """Mutant: the no-drone guard dropped -> the run fails on the missing file, another warning -> red."""
+        home = tmp_path / "AIPass"
+        lock = acquire_install_lock(home)
+        with patch(_BUS) as bus, patch(f"{_MOD}.subprocess.run", wraps=_sp.run) as run:
+            release_install_lock(lock)
+        bus.fire.assert_not_called()
+        run.assert_not_called()
+        assert not lock.exists()
+        drone = home / ".venv" / "bin" / "drone"
+        assert f"[install] no drone at {drone} yet: file_deleted for {lock} not fired" in caplog.text
 
 
 class TestCloneRepo:
@@ -530,14 +572,15 @@ class TestRunSetup:
         assert "--force-symlink" in argv
 
     def test_symlink_flags_absent_by_default(self, tmp_path: Path) -> None:
-        """No symlink flags forwarded unless requested (#660)."""
+        """No symlink flags forwarded unless requested (#660), and nothing exported. Mutant: env always a dict -> red."""
         (tmp_path / "setup.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
         with patch(f"{_MOD}.subprocess.run", return_value=MagicMock(returncode=0)) as run:
             assert _run_setup(tmp_path, dry_run=False) is True
         argv = run.call_args[0][0]
         assert "--no-symlink" not in argv
         assert "--force-symlink" not in argv
-        assert "stdin" not in run.call_args.kwargs
+        assert run.call_args.kwargs["stdin"] is None
+        assert run.call_args.kwargs["env"] is None
 
     def test_non_interactive_closes_setups_stdin_and_says_so_in_its_env(self, tmp_path: Path) -> None:
         """setup.sh asks on [ -t 0 ]: under --non-interactive it gets no tty (container proof, 2026-10-13).
@@ -549,6 +592,16 @@ class TestRunSetup:
             assert _run_setup(tmp_path, dry_run=False, non_interactive=True) is True
         assert run.call_args.kwargs["stdin"] is _sp.DEVNULL
         assert run.call_args.kwargs["env"]["AIPASS_NON_INTERACTIVE"] == "1"
+
+    def test_yes_exports_consent_to_setup_and_leaves_its_stdin_open(self, tmp_path: Path) -> None:
+        """Mutant: `YES_ENV: "1"` keyed on non_interactive instead of yes -> red."""
+        (tmp_path / "setup.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        with patch(f"{_MOD}.subprocess.run", return_value=MagicMock(returncode=0)) as run:
+            assert _run_setup(tmp_path, dry_run=False, yes=True) is True
+        env = run.call_args.kwargs["env"]
+        assert env["AIPASS_YES"] == "1"
+        assert "AIPASS_NON_INTERACTIVE" not in env
+        assert run.call_args.kwargs["stdin"] is None
 
     def test_the_install_flag_reaches_setup(self, tmp_path: Path) -> None:
         """aipass install --non-interactive threads into the setup step. Mutant: the call drops the flag -> red."""
@@ -586,7 +639,7 @@ class TestRunInstall:
         net.assert_not_called()
         assert not install_lock_path(home).parent.exists()
 
-    def test_aborts_when_clone_fails(self, tmp_path: Path) -> None:
+    def test_aborts_when_clone_fails(self, tmp_path: Path, monkeypatch) -> None:
         """A failed fetch aborts before the setup step runs.
 
         The throwaway gate is passed, so the run reaches the clone itself.
@@ -594,6 +647,7 @@ class TestRunInstall:
         Mutant: the clone failure's `return 1` -> `return 0` -> red at rc.
         """
         home = tmp_path / "AIPass"
+        _installed_in(home, monkeypatch)
         with (
             patch(f"{_MOD}._resolve_home", return_value=home),
             patch(f"{_MOD}.is_throwaway_path", return_value=False),
@@ -609,9 +663,10 @@ class TestRunInstall:
             "file_deleted", path=str(install_lock_path(home)), reason="install_lock_released"
         )
 
-    def test_full_happy_path(self, tmp_path: Path) -> None:
+    def test_full_happy_path(self, tmp_path: Path, monkeypatch) -> None:
         """Clone + setup + verify + owner check + next-steps returns success."""
         home = tmp_path / "AIPass"
+        _installed_in(home, monkeypatch)
         with (
             patch(f"{_MOD}._resolve_home", return_value=home),
             patch(f"{_MOD}.is_throwaway_path", return_value=False),
@@ -657,18 +712,19 @@ class TestRunInstall:
             patch(f"{_MOD}._run_setup", return_value=True),
             patch(f"{_MOD}._verify_binaries", return_value={"drone": "/x/drone", "aipass": "/x/aipass"}),
             patch(f"{_MOD}._check_and_fix_owner"),
-            patch(f"{_MOD}._install_phone_face", return_value=False) as face,
+            patch(f"{_MOD}._install_phone_face", return_value=True) as face,
             patch(_BUS),
         ):
             rc = run_install(non_interactive=True, dry_run=False, baud_tag="v0.2.1")
         assert rc == 0
         face.assert_called_once_with(False, False, "v0.2.1")
 
-    def test_phone_face_sits_between_verify_and_the_health_check_and_never_fails_the_install(
+    def test_phone_face_sits_between_verify_and_the_health_check_and_a_requested_miss_fails_the_install(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        """Step 4 of 5 runs after the verified binaries and before the doctor; False is not fatal (FPLAN-0587)."""
+        """Step 4 of 5 runs after the verified binaries and before the doctor; a requested miss exits 1 (FPLAN-0926)."""
         home = tmp_path / "AIPass"
+        _installed_in(home, monkeypatch)
         order = MagicMock()
         with (
             patch(f"{_MOD}._resolve_home", return_value=home),
@@ -685,7 +741,7 @@ class TestRunInstall:
             order.attach_mock(face, "face")
             monkeypatch.setattr(doctor, "run_doctor_preflight", lambda **_kw: (order.doctor(), ({}, (0, 0, 0)))[1])
             rc = run_install(non_interactive=True, dry_run=False, no_baud=False)
-        assert rc == 0
+        assert rc == 1
         bus.fire.assert_called_once_with(
             "file_deleted", path=str(install_lock_path(home)), reason="install_lock_released"
         )
@@ -799,7 +855,9 @@ class TestHandleCommand:
                 handle_command("install", ["--finish", "--here"])
         assert exc.value.code == 0
         install.assert_not_called()
-        assert finish.call_args.kwargs == {"non_interactive": False, "path": None, "here": True, "dry_run": False}
+        assert finish.call_args.kwargs == {
+            "non_interactive": False, "path": None, "here": True, "dry_run": False, "yes": False
+        }  # fmt: skip
 
 
 class TestInstallPhoneFaceStep:
@@ -846,7 +904,9 @@ _ROWS = {
 
 def _finish(home: Path, monkeypatch, capsys, rows=None, counts=(1, 1, 1)) -> "tuple[int, str, str]":
     """`aipass install --finish --non-interactive` on `home` with the doctor answering `rows`."""
-    monkeypatch.setattr(doctor, "run_doctor_preflight", lambda non_interactive=False: (rows or _ROWS, counts))
+    monkeypatch.setattr(
+        doctor, "run_doctor_preflight", lambda non_interactive=False, yes=False: (rows or _ROWS, counts)
+    )
     with pytest.raises(SystemExit) as exc:
         handle_command("install", ["--finish", "--path", str(home), "--non-interactive"])
     out, err = capsys.readouterr()
@@ -874,6 +934,20 @@ def _doctor_world(tmp_path: Path, monkeypatch) -> Path:
     return settings
 
 
+def _full_install(home: Path, monkeypatch, *flags: str) -> "tuple[int, list]":
+    """`aipass install --path home --non-interactive *flags` on an AIPass tree; every subprocess recorded, none run."""
+    home.mkdir(exist_ok=True)
+    _aipass_tree(home)
+    ran: list = []
+    monkeypatch.setattr(
+        _sp, "run", lambda argv, **kw: ran.append((argv, kw.get("env"))) or _sp.CompletedProcess(argv, 0, "", "")
+    )
+    monkeypatch.setattr(sys, "argv", ["aipass", "install"])
+    with patch(f"{_MOD}.is_throwaway_path", return_value=False), patch(_BUS), pytest.raises(SystemExit) as exc:
+        handle_command("install", ["--path", str(home), "--non-interactive", *flags])
+    return int(exc.value.code or 0), ran
+
+
 class TestInstallReport:
     """Step 5 and the final screen: doctor --fix, the report in devpulse's dropbox, one wake command, no launch."""
 
@@ -895,9 +969,11 @@ class TestInstallReport:
         assert install_report_path(home) == home / "src" / "aipass" / "devpulse" / "dropbox" / "install_report.json"
         assert raw.endswith("}\n")
         assert set(report) == {
-            "kind", "version", "written_at", "home", "aipass_version", "user_name", "outcome", "doctor", "attention"
+            "kind", "version", "written_at", "home", "aipass_version", "user_name", "outcome", "failed_steps",
+            "doctor", "attention",
         }  # fmt: skip
         assert (report["kind"], report["version"], report["outcome"]) == ("aipass_install_report", 1, "installed")
+        assert report["failed_steps"] == []
         assert (report["home"], report["user_name"]) == (str(home), "someone")
         assert report["doctor"] == {"pass": 1, "warn": 1, "error": 1}
         assert datetime.fromisoformat(report["written_at"]).utcoffset() == timedelta(0)
@@ -1029,6 +1105,42 @@ class TestInstallReport:
         )
         assert "claude" not in out
 
+    def test_a_requested_phone_face_that_misses_exits_1_and_the_report_names_it_first(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        """Mutants: `failed` always []; the success line kept; outcome "installed"; exit 0; phone row last -> each red."""
+        monkeypatch.setattr(doctor, "run_doctor_preflight", lambda non_interactive=False, yes=False: (_ROWS, (1, 1, 1)))
+        home = tmp_path / "AIPass"
+        rc, _ran = _full_install(home, monkeypatch)
+
+        out, err = capsys.readouterr()
+        report = json.loads(install_report_path(home).read_text(encoding="utf-8"))
+        assert rc == 1
+        assert f"AIPass installed at {home}, but a requested step failed: phone face" in " ".join(err.split())
+        assert "✅ AIPass installed" not in out + err
+        assert (report["outcome"], report["failed_steps"]) == ("step_failed", ["phone face"])
+        assert [a["label"] for a in report["attention"]] == ["phone face", "wire verify", "hooks"]
+        assert report["attention"][0]["severity"] == "error"
+
+    def test_no_baud_skips_the_phone_face_and_the_install_still_succeeds(self, tmp_path: Path, monkeypatch) -> None:
+        """Mutant: `failed = [] if face_installed or no_baud` -> `if face_installed` -> red."""
+        home = tmp_path / "AIPass"
+        rc, _ran = _full_install(home, monkeypatch, "--no-baud")
+
+        report = json.loads(install_report_path(home).read_text(encoding="utf-8"))
+        assert rc == 0
+        assert (report["outcome"], report["failed_steps"]) == ("installed", [])
+
+    @pytest.mark.parametrize("door", [[], ["--finish"]])
+    def test_yes_reaches_the_doctor_and_setup_sh(self, door, tmp_path: Path, monkeypatch, doctor_stays_stubbed) -> None:
+        """Mutants: yes dropped at any hop (run_install, run_finish, _health_check, _run_setup) -> each red."""
+        home = tmp_path / "AIPass"
+        _rc, ran = _full_install(home, monkeypatch, "--no-baud", "--yes", *door)
+
+        assert doctor_stays_stubbed == [{"non_interactive": True, "yes": True}]
+        setup_envs = [env for argv, env in ran if argv[:1] == ["bash"]]
+        assert [env["AIPASS_YES"] for env in setup_envs] == ([] if door else ["1"])
+
     def test_a_dry_run_runs_no_doctor_and_writes_no_report(self, tmp_path: Path, capsys, doctor_stays_stubbed) -> None:
         """Mutant: the dry-run guard in the final screen dropped -> the report is written -> red."""
         home = tmp_path / "AIPass"
@@ -1099,13 +1211,14 @@ class TestThrowawayGate:
             result = run_install(non_interactive=True)
         assert result == 1
 
-    def test_force_flag_overrides(self, tmp_path) -> None:
+    def test_force_flag_overrides(self, tmp_path, monkeypatch) -> None:
         """--force-global-home lets a temp home proceed past the gate.
 
         The home sits one level under tmp_path, as in the other lock tests: the lock
         lies in the home's parent, so a home of tmp_path itself put it in pytest's base.
         """
         home = tmp_path / "AIPass"
+        _installed_in(home, monkeypatch)
         with (
             patch(
                 "aipass.aipass.apps.modules.install._resolve_home",
@@ -1128,6 +1241,7 @@ class TestThrowawayGate:
                 return_value={"drone": "x", "aipass": "x"},
             ),
             patch("aipass.aipass.apps.modules.install._check_and_fix_owner"),
+            patch(f"{_MOD}._install_phone_face", return_value=True),
             patch(_BUS) as bus,
         ):
             result = run_install(non_interactive=True)

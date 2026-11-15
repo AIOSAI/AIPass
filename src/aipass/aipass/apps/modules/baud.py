@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: baud.py
 # Description: aipass baud: install @baud's phone face and baud-cli from a release and point @api at them
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-09-13
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -245,7 +245,7 @@ def install_phone_face(
 
 
 def install_best_effort(dry_run: bool = False, tag: str = LATEST) -> bool:
-    """aipass install's step 4 (phone face + baud-cli). Never raises, never fails the install."""
+    """aipass install's step 4 (phone face + baud-cli). Never raises; False fails the install's exit."""
     try:
         rc = install_phone_face(tag=tag, dry_run=dry_run, best_effort=True)
     except Exception as exc:  # best-effort by contract: the install must continue

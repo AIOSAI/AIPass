@@ -29,7 +29,7 @@ Not suggestions. Violating one is a bug.
 aipass              # live command inventory
 aipass --help       # full reference; each command has its own --help
 aipass doctor       # system health aggregation; --fix repairs
-aipass install      # bootstrap to the report; --finish = doctor + report only
+aipass install      # bootstrap to the report; --finish = doctor + report only; --yes = consent up front
 aipass init <dir>   # project scaffold; init update, init agent
 aipass --version    # resolved live, never hand-typed
 ```
@@ -114,7 +114,8 @@ aipass/
 # Known gotchas
 
  - Bare `init` prints usage; `init run` is refused; `init <dir>` takes no flags. Unknown commands error, nothing falls back. `doctor --json` alone gives the normal report; JSON comes from `doctor --fix --json`.
- - The install asks once before the provider settings write; no tty or `--non-interactive` writes nothing and names `aipass doctor --fix --yes`.
+ - The install asks once before the provider settings write; `--yes` consents up front (also `AIPASS_YES=1` to setup.sh); no tty or `--non-interactive` without `--yes` writes nothing, a warning naming `aipass doctor --fix --yes`.
+ - A requested phone face (no `--no-baud`) that does not install fails the install: exit 1, report `outcome` `step_failed`, `failed_steps` `["phone face"]`.
  - Run the suite from this branch or the repo root; from `src/aipass` four subprocess tests fail on import shadowing.
  - `python apps/aipass.py` fails on package imports; use the installed `aipass`.
  - `init update` can replace files: a decision, not a repair. The plan goes to a human first, stamp-only plans excepted.

@@ -39,7 +39,7 @@ RUN --mount=type=bind,source=dist,target=/tmp/wheel \
 # the public repo holds at build time. The mount is root-owned, hence the one-command safe.directory.
 RUN --mount=type=bind,from=repo,target=/src/.git \
     git config --global --add safe.directory '*' \
-    && aipass install --non-interactive --no-baud --source /src \
+    && aipass install --non-interactive --yes --no-baud --source /src \
     && git config --global --unset-all safe.directory
 
 CMD ["bash"]

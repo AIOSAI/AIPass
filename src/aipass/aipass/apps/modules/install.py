@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: install.py
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + doctor + report)
-# Version: 1.6.1
+# Version: 1.7.0
 # Created: 2026-07-05
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -46,10 +46,19 @@ _CLONE_TIMEOUT = 600
 _SETUP_TIMEOUT = 1800
 # Exported to setup.sh under --non-interactive, for it to read before its own [ -t 0 ].
 NON_INTERACTIVE_ENV = "AIPASS_NON_INTERACTIVE"
+# Exported under --yes: consent to setup.sh's machine changes, given up front.
+YES_ENV = "AIPASS_YES"
 _WAKE_PROMPT = (
     "Read dropbox/install_report.json: a fresh AIPass install. "
     "Greet me by name, then walk me through each attention item."
 )
+_PHONE_FAILED = {
+    "group": "Phone",
+    "label": "phone face",
+    "severity": "error",
+    "detail": "asked for (no --no-baud) and not installed; the Phone face step above says why",
+    "remediation": "aipass baud install",
+}
 _CLOSING_NOTE = (
     "devpulse is the seat you talk to: the admin agent, with higher privileges to change files in any directory,",
     "under your supervision. aipass is the machine concierge for host problems (Wi-Fi drops, a USB port not",
@@ -110,13 +119,32 @@ def install_lock_path(home: Path) -> Path:
 
 
 def _fire_lock_removed(path: Path, reason: str) -> None:
-    """Fire the lock-removal trigger event, ignoring an absent trigger branch."""
-    try:
-        from aipass.trigger.apps.modules.core import trigger
+    """Fire file_deleted for a removed install lock on the home's own event bus.
 
-        trigger.fire("file_deleted", path=str(path), reason=reason)
-    except ImportError as exc:
-        logger.warning("[install] trigger unavailable for file_deleted event: %s", exc)
+    A bootstrap runs from a wheel outside any home, where the bus's handlers need a home
+    at import (RepoRootNotFound): it fires through the home's own drone instead.
+    """
+    home = path.parent / path.name.removeprefix(".").removesuffix(".install.lock")
+    if Path(__file__).resolve().is_relative_to(home.resolve()):
+        try:
+            from aipass.trigger.apps.modules.core import trigger
+
+            trigger.fire("file_deleted", path=str(path), reason=reason)
+        except ImportError as exc:
+            logger.warning("[install] trigger unavailable for file_deleted event: %s", exc)
+        return
+    drone = home / ".venv" / "bin" / "drone"
+    if not drone.is_file():
+        logger.warning("[install] no drone at %s yet: file_deleted for %s not fired", drone, path)
+        return
+    cmd = [str(drone), "@trigger", "fire", "file_deleted", f"path={path}", f"reason={reason}"]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30, cwd=str(home))
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("[install] file_deleted for %s not fired through %s: %s", path, drone, exc)
+        return
+    if proc.returncode != 0:
+        logger.warning("[install] file_deleted for %s: drone exit %s: %s", path, proc.returncode, proc.stderr.strip())
 
 
 def _lock_holder_pid(lock: Path) -> str:
@@ -296,12 +324,18 @@ def _clone_repo(
 
 
 def _run_setup(
-    home: Path, dry_run: bool, no_symlink: bool = False, force_symlink: bool = False, non_interactive: bool = False
+    home: Path,
+    dry_run: bool,
+    no_symlink: bool = False,
+    force_symlink: bool = False,
+    non_interactive: bool = False,
+    yes: bool = False,
 ) -> bool:
     """Run the repo's setup.sh (venv + editable install + hook wiring + binaries).
 
     ``non_interactive`` closes stdin and exports AIPASS_NON_INTERACTIVE=1: install.sh
     hands this process the user's tty, so setup.sh's ``[ -t 0 ]`` alone would still prompt.
+    ``yes`` exports AIPASS_YES=1, consent to setup.sh's machine changes.
     """
     setup = home / "setup.sh"
     # --no-finish: install's own step 5 runs the doctor and the report, once, in this process.
@@ -310,7 +344,9 @@ def _run_setup(
         setup_args.append("--no-symlink")
     if force_symlink:
         setup_args.append("--force-symlink")
-    closed = " (stdin closed, AIPASS_NON_INTERACTIVE=1)" if non_interactive else ""
+    exported = {**({NON_INTERACTIVE_ENV: "1"} if non_interactive else {}), **({YES_ENV: "1"} if yes else {})}
+    said = (["stdin closed"] if non_interactive else []) + [f"{k}=1" for k in exported]
+    closed = f" ({', '.join(said)})" if said else ""
     if dry_run:
         console.print(f"[yellow]\\[dry-run][/yellow] would run: {' '.join(setup_args)}{closed}")
         return True
@@ -318,9 +354,10 @@ def _run_setup(
         warning(f"setup.sh not found at {setup} — cannot build the environment.")
         return False
     console.print("[cyan]Building environment[/cyan] [dim](venv, dependencies, hook wiring)…[/dim]")
-    quiet = {"stdin": subprocess.DEVNULL, "env": {**os.environ, NON_INTERACTIVE_ENV: "1"}} if non_interactive else {}
+    stdin = subprocess.DEVNULL if non_interactive else None
+    env = {**os.environ, **exported} if exported else None
     try:
-        proc = subprocess.run(setup_args, cwd=str(home), timeout=_SETUP_TIMEOUT, **quiet)
+        proc = subprocess.run(setup_args, cwd=str(home), timeout=_SETUP_TIMEOUT, env=env, stdin=stdin)
         if proc.returncode == 0:
             return True
         warning("setup.sh reported errors — see output above.")
@@ -386,15 +423,15 @@ def _setup_attention(home: Path) -> list[dict]:
     ]
 
 
-def _health_check(dry_run: bool, non_interactive: bool) -> tuple[list[dict], dict]:
+def _health_check(dry_run: bool, non_interactive: bool, yes: bool = False) -> tuple[list[dict], dict]:
     """Run 'aipass doctor --fix'. Returns (attention rows, doctor counts), every non-PASS row after the fix."""
     if dry_run:
-        console.print("[yellow]\\[dry-run][/yellow] would run: aipass doctor --fix")
+        console.print(f"[yellow]\\[dry-run][/yellow] would run: aipass doctor --fix{' --yes' if yes else ''}")
         return [], {"pass": 0, "warn": 0, "error": 0}
     from aipass.aipass.apps.modules.doctor import run_doctor_preflight
 
     try:
-        groups, (passed, warned, errored) = run_doctor_preflight(non_interactive=non_interactive)
+        groups, (passed, warned, errored) = run_doctor_preflight(non_interactive=non_interactive, yes=yes)
     except Exception as exc:
         logger.error("[install] doctor --fix crashed: %s", exc)
         error(f"Health check crashed: {exc}. Run 'aipass doctor --fix' yourself.")
@@ -433,14 +470,22 @@ def _aipass_version() -> str:
         return "unknown"
 
 
-def _final_screen(home: Path, attention: list[dict], counts: dict, dry_run: bool) -> int:
-    """Installed line, what needs attention, the report, the wake command. Returns the exit code."""
+def _final_screen(
+    home: Path, attention: list[dict], counts: dict, dry_run: bool, failed: list[str] | None = None
+) -> int:
+    """Installed line, what needs attention, the report, the wake command. Returns the exit code.
+
+    *failed* names the requested steps that did not land: the exit is 1 once the report is written.
+    """
     report_path = install_report_path(home)
     if dry_run:
         console.print(f"[yellow]\\[dry-run][/yellow] would write the install report: {report_path}")
         return 0
     console.print()
-    success(f"AIPass installed at {home}")
+    if failed:
+        error(f"AIPass installed at {home}, but a requested step failed: {', '.join(failed)}")
+    else:
+        success(f"AIPass installed at {home}")
     console.print()
     if attention:
         console.print("[bold]Needs attention:[/bold]")
@@ -458,7 +503,8 @@ def _final_screen(home: Path, attention: list[dict], counts: dict, dry_run: bool
         "home": str(home),
         "aipass_version": _aipass_version(),
         "user_name": _registry_user_name(home),
-        "outcome": "installed",
+        "outcome": "step_failed" if failed else "installed",
+        "failed_steps": failed or [],
         "doctor": counts,
         "attention": attention,
     }
@@ -476,21 +522,33 @@ def _final_screen(home: Path, attention: list[dict], counts: dict, dry_run: bool
     console.print()
     for line in _CLOSING_NOTE:
         console.print(f"[dim]{line}[/dim]")
-    return 0
+    return 1 if failed else 0
 
 
-def _finish(home: Path, dry_run: bool, non_interactive: bool, last_print: Callable[[], None] | None = None) -> int:
-    """Step 5 and the final screen: the doctor with its fix, the phone print, then the report."""
+def _finish(
+    home: Path,
+    dry_run: bool,
+    non_interactive: bool,
+    last_print: Callable[[], None] | None = None,
+    yes: bool = False,
+    failed: list[dict] | None = None,
+) -> int:
+    """Step 5 and the final screen: the doctor with its fix, the phone print, then the report.
+
+    *failed* holds attention rows for requested steps that did not land; each fails the exit.
+    """
     console.print()
     console.print(render_step_header(5, TOTAL_STEPS, "Health check"))
-    attention, counts = _health_check(dry_run, non_interactive)
+    attention, counts = _health_check(dry_run, non_interactive, yes)
     if last_print is not None:
         last_print()
-    return _final_screen(home, attention + _setup_attention(home), counts, dry_run)
+    failed = failed or []
+    rows = [*failed, *attention, *_setup_attention(home)]
+    return _final_screen(home, rows, counts, dry_run, failed=[row["label"] for row in failed])
 
 
 def _install_phone_face(dry_run: bool, no_baud: bool, baud_tag: str = LATEST) -> bool:
-    """The Phone face step: best-effort, so its outcome never fails the install."""
+    """The Phone face step. False when skipped or failed; run_install fails the exit on a requested miss."""
     if no_baud:
         console.print("[dim]Skipped the phone face and baud-cli (--no-baud). Install later: aipass baud install[/dim]")
         return False
@@ -550,6 +608,7 @@ def run_finish(
     path: str | None = None,
     here: bool = False,
     dry_run: bool = False,
+    yes: bool = False,
 ) -> int:
     """Step 5 and the final screen only, no clone/setup. setup.sh's tail calls it."""
     try:
@@ -561,7 +620,7 @@ def run_finish(
         return 1
     if not dry_run:
         _verify_binaries(home)
-    return _finish(home, dry_run, non_interactive)
+    return _finish(home, dry_run, non_interactive, yes=yes)
 
 
 def run_install(
@@ -574,6 +633,7 @@ def run_install(
     no_baud: bool = False,
     baud_tag: str = LATEST,
     source: str | None = None,
+    yes: bool = False,
 ) -> int:
     """Run the 5-step one-command install. Returns 0 on success, 1 on failure.
 
@@ -636,7 +696,12 @@ def run_install(
         console.print()
         console.print(render_step_header(2, TOTAL_STEPS, "Building environment"))
         if not _run_setup(
-            home, dry_run, no_symlink=no_symlink, force_symlink=force_symlink, non_interactive=non_interactive
+            home,
+            dry_run,
+            no_symlink=no_symlink,
+            force_symlink=force_symlink,
+            non_interactive=non_interactive,
+            yes=yes,
         ):
             warning("Environment build failed — aborting install.")
             return 1
@@ -655,6 +720,7 @@ def run_install(
     console.print(render_step_header(4, TOTAL_STEPS, "Phone face + baud-cli"))
     face_installed = _install_phone_face(dry_run, no_baud, baud_tag)
     phone_print = _phone_print(dry_run, face_installed, non_interactive)
+    failed = [] if face_installed or no_baud else [_PHONE_FAILED]
 
     json_handler.log_operation(
         "aipass_install",
@@ -663,11 +729,12 @@ def run_install(
             "non_interactive": non_interactive,
             "dry_run": dry_run,
             "phone_face": face_installed,
+            "yes": yes,
             "baud_tag": baud_tag,
         },
     )
 
-    return _finish(home, dry_run, non_interactive, last_print=phone_print)
+    return _finish(home, dry_run, non_interactive, last_print=phone_print, yes=yes, failed=failed)
 
 
 def print_help() -> None:
@@ -680,6 +747,10 @@ def print_help() -> None:
     console.print(
         "  [green]aipass install --non-interactive[/green]    "
         "[dim]# CI/headless (~/AIPass), no questions, no pairing QR[/dim]"
+    )
+    console.print(
+        "  [green]aipass install --yes[/green]               [dim]# consent to the machine changes up front;"
+        " without it --non-interactive skips them, each a warning[/dim]"
     )
     console.print("  [green]aipass install --path DIR[/green]           [dim]# explicit home[/dim]")
     console.print("  [green]aipass install --here[/green]               [dim]# install into current dir[/dim]")
@@ -696,7 +767,8 @@ def print_help() -> None:
     console.print("  [green]aipass install --dry-run[/green]            [dim]# walk steps, no side effects[/dim]")
     console.print()
     console.print(
-        "[yellow]STEPS:[/yellow] resolve home -> fetch -> setup.sh -> verify -> phone face + baud-cli -> doctor + report"
+        "[yellow]STEPS:[/yellow] resolve home -> fetch -> setup.sh -> verify -> phone face + baud-cli"
+        " -> doctor + report"
     )
     console.print()
     console.print(
@@ -749,6 +821,7 @@ def handle_command(command: str, args: list[str]) -> bool:
     run_args = args[1:] if args and args[0] == "run" else args
 
     non_interactive = "--non-interactive" in run_args
+    yes = "--yes" in run_args
     dry_run = "--dry-run" in run_args
     here = "--here" in run_args
     finish = "--finish" in run_args
@@ -762,7 +835,7 @@ def handle_command(command: str, args: list[str]) -> bool:
     source = _flag_value(run_args, "--source")
 
     if finish:
-        result = run_finish(non_interactive=non_interactive, path=path, here=here, dry_run=dry_run)
+        result = run_finish(non_interactive=non_interactive, path=path, here=here, dry_run=dry_run, yes=yes)
     else:
         result = run_install(
             non_interactive=non_interactive,
@@ -774,12 +847,14 @@ def handle_command(command: str, args: list[str]) -> bool:
             no_baud=no_baud,
             baud_tag=baud_tag,
             source=source,
+            yes=yes,
         )
     json_handler.log_operation(
         "install_run",
         {
             "non_interactive": non_interactive,
             "dry_run": dry_run,
+            "yes": yes,
             "finish": finish,
             "source": _redact_url(source) if source else "default",
             "exit": result,

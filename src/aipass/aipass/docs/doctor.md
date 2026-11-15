@@ -133,8 +133,8 @@ safety gates on git, edits and rm, no standards checks on edits; it names
 `not applied: declined`. With no terminal to ask on, `doctor --fix` writes
 nothing and its row says `not applied: no tty — aipass doctor --fix --yes`;
 `--yes` writes without the question. The install's Health check runs the same
-step, its wire receipt naming the door `install`: it asks on a terminal, and with no terminal or
-under `--non-interactive` it writes nothing and its row says
+step, its wire receipt naming the door `install`: it asks on a terminal, `aipass install --yes`
+writes without the question, and with no terminal or under `--non-interactive` without `--yes` it writes nothing and its row says
 `not applied: no tty` or `not applied: --non-interactive`, each naming
 `aipass doctor --fix --yes`. Each receipt records the door and the consent,
 `y (tty)` or `--yes`. Code: [`apps/handlers/provider_wire.py`](../apps/handlers/provider_wire.py),

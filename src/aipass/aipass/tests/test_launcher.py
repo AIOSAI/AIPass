@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_launcher.py
 # Description: Tests for the repo-root ./aipass cold-clone launcher
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-07-05
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for the repo-root ./aipass launcher (bash), which forwards to apps/aipass.py once installed."""
@@ -139,13 +139,13 @@ class TestPreSetupInstall:
         _make_executable(setup)
 
         result = subprocess.run(
-            ["bash", str(launcher), "install", "--no-chat"],
+            ["bash", str(launcher), "install", "--no-finish"],
             capture_output=True,
             text=True,
             encoding="utf-8",
             timeout=5,
         )
-        assert "--no-chat" in result.stdout
+        assert "--no-finish" in result.stdout
 
     def test_install_passes_path_flag(self, tmp_path):
         """--path and its value pass through to setup.sh."""
