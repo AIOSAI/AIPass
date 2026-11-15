@@ -64,7 +64,7 @@ docs/                      # depth, indexed by docs/README.md
 docs.local/                # git-ignored: notes.jsonl, sub-agent drops
 canary_json/               # git-ignored json output; custom_config/ is a leftover
 logs/                      # note.log, plus ai_mail dispatch transcripts
-tests/                     # entry point, each module, dead-cwd pins; .archive/ retired
+tests/                     # entry point, each module, dead-cwd fence pins; .archive/ retired
 ```
 
 Archive directories are untracked by doctrine: on disk, absent from git.

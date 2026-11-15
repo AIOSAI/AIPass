@@ -17,8 +17,7 @@ on this branch's behalf.
 `apps/handlers/json/json_handler.py` is the byte-identical fleet shim, checked
 by hash across every branch. It imports exactly one thing — the shared json
 service — and binds its public names to a per-branch handle. It imports nothing
-from the retired shared handler, which sits in an archive directory, and the
-dead-cwd pins do not preload it.
+from the retired shared handler, which sits in an archive directory.
 
 Path resolution, measured with the test seam unset: a config, data or log
 document for a given name resolves under `canary_json/` as

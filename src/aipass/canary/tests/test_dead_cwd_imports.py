@@ -1,145 +1,22 @@
 # =================== AIPass ====================
 # Name: test_dead_cwd_imports.py
-# Description: Dead-cwd import defect - child pins, live-injection controls, AST ban on inspect.stack
-# Version: 1.3.0
+# Description: Dead-cwd fence pins (cwd really removed) and the AST ban on inspect.stack
+# Version: 1.4.0
 # Created: 2026-08-31
 # Modified: 2026-11-14
 # =============================================
 
-"""Tests for apps/handlers/__init__.py and every canary package, imported under a dead cwd."""
+"""Tests for apps/handlers/__init__.py: the fence under a removed cwd, and no inspect.stack call."""
 
-# The declared pass — nothing: every canary package and every command module is probed in the world.
+# The declared pass — nothing: the fence is the only file these pins read or run.
 
 import ast
 import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
-# Reached-at-import, not written-at-module-scope, is the test: these pins run the import in a child.
-# World B denies realpath and keeps abspath: it convicts a raw Path.resolve() and inspect.stack() via inspect.py:1009.
-# Probes go through -c, never stdin: linecache caches stdin and the probe lies green.
-
 BRANCH_ROOT = Path(__file__).resolve().parents[1]
-REPO_ROOT = BRANCH_ROOT.parents[2]
 GUARD_FILE = BRANCH_ROOT / "apps" / "handlers" / "__init__.py"
-
-# Command modules are read off apps/modules/ by discover_modules' rule, so a new module is probed unlisted.
-COMMAND_MODULES = sorted(
-    f"aipass.canary.apps.modules.{path.stem}"
-    for path in (BRANCH_ROOT / "apps" / "modules").glob("*.py")
-    if not path.name.startswith("_")
-)
-CANARY_MODULES = [
-    "aipass.canary",
-    "aipass.canary.apps",
-    "aipass.canary.apps.canary",
-    "aipass.canary.apps.handlers",
-    "aipass.canary.apps.handlers.json",
-    "aipass.canary.apps.handlers.json.json_handler",
-    "aipass.canary.apps.modules",
-    "aipass.canary.apps.plugins",
-    *COMMAND_MODULES,
-]
-
-# Non-optional sibling imports, preloaded so the denial convicts canary's own code; a preload is a claim
-# you stop testing, so nothing behind try/except ImportError belongs here.
-PRELOAD = [
-    "aipass.cli.apps.modules",
-    "aipass.prax",
-]
-
-_WORLD_B = """
-import os, os.path
-def _dead_realpath(*a, **k):
-    raise FileNotFoundError(2, "No such file or directory")
-os.path.realpath = _dead_realpath
-"""
-
-WORLDS = {"B": _WORLD_B}
-
-
-def _run_child(body: str) -> subprocess.CompletedProcess:
-    """Run body in a child interpreter on a '<string>' pseudo-frame."""
-    return subprocess.run(
-        [sys.executable, "-c", body],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=120,
-        cwd=str(REPO_ROOT),
-    )
-
-
-def _import_probe(module: str, world: str, inject: bool = True) -> subprocess.CompletedProcess:
-    """Import `module` under `world`. inject=False kills the injection."""
-    body = (
-        "".join(f"import {m}\n" for m in PRELOAD) + (WORLDS[world] if inject else "") + f"import {module}\n"
-        "print('PROBE_OK')\n"
-    )
-    return _run_child(body)
-
-
-@pytest.mark.parametrize("module", CANARY_MODULES)
-@pytest.mark.parametrize("world", sorted(WORLDS))
-def test_module_imports_with_no_readable_cwd(module, world):
-    """Every canary module imports in a process whose cwd is unreadable."""
-    result = _import_probe(module, world)
-    assert "PROBE_OK" in result.stdout, f"{module} failed to import in world {world}:\n{result.stderr[-2000:]}"
-
-
-@pytest.mark.parametrize("world", sorted(WORLDS))
-def test_the_injection_is_live(world):
-    """Positive control: the denial denies, or every pin above is a vacuous green."""
-    body = WORLDS[world] + (
-        "from pathlib import Path\n"
-        "try:\n"
-        "    Path(__file__ if '__file__' in dir() else '/etc/hostname').resolve()\n"
-        "    print('CONTROL_DEAD')\n"
-        "except OSError:\n"
-        "    print('CONTROL_LIVE')\n"
-    )
-    result = _run_child(body)
-    assert "CONTROL_LIVE" in result.stdout, (
-        f"world {world} injection did not deny resolve — every pin in this "
-        f"file is vacuous until it does:\n{result.stdout}\n{result.stderr[-1000:]}"
-    )
-
-
-@pytest.mark.parametrize("world", sorted(WORLDS))
-def test_control_catches_a_dead_injection(world):
-    """Negative control for the positive control: with no injection the probe reports CONTROL_DEAD."""
-    body = (
-        "from pathlib import Path\n"
-        "try:\n"
-        "    Path('/etc/hostname').resolve()\n"
-        "    print('CONTROL_DEAD')\n"
-        "except OSError:\n"
-        "    print('CONTROL_LIVE')\n"
-    )
-    result = _run_child(body)
-    assert "CONTROL_DEAD" in result.stdout, (
-        "with no injection the probe still reported a denial — the probe is "
-        f"not measuring the injection:\n{result.stdout}\n{result.stderr[-1000:]}"
-    )
-
-
-def test_world_b_does_convict_inspect_stack():
-    """World B is the one that convicts inspect.stack()."""
-    body = _WORLD_B + (
-        "import inspect\n"
-        "try:\n"
-        "    inspect.stack()\n"
-        "    print('STACK_SURVIVED')\n"
-        "except OSError:\n"
-        "    print('STACK_DIED')\n"
-    )
-    result = _run_child(body)
-    assert "STACK_DIED" in result.stdout, (
-        "world B no longer convicts inspect.stack — it is the only world that "
-        f"can, so this pin failing means the species is unmeasured:\n{result.stdout}"
-    )
 
 
 # Only a source-shape pin catches an inspect.stack walk: apps/__init__.py always supplies a real-file

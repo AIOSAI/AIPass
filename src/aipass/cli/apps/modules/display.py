@@ -199,12 +199,7 @@ def print_help():
 
     CONSOLE.print("[bold cyan]REFERENCE:[/bold cyan]")
     CONSOLE.print()
-    # help must not traceback with a dead cwd.
-    try:
-        _display_path = Path(__file__).resolve()
-    except OSError:
-        _display_path = Path(__file__)
-    CONSOLE.print(f"  [yellow]Module:[/yellow]      [dim]{_display_path}[/dim]")
+    CONSOLE.print(f"  [yellow]Module:[/yellow]      [dim]{Path(__file__).resolve()}[/dim]")
     CONSOLE.print("  [yellow]Standards:[/yellow]   [dim]See docs/display_api.md[/dim]")
     CONSOLE.print()
     CONSOLE.print("─" * 70)

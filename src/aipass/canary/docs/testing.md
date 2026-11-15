@@ -47,7 +47,7 @@ missing import-time set would be masked rather than cured.
 ## Where tests live
 
 `tests/` holds the entry-point tests, one file per module (note, span, top,
-align, kv), the dead-cwd import pins, and the handler fence tests with their
+align, kv), the dead-cwd fence pins, and the handler fence tests with their
 support file. Archived suites sit in `tests/.archive/`, untracked, with the
 date they were retired in the filename.
 
