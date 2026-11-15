@@ -1,69 +1,61 @@
 # =================== AIPass ====================
 # Name: logging_allowed.py
-# Description: The one list of files the logging checkers let through, by exact path
-# Version: 1.0.0
+# Description: The files the logging checkers let through: prax's published list, and what prax cannot own
+# Version: 2.0.0
 # Created: 2026-11-15
 # Modified: 2026-11-15
 # =============================================
 
 """The files the logging checkers let through, by exact path tail under ``src/aipass``.
 
-TEMPORARY until prax publishes its own list. ``ALLOWED`` serves ``one_logger`` per key;
-``LEGACY_*`` are exactly the files the old path tests passed, so no score moves while it is advisory.
+K0 (stdlib logging) is prax's own list, ``LOGGING_ALLOWED`` in prax's logger module, read with ``ast``:
+a broken prax import chain is when prax most needs judging, and importing that module would raise then.
+``ALLOWED`` holds only what prax cannot own, plus K1's door classes until prax publishes them.
 """
 
+import ast
 from pathlib import Path
 from typing import Dict, FrozenSet, Iterable
 
 from aipass.sentry.apps.handlers.json import json_handler
 
-_FLOOR = "crash floor: the bridge break record, written when prax can be what broke"
+PRAX_LOGGER = Path(__file__).resolve().parents[4] / "prax" / "apps" / "modules" / "logger.py"
+PUBLISHED_NAME = "LOGGING_ALLOWED"
 
-#: key -> {path tail: why it may}. K0 stdlib, K1 level-shaped class, K2 log-file writer, K3 stream writer.
+_CRASH_RECORD = "crash record: a plain append of the break, outside the logger, where the logger can be what broke"
+_UNTIL_PRAX = "TEMPORARY until prax publishes its door classes"
+
 ALLOWED: Dict[str, Dict[str, str]] = {
-    "K0": {
-        "prax/apps/handlers/logging/jsonl_writer.py": "prax's standalone writer: its own failure can only go to stderr",
-    },
     "K1": {
-        "prax/apps/modules/logger.py": "SystemLogger is door one itself",
-        "prax/apps/handlers/logging/direct.py": "DirectLogger is door one's direct form",
+        "prax/apps/modules/logger.py": f"SystemLogger is door one ({_UNTIL_PRAX})",
+        "prax/apps/handlers/logging/direct.py": f"DirectLogger is door one's direct form ({_UNTIL_PRAX})",
+        "prax/apps/handlers/logging/trail.py": f"TrailLogger and PraxTrail are door two ({_UNTIL_PRAX})",
     },
     "K2": {
-        "hooks/apps/handlers/bridges/claude.py": _FLOOR,
-        "hooks/apps/handlers/bridges/codex.py": _FLOOR,
-        "hooks/apps/handlers/bridges/opencode.py": _FLOOR,
-        "hooks/apps/handlers/bridges/seed.py": _FLOOR,
+        "hooks/apps/handlers/bridges/claude.py": _CRASH_RECORD,
+        "hooks/apps/handlers/bridges/codex.py": _CRASH_RECORD,
+        "hooks/apps/handlers/bridges/opencode.py": _CRASH_RECORD,
+        "hooks/apps/handlers/bridges/seed.py": _CRASH_RECORD,
     },
-    "K3": {},
 }
-
-LEGACY_IMPORTS_ROUTER: FrozenSet[str] = frozenset({"prax/apps/modules/logger.py"})
-
-LEGACY_LOG_VISIBILITY: FrozenSet[str] = frozenset(
-    {
-        "prax/apps/handlers/logging/__init__.py",
-        "prax/apps/handlers/logging/direct.py",
-        "prax/apps/handlers/logging/introspection.py",
-        "prax/apps/handlers/logging/jsonl_writer.py",
-        "prax/apps/handlers/logging/log_watchdog.py",
-        "prax/apps/handlers/logging/setup.py",
-        "prax/apps/modules/logger.py",
-    }
-)
-
-LEGACY_LOG_HANDLER: FrozenSet[str] = frozenset(
-    {
-        "prax/apps/handlers/logging/__init__.py",
-        "prax/apps/handlers/logging/direct.py",
-        "prax/apps/handlers/logging/introspection.py",
-        "prax/apps/handlers/logging/jsonl_writer.py",
-        "prax/apps/handlers/logging/log_watchdog.py",
-        "prax/apps/handlers/logging/setup.py",
-    }
-)
 
 #: The transcripts @ai_mail's dispatch writes into every target's logs/, not the branch's own logs.
 MAIL_LANE_LOG_NAMES: FrozenSet[str] = frozenset({"dispatch_wake.log", "dispatch_stdout.log", "dispatch_stderr.log"})
+
+
+def prax_logging_allowed() -> Dict[str, str]:
+    """Prax's published ``{path tail: reason}`` for stdlib logging. Raises ValueError when it cannot be read."""
+    try:
+        tree = ast.parse(Path(PRAX_LOGGER).read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, UnicodeDecodeError) as exc:
+        raise ValueError(f"prax's {PUBLISHED_NAME} unreadable at {PRAX_LOGGER}: {exc}") from exc
+    for node in tree.body:
+        targets = (
+            node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign) else []
+        )
+        if any(isinstance(t, ast.Name) and t.id == PUBLISHED_NAME for t in targets) and node.value is not None:
+            return {str(tail): str(why) for tail, why in ast.literal_eval(node.value)}
+    raise ValueError(f"prax's {PUBLISHED_NAME} not found in {PRAX_LOGGER}")
 
 
 def tail_in(path: str | Path, tails: Iterable[str]) -> bool:
@@ -72,9 +64,10 @@ def tail_in(path: str | Path, tails: Iterable[str]) -> bool:
     return any(posix == tail or posix.endswith("/" + tail) for tail in tails)
 
 
-def allowed_by(path: str | Path, key: str) -> str | None:
-    """The reason this file may do what ``key`` convicts, or None."""
-    for tail, why in ALLOWED.get(key, {}).items():
+def allowed_by(path: str | Path, key: str, published: Dict[str, str]) -> str | None:
+    """The reason this file may do what ``key`` convicts, or None. K0 answers from ``published``, prax's list."""
+    entries = published if key == "K0" else ALLOWED.get(key, {})
+    for tail, why in entries.items():
         if tail_in(path, (tail,)):
             json_handler.log_operation("logging_allowed", {"file": str(path), "key": key})
             return why

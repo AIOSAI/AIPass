@@ -27,15 +27,17 @@ stdout is not a log channel for K3: a CLI's answer and a child's protocol both r
 
 ## No waivers
 
-A bypass row waives nothing here. The only way through is `logging_allowed.py`, which names a file by its exact path under `src/aipass`, per key, with the reason:
+A bypass row waives nothing here. A file passes a key only when a list names it by its exact path under `src/aipass`, with the reason:
 
-| Key | File | Why |
-|-----|------|-----|
-| K0 | `prax/apps/handlers/logging/jsonl_writer.py` | prax's standalone writer: its own failure can only go to stderr |
-| K1 | `prax/apps/modules/logger.py`, `prax/apps/handlers/logging/direct.py` | they are door one |
-| K2 | `hooks/apps/handlers/bridges/{claude,codex,opencode,seed}.py` | crash floor: the break record, written when prax can be what broke |
+| Key | List | Files |
+|-----|------|-------|
+| K0 | prax's `LOGGING_ALLOWED`, in `prax/apps/modules/logger.py` | the files prax names as building door one on stdlib logging |
+| K1 | `logging_allowed.py`, temporary until prax publishes its door classes | `prax/apps/modules/logger.py` (door one), `prax/apps/handlers/logging/direct.py` (door one's direct form), `prax/apps/handlers/logging/trail.py` (door two) |
+| K2 | `logging_allowed.py` | `hooks/apps/handlers/bridges/{claude,codex,opencode,seed}.py`: the crash record |
 
-The list is temporary: prax publishes the files allowed to hold stdlib logging, and this list then reads it.
+The checker reads `LOGGING_ALLOWED` with `ast`, never by importing prax: a broken prax import chain is when prax most needs judging. A missing or unreadable list refuses every file (score 0, the reason named); it never falls back to an empty list.
+
+A crash record is a plain append of the break, outside the logger, allowed only where the logger itself can be what broke. The hooks bridges run every provider hook through prax; when prax is what failed, the record of that failure cannot go through prax. That is the only thing `logging_allowed.py` owns that prax cannot.
 
 ## What the keys cannot see
 
@@ -49,4 +51,4 @@ ADVISORY: each file is scored 100 or 0, outside the branch average. The checklis
 
 ## Related
 
-`imports` convicts stdlib logging in non-handler modules; `log_visibility` and `log_handler` judge getLogger and handler use. Their logging arms fold into this standard when it gates.
+`imports` convicts stdlib logging in non-handler modules; `log_visibility` and `log_handler` judge getLogger and handler use. `log_visibility` passes a getLogger file only when prax's `LOGGING_ALLOWED` names it; `log_handler` and `imports` exempt no file by path. Their logging arms fold into this standard when it gates.

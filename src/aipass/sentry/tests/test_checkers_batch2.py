@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch2.py
 # Description: Tests for checker handlers batch 2
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-29
 # Modified: 2026-11-15
 # =============================================
@@ -449,13 +449,13 @@ def record(base):
     @pytest.mark.parametrize(
         ("parts", "failed"),
         [
-            (("prax", "apps", "modules", "logger.py"), []),
+            (("prax", "apps", "modules", "logger.py"), ["Prax logger import (recommended)"]),
             (("flow", "apps", "modules", "logger.py"), ["Prax logger import (recommended)"]),
         ],
         ids=["the_router", "a_namesake"],
     )
-    def test_only_prax_s_own_router_may_log_through_stdlib(self, tmp_path: Path, parts: tuple, failed: list) -> None:
-        """prax/apps/modules/logger.py is what prax routes INTO; any other logger.py is convicted."""
+    def test_no_logger_module_may_log_through_stdlib(self, tmp_path: Path, parts: tuple, failed: list) -> None:
+        """prax's own logger.py holds no stdlib logging, so imports exempts no logger.py by path."""
         target = tmp_path.joinpath(*parts)
         target.parent.mkdir(parents=True)
         target.write_text(self.STDLIB_LOGGER, encoding="utf-8")

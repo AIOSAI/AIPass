@@ -319,11 +319,6 @@
     },
     {
       "file": "apps/handlers/tests_pytest_standards/payload/audit_hygiene_plugin.py",
-      "standard": "log_visibility",
-      "reason": "PATH-SCOPED GRANT, handlers/tests_pytest_standards/payload/** \u2014 granted by @devpulse 2026-08-29 (r/boardroom-audit-tests post 6), citing Law M10. This file is INJECTED INTO A COPY OF ANOTHER BRANCH and must import nothing from aipass: an instrument that imports the tree it measures has that tree's defects available to it. The grant is CONDITIONAL on adapters.execution_isolation(), which parses every payload file and fails pack registration on any aipass import \u2014 so this exemption cannot widen without a machine refusing the pack. prax's logger is an aipass import; the payload uses stdlib logging. This standard is NAMED in the grant's recorded terms."
-    },
-    {
-      "file": "apps/handlers/tests_pytest_standards/payload/audit_hygiene_plugin.py",
       "standard": "json_structure",
       "reason": "PATH-SCOPED GRANT, handlers/tests_pytest_standards/payload/** \u2014 granted by @devpulse 2026-08-29 (r/boardroom-audit-tests post 6), citing Law M10. This file is INJECTED INTO A COPY OF ANOTHER BRANCH and must import nothing from aipass: an instrument that imports the tree it measures has that tree's defects available to it. The grant is CONDITIONAL on adapters.execution_isolation(), which parses every payload file and fails pack registration on any aipass import \u2014 so this exemption cannot widen without a machine refusing the pack. json_handler is an aipass import. CONFIRMED by @devpulse 2026-08-29: the grant was PATH-scoped BY DESIGN, so any standard that fails purely as a consequence of M10's no-aipass-import property, inside payload/**, is within the grant's intent. Recorded in the terms table at design \u00a77 C9a (rev 4a), which now names all THREE applied standards (log_visibility, json_structure, unused_function) and STRIKES trigger \u2014 a checker the terms named that never fires on this file. It was flagged for a ruling rather than self-granted."
     },
@@ -518,7 +513,7 @@
     {
       "file": "apps/handlers/tests_pytest_standards/payload/audit_hygiene_plugin.py",
       "standard": "logged_fallback",
-      "lines": [241],
+      "lines": [236],
       "reason": "Named, not silent (fleet green leg 15): the hook must never raise inside the suite it measures, and _note_error carries the realpath failure to the artifact, where Law M10 reports it. Only reachable in symlink-sibling mode, off by default."
     },
     {

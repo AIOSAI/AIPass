@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: audit_hygiene_plugin.py
 # Description: pytest write-hygiene gate - stdlib only, injected into a copy
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-29
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """The write gate. A pytest plugin injected into a COPY of somebody else's tree.
@@ -17,7 +17,6 @@ counted into `gate_coverage`: 100 means no violation seen by this gate.
 """
 
 import json
-import logging
 import os
 import sys
 import tempfile
@@ -25,9 +24,6 @@ import time
 from typing import Dict, List, Optional, TextIO, Tuple
 
 __version__ = "1.0.0"
-
-logger = logging.getLogger("audit_tests.hygiene_gate")
-
 
 #: In classifier order, copied verbatim into the artifact: a sandbox never widens unsaid.
 ALLOWANCES: Tuple[Tuple[str, str], ...] = (
@@ -236,7 +232,6 @@ def escapes_via_symlink(path: str, state: GateState = STATE) -> bool:
     try:
         return not _under(os.path.realpath(path), os.path.realpath(state.env_root))
     except OSError as exc:
-        logger.debug("realpath failed for %s", path, exc_info=exc)
         _note_error(state, "realpath", exc)
         return False
 
@@ -323,7 +318,6 @@ def audit_hook(event: str, args: tuple) -> None:
                 dir_fd = args[fd_index] if fd_index is not None and fd_index < len(args) else None
                 _record_write(event, args[index], dir_fd)
     except Exception as exc:  # a hook must never break the suite it measures
-        logger.debug("audit hook failed on %s", event, exc_info=exc)
         _note_error(state, f"hook:{event}", exc)
 
 
@@ -337,7 +331,6 @@ def emit(record: dict) -> None:
         state.sink.write(json.dumps(record, sort_keys=True) + "\n")
         state.sink.flush()
     except Exception as exc:
-        logger.debug("could not write the gate log", exc_info=exc)
         _note_error(state, "sink", exc)
     finally:
         state.emitting = False
@@ -445,7 +438,6 @@ def _resolve_target_module(state: GateState) -> Tuple[bool, str]:
         root = os.path.realpath(state.env_root) if state.env_root else ""
         return bool(where) and _under(where, root), where or "module has neither __file__ nor __path__"
     except Exception as exc:
-        logger.debug("import of %s failed", state.target_module, exc_info=exc)
         return False, f"{type(exc).__name__}: {exc}"
 
 
@@ -503,14 +495,12 @@ def fire_canary() -> dict:
             handle.write("audit-tests canary; removed immediately after the check\n")
     except OSError as exc:
         # An unwritable canary leaves the gate unproven; the reason travels to the artifact.
-        logger.warning("canary write failed: %s", exc)
         error = f"{type(exc).__name__}: {exc}"
     finally:
         try:
             # Only the sentinel this function created inside the scratch copy.
             os.unlink(state.canary_path)
         except OSError as exc:
-            logger.debug("canary cleanup failed", exc_info=exc)
             _note_error(state, "canary-cleanup", exc)
 
     return {"attempted": True, "caught": bool(state.canary_seen), "path": state.canary_path, "error": error}

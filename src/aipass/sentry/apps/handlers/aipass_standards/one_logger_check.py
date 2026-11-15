@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: one_logger_check.py
 # Description: One Logger Standards Checker Handler - prax is the only logging system
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-11-15
 # Modified: 2026-11-15
 # =============================================
@@ -10,7 +10,8 @@
 
 Reference: one_logger.md. Four AST keys, each a logger that is not prax:
 K0 stdlib logging, K1 a level-shaped class, K2 a hand-written .log file, K3 a stream-writing log helper.
-No bypass row waives a finding; only ``logging_allowed.ALLOWED`` names a file that may.
+No bypass row waives a finding; K0 passes only the files prax's ``LOGGING_ALLOWED`` names,
+the other keys only what ``logging_allowed.ALLOWED`` names.
 """
 
 import ast
@@ -19,7 +20,7 @@ from typing import Dict, List, Set, Tuple
 
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.aipass_standards.check_support import read_text, result, tail_name
-from aipass.sentry.apps.handlers.aipass_standards.logging_allowed import allowed_by
+from aipass.sentry.apps.handlers.aipass_standards.logging_allowed import allowed_by, prax_logging_allowed
 from aipass.sentry.apps.handlers.json import json_handler
 
 APPLIES_TO = "production"
@@ -226,9 +227,15 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         logger.info("[one_logger] Unparseable %s: %s", module_path, exc)
         return _refused(f"Unparseable source, not judged: {exc}")
 
+    try:
+        published = prax_logging_allowed()
+    except ValueError as exc:
+        logger.error("[one_logger] %s", exc)
+        return _refused(f"Not judged: {exc}")
+
     checks = []
     for line, key, what in scan(tree):
-        why = allowed_by(path, key)
+        why = allowed_by(path, key, published)
         tail = CURES[key] if why is None else f"allowed: {why}"
         checks.append(
             {

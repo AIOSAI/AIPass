@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: log_visibility_check.py
 # Description: Log Visibility Standards Checker Handler
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-03-05
 # Modified: 2026-11-15
 # =============================================
@@ -18,7 +18,7 @@ from typing import Dict, List
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.aipass_standards.applicability import is_test_path
-from aipass.sentry.apps.handlers.aipass_standards.logging_allowed import LEGACY_LOG_VISIBILITY, tail_in
+from aipass.sentry.apps.handlers.aipass_standards.logging_allowed import prax_logging_allowed, tail_in
 from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
 from aipass.sentry.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify, hash_lines
 
@@ -122,8 +122,8 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
 
 def _is_prax_logging_infra(file_path: str) -> bool:
-    """Whether the file is one logging_allowed names as prax's logging infrastructure, by exact path."""
-    return tail_in(file_path, LEGACY_LOG_VISIBILITY)
+    """Whether prax publishes this file as one that builds door one on stdlib logging."""
+    return tail_in(file_path, prax_logging_allowed())
 
 
 def _check_prax_import(lines: List[str], content: str, file_path: str, bypass_rules: list | None = None) -> Dict:

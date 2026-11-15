@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: imports_check.py
 # Description: Imports Standards Checker Handler
-# Version: 2.5.2
+# Version: 2.5.3
 # Created: 2026-03-05
 # Modified: 2026-11-15
 # =============================================
@@ -19,7 +19,6 @@ from typing import Dict, List, Optional
 
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.aipass_standards import applicability
-from aipass.sentry.apps.handlers.aipass_standards.logging_allowed import LEGACY_IMPORTS_ROUTER, tail_in
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
 from aipass.sentry.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify
@@ -89,8 +88,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     is_small_file = len([line for line in lines if line.strip() and not line.strip().startswith("#")]) < 20
     # A door re-exports and logs nothing, whatever its length.
     is_door = path.name.startswith("door_") and path.parent.name == "modules"
-    # The router itself: stdlib logging is what prax routes INTO, so it cannot route through prax.
-    is_router = tail_in(path, LEGACY_IMPORTS_ROUTER)
 
     if not is_init_file:
         checks.append(check_no_aipass_root(import_lines, module_path, bypass_rules))
@@ -98,7 +95,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not is_init_file:
         checks.append(check_no_sys_path(import_lines, module_path, bypass_rules))
 
-    exempt = is_init_file or is_small_file or is_door or is_handler or is_router
+    exempt = is_init_file or is_small_file or is_door or is_handler
     if not exempt and not applicability.is_test_path(module_path):
         prax_check = check_prax_logger(lines, module_path, bypass_rules)
         if prax_check:

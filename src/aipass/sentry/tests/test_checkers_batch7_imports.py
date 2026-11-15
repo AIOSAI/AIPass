@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_imports.py
 # Description: imports_check and one_logger_check rulings (split from test_checkers_batch7.py)
-# Version: 1.3.0
+# Version: 1.4.1
 # Created: 2026-10-08
 # Modified: 2026-11-15
 # =============================================
@@ -13,7 +13,13 @@
 
 import pytest
 
-from aipass.sentry.apps.handlers.aipass_standards import imports_check, one_logger_check
+from aipass.sentry.apps.handlers.aipass_standards import (
+    imports_check,
+    log_handler_check,
+    log_visibility_check,
+    logging_allowed,
+    one_logger_check,
+)
 from aipass.sentry.apps.handlers.aipass_standards.imports_check import (
     check_handler_independence,
     check_import_order,
@@ -362,11 +368,25 @@ class TestImportsCheckLineNumbersSurviveDocstringFiltering:
         assert root_rows and root_rows[0]["passed"], root_rows
 
 
-_K2_CONSTANT = 'import os\nLOG = os.path.join("logs", "bridge.log")\n\n\ndef rec(line):\n    with open(LOG, "a", encoding="utf-8") as h:\n        h.write(line)\n'
+_K2_CONSTANT = (
+    'import os\nLOG = os.path.join("logs", "bridge.log")\n\n\n'
+    'def rec(line):\n    with open(LOG, "a", encoding="utf-8") as h:\n        h.write(line)\n'
+)
 _K3_STAMPED = (
     "from datetime import datetime\n\n\ndef _log(message):\n"
     '    stamp = datetime.now().strftime("%H:%M:%S")\n    console.print(f"[{stamp}] {message}")\n'
 )
+
+
+@pytest.fixture
+def published(tmp_path, monkeypatch):
+    """Prax's published list, as prax writes it, naming setup.py only."""
+    source = tmp_path / "published_logger.py"
+    source.write_text(
+        'LOGGING_ALLOWED = (("prax/apps/handlers/logging/setup.py", "builds door one"),)\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(logging_allowed, "PRAX_LOGGER", source)
+    return source
 
 
 def _judge(tmp_path, source, rel="flow/apps/handlers/mod.py"):
@@ -387,13 +407,15 @@ class TestOneLoggerConvictsEveryLoggerButPrax:
             ("import logging\nlog = logging.getLogger(__name__)\n", "K0"),
             ("from logging.handlers import RotatingFileHandler\n", "K0"),
             (
-                "def append_trail(p, e):\n    pass\n\n\nclass Trail:\n    def _emit(self, m):\n        append_trail(1, m)\n\n"
+                "def append_trail(p, e):\n    pass\n\n\n"
+                "class Trail:\n    def _emit(self, m):\n        append_trail(1, m)\n\n"
                 "    def info(self, m):\n        self._emit(m)\n\n    def error(self, m):\n        self._emit(m)\n",
                 "K1",
             ),
             (_K2_CONSTANT, "K2"),
             (
-                'from pathlib import Path\nNAME = "serve.log"\n\n\ndef log_path():\n    return Path("logs") / NAME\n\n\n'
+                'from pathlib import Path\nNAME = "serve.log"\n\n\n'
+                'def log_path():\n    return Path("logs") / NAME\n\n\n'
                 'def start():\n    with open(log_path(), "a", encoding="utf-8") as s:\n        s.write("x")\n',
                 "K2",
             ),
@@ -462,16 +484,26 @@ class TestOneLoggerConvictsEveryLoggerButPrax:
         [
             ("hooks/apps/handlers/bridges/claude.py", _K2_CONSTANT, True),
             ("hooks/apps/handlers/bridges/claude_copy.py", _K2_CONSTANT, False),
-            ("prax/apps/handlers/logging/jsonl_writer.py", "import logging\n", True),
-            ("prax/apps/handlers/logging/setup.py", "import logging\n", False),
-            ("prax/apps/handlers/logging/jsonl_writer.py", _K3_STAMPED, False),
+            ("prax/apps/handlers/logging/setup.py", "import logging\n", True),
+            ("prax/apps/handlers/logging/jsonl_writer.py", "import logging\n", False),
+            ("prax/apps/handlers/logging/setup.py", _K3_STAMPED, False),
         ],
-        ids=["floor_named", "floor_namesake", "writer_named", "writer_sibling", "named_for_another_key"],
+        ids=["floor_named", "floor_namesake", "prax_published", "prax_unpublished", "published_for_another_key"],
     )
-    def test_only_a_named_file_passes_and_only_for_its_key(self, tmp_path, rel, source, passed):
+    def test_only_a_named_file_passes_and_only_for_its_key(self, tmp_path, published, rel, source, passed):
         answer = _judge(tmp_path, source, rel)
         assert answer["passed"] is passed
         assert any("allowed: " in c["message"] for c in answer["checks"]) is passed
+
+    @pytest.mark.parametrize("published_source", [None, "OTHER = ()\n"], ids=["file_gone", "name_gone"])
+    def test_an_unreadable_published_list_refuses_every_file(self, tmp_path, monkeypatch, published_source):
+        source = tmp_path / "published_logger.py"
+        if published_source is not None:
+            source.write_text(published_source, encoding="utf-8")
+        monkeypatch.setattr(logging_allowed, "PRAX_LOGGER", source)
+        answer = _judge(tmp_path, "x = 1\n")
+        assert answer["score"] == 0
+        assert "LOGGING_ALLOWED" in answer["checks"][0]["message"]
 
     def test_it_is_advisory_and_production_only(self):
         assert (one_logger_check.ADVISORY, one_logger_check.CHECKLIST_ADVISES, one_logger_check.APPLIES_TO) == (
@@ -481,12 +513,29 @@ class TestOneLoggerConvictsEveryLoggerButPrax:
         )
 
 
-class TestImportsRouterIsOneExactPath:
-    @pytest.mark.parametrize(("branch", "passed"), [("prax", True), ("flow", False)], ids=["router", "namesake"])
-    def test_only_prax_s_own_logger_module_may_use_stdlib_logging(self, tmp_path, branch, passed):
+class TestTheOldLoggingExemptionsReadPraxsList:
+    @pytest.mark.parametrize("branch", ["prax", "flow"], ids=["prax_logger_module", "namesake"])
+    def test_imports_exempts_no_logger_module_from_the_stdlib_conviction(self, tmp_path, branch):
         target = tmp_path / branch / "apps" / "modules" / "logger.py"
         target.parent.mkdir(parents=True)
         body = "".join(f"x{i} = {i}\n" for i in range(25))
         target.write_text("import logging\n\nlog = logging.getLogger(__name__)\n" + body, encoding="utf-8")
         checks = imports_check.check_module(str(target))["checks"]
-        assert all(c["passed"] for c in checks if c["name"].startswith("Prax logger")) is passed
+        assert not all(c["passed"] for c in checks if c["name"].startswith("Prax logger"))
+
+    @pytest.mark.parametrize(
+        ("rel", "passed"),
+        [("prax/apps/handlers/logging/setup.py", True), ("prax/apps/handlers/logging/direct.py", False)],
+        ids=["published", "unpublished"],
+    )
+    def test_log_visibility_passes_only_the_files_prax_publishes(self, tmp_path, published, rel, passed):
+        target = tmp_path / rel
+        target.parent.mkdir(parents=True)
+        target.write_text("import logging\n\nlog = logging.getLogger(__name__)\n", encoding="utf-8")
+        assert log_visibility_check.check_module(str(target))["passed"] is passed
+
+    def test_log_handler_exempts_no_prax_file(self, tmp_path):
+        target = tmp_path / "prax/apps/handlers/logging/setup.py"
+        target.parent.mkdir(parents=True)
+        target.write_text('import logging\n\nh = logging.FileHandler("x.log")\n', encoding="utf-8")
+        assert log_handler_check.check_module(str(target))["passed"] is False

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: one_logger_content.py
 # Description: One Logger Standards Content Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-11-15
 # Modified: 2026-11-15
 # =============================================
@@ -26,8 +26,9 @@ def get_one_logger_standards() -> str:
         "  [red]K2[/red] a file opened for writing whose path resolves, in the module, to a .log name",
         "  [red]K3[/red] a write wrapper sending its message to stderr, or printing it time-stamped",
         "",
-        "[bold cyan]NO WAIVERS:[/bold cyan] a bypass row waives nothing. Only logging_allowed names",
-        "  a file that may, by exact path, with its reason (prax's writer, the bridges' crash floor).",
+        "[bold cyan]NO WAIVERS:[/bold cyan] a bypass row waives nothing. K0 passes only what prax's",
+        "  LOGGING_ALLOWED names; logging_allowed names the bridges' crash record and, until prax",
+        "  publishes them, its door classes. An unreadable prax list refuses every file.",
         "",
         "[bold cyan]SCORING:[/bold cyan] ADVISORY: scored per file, never in the branch average.",
         "",
