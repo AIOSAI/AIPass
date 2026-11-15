@@ -1003,7 +1003,6 @@ class TestStaleSweep:
         _sweep("--stale", "10d", str(stale_tree["api"]))
         assert deeper.exists()
 
-    @pytest.mark.skipif(os.utime not in os.supports_follow_symlinks, reason="needs lutimes to age the link itself")
     def test_a_symlink_named_tmp_is_skipped(self, stale_tree):
         """The LINK is aged too, so only the regular-file rule can spare it."""
         target = _aged(stale_tree["api"] / "elsewhere" / "real.tmp", 11 * _DAY)

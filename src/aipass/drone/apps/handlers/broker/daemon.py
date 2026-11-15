@@ -3,7 +3,7 @@
 # Description: Broker daemon — privileged deleter for sandboxed agents
 # Version: 2.1.5
 # Created: 2026-06-09
-# Modified: 2026-10-24
+# Modified: 2026-11-14
 # =============================================
 
 """Broker daemon — privileged deleter for sandboxed agents.
@@ -117,7 +117,7 @@ class BrokerDaemon:
         secret = secrets.token_bytes(32)
         self._secret_path.parent.mkdir(parents=True, exist_ok=True)
         staged = self._secret_path.with_name(f".{self._secret_path.name}.{secrets.token_hex(4)}.tmp")
-        fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
+        fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "wb") as staged_file:
             staged_file.write(secret)
         os.replace(staged, self._secret_path)
