@@ -3,7 +3,7 @@
 # Description: adopt-citizen handler — plan and apply moving a citizen whole into another project
 # Version: 1.0.0
 # Created: 2026-11-08
-# Modified: 2026-11-09
+# Modified: 2026-11-14
 # =============================================
 
 """Move an existing citizen, memory and registry row with ids kept, into another project root.
@@ -195,7 +195,7 @@ def plan_adoption(citizen, target_root):
     if work_tree and exclude is not None:
         present = set(exclude.read_text(encoding="utf-8").splitlines()) if exclude.is_file() else set()
         lines = [x for x in lines if x not in present]
-        rel_exclude = os.path.relpath(exclude, target).replace(os.sep, "/")
+        rel_exclude = os.path.relpath(exclude, target)
         if lines:
             paths.append({"action": "append", "path": rel_exclude, "reason": " ".join(lines)})
     else:
