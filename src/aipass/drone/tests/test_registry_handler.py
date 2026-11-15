@@ -3,7 +3,7 @@
 # Description: Registry loading, lookup and credential verification
 # Version: 1.1.0
 # Created: 2026-03-14
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/registry_handler.py: registry loading, lookup and credential verification."""
@@ -600,7 +600,7 @@ class TestBranchInterpreter:
         assert python.resolve() in log.info.call_args.args
         log.warning.assert_not_called()
 
-    def test_aipass_home_set_to_another_install_takes_its_venv_in_either_layout(
+    def test_aipass_home_set_to_another_install_takes_its_venv(
         self, stranger: dict[str, Path], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         home = _an_aipass_home(stranger["tmp"] / "AIPass")

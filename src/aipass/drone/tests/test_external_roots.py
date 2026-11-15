@@ -3,7 +3,7 @@
 # Description: Declared roots are the third resolution source
 # Version: 1.0.4
 # Created: 2026-08-30
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/registry_handler.py's declared-roots tier: externals resolve, never over a local."""

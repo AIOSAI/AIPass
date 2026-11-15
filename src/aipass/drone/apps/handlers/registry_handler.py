@@ -3,7 +3,7 @@
 # Description: Handler for registry file operations
 # Version: 1.4.0
 # Created: 2026-03-09
-# Modified: 2026-10-17
+# Modified: 2026-11-14
 # =============================================
 
 """

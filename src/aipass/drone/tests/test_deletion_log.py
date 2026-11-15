@@ -3,7 +3,7 @@
 # Description: Every drone delete, and every refused one, leaves a deletion record
 # Version: 1.1.1
 # Created: 2026-08-14
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/deletion_log.py, the safe_delete path writing it and apps/modules/door_deletion_log.py."""

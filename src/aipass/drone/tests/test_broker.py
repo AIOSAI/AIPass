@@ -3,7 +3,7 @@
 # Description: Tests for the drone-broker daemon, identity, and allowlist
 # Version: 2.0.9
 # Created: 2026-06-09
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/broker/daemon.py, its path resolver, protocol, client and rm routing."""
@@ -286,7 +286,7 @@ class TestPathResolver:
     def walk_host(self, monkeypatch: pytest.MonkeyPatch) -> list[bool]:
         """Stand the resolver on a host with no openat2 and no /proc to read.
 
-        The fallback once asked /proc for the fd's own path. A walk that reaches for it at all fails here.
+        A walk that asks /proc for the fd's own path fails here.
         """
 
         def no_proc(fd: int) -> Path:

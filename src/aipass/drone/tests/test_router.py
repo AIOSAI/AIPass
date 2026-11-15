@@ -3,7 +3,7 @@
 # Description: Command routing - router module and router_handler
 # Version: 1.2.1
 # Created: 2026-03-14
-# Modified: 2026-11-07
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/router.py and apps/handlers/router_handler.py."""

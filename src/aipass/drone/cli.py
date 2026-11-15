@@ -3,7 +3,7 @@
 # Description: Drone CLI entry point — console_scripts wrapper
 # Version: 1.0.0
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-11-14
 # =============================================
 
 """

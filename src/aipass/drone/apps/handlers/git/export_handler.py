@@ -3,7 +3,7 @@
 # Description: The tracked tree at a ref, written into an empty directory
 # Version: 1.0.0
 # Created: 2026-10-04
-# Modified: 2026-10-17
+# Modified: 2026-11-14
 # =============================================
 
 """The tracked tree at a ref, written into an empty directory: the twin of ``git archive | tar -x``.

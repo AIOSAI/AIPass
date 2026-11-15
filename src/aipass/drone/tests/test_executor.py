@@ -3,7 +3,7 @@
 # Description: Subprocess executor - capture, stream, timeout and kill paths
 # Version: 1.0.3
 # Created: 2026-03-14
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/executor.py, the subprocess executor."""

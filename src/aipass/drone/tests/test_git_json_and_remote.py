@@ -3,7 +3,7 @@
 # Description: The git read doors and their --json, remote, gh tiers, merge-main, the read twins and lock
 # Version: 1.0.8
 # Created: 2026-08-18
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/git_module.py's --json on status/log/show and apps/handlers/git/remote_handler.py."""

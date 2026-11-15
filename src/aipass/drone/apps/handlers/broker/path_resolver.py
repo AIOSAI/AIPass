@@ -3,7 +3,7 @@
 # Description: Kernel-safe path resolution via openat2 RESOLVE_BENEATH
 # Version: 1.1.3
 # Created: 2026-06-09
-# Modified: 2026-10-24
+# Modified: 2026-11-14
 # =============================================
 
 """Kernel-safe path resolution via openat2 RESOLVE_BENEATH.

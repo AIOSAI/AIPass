@@ -3,7 +3,7 @@
 # Description: Shared fixtures for the drone suite
 # Version: 1.3.2
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Shared pytest fixtures for drone tests."""

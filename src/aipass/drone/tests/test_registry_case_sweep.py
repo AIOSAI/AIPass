@@ -3,7 +3,7 @@
 # Description: A case-insensitive filesystem must not widen what counts as a registry
 # Version: 1.0.3
 # Created: 2026-08-31
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/router_handler.py registries_in and every *_REGISTRY.json walk under apps/."""
@@ -118,8 +118,8 @@ class TestTheDecoyIsLive:
         )
 
 
-class TestTheWindowsRedIsReproduced:
-    """The exact CI failure, on Linux: with no cwd the walk first passes the branch root's decoy."""
+class TestTheCaseFoldedWalkIsReproduced:
+    """A case-folding listing with no cwd: the walk first passes the branch root's decoy."""
 
     def test_find_registry_never_returns_a_wrong_case_name(self, no_cwd, case_insensitive_filesystem, monkeypatch):
         """Mutant killed (runner): registries_in's name check removed.

@@ -3,7 +3,7 @@
 # Description: Resolve a module's __file__ without an import-time cwd read
 # Version: 1.0.0
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-11-14
 # =============================================
 
 """One guarded spelling for module-level ``__file__`` resolution.
