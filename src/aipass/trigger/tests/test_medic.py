@@ -3,7 +3,7 @@
 # Description: Unit tests for medic module handle_command
 # Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for the medic toggle module (apps/modules/medic.py)."""
@@ -43,6 +43,7 @@ _STATE_NAMES = (
     "unmute_branch_volume",
     "get_suppression_stats",
     "get_rate_limit_stats",
+    "get_failing_handlers",
     "parse_duration",
     "DEFAULT_MUTE_SECONDS",
     "DEFAULT_OFF_SECONDS",
@@ -83,6 +84,7 @@ def _mock_infrastructure(monkeypatch):
             "last_rate_limited": "never",
         }
     )
+    medic_state_mod.get_failing_handlers = MagicMock(return_value=[])
     # The real parser: a stub answering None let no test pin --for (sentry flag_never_passed).
     medic_state_mod.parse_duration = parse_duration
     medic_state_mod.DEFAULT_MUTE_SECONDS = 86400
@@ -577,6 +579,29 @@ def test_output_capture_status_contains_all_fields(capsys):
     output = "\n".join(printed)
     for field in ["State:", "Log watcher:", "Muted branches:", "Suppressed:", "Rate limited:"]:
         assert field in output, f"Status output missing field: {field}"
+
+
+def test_status_names_each_failing_handler_and_its_branch(capsys):
+    """Pins the hidden disable: a handler the bus gave up on appeared nowhere in medic status."""
+    medic = _import_medic()
+    state = _get_medic_state()
+    state.get_failing_handlers.return_value = [
+        {
+            "handler": "handle_error_detected",
+            "branch": "DRONE",
+            "event": "error_detected",
+            "error": "branch registry unreadable",
+            "since": "2026-11-15T13:40:00",
+            "pid": 4242,
+        },
+    ]
+
+    with patch.object(medic, "is_service_active", return_value=True):
+        medic.handle_command("status", [])
+
+    output = "\n".join(_printed(capsys))
+    assert "Failing handlers:" in output
+    assert "handle_error_detected" in output and "DRONE" in output and "branch registry unreadable" in output
 
 
 def test_help_flag_after_a_branch_operand_does_not_mute(monkeypatch):

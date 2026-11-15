@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 import aipass.trigger.apps.handlers as handlers_pkg
@@ -215,52 +215,65 @@ class TestHandleErrorDetectedGates:
 
         send.assert_not_called()
 
-    def test_an_unreadable_branch_registry_is_reported_not_skipped(self, tmp_path: Path) -> None:
-        """A registry that cannot be read names itself in the trail; nothing is skipped or sent.
-        Answering the empty set would log 'Unknown branch skipped' for a branch that has an owner.
-        Mutants: the raise put back to return set(), and the file's name dropped from the message, each redden this.
-        """
+    def test_an_unreadable_registry_tells_its_owner_once_and_records_each_held_dispatch(self, tmp_path: Path) -> None:
+        """Pins the deaf medic: each event failed into an unread trail and nobody was told."""
         send = MagicMock(return_value=True)
         error_detected.set_send_email_callback(send)
         (tmp_path / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")
 
+        for _ in range(3):
+            error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
+
+        assert [c.kwargs["to_branch"] for c in send.call_args_list] == ["@spawn"]
+        assert "branch registry unreadable (AIPASS_REGISTRY.json)" in send.call_args.kwargs["message"]
+        held = (tmp_path / "logs" / "medic_suppressed.jsonl").read_text(encoding="utf-8").splitlines()
+        assert len(held) == 3
+        assert all("registry unreadable" in line and "flow" in line for line in held)
+
+    def test_a_registry_that_recovers_dispatches_again_and_a_new_failure_is_told_again(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Told once per failure, not once per process: a second outage after a recovery mails the owner again."""
+        monkeypatch.setattr(error_detected, "REGISTERED_TTL_SECONDS", 0.0)
+        send = MagicMock(return_value=True)
+        error_detected.set_send_email_callback(send)
+        registry_file = tmp_path / "AIPASS_REGISTRY.json"
+        registry = {"branches": [{"email": "@flow", "status": "active", "path": "src/aipass/flow"}]}
+
+        registry_file.write_text("{not json", encoding="utf-8")
+        error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
+        registry_file.write_text(json.dumps(registry), encoding="utf-8")
+        error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
+        registry_file.write_text("{not json", encoding="utf-8")
         error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
 
-        send.assert_not_called()
-        assert not (tmp_path / "logs" / "medic_suppressed.jsonl").exists()
-        trail = (tmp_path / "error_detected_handler.jsonl").read_text(encoding="utf-8")
-        assert "branch registry unreadable (AIPASS_REGISTRY.json)" in trail
+        assert [c.kwargs["to_branch"] for c in send.call_args_list] == ["@spawn", "@flow", "@spawn"]
 
-    def test_an_unreadable_medic_state_dispatches_nothing(self, tmp_path: Path) -> None:
-        """A medic state nobody can read may hold a person's 'off': no mail, the trail names it.
-        Red first: the unreadable state answered enabled and the error was sent.
-        """
+    def test_an_unreadable_medic_state_raises_to_the_bus_and_dispatches_nothing(self, tmp_path: Path) -> None:
+        """A medic state nobody can read may hold a person's 'off': no mail, and the bus is told, not an unread trail."""
         send = MagicMock(return_value=True)
         error_detected.set_send_email_callback(send)
         registry = {"branches": [{"email": "@flow", "status": "active", "path": "src/aipass/flow"}]}
         (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
-        (tmp_path / "trigger_json").mkdir()
-        (tmp_path / "trigger_json" / "medic_state.json").write_text("{not json", encoding="utf-8")
+        medic_state.MEDIC_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        medic_state.MEDIC_STATE_FILE.write_text("{not json", encoding="utf-8")
 
-        error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
+        with pytest.raises(RuntimeError, match=r"medic state unreadable \(medic_state.json\)"):
+            error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
 
         send.assert_not_called()
-        trail = (tmp_path / "error_detected_handler.jsonl").read_text(encoding="utf-8")
-        assert "medic state unreadable (medic_state.json)" in trail
 
-    def test_an_absent_branch_registry_is_a_registry_with_nobody_in_it(self, tmp_path: Path) -> None:
-        """No registry file answers the empty set: the branch is skipped as unknown, no warning.
-        Mutant: an absent file made to raise reddens this.
-        """
+    def test_an_absent_branch_registry_is_told_to_its_owner_not_read_as_empty(self, tmp_path: Path) -> None:
+        """Pins the silent default census: no file answered the empty set and every branch was skipped as unknown."""
         send = MagicMock(return_value=True)
         error_detected.set_send_email_callback(send)
 
         error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
 
-        send.assert_not_called()
-        assert not (tmp_path / "error_detected_handler.jsonl").exists()
-        skipped = (tmp_path / "logs" / "medic_suppressed.jsonl").read_text(encoding="utf-8")
-        assert "Unknown branch skipped: @flow" in skipped
+        assert [c.kwargs["to_branch"] for c in send.call_args_list] == ["@spawn"]
+        held = (tmp_path / "logs" / "medic_suppressed.jsonl").read_text(encoding="utf-8")
+        assert "Unknown branch skipped" not in held
+        assert "registry unreadable" in held
 
     def test_returns_early_circuit_breaker_open(self) -> None:
         """Does not dispatch when circuit breaker is open."""
@@ -412,55 +425,45 @@ class TestHandleErrorDetectedHappyPath:
             "dispatch_sent", {"recipient": "@flow"}
         )
 
-    def test_a_throwing_send_is_reported_and_stops_the_pipeline(self) -> None:
-        """_send_email raising is caught, named in the log, and records nothing.
-        This handler is the last thing between an error and an operator: a throwing send must be
-        logged, and the exception must not pass as a delivery, so nothing downstream may run.
-        """
+    def test_a_throwing_send_reaches_the_bus_and_records_nothing(self) -> None:
+        """Pins the swallowed send: a raise ended in an unread trail and the error was never delivered or told."""
         mod = _import_module()
         send = _setup_happy_path(mod)
         send.side_effect = RuntimeError("SMTP down")
-        json_handler = mod.json_handler
+        mod.json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
 
-        json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
-
-        with patch.object(mod, "logger") as mock_logger:
+        with pytest.raises(RuntimeError, match="SMTP down"):
             mod.handle_error_detected(
-                branch="flow",
-                module="cfg",
-                message="err",
-                error_hash="h1",
-                count=2,
-                fingerprint="fpX",
+                branch="flow", module="cfg", message="err", error_hash="h1", count=2, fingerprint="fpX"
             )
 
-        reported = str(mock_logger.warning.call_args_list)
-        assert "SMTP down" in reported, f"the cause must reach the log, got: {reported}"
-        json_handler.log_operation.assert_not_called()  # type: ignore[union-attr]
+        mod.json_handler.log_operation.assert_not_called()  # type: ignore[union-attr]
         mod.registry_record_dispatch.assert_not_called()  # type: ignore[attr-defined]
 
-    def test_does_not_record_dispatch_when_send_fails(self) -> None:
-        """When _send_email returns False, dispatch is not recorded."""
+    def test_a_refused_send_raises_and_records_no_dispatch(self) -> None:
+        """A False from the mail adapter is a failed delivery: the bus is told, and backoff is not started."""
         mod = _import_module()
         send = _setup_happy_path(mod)
         send.return_value = False
-        json_handler = mod.json_handler
+        mod.json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
 
-        json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
-
-        mod.handle_error_detected(
-            branch="flow",
-            module="cfg",
-            message="err",
-            error_hash="h1",
-            count=2,
-            fingerprint="fp_fail",
-        )
+        with pytest.raises(RuntimeError, match="delivery failed for @flow"):
+            mod.handle_error_detected(
+                branch="flow", module="cfg", message="err", error_hash="h1", count=2, fingerprint="fp_fail"
+            )
 
         send.assert_called_once()
-        # But nothing after it should have run
-        json_handler.log_operation.assert_not_called()  # type: ignore[union-attr]
+        mod.json_handler.log_operation.assert_not_called()  # type: ignore[union-attr]
         mod.registry_record_dispatch.assert_not_called()  # type: ignore[attr-defined]
+
+    def test_no_mail_adapter_wired_raises_instead_of_returning_quietly(self) -> None:
+        """Pins the quiet return: with ai_mail unwired, every error past the gates vanished."""
+        mod = _import_module()
+        _setup_happy_path(mod)
+        mod._send_email = None  # type: ignore[attr-defined]
+
+        with pytest.raises(RuntimeError, match="no ai_mail adapter"):
+            mod.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
 
 
 class TestMedicEnabledTTL:

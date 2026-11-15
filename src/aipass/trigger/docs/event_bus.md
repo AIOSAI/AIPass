@@ -35,8 +35,13 @@ propagates to the caller and never stops the other handlers — that isolation i
 the point of a bus. `fire()` returns the counts above and `drone @trigger fire`
 prints them, so a wrong-key or wrong-name fire is visible where it is typed: a
 crashed handler shows in `failed`, a name nothing listens to shows `handlers: 0`.
-Handler exceptions are still logged, still counted toward the consecutive-failure
-auto-disable, and still never raised at the caller.
+Handler exceptions are never raised at the caller, and a failing handler is never
+disabled: it runs on every event, so it recovers the moment its cause clears. Its
+ERROR goes to `core.log` at most once per `FAILURE_LOG_INTERVAL_SECONDS` (600 s) per
+handler and branch, because the watcher reads `core.log` and one line per failure
+would feed it back. Its first failure is recorded in `medic_state.json`
+(`failing_handlers`, shown by `drone @trigger medic status`) and mailed to @devpulse
+once per handler; a success clears the row.
 
 **A help flag anywhere explains; it never executes.** `--help` and `-h` are
 matched exactly at *any* position in the argument sequence, so

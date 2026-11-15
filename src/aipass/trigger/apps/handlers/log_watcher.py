@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Branch log watcher event producer for error detection
-# Version: 2.10.0
+# Version: 2.11.0
 # Created: 2026-02-02
 # Modified: 2026-11-15
 # =============================================
@@ -41,7 +41,6 @@ MAX_BACKUP_CHAIN_DEPTH = 3
 
 # Self-referential / dispatch logs: watching them would feed the watcher its own output.
 EXCLUDED_LOG_FILES: Set[str] = {
-    "dispatch.log",
     "medic_suppressed.jsonl",
     "rate_limited.jsonl",
     "error_monitor.log",
@@ -428,6 +427,12 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler):
                     skipped = index - 1
                     break
             if rotated is None:
+                logger.warning(
+                    "Rotated tail of '%s' not found in its %d backups: its lines after offset %d were lost unread",
+                    file_path,
+                    MAX_BACKUP_CHAIN_DEPTH,
+                    last_pos,
+                )
                 return
             if skipped:
                 logger.warning(

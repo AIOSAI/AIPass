@@ -187,7 +187,7 @@
       "file": "apps/handlers/events/error_detected.py",
       "standard": "logged_fallback",
       "lines": [
-        138
+        169
       ],
       "pattern": "_read_log_context returns empty text on a read failure",
       "reason": "Fleet green leg 5, kept leg 10. Its caller runs right before the dispatch mail. A raise would drop a dispatch over an unreadable context, while empty text drops only the context section.",

@@ -196,11 +196,17 @@ class TestShouldProcess:
         assert watcher._should_process(str(_SYNTHETIC_HOME / "src" / "aipass" / "flow" / "logs" / "notes.txt")) is False
 
     def test_excluded_file_rejected(self):
-        """Excluded log files (e.g. dispatch.log) are rejected."""
+        """Excluded log files (e.g. error_monitor.log) are rejected."""
         watcher = lw.BranchLogWatcher()
         assert (
-            watcher._should_process(str(_SYNTHETIC_HOME / "src" / "aipass" / "flow" / "logs" / "dispatch.log")) is False
+            watcher._should_process(str(_SYNTHETIC_HOME / "src" / "aipass" / "flow" / "logs" / "error_monitor.log"))
+            is False
         )
+
+    def test_ai_mail_dispatch_log_is_read(self):
+        """Pins the hidden dispatch errors: dispatch.log was excluded, and its system twin dropped with it."""
+        watcher = lw.BranchLogWatcher()
+        assert watcher._should_process(str(_SYNTHETIC_HOME / "src" / "aipass" / "ai_mail" / "logs" / "dispatch.log"))
 
     def test_system_logs_accepted(self):
         """Log file inside /system_logs/ is accepted."""

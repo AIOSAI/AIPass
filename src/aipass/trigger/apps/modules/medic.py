@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: medic.py
 # Description: Medic toggle module for auto-healing error dispatch control
-# Version: 1.11.0
+# Version: 1.12.0
 # Created: 2026-02-12
-# Modified: 2026-11-10
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -41,6 +41,7 @@ from aipass.trigger.apps.handlers.medic_state import (
     unmute_branch_volume,
     get_suppression_stats,
     get_rate_limit_stats,
+    get_failing_handlers,
     parse_duration,
     DEFAULT_MUTE_SECONDS,
     DEFAULT_OFF_SECONDS,
@@ -374,6 +375,13 @@ def _handle_status(console) -> None:
     console.print(f"  Last suppressed: {suppression['last_suppressed']}")
     console.print(f"  Rate limited:    {rate_limits['rate_limited_count']}")
     console.print(f"  Last rate limit: {rate_limits['last_rate_limited']}")
+    failing = get_failing_handlers()
+    console.print(f"  Failing handlers: {len(failing) if failing else 'none'}")
+    for row in failing:
+        console.print(
+            f"    {escape(row['handler'])} [dim]branch[/dim] {escape(str(row['branch']))} "
+            f"[dim]on {escape(row['event'])} since {row['since']} (pid {row['pid']}):[/dim] {escape(row['error'])}"
+        )
     console.print()
     if not enabled:
         console.print("  [dim]All error dispatch suppressed. Errors logged to medic_suppressed.jsonl[/dim]")

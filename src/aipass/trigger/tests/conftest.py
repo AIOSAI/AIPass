@@ -281,6 +281,18 @@ def _tree_census(repo_root: Any = None, name_from: str = "path", strict: bool = 
 def _fresh_census_caches(monkeypatch: pytest.MonkeyPatch) -> None:
     """The registered-email cache is per process; a test never inherits another test's fleet."""
     monkeypatch.setattr(error_detected, "_registered_cache", (0.0, None))
+    monkeypatch.setattr(error_detected, "_census_alerted", None)
+
+
+@pytest.fixture(autouse=True)
+def bus_alerts_off_the_live_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> List[Dict[str, Any]]:
+    """A failing handler writes medic_state.json and mails the manager: both land in tmp_path, the mail in a list."""
+    monkeypatch.setattr(medic_state, "MEDIC_STATE_FILE", tmp_path / "medic_state.json")
+    monkeypatch.setattr(medic_state, "LEGACY_MEDIC_STATE_FILE", tmp_path / "trigger_config.json")
+    monkeypatch.setattr(outbound, "logger", trail_logger(tmp_path / "ci_lane.jsonl"))
+    mails: List[Dict[str, Any]] = []
+    monkeypatch.setattr(outbound, "_send_email", lambda **kwargs: mails.append(kwargs) or True)
+    return mails
 
 
 # Not autouse: the log watcher test files opt in through pytestmark.
@@ -396,7 +408,7 @@ def ci_lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
     monkeypatch.setattr(core.Trigger, "_initialized", True)
     monkeypatch.setattr(core.Trigger, "_handlers", {"ci_red": [ci_red.handle_ci_red]})
     monkeypatch.setattr(core.Trigger, "_handler_failures", {})
-    monkeypatch.setattr(core.Trigger, "_disabled_handlers", set())
+    monkeypatch.setattr(core.Trigger, "_failure_logged_at", {})
     lane.add_run = add_run
     lane.root = tmp_path
     lane.ledger = lambda: json.loads((tmp_path / "ci_ledger.json").read_text(encoding="utf-8"))

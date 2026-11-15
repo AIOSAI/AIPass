@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: medic_state.py
 # Description: Medic state persistence and status collection handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-02-12
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -14,6 +14,7 @@ Content mutes (error dispatch) and volume mutes (runaway alerts) stay separate; 
 """
 
 import json
+import os
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -44,6 +45,7 @@ DEFAULT_OFF_SECONDS = 86400  # 24 hours
 MUTE_KEY_CONTENT = "muted_branches"  # content-based error noise (medic)
 MUTE_KEY_VOLUME = "volume_muted_branches"  # volume-based runaway alerts
 MUTE_KEYS = (MUTE_KEY_CONTENT, MUTE_KEY_VOLUME)
+FAILING_HANDLERS_KEY = "failing_handlers"  # bus handlers raising right now, one row per (handler, branch, pid)
 
 
 def parse_duration(duration_str: str) -> Optional[float]:
@@ -260,17 +262,24 @@ def unmute_branch_volume(branch_name: str) -> bool:
     return _unmute_branch_in(MUTE_KEY_VOLUME, branch_name)
 
 
+def _trail_stats(path: Path) -> tuple:
+    """Row count across a jsonl trail and its rotated backups, and the newest row's ts."""
+    count = 0
+    newest = "never"
+    for generation in [path, *sorted(path.parent.glob(f"{path.name}.[0-9]*"))]:
+        if not generation.exists():
+            continue
+        lines = generation.read_text(encoding="utf-8").strip().splitlines()
+        count += len(lines)
+        if lines and newest == "never":
+            newest = json.loads(lines[-1]).get("ts", "unknown")
+    return count, newest
+
+
 def get_suppression_stats() -> Dict[str, Any]:
-    """Get suppression log statistics."""
-    suppressed_count = 0
-    last_suppressed = "never"
+    """Get suppression log statistics, rotated rows included."""
     try:
-        if MEDIC_SUPPRESSED_LOG.exists():
-            lines = MEDIC_SUPPRESSED_LOG.read_text(encoding="utf-8").strip().splitlines()
-            suppressed_count = len(lines)
-            if lines:
-                entry = json.loads(lines[-1])
-                last_suppressed = entry.get("ts", "unknown")
+        suppressed_count, last_suppressed = _trail_stats(MEDIC_SUPPRESSED_LOG)
     except Exception as exc:
         logger.warning("get_suppression_stats failed: %s", exc)
         return {"suppressed_count": 0, "last_suppressed": "error reading log"}
@@ -282,16 +291,9 @@ def get_suppression_stats() -> Dict[str, Any]:
 
 
 def get_rate_limit_stats() -> Dict[str, Any]:
-    """Get rate limit log statistics."""
-    dispatch_count = 0
-    last_dispatch = "never"
+    """Get rate limit log statistics, rotated rows included."""
     try:
-        if RATE_LIMITED_LOG.exists():
-            lines = RATE_LIMITED_LOG.read_text(encoding="utf-8").strip().splitlines()
-            dispatch_count = len(lines)
-            if lines:
-                entry = json.loads(lines[-1])
-                last_dispatch = entry.get("ts", "unknown")
+        dispatch_count, last_dispatch = _trail_stats(RATE_LIMITED_LOG)
     except Exception as exc:
         logger.warning("get_rate_limit_stats failed: %s", exc)
         return {"rate_limited_count": 0, "last_rate_limited": "error reading log"}
@@ -300,3 +302,58 @@ def get_rate_limit_stats() -> Dict[str, Any]:
         "rate_limited_count": dispatch_count,
         "last_rate_limited": last_dispatch,
     }
+
+
+def _pid_alive(pid: Any) -> bool:
+    """True while *pid* names a running process; a row from a dead process is stale."""
+    return isinstance(pid, int) and pid > 0 and Path(f"/proc/{pid}").exists()
+
+
+def _live_failing_rows(data: dict) -> List[Dict[str, Any]]:
+    """The failing-handler rows whose process still runs."""
+    return [row for row in data.get(FAILING_HANDLERS_KEY, []) if _pid_alive(row.get("pid"))]
+
+
+def _write_or_raise(data: dict) -> None:
+    """write_config, with a refused write raised: the bus reports it rather than losing the row."""
+    if not write_config(data):
+        raise OSError(f"could not write {MEDIC_STATE_FILE.name}")
+
+
+def record_handler_failure(handler: str, branch: str, event: str, error: str) -> bool:
+    """Record a failing bus handler for this process; True when no live process had *handler* failing before."""
+    with json_file_lock(MEDIC_STATE_FILE):
+        data = read_config()
+        rows = _live_failing_rows(data)
+        first = not any(row["handler"] == handler for row in rows)
+        pid = os.getpid()
+        rows = [r for r in rows if (r["handler"], r["branch"], r["pid"]) != (handler, branch, pid)]
+        rows.append(
+            {
+                "handler": handler,
+                "branch": branch,
+                "event": event,
+                "error": error[:300],
+                "since": datetime.now().isoformat(timespec="seconds"),
+                "pid": pid,
+            }
+        )
+        data[FAILING_HANDLERS_KEY] = rows
+        _write_or_raise(data)
+        return first
+
+
+def clear_handler_failure(handler: str, branch: str) -> None:
+    """Remove this process's row for a recovered (handler, branch)."""
+    with json_file_lock(MEDIC_STATE_FILE):
+        data = read_config()
+        pid = os.getpid()
+        data[FAILING_HANDLERS_KEY] = [
+            r for r in _live_failing_rows(data) if (r["handler"], r["branch"], r["pid"]) != (handler, branch, pid)
+        ]
+        _write_or_raise(data)
+
+
+def get_failing_handlers() -> List[Dict[str, Any]]:
+    """Every bus handler failing right now in a live process, for medic status."""
+    return _live_failing_rows(read_config())

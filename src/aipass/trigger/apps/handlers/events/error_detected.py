@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: error_detected.py
 # Description: Error detected event handler with Medic v2 dispatch gating
-# Version: 2.11.0
+# Version: 2.12.0
 # Created: 2026-02-10
 # Modified: 2026-11-15
 # =============================================
@@ -74,18 +74,21 @@ def set_send_email_callback(callback: Callable[..., bool]) -> None:
 # TTL-bound: the door logs each refused row at ERROR into a log this lane watches, so a per-event read loops.
 REGISTERED_TTL_SECONDS = 60.0
 _registered_cache: tuple = (0.0, None)
+# spawn issues every passport and keeps the registry; an unreadable one is spawn's to fix.
+REGISTRY_OWNER = "@spawn"
+_census_alerted: Optional[str] = None  # the failure already told to REGISTRY_OWNER
 
 
 def _get_registered_emails() -> set:
     """Emails of every declared citizen (core, resident, external), read through memory's door."""
-    # Unreadable raises, never answers empty: an empty set reads every branch as unregistered.
+    # Unreadable or absent raises, never answers empty: an empty set reads every branch as unregistered.
     global _registered_cache
     checked_at, cached = _registered_cache
     now = time.monotonic()
     if cached is not None and now - checked_at < REGISTERED_TTL_SECONDS:
         return cached
     if not BRANCH_REGISTRY_FILE.exists():
-        return set()
+        raise RuntimeError(f"branch registry unreadable ({BRANCH_REGISTRY_FILE.name}): file absent")
     try:
         rows = fleet_branches(repo_root=BRANCH_REGISTRY_FILE.parent, name_from="registry", strict=True)
     except Exception as exc:
@@ -93,6 +96,34 @@ def _get_registered_emails() -> set:
     emails = {row["email"] for row in rows if row.get("email")}
     _registered_cache = (now, emails)
     return emails
+
+
+def _tell_registry_owner(reason: str) -> None:
+    """Dispatch the registry's owner once per failure; a readable census re-arms it."""
+    global _census_alerted
+    if _census_alerted == reason:
+        return
+    body = (
+        f"Medic cannot read the branch registry, so every error dispatch is held until it can: {reason}\n\n"
+        f"Path: {BRANCH_REGISTRY_FILE}\nEach held dispatch is recorded in trigger/logs/medic_suppressed.jsonl."
+    )
+    sent = _send_email(
+        to_branch=REGISTRY_OWNER,
+        subject="[MEDIC] branch registry unreadable",
+        message=body,
+        auto_execute=True,
+        reply_to="@devpulse",
+        from_branch="@trigger",
+    )
+    if not sent:
+        raise RuntimeError(f"could not tell {REGISTRY_OWNER} that {reason}")
+    _census_alerted = reason
+    try:
+        from aipass.ai_mail.apps.modules.door_wake import wake_branch
+
+        wake_branch(REGISTRY_OWNER, fresh=False, sender="@trigger")
+    except Exception as exc:
+        logger.warning(f"wake failed for {REGISTRY_OWNER} (registry unreadable): {exc}")
 
 
 def _is_rate_limited(branch_email: str) -> bool:
@@ -255,130 +286,129 @@ def handle_error_detected(
     **kwargs: Any,
 ) -> None:
     """Handle error_detected event - deliver notification to affected branch."""
-    # Silent by contract: never raises, never prints, never logs through prax.
+    global _census_alerted
+    # Never prints, never logs through prax; a failure raises to the bus, which reports it at a bounded rate.
+    if not branch or not module or not message or not error_hash:
+        return
+
+    # Count BEFORE every gate: a mute, toggle or open breaker stops the dispatch, never the count.
+    escalation.record_error(
+        branch=branch,
+        module=module,
+        message=message,
+        log_file=log_path or "",
+        fingerprint=fingerprint,
+        raw_line=kwargs.get("raw_line", "") or "",
+    )
+
+    if not _is_medic_enabled():
+        _write_suppression_log("Medic OFF - suppressed dispatch for", branch, module, message)
+        return
+
+    if _is_branch_muted(branch):
+        _write_suppression_log("Branch muted - suppressed dispatch for", branch, module, message)
+        return
+
+    # A first occurrence may be transient; dispatch only on recurrence.
+    if count < 2:
+        _write_suppression_log(f"First occurrence (count={count}) - waiting for pattern", branch, module, message)
+        return
+
+    # The breaker counts at detection time, not dispatch time.
+    circuit_breaker_record_error()
+
+    if _send_email is None:
+        raise RuntimeError("no ai_mail adapter wired: medic cannot mail anyone")
+
+    recipient = f"@{branch.lower()}"
+
+    # devpulse is protected from auto-triggering.
+    if recipient == "@devpulse":
+        return
+
     try:
-        if not branch or not module or not message or not error_hash:
-            return
-
-        # Count BEFORE every gate: a mute, toggle or open breaker stops the dispatch, never the count.
-        escalation.record_error(
-            branch=branch,
-            module=module,
-            message=message,
-            log_file=log_path or "",
-            fingerprint=fingerprint,
-            raw_line=kwargs.get("raw_line", "") or "",
-        )
-
-        if not _is_medic_enabled():
-            _write_suppression_log("Medic OFF - suppressed dispatch for", branch, module, message)
-            return
-
-        if _is_branch_muted(branch):
-            _write_suppression_log("Branch muted - suppressed dispatch for", branch, module, message)
-            return
-
-        # A first occurrence may be transient; dispatch only on recurrence.
-        if count < 2:
-            _write_suppression_log(f"First occurrence (count={count}) - waiting for pattern", branch, module, message)
-            return
-
-        # The breaker counts at detection time, not dispatch time.
-        circuit_breaker_record_error()
-
-        if _send_email is None:
-            return
-
-        recipient = f"@{branch.lower()}"
-
-        # devpulse is protected from auto-triggering.
-        if recipient == "@devpulse":
-            return
-
         registered_emails = _get_registered_emails()
-        if recipient not in registered_emails:
-            _write_suppression_log(f"Unknown branch skipped: {recipient}", branch, module, message)
+    except RuntimeError as exc:
+        _tell_registry_owner(str(exc))
+        _write_suppression_log(f"Held, {exc} - no dispatch for", branch, module, message)
+        return
+    _census_alerted = None
+    if recipient not in registered_emails:
+        _write_suppression_log(f"Unknown branch skipped: {recipient}", branch, module, message)
+        return
+
+    if fingerprint:
+        # Backoff first: a half-open breaker's one probe must go to a fingerprint that would be sent.
+        if not registry_should_dispatch(fingerprint):
+            # Keep a permanent suppression from reading as a timing wait on the trail.
+            if registry_is_suppressed(fingerprint):
+                _write_suppression_log(
+                    f"Suppressed fingerprint {fingerprint[:12]} - no dispatch for", branch, module, message
+                )
+            else:
+                _write_rate_log("Backoff active", f"fingerprint {fingerprint[:12]}: {recipient} - {module}, skipping")
             return
 
-        if fingerprint:
-            # Backoff first: a half-open breaker's one probe must go to a fingerprint that would be sent.
-            if not registry_should_dispatch(fingerprint):
-                # Keep a permanent suppression from reading as a timing wait on the trail.
-                if registry_is_suppressed(fingerprint):
-                    _write_suppression_log(
-                        f"Suppressed fingerprint {fingerprint[:12]} - no dispatch for", branch, module, message
-                    )
-                else:
-                    _write_rate_log(
-                        "Backoff active", f"fingerprint {fingerprint[:12]}: {recipient} - {module}, skipping"
-                    )
-                return
-
-            if not circuit_breaker_allows():
-                _write_suppression_log("Circuit breaker OPEN - suppressed dispatch for", branch, module, message)
-                return
-        else:
-            recent_count = len(
-                [ts for ts in _dispatch_timestamps.get(recipient, []) if ts > time.time() - RATE_LIMIT_WINDOW_SECONDS]
-            )
-            if _is_rate_limited(recipient):
-                _write_rate_log("Rate limited", f"{recipient} has {recent_count} recent dispatches, skipping")
-                return
-
-        if not timestamp:
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        effective_log_path = log_path if log_path else "unknown"
-
-        error_log_context = _read_log_context(effective_log_path, message)
-
-        email_subject = f"[ERROR] {module} - detected in logs"
-
-        notification_message = _build_notification_message(
-            error_hash=error_hash,
-            module=module,
-            message=message,
-            timestamp=timestamp,
-            log_path=effective_log_path,
-            occurrences=count,
-            first_seen=first_seen or timestamp,
-            last_seen=last_seen or timestamp,
-            log_context=error_log_context,
-            fingerprint=fingerprint,
-            registry_id=registry_id,
+        if not circuit_breaker_allows():
+            _write_suppression_log("Circuit breaker OPEN - suppressed dispatch for", branch, module, message)
+            return
+    else:
+        recent_count = len(
+            [ts for ts in _dispatch_timestamps.get(recipient, []) if ts > time.time() - RATE_LIMIT_WINDOW_SECONDS]
         )
-
-        # Via the callback: trigger is not a branch, so ai_mail's PWD sender detection fails.
-        sent = _send_email(
-            to_branch=recipient,
-            subject=email_subject,
-            message=notification_message,
-            auto_execute=True,
-            reply_to="@devpulse",
-            from_branch="@trigger",
-        )
-
-        if not sent:
-            logger.warning(f"Email delivery failed for {recipient} (fingerprint={fingerprint})")
+        if _is_rate_limited(recipient):
+            _write_rate_log("Rate limited", f"{recipient} has {recent_count} recent dispatches, skipping")
             return
 
-        try:
-            # Through ai_mail's published door, never its handlers.
-            from aipass.ai_mail.apps.modules.door_wake import wake_branch
+    if not timestamp:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-            wake_branch(recipient, fresh=False, sender="@trigger")
-        except Exception as exc:
-            # Not fatal: the email waits in the inbox. Recorded so the missed wake is visible.
-            logger.warning(f"wake failed for {recipient} (fingerprint={fingerprint}): {exc}")
+    effective_log_path = log_path if log_path else "unknown"
 
-        json_handler.log_operation("dispatch_sent", {"recipient": recipient})
+    error_log_context = _read_log_context(effective_log_path, message)
 
-        if fingerprint:
-            registry_record_dispatch(fingerprint)
-            circuit_breaker_probe_succeeded()
-        else:
-            _record_dispatch(recipient)
+    email_subject = f"[ERROR] {module} - detected in logs"
 
+    notification_message = _build_notification_message(
+        error_hash=error_hash,
+        module=module,
+        message=message,
+        timestamp=timestamp,
+        log_path=effective_log_path,
+        occurrences=count,
+        first_seen=first_seen or timestamp,
+        last_seen=last_seen or timestamp,
+        log_context=error_log_context,
+        fingerprint=fingerprint,
+        registry_id=registry_id,
+    )
+
+    # Via the callback: trigger is not a branch, so ai_mail's PWD sender detection fails.
+    sent = _send_email(
+        to_branch=recipient,
+        subject=email_subject,
+        message=notification_message,
+        auto_execute=True,
+        reply_to="@devpulse",
+        from_branch="@trigger",
+    )
+
+    if not sent:
+        raise RuntimeError(f"Email delivery failed for {recipient} (fingerprint={fingerprint})")
+
+    try:
+        # Through ai_mail's published door, never its handlers.
+        from aipass.ai_mail.apps.modules.door_wake import wake_branch
+
+        wake_branch(recipient, fresh=False, sender="@trigger")
     except Exception as exc:
-        logger.warning(f"handle_error_detected failed: {exc}")
-        return  # Silent failure - handler must not raise
+        # Not fatal: the email waits in the inbox. Recorded so the missed wake is visible.
+        logger.warning(f"wake failed for {recipient} (fingerprint={fingerprint}): {exc}")
+
+    json_handler.log_operation("dispatch_sent", {"recipient": recipient})
+
+    if fingerprint:
+        registry_record_dispatch(fingerprint)
+        circuit_breaker_probe_succeeded()
+    else:
+        _record_dispatch(recipient)

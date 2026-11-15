@@ -3,7 +3,7 @@
 # Description: Tests for the branch log watcher's file reading, rotation drain and inode detection
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/log_watcher.py's file reading and rotation (_read_new_lines, on_modified)."""
@@ -429,6 +429,26 @@ class TestInodeRotationDetection:
         assert not any("lost tail" in line for line in lines)
         assert lines == fresh
         assert watcher.log_positions[file_path] == log_file.stat().st_size
+
+    def test_a_tail_rotated_past_the_chain_is_named_as_lost(self, tmp_path):
+        """Pins the silent return: an inode past the last backup dropped its unread tail without a word."""
+        watcher = lw.BranchLogWatcher()
+        log_file = tmp_path / "core.log"
+        log_file.write_text("header\n", encoding="utf-8")
+        file_path = str(log_file)
+        watcher._record_position(file_path, log_file.stat().st_size)
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(_error_line("lost tail"))
+        for _ in range(4):
+            _rotate_chain(log_file, backup_count=5)
+        log_file.write_text(_error_line("fresh"), encoding="utf-8")
+
+        with patch.object(lw, "logger") as mock_logger:
+            with patch.object(watcher, "_process_log_line"):
+                watcher._read_new_lines(file_path)
+
+        warnings = [call.args[0] % call.args[1:] for call in mock_logger.warning.call_args_list]
+        assert any(file_path in w and "lost unread" in w for w in warnings), warnings
 
     def test_in_place_truncation_with_backup_chain_no_drain(self, tmp_path):
         """No-overreach guard: same inode plus a full backup chain never drains.

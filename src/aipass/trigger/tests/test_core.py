@@ -3,7 +3,7 @@
 # Description: Unit tests for trigger event bus core module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/core.py, the Trigger event bus."""
@@ -17,6 +17,7 @@ import pytest
 from unittest.mock import MagicMock, call
 
 from aipass.trigger.apps.config import trail_logger
+from aipass.trigger.apps.handlers import medic_state
 from aipass.trigger.apps.handlers.events import error_detected, registry, runaway_handler
 from aipass.trigger.apps.modules import core
 
@@ -52,7 +53,7 @@ def trigger_cls(monkeypatch):
     monkeypatch.setattr(Trigger, "_draining_deferred", False)
     monkeypatch.setattr(Trigger, "_log_watcher_started", False)
     monkeypatch.setattr(Trigger, "_handler_failures", {})
-    monkeypatch.setattr(Trigger, "_disabled_handlers", set())
+    monkeypatch.setattr(Trigger, "_failure_logged_at", {})
     monkeypatch.setattr(Trigger, "_alias_warned", set())
     return Trigger
 
@@ -492,44 +493,60 @@ def test_fire_event_kwarg_always_overwritten(trigger_cls):
     assert getattr(callback, "__qualname__", "") == "Trigger.fire"
 
 
-def test_handler_disabled_after_threshold_failures(trigger_cls):
-    """A handler that fails 5 times for the same branch gets disabled for that branch."""
-    fail_handler = MagicMock(side_effect=RuntimeError("boom"))
+def test_a_failing_handler_is_never_disabled_and_runs_on_every_event(trigger_cls):
+    """Pins the silent auto-disable: after 5 failures the bus stopped calling the handler for that branch."""
+    fail_handler = MagicMock(side_effect=RuntimeError("boom"), __name__="fail_handler")
     trigger_cls.on("error_detected", fail_handler)
 
-    for _ in range(trigger_cls._HANDLER_FAILURE_THRESHOLD):
+    for _ in range(7):
         trigger_cls.fire("error_detected", branch="DRONE")
 
-    assert (fail_handler, "DRONE") in trigger_cls._disabled_handlers
+    assert fail_handler.call_count == 7
 
-    fail_handler.reset_mock()
+
+def test_a_failing_handler_logs_once_per_interval_not_once_per_failure(trigger_cls, monkeypatch):
+    """core.log is watched: one ERROR per failure would feed the watcher its own line on every event."""
+    clock = [1000.0]
+    monkeypatch.setattr(core, "monotonic", lambda: clock[0])
+    trigger_cls.on("error_detected", MagicMock(side_effect=RuntimeError("boom"), __name__="fail_handler"))
+
+    for _ in range(4):
+        trigger_cls.fire("error_detected", branch="DRONE")
+    assert core.logger.error.call_count == 1
+
+    clock[0] += trigger_cls.FAILURE_LOG_INTERVAL_SECONDS
     trigger_cls.fire("error_detected", branch="DRONE")
-    fail_handler.assert_not_called()
+
+    assert core.logger.error.call_count == 2
+    assert "5 in a row" in core.logger.error.call_args.args[0]
 
 
-def test_handler_disabled_for_one_branch_still_fires_for_another(trigger_cls):
-    """Disabling a handler for branch A does not disable it for branch B."""
-    call_count = 0
+def test_a_failing_handler_shows_in_medic_state_and_the_manager_is_told_once(
+    trigger_cls, bus_alerts_off_the_live_state
+):
+    """Two branches failing one handler: two rows in medic state, one mail to the manager; success clears each row."""
+    failing = {"DRONE", "MEMORY"}
 
     def flaky_handler(**kwargs):
-        """Raise only when branch is DRONE."""
-        nonlocal call_count
-        call_count += 1
-        if kwargs.get("branch") == "DRONE":
-            raise RuntimeError("noisy branch")
+        if kwargs.get("branch") in failing:
+            raise RuntimeError("registry gone")
 
     trigger_cls.on("error_detected", flaky_handler)
-
-    for _ in range(trigger_cls._HANDLER_FAILURE_THRESHOLD):
+    for _ in range(3):
         trigger_cls.fire("error_detected", branch="DRONE")
+        trigger_cls.fire("error_detected", branch="MEMORY")
 
-    assert (flaky_handler, "DRONE") in trigger_cls._disabled_handlers
+    rows = medic_state.get_failing_handlers()
+    assert sorted(row["branch"] for row in rows) == ["DRONE", "MEMORY"]
+    assert all(row["handler"] == "flaky_handler" and "registry gone" in row["error"] for row in rows)
+    assert [mail["to_branch"] for mail in bus_alerts_off_the_live_state] == ["@devpulse"]
+    assert "flaky_handler" in bus_alerts_off_the_live_state[0]["subject"]
 
-    call_count = 0
+    failing.clear()
+    trigger_cls.fire("error_detected", branch="DRONE")
+    assert [row["branch"] for row in medic_state.get_failing_handlers()] == ["MEMORY"]
     trigger_cls.fire("error_detected", branch="MEMORY")
-
-    assert call_count == 1
-    assert (flaky_handler, "MEMORY") not in trigger_cls._disabled_handlers
+    assert medic_state.get_failing_handlers() == []
 
 
 def test_handler_failure_count_resets_on_success(trigger_cls):
@@ -577,9 +594,6 @@ def test_different_branches_have_independent_failure_counts(trigger_cls):
 
     assert trigger_cls._handler_failures[(fail_handler, "DRONE")] == 3
     assert trigger_cls._handler_failures[(fail_handler, "MEMORY")] == 2
-
-    assert (fail_handler, "DRONE") not in trigger_cls._disabled_handlers
-    assert (fail_handler, "MEMORY") not in trigger_cls._disabled_handlers
 
 
 def _fire_value(trigger_cls, monkeypatch, token):
