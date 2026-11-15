@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_sweep.py
 # Description: Tests for stale log sweep in log_audit
-# Version: 1.4.1
+# Version: 1.5.0
 # Created: 2026-07-10
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/logging/log_watchdog.py's sweep_stale_logs and apps/modules/log_audit.py's sweep route."""
@@ -89,12 +89,12 @@ class TestSweepIntegration:
         assert result["files_removed"] == 1
         assert not (sys_logs / "old_module.log").exists()
 
-    def test_deletes_old_branch_jsonl(self, tmp_path):
-        """Verify sweep deletes old .jsonl files from branch logs/."""
+    def test_leaves_branch_jsonl_and_its_backups_to_their_writer(self, tmp_path):
+        """A .jsonl writer rotates itself; the sweep takes only stale .log files from branch logs/."""
         eco = tmp_path / "src" / "aipass"
         branch_logs = eco / "testbranch" / "logs"
-        branch_logs.mkdir(parents=True)
-        _make_old_file(branch_logs / "ops.jsonl", 35)
+        for name in ("ops.jsonl", "ops.jsonl.1", "old.log"):
+            _make_old_file(branch_logs / name, 35)
 
         with (
             patch.object(lw, "_get_system_logs_dir", return_value=tmp_path / "system_logs"),
@@ -103,8 +103,8 @@ class TestSweepIntegration:
         ):
             result = lw.sweep_stale_logs()
 
-        assert result["files_removed"] == 1
-        assert not (branch_logs / "ops.jsonl").exists()
+        assert [row["name"] for row in result["removed"]] == ["old.log"]
+        assert sorted(p.name for p in branch_logs.iterdir()) == ["ops.jsonl", "ops.jsonl.1"]
 
     def test_keeps_fresh_files(self, tmp_path):
         """Verify sweep leaves files younger than 30 days untouched."""
@@ -142,7 +142,7 @@ class TestSweepIntegration:
         assert not (sys_logs / "module.log.1").exists()
 
     def test_deletes_every_numbered_backup(self, tmp_path):
-        """backup_count is 3, so .log.2/.log.3 and branch .jsonl.3 are swept too."""
+        """backup_count is 3, so .log.2/.log.3 are swept too; a branch .jsonl.3 is its writer's."""
         sys_logs = tmp_path / "system_logs"
         logs = tmp_path / "src" / "aipass" / "hooks" / "logs"
         for path in (sys_logs / "m.log.2", sys_logs / "m.log.3", logs / "e.jsonl.3", logs / "e.log.2"):
@@ -155,7 +155,8 @@ class TestSweepIntegration:
         ):
             result = lw.sweep_stale_logs()
 
-        assert result["files_removed"] == 4
+        assert result["files_removed"] == 3
+        assert (logs / "e.jsonl.3").exists()
 
     def test_returns_structured_summary(self, tmp_path):
         """Verify sweep returns summary with counts and reclaimed size."""
@@ -206,30 +207,8 @@ class TestSweepCommand:
         logger.info.assert_called_once_with("[log-audit] Sweep removed %d stale files", 1)
 
 
-class TestTruncateAndHome:
-    """The watchdog's truncate and the system_logs home it watches."""
-
-    def test_truncate_keeps_the_tail_and_leaves_no_temp(self, tmp_path):
-        """The last N lines survive behind a marker, written by replace, not in place."""
-        log = tmp_path / "big.log"
-        log.write_text("".join(f"line {i}\n" for i in range(50)), encoding="utf-8")
-
-        assert lw.truncate_log_file(log, keep_lines=5) == (50, 6)
-        lines = log.read_text(encoding="utf-8").splitlines()
-        assert lines[0].startswith("--- LOG TRUNCATED")
-        assert lines[1:] == [f"line {i}" for i in range(45, 50)]
-        assert [p.name for p in tmp_path.iterdir()] == ["big.log"]
-
-    def test_a_failed_write_leaves_the_log_whole(self, tmp_path, monkeypatch):
-        """A crash before the replace never leaves the log empty or short."""
-        log = tmp_path / "big.log"
-        original = "".join(f"line {i}\n" for i in range(50))
-        log.write_text(original, encoding="utf-8")
-        # A directory where the temp file goes: the write fails on every OS, root included.
-        (tmp_path / ".big.log.trunc").mkdir()
-
-        assert lw.truncate_log_file(log, keep_lines=5) == (0, 0)
-        assert log.read_text(encoding="utf-8") == original
+class TestWatchdogHome:
+    """The system_logs home the watchdog watches."""
 
     def test_system_logs_home_honours_the_test_log_dir(self, tmp_path, monkeypatch):
         """The watchdog watches where the loggers write, AIPASS_TEST_LOG_DIR included."""

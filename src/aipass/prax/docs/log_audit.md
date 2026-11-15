@@ -2,7 +2,7 @@
 
 # log_audit and log_health — size, growth, rotation
 
-Log health summaries, runaway-growth rates, truncation, and the weekly tmp sweep the daemon runs.
+Log health summaries, runaway-growth rates, the stale-log sweep, and the weekly tmp sweep the daemon runs.
 
 ---
 
@@ -10,14 +10,19 @@ Log health summaries, runaway-growth rates, truncation, and the weekly tmp sweep
 
 ```bash
 drone @prax log-audit                    # Show audit module info
-drone @prax log-audit audit              # Scan system_logs/ for health + oversized files
-drone @prax log-audit enforce            # Truncate oversized logs to 1000 lines
-drone @prax log-audit sweep              # Delete log files older than 30 days
+drone @prax log-audit audit              # Scan system_logs/ and branch logs/ for oversized files
+drone @prax log-audit sweep              # Delete .log files older than 30 days
 drone @prax log-audit --help             # Audit usage
 ```
 
 `audit` reports problems but always exits 0 — it flags unbounded and critical
 files in its output, so a health gate must read the text, not `$?`.
+
+Nothing here rewrites a log. A live file has other processes appending to it,
+so truncating it in place loses their lines; every writer rotates its own file
+(`.log` through prax's rotating handler, `.jsonl` through `append_jsonl`). The
+sweep deletes stale `*.log` and `*.log.N` only; a `.jsonl` and its backups are
+left to the writer that rotates them.
 
 ## Log Health
 

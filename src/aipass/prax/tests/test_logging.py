@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_logging.py
 # Description: Tests for prax logging subsystem
-# Version: 1.4.1
+# Version: 1.5.0
 # Created: 2026-03-29
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/logging/introspection.py and setup.py."""
@@ -14,6 +14,7 @@
 # sentry: no-test-needed(stdlib) — get_captured_loggers_count, the size of _captured_loggers
 
 import copy
+import json
 import logging
 import os
 import threading
@@ -308,7 +309,7 @@ class TestSetupExternalRouting:
         assert len(get_calls) == 0
 
     def test_a_project_system_logs_that_cannot_be_made_mutes_that_tier_and_never_raises(
-        self, mock_prax_infrastructure, monkeypatch, tmp_path, caplog
+        self, mock_prax_infrastructure, monkeypatch, tmp_path
     ):
         """An unmakeable <project>/system_logs mutes that tier; the logger call never raises."""
         project_dir = tmp_path / "Compass"
@@ -319,10 +320,9 @@ class TestSetupExternalRouting:
         monkeypatch.setattr(setup_handler, "_captured_loggers", {})
         monkeypatch.setenv("AIPASS_BRANCH_NAME", "")
 
-        with caplog.at_level(logging.ERROR, logger=setup_handler.logger.name):
-            built = setup_handler.setup_individual_logger("navigator", caller_path=str(project_dir / "nav.py"))
+        built = setup_handler.setup_individual_logger("navigator", caller_path=str(project_dir / "nav.py"))
         try:
-            failed = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Log handler failed")]
+            failed = _handler_failures(mock_prax_infrastructure)
             handler_types = [type(h) is logging.NullHandler for h in built.handlers]
             local_is_a_file = isinstance(built.handlers[1], RotatingFileHandler)
             local_file = Path(getattr(built.handlers[1], "baseFilename"))
@@ -331,8 +331,7 @@ class TestSetupExternalRouting:
                 handler.close()
                 built.removeHandler(handler)
 
-        assert len(failed) == 1
-        assert failed[0].startswith("Log handler failed for compass_navigator.log: ")
+        assert [r["file"] for r in failed] == ["compass_navigator.log"]
         assert handler_types == [True, False]
         assert local_is_a_file
         assert local_file == project_dir / "logs" / "navigator.log"
@@ -436,6 +435,13 @@ class TestSameModuleNameInTwoBranches:
         assert "captured_config" in api_local
 
 
+def _handler_failures(log_root: Path) -> list:
+    """The "Log handler failed" records on setup's trail under the test log root."""
+    trail_file = log_root / "prax" / "logs" / "setup.jsonl"
+    records = [json.loads(line) for line in trail_file.read_text(encoding="utf-8").splitlines()]
+    return [r for r in records if r["msg"] == "Log handler failed"]
+
+
 class TestAnUnwritableLogHome:
     """A logger call degrades to 'Log handler failed' over a log home it cannot make."""
 
@@ -444,23 +450,29 @@ class TestAnUnwritableLogHome:
         os.geteuid() == 0,
         reason="needs a POSIX permission bit that binds the writer",
     )
-    def test_a_first_line_over_an_unwritable_home_is_reported_and_never_raised(self, monkeypatch, tmp_path, caplog):
-        """FPLAN-0642: the first log line of a uv tool install raised Errno 13 into `aipass install`."""
-        locked = tmp_path / "locked"
-        locked.mkdir()
-        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(locked))
-        monkeypatch.setattr(setup_handler, "_captured_loggers", {})
-        locked.chmod(0o500)
-        try:
-            with caplog.at_level(logging.ERROR, logger=setup_handler.logger.name):
-                built = setup_handler.setup_individual_logger("homeless_probe", caller_branch="probe")
-                built.info("a line with nowhere to go")
-        finally:
-            locked.chmod(0o700)
+    def test_a_first_line_over_an_unwritable_home_is_reported_and_never_raised(self, monkeypatch, tmp_path):
+        """FPLAN-0642: the first log line of a uv tool install raised Errno 13 into `aipass install`.
 
-        failed = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Log handler failed")]
-        assert len(failed) == 2  # both tiers, central and local
-        assert list(locked.iterdir()) == []
+        HELD fallback (a NullHandler tier); its report rides prax's trail, whose directory stays writable here.
+        """
+        home = tmp_path / "home"
+        (home / "prax" / "logs").mkdir(parents=True)
+        (home / "system").mkdir()
+        (home / "probe").mkdir()
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(home))
+        monkeypatch.setattr(setup_handler, "_captured_loggers", {})
+        locked = (home / "system", home / "probe")
+        for d in locked:
+            d.chmod(0o500)
+        try:
+            built = setup_handler.setup_individual_logger("homeless_probe", caller_branch="probe")
+            built.info("a line with nowhere to go")
+        finally:
+            for d in locked:
+                d.chmod(0o700)
+
+        assert len(_handler_failures(home)) == 2  # both tiers, central and local
+        assert [list(d.iterdir()) for d in locked] == [[], []]
 
 
 class TestGetCallerInfo:

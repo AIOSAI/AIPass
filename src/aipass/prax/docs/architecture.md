@@ -60,7 +60,7 @@ that left branches stale does not exit 0.
 
 1. **Auto-routing** — `logger.info()` inspects the call stack to identify the caller's module, branch, and file path, then routes the log entry to the correct per-module log file.
 2. **Two-tier logging** — Each log entry goes to both `system_logs/` (central, all branches) and `<branch>/logs/` (branch-local), both with size-based rotation.
-3. **Self-healing** — Auto-creates missing log directories, falls back to `system_logs/external/` for unknown modules, provides NullLogger if prax itself fails to import.
+3. **Self-healing** — Auto-creates missing log directories, routes unknown modules to `system_logs/external/` (a line on prax's `load` trail says so). A logger chain that cannot import raises; there is no fallback logger.
 4. **Mission Control** — Four threads: display worker (pulls from event queue), file watcher (watchdog on branch `apps/` dirs), log watcher (tails `system_logs/*.log`), rate tracker (scans `system_logs/` for runaway growth every 10s). Falls back to polling when inotify is exhausted.
 5. **Multi-CLI monitoring** — Watches Claude Code JSONL and Codex JSONL session files. Extracts agent activity (thinking, tool use, responses) with model detection and branch resolution.
 6. **Runaway-log detection** — Rate tracker measures byte growth per log file, estimates lines/min from byte deltas. Sustained thresholds: WARNING (>100 lines/min for 2 min), CRITICAL (>10 lines/sec for 1 min). Fires `runaway_log_detected` on the trigger event bus. State persists to disk across process restarts. Per-file suppression available.
@@ -83,7 +83,7 @@ is reached: through drone, through `prax.py`, or by running the file directly.
 
 A gate at `args[0]` only, or a screen for `--help` but not `-h` (which survives a
 `--`-prefix filter because it carries a single dash), lets a help request run the
-command: `log_audit.py enforce -h` would truncate every oversized log. The
+command: `log_audit.py sweep -h` would delete every stale log. The
 predicate lives in `handlers/cli/help_flags.py` — pure argument inspection, no
 I/O. Its sibling `handlers/cli/arg_gate.py` answers the opposite question — "is
 this token one we do not define?" — and is described under the unknown-argument

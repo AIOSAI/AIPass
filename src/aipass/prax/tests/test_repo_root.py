@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_repo_root.py
 # Description: Repo-Root Resolution Pins
-# Version: 1.2.2
+# Version: 1.3.0
 # Created: 2026-08-31
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # Category: prax/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -27,6 +27,7 @@
 # sentry: no-test-needed(error_handling) — find_repo_root walking past an unreadable directory, covered by that row
 
 import ast
+import json
 import subprocess
 import sys
 import textwrap
@@ -111,6 +112,12 @@ def _run_without_a_working_directory(body: str, world: str = _INJECT_DEAD_CWD, m
     )
 
 
+def _trail(log_root: Path) -> list:
+    """The records on repo_root's trail under the test log root."""
+    trail_file = log_root / "prax" / "logs" / "repo_root.jsonl"
+    return [json.loads(line) for line in trail_file.read_text(encoding="utf-8").splitlines()]
+
+
 class TestSourceRoot:
     """The fallback is derived from the FILE, and nothing else."""
 
@@ -167,39 +174,40 @@ class TestFindRepoRoot:
         )
         assert resolved == repo_root_mod.find_repo_root()
 
-    def test_the_fallback_is_announced(self, tmp_path, caplog, monkeypatch):
+    def test_the_fallback_is_announced(self, tmp_path, mock_prax_infrastructure, monkeypatch):
         """A fallback nobody can see is how the next one survives."""
         monkeypatch.setattr(repo_root_mod, "_ANNOUNCED", set())
         start = tmp_path / "checkout" / "src" / "aipass" / "prax" / "a.py"
         start.parent.mkdir(parents=True)
-        with caplog.at_level("WARNING", logger=repo_root_mod.__name__):
-            repo_root_mod.find_repo_root(start)
-        assert repo_root_mod.REGISTRY_MARKER in caplog.text
+        repo_root_mod.find_repo_root(start)
+        [record] = _trail(mock_prax_infrastructure)
+        assert record["level"] == "WARNING" and repo_root_mod.REGISTRY_MARKER in record["msg"]
 
-    def test_the_announcement_is_once_per_process_not_once_per_call(self, tmp_path, caplog, monkeypatch):
+    def test_the_announcement_is_once_per_process_not_once_per_call(
+        self, tmp_path, mock_prax_infrastructure, monkeypatch
+    ):
         """A per-call warning would bury CI output: every module reaches this during import."""
         monkeypatch.setattr(repo_root_mod, "_ANNOUNCED", set())
         start = tmp_path / "checkout" / "src" / "aipass" / "prax" / "a.py"
         start.parent.mkdir(parents=True)
-        with caplog.at_level("WARNING", logger=repo_root_mod.__name__):
-            for _ in range(5):
-                repo_root_mod.find_repo_root(start)
-        assert caplog.text.count("[repo_root]") == 1
+        for _ in range(5):
+            repo_root_mod.find_repo_root(start)
+        assert len(_trail(mock_prax_infrastructure)) == 1
 
-    def test_an_installed_package_falls_back_to_the_anchor_root_without_a_warning(self, tmp_path, caplog, monkeypatch):
+    def test_an_installed_package_falls_back_to_the_anchor_root_without_a_warning(
+        self, tmp_path, mock_prax_infrastructure, monkeypatch
+    ):
         """site-packages has no registry and no src/: the anchor root is the designed answer, logged as a note."""
         monkeypatch.setattr(repo_root_mod, "_ANNOUNCED", set())
         start = tmp_path / "site-packages" / "aipass" / "prax" / "a.py"
         start.parent.mkdir(parents=True)
-        with caplog.at_level("INFO", logger=repo_root_mod.__name__):
-            resolved = repo_root_mod.find_repo_root(start)
+        resolved = repo_root_mod.find_repo_root(start)
         assert resolved == Path(start.anchor)
-        levels = [record.levelname for record in caplog.records if "[repo_root]" in record.getMessage()]
-        assert levels == ["INFO"], levels
-        assert "installed package" in caplog.text
+        [record] = _trail(mock_prax_infrastructure)
+        assert record["level"] == "INFO" and "installed package" in record["msg"]
 
-    def test_this_module_imports_nothing_from_prax(self):
-        """Imports nothing from aipass: it runs inside the construction of prax's own logger."""
+    def test_this_module_imports_only_the_trail_from_prax(self):
+        """It runs inside the construction of prax's own logger: door one is out of reach, door two is all."""
         tree = ast.parse(Path(repo_root_mod.__file__).read_text(encoding="utf-8"))
         imported = []
         for node in ast.walk(tree):
@@ -207,7 +215,7 @@ class TestFindRepoRoot:
                 imported += [alias.name for alias in node.names]
             elif isinstance(node, ast.ImportFrom) and node.module:
                 imported.append(node.module)
-        assert not [name for name in imported if name.startswith("aipass")], imported
+        assert [name for name in imported if name.startswith("aipass")] == ["aipass.prax.apps.handlers.logging.trail"]
 
 
 WORLDS = [

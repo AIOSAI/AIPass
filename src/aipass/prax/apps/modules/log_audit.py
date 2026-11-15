@@ -1,18 +1,12 @@
 # =================== AIPass ====================
 # Name: log_audit.py
 # Description: PRAX Log Audit Command
-# Version: 0.2.0
+# Version: 0.3.0
 # Created: 2026-02-26
-# Modified: 2026-10-28
+# Modified: 2026-11-15
 # =============================================
 
-"""
-PRAX Log Audit Module
-
-Implements the 'log-audit' command for system log health monitoring.
-Scans the system_logs/ directory for oversized files, reports status,
-and optionally enforces size limits by truncating bloated logs.
-"""
+"""PRAX Log Audit Module: reports oversized logs and sweeps stale ones; never truncates (writers rotate themselves)."""
 
 import sys
 from typing import List
@@ -30,13 +24,13 @@ def print_introspection():
     console.print("[bold cyan]PRAX Log Audit Module[/bold cyan]")
     console.print()
     console.print("[yellow]Purpose:[/yellow]")
-    console.print("  Monitor and enforce system log size limits")
+    console.print("  Report oversized logs and sweep stale ones")
     console.print()
 
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print()
     console.print("  [cyan]prax/handlers/logging/[/cyan]")
-    console.print("    [dim]- log_watchdog.py (scan_log_files, enforce_log_limits, log_health_summary)[/dim]")
+    console.print("    [dim]- log_watchdog.py (scan_log_files, log_health_summary, sweep_stale_logs)[/dim]")
     console.print()
 
     console.print("[dim]Run 'drone @prax log-audit --help' for usage[/dim]")
@@ -50,24 +44,20 @@ def print_help():
     console.print()
 
     console.print("[yellow]Purpose:[/yellow]")
-    console.print("  Scan system_logs/ for oversized files and enforce rotation limits")
+    console.print("  Report oversized logs in system_logs/ and branch logs/; writers rotate themselves")
     console.print()
 
     console.print("[yellow]Subcommands:[/yellow]")
     console.print()
     console.print("  [cyan]audit[/cyan]     Show log health summary + any oversized files")
-    console.print("  [cyan]enforce[/cyan]   Truncate all oversized files to 1000 lines")
-    console.print("  [cyan]sweep[/cyan]     Delete log files older than 30 days")
+    console.print("  [cyan]sweep[/cyan]     Delete .log files older than 30 days")
     console.print()
     console.print("[yellow]Usage:[/yellow]")
     console.print()
     console.print("  [dim]# Show log health summary + any oversized files[/dim]")
     console.print("  $ drone @prax log-audit audit")
     console.print()
-    console.print("  [dim]# Truncate all oversized files to 1000 lines[/dim]")
-    console.print("  $ drone @prax log-audit enforce")
-    console.print()
-    console.print("  [dim]# Delete log files older than 30 days[/dim]")
+    console.print("  [dim]# Delete .log files older than 30 days[/dim]")
     console.print("  $ drone @prax log-audit sweep")
     console.print()
 
@@ -126,25 +116,11 @@ def _display_branch_audit(files: list, summary: dict) -> None:
                 f"{f['branch']}/{f['name']}: {f['size_mb']} MB, "
                 f"{f['lines']:,} lines, {rotation}"
             )
-        console.print()
-        console.print("[dim]Run 'drone @prax log-audit enforce' to truncate[/dim]")
     console.print()
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle log-audit command
-
-    Args:
-        command: Command name
-        args: Command arguments ('enforce' to truncate)
-
-    Returns:
-        True if command was handled
-
-    Raises:
-        UnknownArgument: The subcommand is not one log-audit defines
-    """
+    """Handle `log-audit audit|sweep`; True if handled, UnknownArgument for any other subcommand."""
     if command != "log-audit":
         return False
 
@@ -152,10 +128,8 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    # A dashed help flag ANYWHERE wins — `enforce -h` asked about enforce, and
-    # answering it by truncating every oversized log is the worst possible reply.
-    # Placed after the ownership check above: prax.py tries each module in turn,
-    # so a scan at the top of the function would hijack other modules' help.
+    # A dashed help flag ANYWHERE wins (`sweep -h` must not delete); after the ownership
+    # check, since prax.py tries each module in turn.
     if wants_help(args):
         print_help()
         return True
@@ -167,8 +141,8 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     subcmd = args[0]
     usage = "drone @prax log-audit --help"
-    # A stray flag like `enforce --dry-run` must not run the real thing.
-    if subcmd in ("audit", "enforce", "sweep") and len(args) > 1:
+    # A stray flag like `sweep --dry-run` must not run the real thing.
+    if subcmd in ("audit", "sweep") and len(args) > 1:
         refuse("log-audit", args[1], usage)
     json_handler.log_operation("log_audit_executed", {"mode": subcmd})
 
@@ -187,65 +161,12 @@ def handle_command(command: str, args: List[str]) -> bool:
         _display_branch_audit(branch_files, branch_summary)
         return True
 
-    if subcmd == "enforce":
-        _run_enforce()
-        _run_branch_enforce()
-        return True
-
     if subcmd == "sweep":
         _run_sweep()
         return True
 
-    # Refused, not "handled": this printed the right words and still exited 0,
-    # so `drone @prax log-audit typo && next-step` ran next-step (devpulse's
-    # 2026-09-07 CLI sweep). The raise carries the exit code back to prax.py.
+    # Refused, not "handled": a typo that exits 0 runs `&& next-step`; the raise carries the exit code.
     refuse("log-audit", subcmd, usage)
-
-
-def _run_enforce():
-    """Execute log enforcement and display results."""
-    from aipass.prax.apps.handlers.logging.log_watchdog import enforce_log_limits
-
-    console.print("\n[bold cyan]Enforcing log limits...[/bold cyan]")
-    actions = enforce_log_limits()
-
-    if not actions:
-        console.print("[green]All logs within limits — nothing to truncate[/green]\n")
-        return
-
-    for action in actions:
-        if action["truncated"]:
-            console.print(
-                f"  [yellow]TRUNCATED[/yellow] {action['name']}: "
-                f"{action['original_lines']:,} → {action['new_lines']:,} lines"
-            )
-        else:
-            console.print(f"  [green]OK[/green] {action['name']}: within limits")
-    console.print()
-    logger.info("[log-audit] Enforced limits on %d files", len(actions))
-
-
-def _run_branch_enforce():
-    """Execute branch log enforcement and display results."""
-    from aipass.prax.apps.handlers.logging.log_watchdog import enforce_branch_log_limits
-
-    console.print("[bold cyan]Enforcing branch log limits...[/bold cyan]")
-    actions = enforce_branch_log_limits()
-
-    if not actions:
-        console.print("[green]All branch logs within limits — nothing to truncate[/green]\n")
-        return
-
-    for action in actions:
-        if action["truncated"]:
-            console.print(
-                f"  [red]TRUNCATED[/red] {action['branch']}/{action['name']}: "
-                f"{action['size_mb']} MB, {action['original_lines']:,} → {action['new_lines']:,} lines"
-            )
-        else:
-            console.print(f"  [green]OK[/green] {action['branch']}/{action['name']}: within limits")
-    console.print()
-    logger.info("[log-audit] Enforced branch log limits on %d files", len(actions))
 
 
 def _run_sweep():

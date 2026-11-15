@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: load.py
 # Description: Load Logging Configuration Handler
-# Version: 1.5.2
+# Version: 1.6.0
 # Created: 2025-11-07
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -11,16 +11,17 @@ Load Logging Configuration Handler
 """
 
 import json
-import logging
 import os
 import sys
 import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional, Union
 
+from aipass.prax.apps.handlers.logging.trail import PraxTrail
 from aipass.prax.apps.handlers.repo_root import find_repo_root
 
-logger = logging.getLogger(__name__)
+# The trail, never door one: this module resolves the paths door one is built on.
+logger = PraxTrail("load")
 
 MODULE_NAME = "load"
 
@@ -76,22 +77,12 @@ def get_system_logs_dir() -> Path:
 
 
 def _warn_routing(module_name: str, destination: object) -> None:
-    """Log routing warning when a module's log path falls outside ECOSYSTEM_ROOT."""
-    try:
-        from aipass.prax.apps.modules.logger import get_direct_logger
-
-        get_direct_logger().warning(
-            "[get_module_logs_dir] '%s' not in ECOSYSTEM_ROOT; routing to %s",
-            module_name,
-            destination,
-        )
-    except Exception as e:
-        logger.warning(
-            "[get_module_logs_dir] '%s' routing to %s (logger unavailable: %s)",
-            module_name,
-            destination,
-            e,
-        )
+    """Record, on load's trail, that a module's logs were routed outside ECOSYSTEM_ROOT."""
+    logger.warning(
+        "[get_module_logs_dir] module not in ECOSYSTEM_ROOT; logs routed away",
+        module=module_name,
+        destination=str(destination),
+    )
 
 
 _PSEUDO_FILENAME = ("<", ">")
@@ -180,7 +171,7 @@ def get_module_logs_dir(module_name: Optional[str] = None, branch_dir: Optional[
 
 PRAX_LOGGER_CONFIG_FILE = PRAX_JSON_DIR / "prax_logger_config.json"
 
-LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+LOG_FORMAT = "%(asctime)s | %(name)s | %(levelname)s | %(message)s"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 DEFAULT_LOG_LEVEL = "INFO"
 
@@ -189,7 +180,8 @@ DEFAULT_SYSTEM_LOGS = {"max_lines": 1000, "backup_count": 3, "log_level": "INFO"
 
 DEFAULT_LOCAL_LOGS = {"max_lines": 250, "backup_count": 3, "log_level": "INFO"}
 
-LOG_LEVEL_NAMES = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+LOG_LEVEL_NUMBERS = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40, "CRITICAL": 50}
+LOG_LEVEL_NAMES = tuple(LOG_LEVEL_NUMBERS)
 
 # Set before the process starts: levels bind when a logger is created, not per call.
 LOG_LEVEL_ENV = "AIPASS_LOG_LEVEL"
@@ -223,21 +215,19 @@ def resolve_log_level(configured: Any = None) -> Any:
         if key not in _bad_level_warned:
             _bad_level_warned.add(key)
             logger.warning(
-                "[config] %s is not a log level (%s) — using %s. Valid: %s",
-                candidate,
-                source,
-                DEFAULT_LOG_LEVEL,
-                ", ".join(LOG_LEVEL_NAMES),
+                f"[config] {candidate} is not a log level ({source}) — using {DEFAULT_LOG_LEVEL}",
+                value=str(candidate),
+                source=source,
+                valid=list(LOG_LEVEL_NAMES),
             )
     return DEFAULT_LOG_LEVEL
 
 
 def level_to_int(level: Any) -> int:
-    """Convert a resolved log level to its numeric value for comparison."""
+    """Convert a resolved log level to its numeric value for comparison; an unknown name raises KeyError."""
     if isinstance(level, int) and not isinstance(level, bool):
         return level
-    numeric = logging.getLevelName(str(level).strip().upper())
-    return numeric if isinstance(numeric, int) else logging.INFO
+    return LOG_LEVEL_NUMBERS[str(level).strip().upper()]
 
 
 def _as_dict(value: Any) -> Dict[str, Any]:
@@ -260,12 +250,11 @@ def load_log_config() -> Dict[str, Any]:
                 if missing and not _config_schema_warned:
                     _config_schema_warned = True
                     logger.warning(
-                        "[config] %s has no %s section — those settings are IGNORED, "
-                        "using code defaults (system: %s, local: %s)",
-                        PRAX_LOGGER_CONFIG_FILE.name,
-                        " or ".join(missing),
-                        DEFAULT_SYSTEM_LOGS,
-                        DEFAULT_LOCAL_LOGS,
+                        "[config] a log section is missing — its settings are IGNORED, using code defaults",
+                        file=PRAX_LOGGER_CONFIG_FILE.name,
+                        missing=" or ".join(missing),
+                        system_defaults=DEFAULT_SYSTEM_LOGS,
+                        local_defaults=DEFAULT_LOCAL_LOGS,
                     )
 
                 system_logs = {**DEFAULT_SYSTEM_LOGS, **_as_dict(section.get("system_logs"))}
@@ -280,7 +269,11 @@ def load_log_config() -> Dict[str, Any]:
                 return result
     except (json.JSONDecodeError, OSError) as e:
         # Not a raise: this runs inside every logger call fleet-wide, the hooks' included.
-        logger.error(f"[config] {PRAX_LOGGER_CONFIG_FILE} is unreadable, its settings are IGNORED until fixed: {e}")
+        logger.error(
+            "[config] the logger config is unreadable, its settings are IGNORED until fixed",
+            file=str(PRAX_LOGGER_CONFIG_FILE),
+            error=str(e),
+        )
 
     return {
         "system_logs": DEFAULT_SYSTEM_LOGS,

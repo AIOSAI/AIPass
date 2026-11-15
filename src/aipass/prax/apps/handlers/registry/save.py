@@ -1,15 +1,14 @@
 # =================== AIPass ====================
 # Name: save.py
 # Description: Save Module Registry Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2025-11-07
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """Save Module Registry Handler"""
 
 import json
-import logging
 import os
 import tempfile
 from datetime import datetime, timezone
@@ -19,8 +18,9 @@ from typing import Dict, Any, Optional
 from aipass.prax.apps.handlers.config.load import ECOSYSTEM_ROOT
 from aipass.prax.apps.handlers.registry.load import PRAX_JSON_DIR, REGISTRY_FILE
 from aipass.prax.apps.handlers.json import json_handler
+from aipass.prax.apps.handlers.logging.trail import PraxTrail
 
-logger = logging.getLogger(__name__)
+logger = PraxTrail("registry_save")
 
 MODULE_NAME = "save"
 
@@ -33,7 +33,7 @@ def _existing_last_scan() -> Optional[Dict[str, Any]]:
         with open(REGISTRY_FILE, "r", encoding="utf-8") as handle:
             existing = json.load(handle)
     except (OSError, ValueError) as exc:
-        logger.debug("save: no previous last_scan to carry over (%s)", exc)
+        logger.debug("save: no previous last_scan to carry over", error=str(exc))
         return None
     block = existing.get("last_scan") if isinstance(existing, dict) else None
     return block if isinstance(block, dict) else None
@@ -54,7 +54,7 @@ def _atomic_write(json_path: Path, content: str) -> None:
         try:
             os.unlink(tmp_path)
         except OSError as cleanup_err:
-            logger.warning("save: temp file cleanup failed for '%s': %s", tmp_path, cleanup_err)
+            logger.warning("save: temp file cleanup failed", path=tmp_path, error=str(cleanup_err))
         raise
 
 
@@ -90,5 +90,5 @@ def save_module_registry(modules: Dict[str, Dict[str, Any]], scan_stats: Optiona
         return True
 
     except Exception as e:
-        logger.error("save: failed to save module registry to '%s': %s", REGISTRY_FILE, e)
+        logger.error("save: failed to save the module registry", file=str(REGISTRY_FILE), error=str(e))
         return False

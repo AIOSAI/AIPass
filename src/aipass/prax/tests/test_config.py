@@ -1,15 +1,14 @@
 # =================== AIPass ====================
 # Name: test_config.py
 # Description: Tests for prax config handlers (load + ignore_patterns)
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-03-29
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/config/load.py and apps/handlers/config/ignore_patterns.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(stderr_routing) — _warn_routing's warning when a log is routed away, covered by that row
 
 import json
 import os
@@ -21,6 +20,7 @@ import pytest
 from aipass.prax.apps.handlers.config import ignore_patterns as ip_mod
 from aipass.prax.apps.handlers.config import load as load_mod
 from aipass.prax.apps.handlers.json import json_service
+from aipass.prax.apps.modules import logger as logger_module
 
 
 def _patch_load_world(monkeypatch, tmp_path):
@@ -57,8 +57,6 @@ def _patch_load_world(monkeypatch, tmp_path):
     # every consultation is recorded, so a test can show the product asked.
     consulted: list = []
     monkeypatch.setattr(load_mod, "_is_pytest_session", lambda: consulted.append(True) or False)
-    # With detection off, the routing warning's direct logger resolves the live prax/logs by branch dir.
-    monkeypatch.setattr(load_mod, "_warn_routing", lambda *a: None)
     return consulted
 
 
@@ -190,7 +188,6 @@ class TestGetModuleLogsDir:
     ):
         _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.setattr(load_mod, "_find_repo_root", lambda: tmp_path)
-        # The warning goes to a non-propagating direct logger, out of caplog's reach.
         warned = []
         monkeypatch.setattr(load_mod, "_warn_routing", lambda *a: warned.append(a))
         branch = tmp_path / "projects" / "hark" / "src" / "hark" / "hark"
@@ -199,6 +196,28 @@ class TestGetModuleLogsDir:
         assert result.is_dir()
         assert not (tmp_path / "system_logs" / "external" / "hark").exists()
         assert warned == []
+
+    def test_routing_away_is_a_trail_line_and_never_imports_door_one(
+        self, mock_prax_infrastructure, monkeypatch, tmp_path
+    ):
+        """A path primitive must not import the logger it is building: the fact goes to load's trail."""
+        _patch_load_world(monkeypatch, tmp_path)
+        monkeypatch.setattr(load_mod, "_find_repo_root", lambda: tmp_path)
+        monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+        door_one = MagicMock()
+        monkeypatch.setattr(logger_module, "get_direct_logger", door_one)
+
+        load_mod.get_module_logs_dir("stranger")
+
+        door_one.assert_not_called()
+
+        trail_file = mock_prax_infrastructure / "prax" / "logs" / "load.jsonl"
+        [record] = [json.loads(line) for line in trail_file.read_text(encoding="utf-8").splitlines()]
+        assert (record["level"], record["module"], record["destination"]) == (
+            "WARNING",
+            "stranger",
+            "system_logs/external/",
+        )
 
     def test_unknown_module_routes_to_system_logs_external(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Unknown modules must NOT create dirs in ECOSYSTEM_ROOT (log-leak regression)."""
@@ -424,6 +443,14 @@ class TestLoadLogConfig:
         assert "asctime" in result["log_format"]
         assert "%Y-%m-%d" in result["date_format"]
 
+    def test_the_default_format_is_the_pipe_form_a_configured_seat_logs(
+        self, mock_prax_infrastructure, monkeypatch, tmp_path
+    ):
+        """A fresh clone has no git-ignored config, so the default must log what this machine logs."""
+        _patch_load_world(monkeypatch, tmp_path)
+
+        assert load_mod.load_log_config()["log_format"] == "%(asctime)s | %(name)s | %(levelname)s | %(message)s"
+
     def test_defaults_keep_three_backups(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         # Retained history scales with backup_count, so this number IS the
         # forensic window: 1 -> 3 triples the floor and doubles the ceiling.
@@ -446,7 +473,7 @@ class TestLoadLogConfig:
         assert result["system_logs"] == load_mod.DEFAULT_SYSTEM_LOGS
         assert result["local_logs"] == load_mod.DEFAULT_LOCAL_LOGS
         mock_logger.warning.assert_called_once()
-        assert mock_logger.warning.call_args[0][2] == "system_logs or local_logs"
+        assert mock_logger.warning.call_args.kwargs["missing"] == "system_logs or local_logs"
 
     def test_warning_names_only_the_missing_section(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         _patch_load_world(monkeypatch, tmp_path)
@@ -460,7 +487,7 @@ class TestLoadLogConfig:
         load_mod.load_log_config()
 
         mock_logger.warning.assert_called_once()
-        assert mock_logger.warning.call_args[0][2] == "local_logs"
+        assert mock_logger.warning.call_args.kwargs["missing"] == "local_logs"
 
     def test_schema_warning_fires_once_per_process(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         # Every logger init fleet-wide calls this, and prax's own log sits in the
@@ -554,14 +581,15 @@ class TestLoadIgnorePatternsFromConfig:
         result = ip_mod.load_ignore_patterns_from_config()
         assert result == ip_mod.DEFAULT_IGNORE_FOLDERS
 
-    def test_falls_back_on_invalid_json(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+    def test_invalid_json_raises(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        """No fallback: a broken config is an error, never a silent switch to the defaults."""
         _patch_ignore_world(monkeypatch, tmp_path)
         config_file = ip_mod.PRAX_LOGGER_CONFIG_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text("{broken json", encoding="utf-8")
 
-        result = ip_mod.load_ignore_patterns_from_config()
-        assert result == ip_mod.DEFAULT_IGNORE_FOLDERS
+        with pytest.raises(json.JSONDecodeError):
+            ip_mod.load_ignore_patterns_from_config()
 
     def test_falls_back_on_missing_config_key(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         _patch_ignore_world(monkeypatch, tmp_path)
@@ -627,7 +655,7 @@ class TestResolveLogLevel:
         _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.delenv(load_mod.LOG_LEVEL_ENV, raising=False)
         warnings = []
-        monkeypatch.setattr(load_mod.logger, "warning", lambda msg, *a: warnings.append(msg % a))
+        monkeypatch.setattr(load_mod.logger, "warning", lambda msg, **f: warnings.append(f"{msg} {f}"))
 
         load_mod.resolve_log_level("LOUD")
 
@@ -639,7 +667,7 @@ class TestResolveLogLevel:
         _patch_load_world(monkeypatch, tmp_path)
         monkeypatch.delenv(load_mod.LOG_LEVEL_ENV, raising=False)
         warnings = []
-        monkeypatch.setattr(load_mod.logger, "warning", lambda msg, *a: warnings.append(msg % a))
+        monkeypatch.setattr(load_mod.logger, "warning", lambda msg, **f: warnings.append(f"{msg} {f}"))
 
         for _ in range(5):
             load_mod.resolve_log_level("LOUD")
@@ -668,10 +696,12 @@ class TestLevelToInt:
 
         assert load_mod.level_to_int(10) == 10
 
-    def test_unknown_name_reads_as_info(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+    def test_an_unknown_name_raises(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        """No fallback to INFO: resolve_log_level hands this only names it knows, so another is a bug."""
         _patch_load_world(monkeypatch, tmp_path)
 
-        assert load_mod.level_to_int("NONSENSE") == 20
+        with pytest.raises(KeyError):
+            load_mod.level_to_int("NONSENSE")
 
     def test_debug_is_more_permissive_than_info(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """min() over the two tiers must pick DEBUG — the property setup.py relies on."""

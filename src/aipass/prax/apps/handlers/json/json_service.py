@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_service.py
 # Description: The fleet's one JSON handler service (prax-owned)
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-09-03
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """The fleet's one JSON handler implementation (DPLAN-0325).
@@ -13,7 +13,6 @@ Reference: docs/json_service.md
 
 import itertools
 import json
-import logging
 import os
 import stat
 import sys
@@ -21,7 +20,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-logger = logging.getLogger("aipass.prax.json")
+from aipass.prax.apps.handlers.logging.trail import PraxTrail
+
+# The trail, never door one: every branch's logger build reaches this service.
+logger = PraxTrail("json_service")
 
 JSON_TYPES = ("config", "data", "log")
 DEFAULT_MAX_LOG_ENTRIES = 100
@@ -71,9 +73,9 @@ def _current_mode(file_path: Path) -> Optional[int]:
         return None
     except OSError as exc:
         logger.warning(
-            "json_service: cannot read the current mode of '%s' (%s) — writing it as a new document",
-            file_path,
-            exc,
+            "json_service: cannot read the current mode — writing it as a new document",
+            path=str(file_path),
+            error=str(exc),
         )
         return None
 
@@ -128,9 +130,9 @@ def _sweep_orphans(directory: Path) -> None:
                 if orphan.stat().st_mtime < cutoff:
                     orphan.unlink()
             except OSError as exc:
-                logger.info("json_service: orphan sweep skipped '%s': %s", orphan, exc)
+                logger.info("json_service: orphan sweep skipped a file", path=str(orphan), error=str(exc))
     except OSError as exc:
-        logger.info("json_service: orphan sweep of '%s' failed: %s", directory, exc)
+        logger.info("json_service: orphan sweep failed", path=str(directory), error=str(exc))
 
 
 def _discard(temp_path: str) -> None:
@@ -140,7 +142,7 @@ def _discard(temp_path: str) -> None:
     try:
         os.unlink(temp_path)
     except OSError as exc:
-        logger.warning("json_service: temp cleanup failed for '%s': %s", temp_path, exc)
+        logger.warning("json_service: temp cleanup failed", path=temp_path, error=str(exc))
 
 
 def _get_caller_module_name() -> str:
@@ -197,7 +199,7 @@ class JsonHandle:
         except FileNotFoundError:
             return None
         except (OSError, ValueError) as exc:
-            logger.warning("json_service: unreadable document '%s': %s", file_path, exc)
+            logger.warning("json_service: unreadable document", path=str(file_path), error=str(exc))
             return None
 
     def write_json(self, file_path: Path, data: Any, indent: int = 2) -> bool:
@@ -211,7 +213,7 @@ class JsonHandle:
         try:
             file_path.parent.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
-            logger.warning("json_service: cannot create '%s': %s", file_path.parent, exc)
+            logger.warning("json_service: cannot create the directory", path=str(file_path.parent), error=str(exc))
             return False
 
         content = json.dumps(data, indent=indent, ensure_ascii=False, allow_nan=False)
@@ -222,7 +224,7 @@ class JsonHandle:
             os.replace(temp_path, str(file_path))
             return True
         except OSError as exc:
-            logger.warning("json_service: write failed for '%s': %s", file_path, exc)
+            logger.warning("json_service: write failed", path=str(file_path), error=str(exc))
             _discard(temp_path)
             return False
 
@@ -260,7 +262,7 @@ class JsonHandle:
         try:
             json_path.parent.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
-            logger.warning("json_service: cannot create '%s': %s", json_path.parent, exc)
+            logger.warning("json_service: cannot create the directory", path=str(json_path.parent), error=str(exc))
             return False
 
         existing = self.read_json(json_path)
@@ -274,7 +276,11 @@ class JsonHandle:
                 return self.write_json(json_path, existing)
             except (TypeError, ValueError) as exc:
                 # json.load accepts NaN the writer refuses; the heal never destroys keys to write.
-                logger.warning("json_service: cannot heal '%s' without losing its keys: %s", json_path, exc)
+                logger.warning(
+                    "json_service: cannot heal the document without losing its keys",
+                    path=str(json_path),
+                    error=str(exc),
+                )
                 return False
 
         if existing is not None or json_path.exists():
@@ -348,10 +354,12 @@ class JsonHandle:
 
             logged = self.save_json(module_name, "log", log)
         except InvalidDocument as exc:
-            logger.error("json_service: log_operation('%s') refused for '%s': %s", operation, module_name, exc)
+            logger.error("json_service: log_operation refused", operation=operation, module=module_name, error=str(exc))
             return False
         except (OSError, TypeError, ValueError) as exc:
-            logger.warning("json_service: log_operation('%s') failed for '%s': %s", operation, module_name, exc)
+            logger.warning(
+                "json_service: log_operation failed", operation=operation, module=module_name, error=str(exc)
+            )
             return False
 
         self._bump_data(module_name, operation)
@@ -381,10 +389,10 @@ class JsonHandle:
             self.save_json(module_name, "data", document)
         except (OSError, TypeError, ValueError) as exc:
             logger.warning(
-                "json_service: data bump after '%s' failed for '%s' — the log entry landed, the count did not: %s",
-                operation,
-                module_name,
-                exc,
+                "json_service: data bump failed — the log entry landed, the count did not",
+                operation=operation,
+                module=module_name,
+                error=str(exc),
             )
 
     def _max_log_entries(self, module_name: str) -> int:

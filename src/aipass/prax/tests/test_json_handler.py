@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_json_handler.py
 # Description: Tests for the fleet json service through prax's own shim
-# Version: 2.2.0
+# Version: 2.3.0
 # Created: 2026-03-28
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/json/json_handler.py and apps/handlers/json/json_service.py."""
@@ -14,7 +14,6 @@
 # sentry: no-test-needed(json_handler) — that json_handler.py binds byte-identically fleet-wide
 
 import json
-import logging
 import os
 import stat
 from datetime import date
@@ -642,9 +641,9 @@ class TestEveryLogWriteBumpsTheDataLeg:
         ],
         ids=["writefailed", "invaliddocument", "typeerror"],
     )
-    def test_a_failed_bump_never_breaks_the_log(self, handle, sandbox, monkeypatch, caplog, failure):
+    def test_a_failed_bump_never_breaks_the_log(self, handle, sandbox, monkeypatch, tmp_path, failure):
         """Telemetry on the monitor's threads: the log entry already landed, so
-        the answer stays the log's own True and the failure is a warning."""
+        the answer stays the log's own True and the failure is a warning on prax's trail."""
         real_save = handle.save_json
 
         def refuse_the_data(module_name, json_type, data):
@@ -654,19 +653,15 @@ class TestEveryLogWriteBumpsTheDataLeg:
 
         monkeypatch.setattr(handle, "save_json", refuse_the_data)
 
-        with caplog.at_level(logging.WARNING, logger=json_service.logger.name):
-            answer = handle.log_operation("survives", module_name="fragile")
+        answer = handle.log_operation("survives", module_name="fragile")
 
         assert answer is True
         entries = json.loads((sandbox / "fragile_log.json").read_text(encoding="utf-8"))
         assert [entry["operation"] for entry in entries] == ["survives"]
         assert "operations_total" not in _read_data(sandbox, "fragile")
-        warned = [
-            record.getMessage()
-            for record in caplog.records
-            if record.name == json_service.logger.name and record.levelno == logging.WARNING
-        ]
-        assert any("fragile" in message and str(failure) in message for message in warned), warned
+        trail_file = tmp_path / "prax" / "logs" / "json_service.jsonl"
+        warned = [json.loads(line) for line in trail_file.read_text(encoding="utf-8").splitlines()]
+        assert [(r["level"], r["module"], r["error"]) for r in warned] == [("WARNING", "fragile", str(failure))]
 
 
 class TestRateTrackerKeepsKeysItDoesNotOwn:

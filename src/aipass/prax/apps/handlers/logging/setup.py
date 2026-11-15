@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: setup.py
 # Description: Logger Setup & Management
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2025-11-10
-# Modified: 2026-10-29
+# Modified: 2026-11-15
 # =============================================
 
 """PRAX Logger Setup"""
@@ -11,12 +11,9 @@
 import logging
 import os
 import threading
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable, Dict, Iterator, Optional
+from typing import Callable, Dict, Optional
 from logging.handlers import RotatingFileHandler
-
-import fcntl
 
 from aipass.prax.apps.handlers.config.load import (
     get_system_logs_dir,
@@ -27,27 +24,21 @@ from aipass.prax.apps.handlers.config.load import (
     resolve_log_level,
 )
 
+from aipass.prax.apps.handlers.logging.jsonl_writer import rotation_lock
+from aipass.prax.apps.handlers.logging.trail import PraxTrail
 from aipass.prax.apps.handlers.logging.introspection import (
     get_calling_module_path,
     detect_branch_from_path,
     detect_external_project,
 )
 
-
-logger = logging.getLogger(__name__)
+# stdlib builds door one here; this file's own diagnostics ride prax's trail.
+logger = PraxTrail("setup")
 _captured_loggers: Dict[str, logging.Logger] = {}
 _captured_loggers_lock = threading.Lock()
 # Held across a whole logger build, not just the cache read: two racing builds would each
 # open handlers on the same files. Re-entrant because a build can log through prax on its own thread.
 _logger_build_lock = threading.RLock()
-
-
-@contextmanager
-def rotation_lock(path: Path) -> Iterator[None]:
-    """Exclusive cross-process lock on '<path>.lock' while a file rotates."""
-    with open(f"{path}.lock", "a", encoding="utf-8") as lock_file:
-        fcntl.flock(lock_file, fcntl.LOCK_EX)
-        yield
 
 
 class SafeRotatingFileHandler(RotatingFileHandler):
@@ -88,7 +79,7 @@ class SafeRotatingFileHandler(RotatingFileHandler):
                     super().doRollover()
         except OSError as exc:
             # A failed rotation keeps writing to the current file.
-            logger.warning("Log rotation skipped (file locked): %s", exc)
+            logger.warning("Log rotation skipped (file locked)", file=self.baseFilename, error=str(exc))
 
 
 def _safe_rotating_handler(log_file: Path, max_bytes: int, backup_count: int) -> logging.Handler:
@@ -99,7 +90,7 @@ def _safe_rotating_handler(log_file: Path, max_bytes: int, backup_count: int) ->
             parent.mkdir(parents=True, exist_ok=True)
         return SafeRotatingFileHandler(log_file, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8")
     except OSError as e:
-        logger.error("Log handler failed for %s: %s", log_file, e)
+        logger.error("Log handler failed", file=str(log_file), error=str(e))
         return logging.NullHandler()
 
 
@@ -112,7 +103,7 @@ def _tier_handler(resolve_dir: Callable[[], Path], filename: str, max_bytes: int
     try:
         log_dir = resolve_dir()
     except (OSError, RuntimeError) as e:  # RuntimeError: Path.home() with no home to find
-        logger.error("Log handler failed for %s: %s", filename, e)
+        logger.error("Log handler failed", file=filename, error=str(e))
         return logging.NullHandler()
     return _safe_rotating_handler(log_dir / filename, max_bytes, backup_count)
 

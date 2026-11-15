@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_help_flag_safety.py
 # Description: A help probe must never execute the thing it asks about
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-13
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/log_audit.py, log_health.py, monitor.py and apps/handlers/cli/help_flags.py."""
@@ -12,7 +12,7 @@
 # only at position 0 (branch names, log filenames and grep patterns are free text).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(through_the_command) — log_audit.py's enforce and sweep, covered by tests/test_log_audit.py
+# sentry: no-test-needed(through_the_command) — log_audit.py's sweep, covered by tests/test_log_audit.py
 # sentry: no-test-needed(through_the_command) — monitor.py's run dispatch, covered by tests/test_monitor_module.py
 
 import contextlib
@@ -69,8 +69,7 @@ def _load(module_path: str):
 
 # Each case's FIRST arg is a real, destructive subcommand; the flag hides behind it.
 DESTRUCTIVE_CASES = [
-    ("log-audit", LOG_AUDIT_PATH, ["enforce", "--help"]),
-    ("log-audit", LOG_AUDIT_PATH, ["enforce", "-h"]),
+    ("log-audit", LOG_AUDIT_PATH, ["sweep", "--help"]),
     ("log-audit", LOG_AUDIT_PATH, ["sweep", "-h"]),
     ("log-health", LOG_HEALTH_PATH, ["scan", "--help"]),
     ("log-health", LOG_HEALTH_PATH, ["scan", "-h"]),
@@ -80,12 +79,10 @@ DESTRUCTIVE_CASES = [
 ]
 
 
-# Every doing entry point, stubbed so a red run cannot truncate a log or start a
+# Every doing entry point, stubbed so a red run cannot delete a log or start a
 # live monitor (that hangs the suite).
 EXECUTION_TARGETS = {
     LOG_AUDIT_PATH: [
-        (None, "_run_enforce"),
-        (None, "_run_branch_enforce"),
         (None, "_run_sweep"),
         (None, "_display_audit"),
         (WATCHDOG_PATH, "scan_log_files"),
@@ -124,12 +121,12 @@ class TestHelpNeverExecutes:
         ran = [name for name, mock in mocks.items() if mock.call_count]
         assert not ran, f"{command} {args} executed {ran} while asking for help"
 
-    def test_enforce_with_trailing_dash_h_does_not_truncate(self):
-        """The live damage: -h survived the --prefix filter and truncated logs."""
+    def test_sweep_with_trailing_dash_h_does_not_delete(self):
+        """The live damage: -h survived the --prefix filter and ran the destructive verb."""
         mod = _load(LOG_AUDIT_PATH)
-        with patch.object(mod, "print_help"), patch.object(mod, "_run_enforce") as enforce:
-            mod.handle_command("log-audit", ["enforce", "-h"])
-        assert enforce.call_count == 0
+        with patch.object(mod, "print_help"), patch.object(mod, "_run_sweep") as sweep:
+            mod.handle_command("log-audit", ["sweep", "-h"])
+        assert sweep.call_count == 0
 
     def test_run_with_trailing_dash_h_does_not_start_a_monitor(self):
         """The other live one: a help probe must never start or stop a monitor."""

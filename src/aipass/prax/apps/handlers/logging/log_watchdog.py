@@ -1,33 +1,28 @@
 # =================== AIPass ====================
 # Name: log_watchdog.py
 # Description: System Log Size Watchdog
-# Version: 0.2.0
+# Version: 0.3.0
 # Created: 2026-02-26
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """System Log Size Watchdog
 
-Scans system_logs/ (scan_log_files) and src/aipass/*/logs/ (scan_branch_log_files);
-audit reports oversized files, enforce truncates them to the last max_lines. The safety
-net for writers that bypass PRAX's RotatingFileHandler (raw open("a") .jsonl appenders,
-plain FileHandler bots), whose unbounded growth can take the system down.
+Scans system_logs/ (scan_log_files) and src/aipass/*/logs/ (scan_branch_log_files) and
+reports oversized files; it never rewrites one. A live file has other processes appending
+to it, so truncating it loses their lines: writers rotate themselves.
 """
 
-import logging
-import os
-import sys
 import time
-from collections import deque
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from aipass.prax.apps.handlers.config.load import get_system_logs_dir
 from aipass.prax.apps.handlers.json import json_handler
+from aipass.prax.apps.handlers.logging.trail import PraxTrail
 from aipass.prax.apps.handlers.repo_root import find_repo_root
 
-logger = logging.getLogger(__name__)
+logger = PraxTrail("log_watchdog")
 
 
 def _find_repo_root() -> Path:
@@ -45,13 +40,11 @@ def _get_system_logs_dir() -> Path:
 
 
 WARN_THRESHOLD_LINES = 5000  # Fire warning at this line count
-DEFAULT_MAX_LINES = 1000  # Truncate to this many lines (matches prax config)
 CRITICAL_THRESHOLD_LINES = 10000  # Immediate action recommended
 
 # Branch logs are size-based: that catches .jsonl and unrotated .log files.
 BRANCH_WARN_SIZE_MB = 1.0
 BRANCH_CRITICAL_SIZE_MB = 10.0
-BRANCH_DEFAULT_MAX_LINES = 5000
 
 SWEEP_MAX_AGE_DAYS = 30
 
@@ -62,7 +55,7 @@ def _count_lines(filepath: Path) -> int:
         with open(filepath, "rb") as f:
             return sum(1 for _ in f)
     except OSError as e:
-        logger.info("Failed to count lines in %s: %s", filepath, e)
+        logger.info("Failed to count lines", path=str(filepath), error=str(e))
         return 0
 
 
@@ -71,7 +64,7 @@ def _get_file_size_kb(filepath: Path) -> float:
     try:
         return filepath.stat().st_size / 1024.0
     except OSError as e:
-        logger.info("Failed to stat file %s: %s", filepath, e)
+        logger.info("Failed to stat file", path=str(filepath), error=str(e))
         return 0.0
 
 
@@ -112,58 +105,6 @@ def scan_log_files() -> List[Dict[str, Any]]:
 def get_oversized_files(threshold: int = WARN_THRESHOLD_LINES) -> List[Dict[str, Any]]:
     """Get only files exceeding the threshold."""
     return [f for f in scan_log_files() if f["lines"] >= threshold]
-
-
-def truncate_log_file(filepath: Path, keep_lines: int = DEFAULT_MAX_LINES) -> Tuple[int, int]:
-    """Truncate a log file to keep only the last N lines."""
-    filepath = Path(filepath)
-    try:
-        original_count = 0
-        kept_lines: deque = deque(maxlen=keep_lines)
-        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
-            for line in f:
-                original_count += 1
-                kept_lines.append(line)
-
-        if original_count <= keep_lines:
-            return original_count, original_count
-
-        marker = (
-            f"--- LOG TRUNCATED by PRAX watchdog at {datetime.now().isoformat()} "
-            f"| was {original_count} lines, kept last {keep_lines} ---\n"
-        )
-
-        # Sibling temp + replace: a crash mid-write never leaves the log empty; a leftover is overwritten next run.
-        tmp_path = filepath.with_name(f".{filepath.name}.trunc")
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            f.write(marker)
-            f.writelines(kept_lines)
-        os.replace(tmp_path, filepath)
-
-        return original_count, keep_lines + 1  # +1 for marker line
-
-    except OSError as e:
-        logger.warning("Failed to truncate log file %s: %s", filepath, e)
-        return 0, 0
-
-
-def enforce_log_limits(
-    max_lines: int = DEFAULT_MAX_LINES, threshold: int = WARN_THRESHOLD_LINES
-) -> List[Dict[str, Any]]:
-    """Scan and truncate all oversized log files."""
-    actions: List[Dict[str, Any]] = []
-
-    oversized = get_oversized_files(threshold)
-
-    for file_info in oversized:
-        filepath = Path(file_info["path"])
-        original, new = truncate_log_file(filepath, max_lines)
-
-        actions.append(
-            {"name": file_info["name"], "original_lines": original, "new_lines": new, "truncated": original != new}
-        )
-
-    return actions
 
 
 def log_health_summary(files: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
@@ -254,35 +195,6 @@ def scan_branch_log_files() -> List[Dict[str, Any]]:
     return results
 
 
-def get_oversized_branch_files() -> List[Dict[str, Any]]:
-    """Get branch log files exceeding size thresholds."""
-    return [f for f in scan_branch_log_files() if f["status"] != "ok"]
-
-
-def enforce_branch_log_limits(
-    max_lines: int = BRANCH_DEFAULT_MAX_LINES,
-) -> List[Dict[str, Any]]:
-    """Truncate oversized branch log files (including .jsonl)."""
-    actions: List[Dict[str, Any]] = []
-
-    for file_info in get_oversized_branch_files():
-        filepath = Path(file_info["path"])
-        original, new = truncate_log_file(filepath, max_lines)
-
-        actions.append(
-            {
-                "name": file_info["name"],
-                "branch": file_info["branch"],
-                "original_lines": original,
-                "new_lines": new,
-                "size_mb": file_info["size_mb"],
-                "truncated": original != new,
-            }
-        )
-
-    return actions
-
-
 def branch_log_health_summary(files: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     """Generate a health summary of branch logs (from an existing scan when given)."""
     if files is None:
@@ -319,7 +231,7 @@ def _file_age_days(filepath: Path) -> float:
     try:
         mtime = filepath.stat().st_mtime
     except OSError as exc:
-        logger.warning("Cannot stat %s for age check: %s", filepath, exc)
+        logger.warning("Cannot stat for age check", path=str(filepath), error=str(exc))
         return 0.0
     return (time.time() - mtime) / 86400.0
 
@@ -347,19 +259,19 @@ def _sweep_directory(directory: Path, patterns: List[str], max_age_days: int) ->
                     }
                 )
             except OSError as exc:
-                logger.warning("Sweep failed to delete %s: %s", filepath, exc)
+                logger.warning("Sweep failed to delete", path=str(filepath), error=str(exc))
 
     return removed
 
 
 def sweep_stale_logs(max_age_days: int = SWEEP_MAX_AGE_DAYS) -> Dict[str, Any]:
-    """Delete log files older than max_age_days across system_logs/ and branch logs/."""
+    """Delete .log files older than max_age_days across system_logs/ and branch logs/; .jsonl is its writer's."""
     all_removed: List[Dict[str, Any]] = []
 
     system_patterns = ["*.log", "*.log.[0-9]"]
     all_removed.extend(_sweep_directory(_get_system_logs_dir(), system_patterns, max_age_days))
 
-    branch_patterns = ["*.log", "*.log.[0-9]", "*.jsonl", "*.jsonl.[0-9]"]
+    branch_patterns = ["*.log", "*.log.[0-9]"]
     eco_root = _get_ecosystem_root()
     if eco_root.exists():
         for branch_dir in sorted(eco_root.iterdir()):
@@ -380,15 +292,8 @@ def sweep_stale_logs(max_age_days: int = SWEEP_MAX_AGE_DAYS) -> Dict[str, Any]:
 if __name__ == "__main__":
     import json
 
-    if len(sys.argv) > 1 and sys.argv[1] == "enforce":
-        print("Enforcing log limits...")
-        actions = enforce_log_limits()
-        print(json.dumps(actions, indent=2))
-    else:
-        print("Log health summary:")
-        summary = log_health_summary()
-        print(json.dumps(summary, indent=2))
-        print()
-        print("Oversized files:")
-        oversized = get_oversized_files()
-        print(json.dumps(oversized, indent=2))
+    print("Log health summary:")
+    print(json.dumps(log_health_summary(), indent=2))
+    print()
+    print("Oversized files:")
+    print(json.dumps(get_oversized_files(), indent=2))

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_logging_handlers.py
 # Description: Tests for prax logging handler modules
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-04-25
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/logging/direct.py and its sibling modules under apps/handlers/logging/."""
@@ -13,6 +13,7 @@
 # sentry: no-test-needed(through_the_command) — setup_individual_logger(), covered by tests/test_logging.py
 # sentry: no-test-needed(through_the_command) — append_jsonl() in jsonl_writer.py, covered by tests/test_jsonl_writer.py
 
+import json
 import logging
 import os
 import sys
@@ -86,24 +87,27 @@ class TestDirectLog:
         os.geteuid() == 0,
         reason="needs a POSIX permission bit that binds the writer",
     )
-    def test_an_unwritable_log_home_degrades_to_log_handler_failed_and_never_raises(
-        self, monkeypatch, tmp_path, caplog
-    ):
-        """A direct logger's first line never raises PermissionError into its caller."""
-        locked, cache = tmp_path / "locked", {}
-        locked.mkdir()
-        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(locked))
+    def test_an_unwritable_log_home_is_a_log_handler_failed_line_on_the_direct_trail(self, monkeypatch, tmp_path):
+        """HELD fallback (a NullHandler tier): the failure is on prax's trail, not stdlib's last resort."""
+        home, cache = tmp_path / "home", {}
+        trail_dir = home / "prax" / "logs"
+        trail_dir.mkdir(parents=True)
+        (home / "system").mkdir()
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(home))
         monkeypatch.setattr(direct, "_direct_loggers", cache)
-        locked.chmod(0o500)
+        # Both tiers' homes refuse new files; the trail's directory below prax/ was made first and stays open.
+        locked = (home / "system", home / "prax")
+        for d in locked:
+            d.chmod(0o500)
         try:
-            with caplog.at_level(logging.ERROR, logger=direct.logger.name):
-                direct.direct_log("info", "a line with nowhere to go")
+            direct.direct_log("info", "a line with nowhere to go")
         finally:
-            locked.chmod(0o700)
+            for d in locked:
+                d.chmod(0o700)
 
-        failed = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Log handler failed")]
-        assert len(failed) == 2  # both tiers, central and local
-        assert list(locked.iterdir()) == []
+        lines = [json.loads(line) for line in (trail_dir / "direct.jsonl").read_text(encoding="utf-8").splitlines()]
+        assert [(r["level"], r["msg"]) for r in lines] == [("ERROR", "Log handler failed")] * 2  # both tiers
+        assert list((home / "system").iterdir()) == []
 
 
 class TestSafeRotatingFileHandlerDoRollover:
@@ -148,7 +152,9 @@ class TestSafeRotatingFileHandlerDoRollover:
         ):
             handler.doRollover()
 
-        mock_logger.warning.assert_called_once_with("Log rotation skipped (file locked): %s", failure)
+        mock_logger.warning.assert_called_once_with(
+            "Log rotation skipped (file locked)", file=str(log_file), error=str(failure)
+        )
         handler.close()
 
     def test_a_rotation_by_another_process_is_followed_not_repeated(self, mock_prax_infrastructure, tmp_path):
@@ -248,46 +254,6 @@ class TestGetOversizedFiles:
         with patch.object(lw, "_get_system_logs_dir", return_value=nonexistent):
             result = lw.get_oversized_files()
             assert result == []
-
-
-class TestTruncateLogFile:
-    """Tests for log_watchdog.py truncate_log_file()."""
-
-    def test_truncates_oversized_file(self, mock_prax_infrastructure, tmp_path):
-        """Truncates file to keep_lines and adds truncation marker."""
-        lw = _import_watchdog(tmp_path)
-
-        log_file = tmp_path / "truncate_me.log"
-        lines = [f"line {i}\n" for i in range(500)]
-        log_file.write_text("".join(lines), encoding="utf-8")
-
-        original, new = lw.truncate_log_file(log_file, keep_lines=100)
-        assert original == 500
-        assert new == 101  # 100 kept lines + 1 marker
-
-        content = log_file.read_text(encoding="utf-8")
-        assert "LOG TRUNCATED by PRAX watchdog" in content
-
-    def test_no_truncation_when_under_limit(self, mock_prax_infrastructure, tmp_path):
-        """File under limit is not modified."""
-        lw = _import_watchdog(tmp_path)
-
-        log_file = tmp_path / "small.log"
-        lines = [f"line {i}\n" for i in range(50)]
-        log_file.write_text("".join(lines), encoding="utf-8")
-
-        original, new = lw.truncate_log_file(log_file, keep_lines=100)
-        assert original == 50
-        assert new == 50
-
-    def test_truncate_handles_os_error(self, mock_prax_infrastructure, tmp_path):
-        """Returns (0, 0) on OSError."""
-        lw = _import_watchdog(tmp_path)
-
-        nonexistent = tmp_path / "does_not_exist.log"
-        original, new = lw.truncate_log_file(nonexistent, keep_lines=100)
-        assert original == 0
-        assert new == 0
 
 
 def _import_watchdog(tmp_path):
@@ -395,35 +361,6 @@ class TestBranchLogHealthSummary:
             assert summary["total_files"] == 0
 
 
-class TestEnforceBranchLogLimits:
-    """Tests for log_watchdog.py enforce_branch_log_limits()."""
-
-    def test_truncates_oversized_jsonl(self, mock_prax_infrastructure, tmp_path):
-        """Truncates .jsonl files that exceed size threshold."""
-        lw = _import_watchdog(tmp_path)
-
-        eco = tmp_path / "src" / "aipass"
-        logs = eco / "hooks" / "logs"
-        logs.mkdir(parents=True)
-
-        big_jsonl = logs / "engine.jsonl"
-        big_jsonl.write_text(
-            "\n".join(f'{{"line": {i}, "padding": "{" " * 200}}}' for i in range(10000)) + "\n",
-            encoding="utf-8",
-        )
-
-        with patch.object(lw, "_get_ecosystem_root", return_value=eco):
-            with patch.object(lw, "BRANCH_WARN_SIZE_MB", 0.5):
-                actions = lw.enforce_branch_log_limits(max_lines=1000)
-                assert len(actions) >= 1
-                action = actions[0]
-                assert action["truncated"] is True
-                assert action["branch"] == "hooks"
-
-                content = big_jsonl.read_text(encoding="utf-8")
-                assert "LOG TRUNCATED by PRAX watchdog" in content
-
-
 class TestSetupSafeRotatingHandlerDoRollover:
     """Tests for the rotating handler setup.py builds into every module logger."""
 
@@ -488,8 +425,7 @@ class TestSetupSafeRotatingHandlerDoRollover:
         handler.close()
 
         # Not raising is half the contract: the skip is reported once and no backup is made.
-        mock_logger.warning.assert_called_once_with("Log rotation skipped (file locked): %s", ANY)
-        assert str(mock_logger.warning.call_args[0][1]) == "locked"
+        mock_logger.warning.assert_called_once_with("Log rotation skipped (file locked)", file=ANY, error="locked")
         assert not (tmp_path / "prax_rollover_test.log.1").exists()
         assert log_file.read_text(encoding="utf-8") == "data\n"
 

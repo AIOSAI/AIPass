@@ -1,18 +1,18 @@
 # =================== AIPass ====================
 # Name: watcher.py
 # Description: File System Watching
-# Version: 1.7.1
+# Version: 1.8.0
 # Created: 2025-11-26
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """PRAX File Watcher (Handler)
 
 Reference: docs/discovery.md"""
 
-import logging
 import threading
 import time
+import traceback
 from pathlib import Path
 
 from datetime import datetime, timezone
@@ -28,8 +28,9 @@ from aipass.prax.apps.handlers.registry.save import save_module_registry
 
 from aipass.prax.apps.handlers.discovery.filtering import in_sandbox, should_ignore_path
 from aipass.prax.apps.handlers.json import json_handler
+from aipass.prax.apps.handlers.logging.trail import PraxTrail
 
-logger = logging.getLogger(__name__)
+logger = PraxTrail("watcher")
 
 
 def _get_trigger() -> Any:
@@ -75,7 +76,7 @@ class PythonFileWatcher(FileSystemEventHandler):
             logger.error(
                 f"[watcher] on_created failed for {getattr(event, 'src_path', '<unknown>')} "
                 f"({type(e).__name__}: {e}) — event dropped, watcher still alive",
-                exc_info=True,
+                traceback=traceback.format_exc(),
             )
 
     def _register_created_module(self, event):

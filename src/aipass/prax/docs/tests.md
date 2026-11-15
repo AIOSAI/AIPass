@@ -29,7 +29,7 @@ One row per file, no counts: the count belongs to the run, the coverage belongs 
 | test_monitor_module.py | Monitor commands, thread lifecycle (4-thread), branch scoping |
 | test_config.py | Config loading, path resolution, log levels |
 | test_repo_root.py | Repo-root resolution with a dead working directory, per-platform expectation tables |
-| test_logger_module.py | Logger routing, status, NullLogger fallback, lazy-init import footprint (subprocess) |
+| test_logger_module.py | Logger routing, status, a broken chain raising in every spelling, published LOGGING_ALLOWED and log_backup_count, lazy-init import footprint (subprocess) |
 | test_event_queue.py | Thread-safe event buffering, scope suppression |
 | test_logging_handlers.py | Setup, rotation, introspection, direct logger |
 | test_logging.py | Core logging system, debug level gating |

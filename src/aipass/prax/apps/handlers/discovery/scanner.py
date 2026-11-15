@@ -1,16 +1,14 @@
 # =================== AIPass ====================
 # Name: scanner.py
 # Description: Directory Scanning
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2025-11-10
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """
 PRAX Discovery Scanner
 """
-
-import logging
 
 from pathlib import Path
 
@@ -21,8 +19,9 @@ from aipass.prax.apps.handlers.config.load import ECOSYSTEM_ROOT, get_system_log
 
 from aipass.prax.apps.handlers.discovery import filtering
 from aipass.prax.apps.handlers.json import json_handler
+from aipass.prax.apps.handlers.logging.trail import PraxTrail
 
-logger = logging.getLogger(__name__)
+logger = PraxTrail("scanner")
 
 
 def scan_directory_safely(directory: Path, modules: Dict, max_depth: int = 10, patterns: Optional[Set[str]] = None):
@@ -36,7 +35,7 @@ def scan_directory_safely(directory: Path, modules: Dict, max_depth: int = 10, p
     try:
         items = list(directory.iterdir())
     except OSError as e:
-        logger.warning(f"[scanner] Error scanning directory {directory}: {e}")
+        logger.warning("[scanner] Error scanning directory", path=str(directory), error=str(e))
         return
 
     # Per item: one file vanishing mid-walk must not drop the rest of the directory from the registry.
@@ -63,7 +62,7 @@ def scan_directory_safely(directory: Path, modules: Dict, max_depth: int = 10, p
                 scan_directory_safely(item, modules, max_depth - 1, patterns)
 
         except (OSError, ValueError) as e:
-            logger.warning(f"[scanner] Error scanning {item}: {e}")
+            logger.warning("[scanner] Error scanning", path=str(item), error=str(e))
 
 
 def discover_python_modules() -> Dict[str, Dict[str, Any]]:

@@ -47,7 +47,7 @@ prax/
  - Two-tier placement: `system_logs/<branch>_<module>.log` central, `<branch>/logs/<module>.log` local. Both rotate by size.
  - Env override before the stack walk: `AIPASS_LOG_NAME` or `AIPASS_BOT_ID`, for shared base classes that would otherwise all log as one caller.
  - Projects outside AIPass get their own `system_logs/` and `logs/` under their own root.
- - Self-healing: missing directories are created, an unknown caller falls back and says so, and a failed prax import hands back a NullLogger rather than taking the caller down.
+ - Self-healing: missing directories are created and an unknown caller is routed to system_logs/external/ and says so. A failed prax import raises in every spelling: no fallback logger.
 
 # Critical rules
 

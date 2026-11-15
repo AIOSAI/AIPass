@@ -3,7 +3,7 @@
     "version": "2.0.0",
     "created": "2026-03-07T22:43:24.315842",
     "description": "Standards bypass configuration for prax branch",
-    "last_updated": "2026-10-24T12:00:00"
+    "last_updated": "2026-11-15T00:00:00"
   },
   "bypass": [
     {
@@ -11,48 +11,6 @@
       "standard": "cli",
       "pattern": "console.print(",
       "reason": "This IS the display handler layer. unified_stream.py is the designated terminal output formatter for the monitoring system. console.print() is its core responsibility, not a violation."
-    },
-    {
-      "file": "apps/handlers/config/ignore_patterns.py",
-      "standard": "log_visibility",
-      "pattern": "logging.getLogger(",
-      "reason": "Prax import chain — transitively imported by logger.py. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
-    },
-    {
-      "file": "apps/handlers/json/json_service.py",
-      "standard": "log_visibility",
-      "pattern": "logging.getLogger(",
-      "reason": "The fleet json service (DPLAN-0325) is stdlib-only by contract: it must import without pulling the prax logger graph (30 modules, watchdog, the aipass.trigger edge), which is the entire point of the lazy package init. A test pins the cold import footprint at 6 aipass modules and zero third-party."
-    },
-    {
-      "file": "apps/handlers/discovery/watcher.py",
-      "standard": "log_visibility",
-      "pattern": "logging.getLogger(",
-      "reason": "Prax import chain — directly imported by logger.py. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
-    },
-    {
-      "file": "apps/handlers/discovery/scanner.py",
-      "standard": "log_visibility",
-      "pattern": "logging.getLogger(",
-      "reason": "Prax import chain — imported via logging/lifecycle.py. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
-    },
-    {
-      "file": "apps/handlers/registry/load.py",
-      "standard": "log_visibility",
-      "pattern": "logging.getLogger(",
-      "reason": "Prax import chain — directly imported by logger.py. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
-    },
-    {
-      "file": "apps/handlers/registry/save.py",
-      "standard": "log_visibility",
-      "pattern": "logging.getLogger(",
-      "reason": "Prax import chain — imported via discovery/watcher.py. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
-    },
-    {
-      "file": "apps/handlers/repo_root.py",
-      "standard": "log_visibility",
-      "pattern": "logging.getLogger(",
-      "reason": "Prax import chain — imported by config/load.py, which logger.py calls while CONSTRUCTING the system logger. Cannot import from aipass.prax.apps.modules.logger (circular dependency), and a diagnostic that needs the logger it is being emitted from is a second crash wearing a diagnostic's clothes (@memory, 2026-08-31). A test pins that this module imports nothing from aipass at all."
     },
     {
       "file": "apps/handlers/discovery/watcher.py",
@@ -175,7 +133,7 @@
       "file": "apps/handlers/json/json_service.py",
       "standard": "logged_fallback",
       "lines": [
-        155
+        157
       ],
       "reason": "prax, leg 7: 'unknown' means one thing on both paths, as the docstring says: there is no module behind frame 2. sys._getframe raises ValueError exactly when the stack is too shallow to have that frame; it is the same answer, not a failure dressed as one."
     },
@@ -183,7 +141,7 @@
       "file": "apps/handlers/logging/introspection.py",
       "standard": "logged_fallback",
       "lines": [
-        105
+        104
       ],
       "reason": "prax, leg 7: the docstring names None as the answer 'the caller cannot be located — an answer, not a failure'. A path that will not resolve is a caller that cannot be located; branch detection is a routing hint and must never raise into the caller's import."
     },
@@ -219,15 +177,15 @@
       "file": "tests/test_repo_root.py",
       "standard": "through_the_command",
       "lines": [
-        495
+        503
       ],
-      "reason": "prax, leg 14. 495: load's lane of the repo root; its one public reader, get_system_logs_dir outside a pytest session, ends in a mkdir of the live system_logs, so the lane is asked by name (prax, leg 5, HELD; re-read this leg, unchanged)."
+      "reason": "prax, leg 14. 503: load's lane of the repo root; its one public reader, get_system_logs_dir outside a pytest session, ends in a mkdir of the live system_logs, so the lane is asked by name (prax, leg 5, HELD; re-read this leg, unchanged)."
     },
     {
       "file": "apps/handlers/discovery/watcher.py",
       "standard": "logged_fallback",
       "lines": [
-        238
+        239
       ],
       "reason": "prax, leg 15. Fail-safe True: the liveness check exists to report a death, its one caller (logger.py get_status) ignores the answer, and nothing restarts or is taken on True. The failure is logged as a warning beside it."
     },
@@ -291,6 +249,20 @@
       "reason": "Hot path: runs per log line, per file event or per discovered path. log_operation measured ~11 ms per call (about 9 reads and 2 fsynced writes) and loses entries under concurrent writers, so it was removed here; the operation log stays on the command doors."
     },
     {
+      "file": "apps/handlers/logging/trail.py",
+      "standard": "json_structure",
+      "reason": "Door two (FPLAN-0932): stdlib plus jsonl_writer only, for code on the watched event path that cannot import prax's logger or json service without re-entering it. A test pins its import set; json_handler would pull json_service and config onto that path."
+    },
+    {
+      "file": "prax/__init__.py",
+      "standard": "encapsulation",
+      "lines": [
+        12,
+        13
+      ],
+      "reason": "FPLAN-0932: the TYPE_CHECKING view of the two standalone doors. append_jsonl and trail resolve straight to their handler modules on purpose, never through modules.logger and its graph; a test pins that. Type-checker only: nothing is imported at runtime."
+    },
+    {
       "file": "apps/handlers/config/load.py",
       "standard": "json_structure",
       "reason": "Hot path: runs per log line, per file event or per discovered path. log_operation measured ~11 ms per call (about 9 reads and 2 fsynced writes) and loses entries under concurrent writers, so it was removed here; the operation log stays on the command doors."
@@ -323,13 +295,13 @@
     {
       "file": "apps/handlers/logging/setup.py",
       "standard": "silent_catch",
-      "reason": "File-wide (this checker reads no line). 65: FileNotFoundError is the answer, not a failure: the file was rotated away by another process, so moved = True reopens it."
+      "reason": "File-wide (this checker reads no line). 55: FileNotFoundError is the answer, not a failure: the file was rotated away by another process, so moved = True reopens it."
     },
     {
       "file": "apps/handlers/logging/setup.py",
       "standard": "logged_fallback",
       "lines": [
-        80
+        71
       ],
       "reason": "shouldRollover's False is 'do not roll now', the truth for a file whose size cannot be read: it cannot be rotated either. The next record asks again; a raise here would drop the record inside logging's handler."
     },
@@ -364,6 +336,16 @@
       "file": "handlers/json/json_service.py",
       "standard": "dead_code",
       "reason": "Reached by string, not by an import statement: aipass/prax/__init__.py resolves it with importlib.import_module inside its PEP 562 __getattr__, which is what keeps the module out of every consumer's import graph until it is asked for. A scan keyed on import statements cannot see that edge. The entry point 'from aipass.prax import json_handler' is the fleet's only sanctioned import."
+    },
+    {
+      "file": "apps/handlers/logging/introspection.py",
+      "standard": "json_structure",
+      "reason": "Hot path: runs per log line (every logger build resolves its caller here). FPLAN-0932 cut its one log_operation, in detect_external_project; json_handler would also put json_service's graph under door one's construction."
+    },
+    {
+      "file": "apps/handlers/repo_root.py",
+      "standard": "json_structure",
+      "reason": "Runs at import inside door one's construction (config/load.py resolves the repo root for every logger). It imports prax's trail only; a log_operation here would write a json record on every process's first import."
     }
   ],
   "notes": {

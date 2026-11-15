@@ -1,21 +1,20 @@
 # =================== AIPass ====================
 # Name: introspection.py
 # Description: Stack Introspection
-# Version: 1.4.2
+# Version: 1.5.0
 # Created: 2025-11-10
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """PRAX Logging Introspection"""
 
 import functools
-import logging
 from pathlib import Path
 from typing import Optional
 
-from aipass.prax.apps.handlers.json import json_handler
+from aipass.prax.apps.handlers.logging.trail import PraxTrail
 
-logger = logging.getLogger(__name__)
+logger = PraxTrail("introspection")
 
 _PRAX_INTERNAL_MARKERS = (
     "/prax/apps/modules/logger.py",
@@ -101,7 +100,7 @@ def _resolve_caller_path(module_path: str) -> Optional[Path]:
     try:
         return candidate.resolve()
     except OSError as exc:
-        logger.info("Caller path %s could not be resolved: %s", module_path, exc)
+        logger.info("Caller path could not be resolved", path=module_path, error=str(exc))
         return None
 
 
@@ -113,20 +112,16 @@ def detect_branch_from_path(module_path: str) -> Optional[str]:
     if path is None:
         return None
 
-    try:
+    # No record of any kind on this path: it runs on every log line, and its misses are answers.
+    if path.is_relative_to(_AIPASS_PKG_ROOT):
         relative = path.relative_to(_AIPASS_PKG_ROOT)
         if len(relative.parts) >= 2:
-            # No json operation here: every module-level get_direct_logger() resolves through this.
             return str(_AIPASS_PKG_ROOT / relative.parts[0])
-    except ValueError:
-        logger.info("Path %s is not relative to aipass package root", module_path)
 
-    try:
+    if path.is_relative_to(_SRC_ROOT):
         relative = path.relative_to(_SRC_ROOT)
         if len(relative.parts) >= 2 and relative.parts[0] != "aipass":
             return str(_SRC_ROOT / relative.parts[0])
-    except ValueError:
-        logger.info("Path %s is not relative to src root", module_path)
 
     return next((str(p) for p in path.parents if (p / ".trinity" / "passport.json").is_file()), None)
 
@@ -139,11 +134,8 @@ def detect_external_project(module_path: str) -> Optional[tuple]:
     if path is None:
         return None
 
-    try:
-        path.relative_to(_REPO_ROOT)
+    if path.is_relative_to(_REPO_ROOT):
         return None
-    except ValueError:
-        logger.info("Path %s is external to AIPass repo", module_path)
 
     import os
 
@@ -160,12 +152,6 @@ def detect_external_project(module_path: str) -> Optional[tuple]:
             or (candidate / "pyproject.toml").exists()
         ):
             project_name = candidate.name.lower().replace(" ", "_").replace("-", "_")
-            # Logged outside AIPass only, never on a fleet module's import.
-            json_handler.log_operation(
-                "introspection_external_project",
-                {"module_path": module_path, "project": project_name},
-                module_name="prax_introspection",
-            )
             return (project_name, candidate)
 
     return None

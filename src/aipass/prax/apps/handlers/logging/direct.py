@@ -1,15 +1,15 @@
 # =================== AIPass ====================
 # Name: direct.py
 # Description: Direct Logger (Event Pipeline Bypass)
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-02-27
-# Modified: 2026-10-29
+# Modified: 2026-11-15
 # =============================================
 
 """PRAX Direct Logger
 
 system_logger's files, format and rotation without the event pipeline, for handlers that would
-recurse through it (log_watcher, error_registry, log_streamer, base_bot). Reference: docs/logging_api.md.
+recurse through it (log_watcher, error_registry). Reference: docs/logging_api.md.
 """
 
 import inspect
@@ -28,9 +28,11 @@ from aipass.prax.apps.handlers.config.load import (
 )
 from aipass.prax.apps.handlers.logging.introspection import detect_branch_from_path
 from aipass.prax.apps.handlers.logging.setup import SafeRotatingFileHandler
+from aipass.prax.apps.handlers.logging.trail import PraxTrail
 from aipass.prax.apps.handlers.json import json_handler
 
-logger = logging.getLogger(__name__)
+# stdlib builds door one here; this file's own diagnostics ride prax's trail.
+logger = PraxTrail("direct")
 
 _direct_loggers: Dict[str, logging.Logger] = {}
 # Two threads building one key would each add handlers to the same named logger.
@@ -75,7 +77,7 @@ def _tier_handler(resolve_dir: Callable[[], Path], filename: str, limits: Dict[s
             encoding="utf-8",
         )
     except (OSError, RuntimeError) as e:  # RuntimeError: Path.home() with no home to find
-        logger.error("Log handler failed for %s: %s", filename, e)
+        logger.error("Log handler failed", file=filename, error=str(e))
         return logging.NullHandler()
 
 

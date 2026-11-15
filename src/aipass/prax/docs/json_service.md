@@ -15,8 +15,10 @@ branch follows the one file.
 from aipass.prax import json_handler          # the entry point, the only sanctioned import
 ```
 
-- `apps/handlers/json/json_service.py` — the implementation. Stdlib only, so it
-  imports without the logger graph. No `getcwd()` and no `inspect.stack()`: it
+- `apps/handlers/json/json_service.py` — the implementation. Stdlib plus prax's
+  trail, so it imports without the logger graph; its diagnostics (an unreadable
+  document, a failed write, a failed data bump) are lines on
+  `prax/logs/json_service.jsonl`, and a failed trail write raises. No `getcwd()` and no `inspect.stack()`: it
   runs with a deleted working directory. No `resolve()` either: a symlinked
   path names the branch it is under, not the one it points to.
 - `apps/handlers/json/json_handler.py` — prax's own shim, byte-identical in
@@ -67,7 +69,7 @@ have wanted to log one line.
 **The package init is lazy** (PEP 562 `__getattr__` in `aipass/prax/__init__.py`).
 `logger`, `append_jsonl` and `json_handler` resolve on first attribute access.
 `from aipass.prax import json_handler` in a fresh interpreter imports a fixed set
-of prax modules (`EXPECTED_COLD_FOOTPRINT`) and no third-party package: `aipass.trigger` and the whole watchdog edge
+of prax modules (`EXPECTED_COLD_FOOTPRINT`: the service, and the writer and trail its diagnostics ride) and no third-party package: `aipass.trigger` and the whole watchdog edge
 stay cold. Pinned by `TestLazyInitImportFootprint` in
 `tests/test_logger_module.py`, which measures in a subprocess — in-process the
 number is meaningless, pytest has already imported prax's world.

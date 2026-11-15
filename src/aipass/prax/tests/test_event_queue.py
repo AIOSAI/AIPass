@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_event_queue.py
 # Description: Unit tests for MonitoringEvent and MonitoringQueue
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/monitoring/event_queue.py and the branch_scope.py filter it drives."""
@@ -13,6 +13,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(through_the_command) — BranchScope's matching rules, covered by tests/test_branch_scope.py
 
+import json
 import threading
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock
@@ -553,6 +554,23 @@ class TestDropReportWording:
 
         assert event_queue_module.logger.warning.call_count == 1
         assert q._dropped == 9, "events after the report still counted for the next one"
+
+
+class TestDropReportGoesToTheTrail:
+    """Health reporting rides prax's trail: a line in a watched .log would feed the monitor it reports on."""
+
+    def test_an_overflow_is_one_warning_line_in_the_event_queue_trail(self, mock_prax_infrastructure):
+        q = event_queue.MonitoringQueue(maxsize=1)
+        q.enqueue(event_queue.MonitoringEvent(priority=1, event_type="log", branch="FIRST", message="in"))
+
+        q.enqueue(event_queue.MonitoringEvent(priority=2, event_type="log", branch="DAEMON", message="out"))
+
+        trail_file = mock_prax_infrastructure / "prax" / "logs" / "event_queue.jsonl"
+        [line] = trail_file.read_text(encoding="utf-8").splitlines()
+        record = json.loads(line)
+        assert record["level"] == "WARNING"
+        assert "queue is full" in record["msg"]
+        assert not list(mock_prax_infrastructure.rglob("event_queue.log"))
 
 
 # =============================================
