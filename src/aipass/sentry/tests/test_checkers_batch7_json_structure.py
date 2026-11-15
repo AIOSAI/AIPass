@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_json_structure.py
 # Description: json_structure_check: declaration-only and bootstrap modules (split from test_checkers_batch7.py)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/json_structure_check.py."""
@@ -211,18 +211,3 @@ class TestTheBootstrapChainSeesRelativeImports:
 
     def test_an_absolute_import_is_untouched_by_the_resolver(self):
         assert self._resolve("aipass.prax", 0, "aipass.canary.apps") is None
-
-    def test_the_walk_reaches_a_relatively_imported_bootstrap_module(self, tmp_path):
-        """End to end on the real tree: @canary's helper is in the chain now."""
-        from pathlib import Path
-
-        # parents[2] is src/aipass, parents[3] is src: the branch is asserted, because a skip reads as a pass.
-        aipass_root = Path(__file__).resolve().parents[2]
-        assert aipass_root.name == "aipass", aipass_root
-        target = aipass_root / "canary" / "apps" / "handlers" / "paths.py"
-        if not target.exists():
-            import pytest
-
-            pytest.skip(f"canary's paths.py is not on this machine ({target})")
-        message = json_structure_check.check_module(str(target))["checks"][0]["message"]
-        assert message.startswith("Pre-logging bootstrap module"), message

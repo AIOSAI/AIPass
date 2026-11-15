@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: architecture_check.py
 # Description: Architecture Standards Checker Handler
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Architecture Standards Checker Handler
@@ -26,13 +26,12 @@ from aipass.sentry.apps.handlers.aipass_standards.prose_lines import Unparseable
 # fallback on purpose: if this door moves, the checker must die at import with spawn's
 # name in the traceback, not quietly score the fleet against a guess.
 from aipass.spawn.apps.modules import get_template_dir, refuse_legacy_class
-from aipass.sentry.apps.handlers.module_root import module_file
 
 AUDIT_SCOPE = "all_files"
 # Applies to production source only: a test file has no apps/handlers/modules layering.
 APPLIES_TO = "production"
 
-PACK_ROOT = module_file(__file__).parent.parent.parent  # aipass_standards/ -> handlers/ -> apps/ -> sentry/
+PACK_ROOT = Path(__file__).resolve().parent.parent.parent  # aipass_standards/ -> handlers/ -> apps/ -> sentry/
 
 # Spawn templates root. The SUBDIRECTORY under it is never guessed from citizen_class
 # (the class does not name a directory); only spawn's gateway may answer it. The ROOT

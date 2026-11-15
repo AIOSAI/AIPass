@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: bypass_handler.py
 # Description: Bypass Configuration Handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-08
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Bypass Configuration Handler"""
@@ -75,6 +75,18 @@ def get_branch_from_path(file_path: str) -> Optional[Dict[str, Any]]:
         logger.error(f"[bypass_handler] Error reading AIPASS_REGISTRY: {e}")
         UNREADABLE_REGISTRIES[str(registry_path or "AIPASS_REGISTRY.json")] = str(e)
         return None
+
+
+def waived_sites(rules: List[Dict[str, Any]]) -> int:
+    """How many sites a branch's rules waive: one per pinned line or function, one per whole-file rule.
+
+    A rule naming no file or no standard matches nothing (bypass.utils.matching_rule) and waives nothing.
+    """
+    return sum(
+        len(rule.get("lines") or []) or len(rule.get("functions") or []) or 1
+        for rule in rules
+        if rule.get("file") and rule.get("standard")
+    )
 
 
 def load_bypass_rules(branch_path: str) -> List[Dict[str, Any]]:

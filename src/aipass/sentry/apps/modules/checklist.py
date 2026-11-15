@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: checklist.py
 # Description: Per-File Standards Checklist Module
-# Version: 1.4.2
+# Version: 1.5.0
 # Created: 2026-03-15
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Per-File Standards Checklist Module
@@ -139,6 +139,8 @@ def run_checklist(file_path: str, pack_name: str = "aipass", prototype: bool = F
             detail = _format_failure(r)
 
         result = {"standard": name, "passed": passed, "detail": detail}
+        if not passed and getattr(checker, "CHECKLIST_ADVISES", False) is True:
+            result = {"standard": name, "passed": True, "detail": None, "advice": detail}
         notes = inert.inert_notes(resolved, name, bypass_rules)
         if notes:
             result["bypass_notes"] = notes
@@ -205,6 +207,10 @@ FINDING_MARKER = "[FAIL]"
 # The bracket must be escaped: Rich reads "[FAIL]" as a style tag and drops it at render.
 _FINDING_MARKUP = "[red]\\[FAIL][/red]"
 
+# An advisory standard's finding: shown at edit time, never counted as a [FAIL] the hook must fix.
+ADVICE_MARKER = "[ADVISORY]"
+_ADVICE_MARKUP = "[yellow]\\[ADVISORY][/yellow]"
+
 
 def _print_results(results: List[Dict], file_path: str) -> None:
     """Print concise pass/fail output for hook consumption."""
@@ -229,10 +235,13 @@ def _print_results(results: List[Dict], file_path: str) -> None:
 
     # Behind a blank line: hooks' auto_fix rejoins a finding's wrapped detail until one.
     notes = [(r["standard"], note) for r in results for note in r.get("bypass_notes", [])]
-    if notes:
+    if notes or any(r.get("advice") for r in results):
         console.print()
     for std, note in notes:
         console.print(f"  [yellow]inert bypass[/yellow] \u2014 {std}: {note}")
+    for r in results:
+        if r.get("advice"):
+            console.print(f"  {_ADVICE_MARKUP} \u2014 {r['standard']}: {r['advice']}")
 
 
 def _print_not_judged(names: List[str]) -> None:

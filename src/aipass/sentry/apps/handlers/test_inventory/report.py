@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: report.py
 # Description: assemble every row, declare the blind spots, publish the artifact
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-09-01
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -24,12 +24,11 @@ from typing import Dict, List, Optional, Sequence
 
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.module_root import module_file
 from aipass.sentry.apps.handlers.test_inventory import collection, exclusions, history, ranking, shape
 
 #: Where the inventory is published. Sentry's own state directory, never the
 #: target's - `.sentry` is sentry-owned storage under gateway_boundary.
-SENTRY_ROOT = module_file(__file__).parents[3]
+SENTRY_ROOT = Path(__file__).resolve().parents[3]
 ARTIFACT_DIR = SENTRY_ROOT / ".sentry"
 
 ROWS_NAME = "test_inventory_rows.jsonl"

@@ -19,7 +19,6 @@ pack inventory.
 | `audit/audit_display.py` | Rich result formatting — the score grid, the violation detail, the info lines. |
 | `audit/incremental_cache.py` | Content-hash cache: a branch whose inputs did not change replays its stored score instead of re-running every checker, and a branch where one checker changed re-runs that checker alone. |
 | `audit/artifact.py` | The untruncated violation set → `.sentry/last_audit_<branch>.json`, because the console view is capped and the full set is what you actually debug against. |
-| `module_root.py` | The guarded `module_file()` — the one import-time `__file__` resolve in the branch. |
 | `registry_scan.py` | Case-EXACT registry discovery — the one reader every lane uses. |
 
 ---
@@ -210,6 +209,17 @@ The audit returns `bypass_dead` (index, file, standard, why, the rule's own reas
 carries both. `drone @sentry bypass prune @branch [--dry-run]` removes exactly the convicted
 rules, prints each with its reason, and refuses to rewrite a file `json.dumps` cannot reproduce
 byte for byte. A dead rule matches nothing, so pruning one moves no score.
+
+Prune also convicts a rule that **covers nothing**: it matches a file, yet its checker answers the
+same with the rule removed (a line pin that drifted, a finding that was cured). A file-wide rule
+always changes the answer to "bypassed", so a rule also covers nothing when every file it is handed
+passes clean without it. Each such rule
+costs two checker runs over its files, so the lane runs in prune only, never in the audit. A
+checker with a post-pass or observe lane is not judged this way.
+
+The audit's bypass info also names, as certain rather than advisory, a rule carrying `pattern`
+(`matching_rule` never reads it, so the rule is file-wide) and a `diagnostics` rule (diagnostics
+never reads bypass rules).
 
 ---
 

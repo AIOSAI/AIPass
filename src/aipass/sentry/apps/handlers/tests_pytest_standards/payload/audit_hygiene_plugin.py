@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: audit_hygiene_plugin.py
 # Description: pytest write-hygiene gate - stdlib only, injected into a copy
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-29
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """The write gate. A pytest plugin injected into a COPY of somebody else's tree.
@@ -363,8 +363,11 @@ def pytest_configure(config) -> None:
             "to run without a sink rather than run blind."
         )
 
-    state.env_root = os.path.normpath(os.environ.get("AUDIT_TESTS_ENV_ROOT", "")) or ""
-    state.target_root = os.path.normpath(os.environ.get("AUDIT_TESTS_TARGET_ROOT", "")) or ""
+    # normpath("") is ".", so an unset root must stay "" for the guards that test it.
+    raw_env_root = os.environ.get("AUDIT_TESTS_ENV_ROOT", "")
+    state.env_root = os.path.normpath(raw_env_root) if raw_env_root else ""
+    raw_target_root = os.environ.get("AUDIT_TESTS_TARGET_ROOT", "")
+    state.target_root = os.path.normpath(raw_target_root) if raw_target_root else ""
     state.target_module = os.environ.get("AUDIT_TESTS_TARGET_MODULE", "")
     state.tmpdir_allowed = os.environ.get("AUDIT_TESTS_TMPDIR_ALLOWED", "1") != "0"
     state.tmp_root = os.path.normpath(tempfile.gettempdir())

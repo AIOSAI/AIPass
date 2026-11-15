@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: adapter.py
 # Description: the pytest execution adapter - the 6-function contract
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-08-29
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """The pytest adapter. Eight functions, two constants, and nothing else.
@@ -33,7 +33,6 @@ from aipass.sentry.apps.handlers.tests_pytest_standards import (
     nominators,
     statement_deletion,
 )
-from aipass.sentry.apps.handlers.module_root import module_file
 
 ADAPTER_API = 1
 ECOSYSTEM = "pytest"
@@ -101,7 +100,7 @@ RETIRED_GROUPS: tuple = (
 )
 
 #: The injected plugin, by path. Copied into the env, never imported here.
-PAYLOAD_DIR = module_file(__file__).parent / "payload"
+PAYLOAD_DIR = Path(__file__).resolve().parent / "payload"
 PLUGIN_FILE = PAYLOAD_DIR / "audit_hygiene_plugin.py"
 
 TEST_DIR_NAMES: tuple = ("tests", "test")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: readme_ops.py
 # Description: README Update Operations Handler
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -18,7 +18,6 @@ from typing import Dict, List, Optional
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers import registry_scan
-from aipass.sentry.apps.handlers.module_root import module_file
 
 
 def _find_registry() -> Path:
@@ -26,7 +25,7 @@ def _find_registry() -> Path:
     return registry_scan.find_registry()
 
 
-GENERATOR_PATH = module_file(__file__).parent / "readme_generator.py"
+GENERATOR_PATH = Path(__file__).resolve().parent / "readme_generator.py"
 
 SECTION_NAMES = {
     "tree": "TREE",

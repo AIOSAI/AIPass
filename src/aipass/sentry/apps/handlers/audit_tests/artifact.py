@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: artifact.py
 # Description: audit-tests artifact assembly, provenance and write
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-29
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -24,12 +24,11 @@ from typing import Dict, List, Optional
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.audit_tests import laws, refusal, spine, target as target_module
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.module_root import module_file
 
 ARTIFACT_VERSION = "audit-tests/1"
 LANE_VERSION = "1.0.0"
 
-SENTRY_ROOT = module_file(__file__).parents[3]
+SENTRY_ROOT = Path(__file__).resolve().parents[3]
 ARTIFACT_DIR = SENTRY_ROOT / ".sentry"
 
 FIRST_RUN_BASELINE = "first run for this pair"

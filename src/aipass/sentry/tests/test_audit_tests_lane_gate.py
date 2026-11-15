@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_audit_tests_lane_gate.py
 # Description: audit-tests write gate: payload classifier and its gate log (split from test_audit_tests_lane.py)
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-10-08
 # Modified: 2026-11-14
 # =============================================
@@ -377,3 +377,20 @@ class TestExecutedOrder:
 
     def test_a_run_with_no_summary_reports_no_order_rather_than_a_partial_one(self):
         assert gatelog.executed_order([{"rec": "header"}]) == []
+
+
+class TestUnsetRoots:
+    """An unset sandbox root stays unset: normpath("") is ".", the working directory."""
+
+    def test_an_unset_target_root_refuses_the_canary_instead_of_aiming_it_at_the_cwd(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(plugin, "STATE", plugin.GateState())
+        monkeypatch.setenv("AUDIT_TESTS_LOG", str(tmp_path / "gate.jsonl"))
+        monkeypatch.setenv("AUDIT_TESTS_DISABLE_HOOK", "1")
+        monkeypatch.delenv("AUDIT_TESTS_ENV_ROOT", raising=False)
+        monkeypatch.delenv("AUDIT_TESTS_TARGET_ROOT", raising=False)
+        plugin.pytest_configure(object())
+        try:
+            assert (plugin.STATE.env_root, plugin.STATE.target_root) == ("", "")
+            assert plugin.fire_canary()["error"] == "no target root configured"
+        finally:
+            plugin.STATE.sink.close()

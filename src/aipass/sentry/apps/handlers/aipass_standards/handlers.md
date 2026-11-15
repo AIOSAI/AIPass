@@ -88,8 +88,7 @@ json_handler.log_operation("my_module", "operation", data)  # Typo-prone, boiler
 - The proof is the **question**, not the spelling: a call to any frame-walk API
   (`sys._getframe`, `inspect.stack`, `inspect.currentframe` ...) or to a named caller helper
   (`_get_caller_module_name`, `get_caller`). `sys._getframe` is the sound answer:
-  `inspect.stack()` reaches an unguarded `os.path.realpath` inside `inspect.getmodule`, which
-  reads `os.getcwd()` and fails with a dead working directory.
+  it reads one frame, where `inspect.stack()` reads the source of every frame on the stack.
 - Both are read from the parse tree, never as a substring, so a docstring or comment that
   names a call neither proves nor convicts. An unparseable file is no acquittal.
 - Known blind spot: the rule reads the parameter's NAME, so a `module_name` that is an event

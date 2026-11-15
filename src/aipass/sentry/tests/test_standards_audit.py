@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_standards_audit.py
 # Description: Unit tests for the standards_audit module and the sentry-audit CI gate
-# Version: 1.3.3
+# Version: 1.4.0
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/standards_audit.py and the sentry-audit CI gate."""
@@ -13,6 +13,7 @@
 # sentry: no-test-needed(standard) — each checker's own verdict; every <row>_check.py has its own test file
 # sentry: no-test-needed(covered) — the audit-tests lane's own run, in tests/test_audit_tests_lane.py
 
+import json
 import tempfile
 
 import pytest
@@ -868,3 +869,33 @@ def test_the_ci_gate_holds_no_cap_of_its_own(tmp_path):
     }
 
     assert literals.isdisjoint({10000, 9000, 6000, 15000, 25000}), f"a cap was copied into the CI script: {literals}"
+
+
+@pytest.fixture
+def one_registry(tmp_path, monkeypatch):
+    """discovery reading only tmp_path/AIPASS_REGISTRY.json, with no caller project."""
+    registry = tmp_path / "AIPASS_REGISTRY.json"
+    monkeypatch.setattr(real_discovery.registry_scan, "find_registry", lambda: registry)
+    monkeypatch.setattr(real_discovery.registry_scan, "caller_registries", lambda: [])
+    return registry
+
+
+class TestDiscoveryFailsLoud:
+    """An unreadable registry refuses; it never reads as no branches, or as every branch public."""
+
+    def test_a_corrupt_registry_raises_naming_the_file_instead_of_discovering_zero(self, one_registry):
+        one_registry.write_text("{not json", encoding="utf-8")
+        with pytest.raises(ValueError, match="AIPASS_REGISTRY.json is unreadable"):
+            real_discovery.discover_branches()
+
+    def test_a_corrupt_private_registry_raises_instead_of_making_every_branch_public(self, one_registry, tmp_path):
+        (tmp_path / "flow" / "apps").mkdir(parents=True)
+        (tmp_path / "flow" / "apps" / "flow.py").write_text("", encoding="utf-8")
+        one_registry.write_text(json.dumps({"branches": [{"name": "FLOW", "path": "flow"}]}), encoding="utf-8")
+        (tmp_path / "PRIVATE_BRANCH_REGISTRY.json").write_text("{not json", encoding="utf-8")
+        with pytest.raises(ValueError, match="private registry .* is unreadable"):
+            real_discovery.discover_branches()
+
+    def test_a_branch_the_registry_cannot_locate_is_refused_internal_access(self, one_registry):
+        one_registry.write_text(json.dumps({"branches": [{"name": "GHOST", "path": "ghost"}]}), encoding="utf-8")
+        assert real_discovery.check_internal_access("ghost") is False

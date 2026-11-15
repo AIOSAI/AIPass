@@ -1,17 +1,14 @@
 # =================== AIPass ====================
 # Name: incremental_cache.py
 # Description: Audit Fingerprint Cache Handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-07-31
-# Modified: 2026-11-07
+# Modified: 2026-11-14
 # =============================================
 
-"""
-Audit Fingerprint Cache Handler
+"""One file per cache key so concurrent runs on different branches cannot clobber each other.
 
-One file per cache key so concurrent runs on different branches cannot clobber each other.
-Fail-open: any read/schema problem returns {} and the caller runs a full audit.
-"""
+Fail-open: any read/schema problem returns {} and the caller runs a full audit."""
 
 import datetime
 import hashlib
@@ -19,34 +16,30 @@ import json
 import os
 import re
 import tempfile
-import time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.module_root import module_file
 
 # Bump when the stamp algorithm or branch_audit's corpus changes: no stamp covers either.
 CACHE_VERSION = "3"
-# Bump when the on-disk doc shape changes; a container-only change migrates, not busts.
+# Bump when the on-disk doc shape changes: an entry of another version reads as a miss.
 SCHEMA_VERSION = 2
 _JSON_DIR = json_handler.get_json_path("audit", "data").parent
 
 CACHE_DIR = _JSON_DIR / "audit_cache"
 
-LEGACY_CACHE_FILE = _JSON_DIR / "audit_cache.json"
-
 # Outside the pack yet decide audit output: unstamped, a semantics change serves stale green.
 MACHINERY_DIRS: Tuple[Path, ...] = (
-    module_file(__file__).parent,
-    module_file(__file__).parent.parent / "bypass",
-    module_file(__file__).parent.parent / "test_map",
+    Path(__file__).resolve().parent,
+    Path(__file__).resolve().parent.parent / "bypass",
+    Path(__file__).resolve().parent.parent / "test_map",
 )
 # Inside the default pack (already stamped there) but they shape every other pack's output too.
 MACHINERY_FILES: Tuple[Path, ...] = (
-    module_file(__file__).parent.parent / "aipass_standards" / "applicability.py",
-    module_file(__file__).parent.parent / "aipass_standards" / "skip_dirs.py",
+    Path(__file__).resolve().parent.parent / "aipass_standards" / "applicability.py",
+    Path(__file__).resolve().parent.parent / "aipass_standards" / "skip_dirs.py",
 )
 
 
@@ -219,43 +212,6 @@ def atomic_write(path: Path, doc: Dict[str, Any]) -> None:
                 logger.warning("[incremental_cache] Failed to clean up temp file %s: %s", tmp, cleanup_err)
 
 
-def _retire_legacy_cache() -> None:
-    """Rename the flat doc beside itself, timestamped. Never deleted."""
-    retired = LEGACY_CACHE_FILE.with_name(f"audit_cache.retired-{time.strftime('%Y%m%d%H%M%S')}.json")
-    try:
-        LEGACY_CACHE_FILE.rename(retired)
-    except OSError as exc:
-        logger.info("[incremental_cache] Legacy cache not retired (%s): %s", LEGACY_CACHE_FILE, exc)
-        return
-    logger.info("[incremental_cache] Legacy cache retired to %s", retired.name)
-    json_handler.log_operation("audit_cache_legacy_retired", {"file": retired.name})
-
-
-def migrate_legacy_cache() -> int:
-    """Split the flat doc into one file per key, then retire it. Returns the count."""
-    if not LEGACY_CACHE_FILE.exists():
-        return 0
-    try:
-        doc = json.loads(LEGACY_CACHE_FILE.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("[incremental_cache] Legacy cache unreadable, retiring without migrating: %s", exc)
-        _retire_legacy_cache()
-        return 0
-
-    branches = doc.get("branches") if isinstance(doc, dict) else None
-    migrated = 0
-    if isinstance(branches, dict):
-        for cache_key, entry in branches.items():
-            if not isinstance(entry, dict) or entry_path(cache_key).exists():
-                continue
-            atomic_write(entry_path(cache_key), _wrap(cache_key, entry))
-            migrated += 1
-    _retire_legacy_cache()
-    logger.info("[incremental_cache] Migrated %d cache entries to %s", migrated, CACHE_DIR.name)
-    json_handler.log_operation("audit_cache_migrated", {"entries": migrated})
-    return migrated
-
-
 def _wrap(cache_key: str, entry: Dict[str, Any]) -> Dict[str, Any]:
     """The on-disk doc for one entry: its schema, its key, and the entry itself."""
     return {"schema_version": SCHEMA_VERSION, "cache_key": cache_key, "entry": entry}
@@ -263,7 +219,6 @@ def _wrap(cache_key: str, entry: Dict[str, Any]) -> Dict[str, Any]:
 
 def load_branch_entry(cache_key: str) -> Dict[str, Any]:
     """Load one key's cached entry. Missing/corrupt/mismatched -> {} (fail open to full)."""
-    migrate_legacy_cache()
     path = entry_path(cache_key)
     if not path.exists():
         return {}
@@ -298,6 +253,5 @@ def load_branch_entry(cache_key: str) -> Dict[str, Any]:
 
 def save_branch_entry(cache_key: str, entry: Dict[str, Any]) -> None:
     """Atomically write one key's entry to its own file."""
-    migrate_legacy_cache()
     atomic_write(entry_path(cache_key), _wrap(cache_key, entry))
     json_handler.log_operation("audit_cache_saved", {"cache_key": cache_key})

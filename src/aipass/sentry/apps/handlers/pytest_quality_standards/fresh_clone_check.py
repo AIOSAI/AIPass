@@ -75,7 +75,6 @@ IGNORED_SEGMENT_SUFFIXES: tuple = ("_json",)
 IGNORED_FILE_NAMES: frozenset = frozenset(
     {
         "DASHBOARD.local.json",
-        "STATUS.local.md",
         "STATUS.md",
         "AIPASS_REGISTRY.json",
         "AIPASS_ROOTS.json",

@@ -528,42 +528,11 @@ def test_disk_triplets_multiple_gaps_counted(tmp_path):
     assert result["message"].startswith("2/3 modules missing triplet files")
 
 
-def _canonical_shim_bytes_or_skip():
-    """The canonical shim as the pinned spec defines it, or skip saying why.
-
-    A constant taught by a branch copy would bless that branch's drift. docs.local/ is gitignored, so the spec
-    is absent on a fresh checkout: this skips naming the path rather than degrade silently.
-    """
-    import re
-    from pathlib import Path
-
-    # From the installed package, so the read is identical whichever rootdir pytest picks.
-    spec = Path(aipass.__file__).resolve().parent / "devpulse" / "docs.local" / "DPLAN-0325_spec.md"
-    if not spec.is_file():
-        pytest.skip(f"pinned spec not present ({spec}) — docs.local/ is gitignored, so this pin is local-only")
-    text = spec.read_text(encoding="utf-8")
-    section = text.index("## 3. The shim")
-    block = re.search(r"```python\n(.*?)\n```", text[section:], re.S)
-    assert block is not None, "DPLAN-0325 section 3 no longer carries a python block"
-    return block.group(1) + "\n"
-
-
-def test_the_pinned_hash_is_the_hash_of_the_spec_block():
-    """The constant and the spec cannot drift apart without this turning red."""
-    import hashlib
-
-    measured = hashlib.sha256(_canonical_shim_bytes_or_skip().encode("utf-8")).hexdigest()
-    assert measured == json_handler_check.CANONICAL_SHIM_SHA256, (
-        "the pinned canonical-shim hash no longer matches DPLAN-0325 section 3 — "
-        "amend the constant in the same change as the spec"
-    )
-
-
 def _canonical_shim_bytes_on_disk():
     """The canonical shim from the citizen template, verified against the pin.
 
-    The spec is gitignored and absent on CI; the template ships in the repo, so pins needing real bytes still
-    run. The bytes are checked against ``CANONICAL_SHIM_SHA256``, so template drift is never blessed.
+    The template ships in the repo, and its bytes are checked against ``CANONICAL_SHIM_SHA256``,
+    so template drift is never blessed.
     """
     import hashlib
     from pathlib import Path as _Path
@@ -608,16 +577,16 @@ def _capability(root, content, branch_name):
 
 
 def test_the_canonical_shim_passes_capability_by_hash(tmp_path):
-    """The spec's own bytes are accepted, and accepted on the identity path."""
+    """The canonical bytes are accepted, and accepted on the identity path."""
 
-    passed, message = _capability(tmp_path, _canonical_shim_bytes_or_skip(), "anybranch")
+    passed, message = _capability(tmp_path, _canonical_shim_bytes_on_disk(), "anybranch")
     assert passed is True
     assert "sha256" in message
 
 
 def test_one_changed_character_is_no_longer_the_canonical_shim(tmp_path):
     """Identity, not resemblance: a shim that drifts stops being the shim."""
-    mutated = _canonical_shim_bytes_or_skip().replace("_h = json_handler.for_module", "_h  = json_handler.for_module")
+    mutated = _canonical_shim_bytes_on_disk().replace("_h = json_handler.for_module", "_h  = json_handler.for_module")
     passed, message = _capability(tmp_path, mutated, "anybranch")
     assert passed is False
     assert "sha256" in message

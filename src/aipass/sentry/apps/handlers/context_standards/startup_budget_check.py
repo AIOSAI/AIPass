@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: startup_budget_check.py
 # Description: Startup Budget Standards Checker — the greeting cost of one citizen
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-15
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Startup Budget Standards Checker — what a greeting costs, in characters.
@@ -17,10 +17,9 @@ from typing import Any, Dict, List, Tuple
 
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.module_root import module_file
 
-# Guarded: discover_checkers() drops a pack module that raises on exec, so a
-# bare import failure would delete the standard instead of printing the error row.
+# Guarded: discover_checkers() refuses a pack module that raises on exec, so a
+# bare import failure would stop the whole audit instead of printing the error row.
 # Caps are read off the module at call time; a `from ... import` binding is a copy.
 
 try:
@@ -98,11 +97,8 @@ _STATE_ERROR = "error"
 
 
 def _repo_root() -> Path | None:
-    """Walk up from this file to the repo root — the dir holding src/aipass.
-
-    module_file(), not Path.resolve().
-    """
-    for parent in module_file(__file__).parents:
+    """Walk up from this file to the repo root — the dir holding src/aipass."""
+    for parent in Path(__file__).resolve().parents:
         if (parent / "src" / "aipass").is_dir():
             return parent
     logger.warning("startup_budget: cannot locate repo root from %s", __file__)
@@ -122,7 +118,7 @@ def memory_config_path() -> Path | None:
 
 def pack_manifest_path() -> Path:
     """This pack's own ``pack.json`` — where sentry keeps the README cap."""
-    return module_file(__file__).parent / "pack.json"
+    return Path(__file__).resolve().parent / "pack.json"
 
 
 def external_inputs() -> List[Path]:

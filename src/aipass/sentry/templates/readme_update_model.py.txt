@@ -234,7 +234,7 @@ class TestMarkerReplacement:
         """The replacement went to re.sub as a string, so C:\\Users read as the escape \\U (PR#774)."""
         # Joined, not written whole: this is a directory NAME carrying a
         # backslash-U, not a path anything opens, and a literal would read to
-        # the hardcoded_path checker as a real Windows home.
+        # the hardcoded_path checker as a real home directory.
         branch = tmp_path / "\\".join(("C:", "Users", "runner"))
         (branch / "apps").mkdir(parents=True)
         (branch / "apps" / "main.py").write_text("# entry\n", encoding="utf-8")

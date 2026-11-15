@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for sentry tests
-# Version: 2.4.2
+# Version: 2.4.3
 # Created: 2026-03-05
 # Modified: 2026-11-14
 # =============================================
@@ -110,7 +110,7 @@ class BusRecorder:
 @pytest.fixture(autouse=True)
 def bus(monkeypatch) -> BusRecorder:
     """No test fires a real event: a recorder stands where the bus lives."""
-    # ``tests_lane._announce_bump`` imports trigger from core on every call.
+    # ``tests_lane._announce_bump`` reads trigger off core on every call.
     recorder = BusRecorder()
     monkeypatch.setattr(trigger_core, "trigger", recorder)
     return recorder

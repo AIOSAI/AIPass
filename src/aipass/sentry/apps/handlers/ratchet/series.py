@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: series.py
 # Description: the ratchet series - one append-only line per probe, and the archived artifact behind it
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-10-12
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -24,11 +24,10 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.module_root import module_file
 
 MODULE_NAME = "ratchet.series"
 
-SENTRY_ROOT = module_file(__file__).parents[3]
+SENTRY_ROOT = Path(__file__).resolve().parents[3]
 ARTIFACT_DIR = SENTRY_ROOT / ".sentry"
 
 #: The AIPass root the probe runs in: `src/aipass/sentry` is three levels down.

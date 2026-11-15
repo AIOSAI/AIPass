@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discovery.py
 # Description: Branch Discovery Handler
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -23,7 +23,7 @@ from aipass.sentry.apps.handlers.aipass_standards import applicability
 
 
 def _is_branch_private(branch_name: str) -> bool:
-    """Check if branch is in the private registry."""
+    """Check if branch is in the private registry; an unreadable one raises ValueError, never reads as public."""
     registry_path = _find_registry()
     priv_path = registry_path.parent / "PRIVATE_BRANCH_REGISTRY.json" if registry_path.exists() else None
     if not priv_path or not priv_path.exists():
@@ -31,12 +31,9 @@ def _is_branch_private(branch_name: str) -> bool:
     try:
         with open(priv_path, "r", encoding="utf-8") as f:
             registry = json.load(f)
-        for branch in registry_branches(registry):
-            if branch.get("name", "").upper() == branch_name.upper():
-                return True
-    except (json.JSONDecodeError, IOError):
-        logger.info("Cannot read private registry for branch %s", branch_name)
-    return False
+    except (json.JSONDecodeError, OSError) as exc:
+        raise ValueError(f"private registry {priv_path} is unreadable: {exc}") from exc
+    return any(branch.get("name", "").upper() == branch_name.upper() for branch in registry_branches(registry))
 
 
 def _find_registry() -> Path:
@@ -58,28 +55,34 @@ def registry_branches(registry_data: Any) -> List[Dict[str, Any]]:
 
 
 def _branches_from_registry(registry_path: Path) -> List[Dict[str, str]]:
-    """Extract branch dicts from a single registry file."""
+    """Extract branch dicts from a single registry file; an unreadable registry raises ValueError."""
     branches = []
     if not registry_path.exists():
         return branches
     try:
         with open(registry_path, "r", encoding="utf-8") as f:
             registry_data = json.load(f)
-        registry_dir = registry_path.parent
-        for branch in registry_branches(registry_data):
-            branch_name = branch.get("name", "")
-            raw_path = branch.get("path", "")
-            branch_path = Path(raw_path)
-            if not branch_path.is_absolute():
-                branch_path = (registry_dir / branch_path).resolve()
-            if not branch_path.exists():
-                continue
-            candidates = (branch_path / "apps" / name for name in applicability.entry_file_names(branch_name))
-            entry_file = next((path for path in candidates if path.exists()), None)
-            if entry_file:
-                branches.append({"name": branch_name, "path": str(branch_path), "entry_file": str(entry_file)})
-    except (json.JSONDecodeError, IOError):
-        logger.info("Cannot read registry %s", registry_path)
+    except (json.JSONDecodeError, OSError) as exc:
+        raise ValueError(f"registry {registry_path} is unreadable: {exc}") from exc
+    registry_dir = registry_path.parent
+    for branch in registry_branches(registry_data):
+        branch_name = branch.get("name", "")
+        branch_path = Path(branch.get("path", ""))
+        if not branch_path.is_absolute():
+            branch_path = (registry_dir / branch_path).resolve()
+        if not branch_path.exists():
+            logger.warning(
+                "Registry %s: branch %r skipped, its path %s does not exist", registry_path, branch_name, branch_path
+            )
+            continue
+        candidates = (branch_path / "apps" / name for name in applicability.entry_file_names(branch_name))
+        entry_file = next((path for path in candidates if path.exists()), None)
+        if entry_file is None:
+            logger.warning(
+                "Registry %s: branch %r skipped, no entry file under %s/apps", registry_path, branch_name, branch_path
+            )
+            continue
+        branches.append({"name": branch_name, "path": str(branch_path), "entry_file": str(entry_file)})
     return branches
 
 
@@ -107,7 +110,8 @@ def discover_branches(include_private: bool = False) -> List[Dict[str, str]]:
 def check_internal_access(branch_name: str) -> bool:
     """Check if the current working directory is inside a private branch.
 
-    Private branches can only be audited from inside their own directory.
+    Private branches can only be audited from inside their own directory; one the registry
+    cannot locate is refused.
     """
     _branch_path = None
     _priv_branches = discover_branches(include_private=True)
@@ -117,7 +121,7 @@ def check_internal_access(branch_name: str) -> bool:
             break
 
     if _branch_path is None:
-        return True  # Branch not found in registry, allow access
+        return False
 
     cwd = Path.cwd()
     return cwd == _branch_path or cwd.is_relative_to(_branch_path)

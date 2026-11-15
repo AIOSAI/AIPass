@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: standards_audit.py
 # Description: Standards Audit Module
-# Version: 1.1.3
+# Version: 1.2.0
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -36,7 +36,7 @@ from aipass.sentry.apps.handlers.audit.audit_display import (
 )
 from aipass.sentry.apps.handlers.audit.artifact import write_audit_artifact
 
-from aipass.sentry.apps.handlers.bypass.bypass_handler import load_bypass_rules, registry_notes
+from aipass.sentry.apps.handlers.bypass.bypass_handler import load_bypass_rules, registry_notes, waived_sites
 
 # Law ARGV's exit code and did-you-mean are reused so the two verbs sharing the typo refuse it alike.
 from aipass.sentry.apps.handlers.audit_tests import refusal
@@ -377,6 +377,7 @@ def handle_command(command: str, args: List[str]) -> bool:
             branch_elapsed = time.monotonic() - branch_start
 
             result["elapsed"] = branch_elapsed
+            result["waived"] = waived_sites(bypass_rules)
             audit_results.append(result)
 
             avg = result.get("average", 0)
@@ -384,7 +385,7 @@ def handle_command(command: str, args: List[str]) -> bool:
             cached_tag = cache_tag(result)
             progress.console.print(
                 f"  [dim][{idx}/{total_branches}][/dim] [cyan]{branch_name:<12}[/cyan]"
-                f" [{style}]{avg:>3}%[/{style}] [dim]({branch_elapsed:.1f}s)[/dim]{cached_tag}"
+                f" [{style}]{avg:>3}%[/{style}] [dim]{result['waived']:>3} waived ({branch_elapsed:.1f}s)[/dim]{cached_tag}"
             )
             progress.advance(task)
 

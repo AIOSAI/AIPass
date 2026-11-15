@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: score.py
 # Description: the v5 shadow score - one checker pack over the fleet, scoring and never gating
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-02
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -25,11 +25,10 @@ from aipass.sentry.apps.handlers.audit.artifact import write_audit_artifact
 from aipass.sentry.apps.handlers.audit.branch_audit import audit_branch_incremental
 from aipass.sentry.apps.handlers.bypass.bypass_handler import load_bypass_rules
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.module_root import module_file
 
 MODULE_NAME = "shadow_cycle.score"
 
-HANDLERS_DIR = module_file(__file__).parents[1]
+HANDLERS_DIR = Path(__file__).resolve().parents[1]
 
 WEAKEST_SHOWN = 3
 

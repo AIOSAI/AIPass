@@ -28,9 +28,8 @@ _TRIPLET_KINDS = ("config", "data", "log")
 
 _TRIPLET_RE = re.compile(r"^(?P<stem>.+)_(?P<kind>config|data|log)\.json$")
 
-# sha256 of the canonical shim pinned in src/aipass/devpulse/docs.local/DPLAN-0325_spec.md section 3. Computed
-# from the spec, not a branch copy, so a branch that drifts cannot teach the constant its own drift.
-# Re-pinned when the shim's docstring was renamed with the citizen (seedgo to sentry); all 19 copies agree.
+# sha256 of the canonical shim: the bytes spawn's citizen template ships at apps/handlers/json/json_handler.py.
+# Never taught by a branch copy, so a branch that drifts cannot teach the constant its own drift.
 CANONICAL_SHIM_SHA256 = "237bc66d92337a188bcd85e515863fe2141a607df0b7534c820b9ead55ae50db"
 
 # Guidance only: quoted in the refusal message, accepted by nothing. json_structure_check imports

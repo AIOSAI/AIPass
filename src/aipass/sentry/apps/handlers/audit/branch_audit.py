@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_audit.py
 # Description: Branch Audit Handler
-# Version: 2.8.1
+# Version: 2.9.0
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 """Branch Audit Handler — auto-discovers checkers from handlers/*_standards/ packs via glob."""
 
@@ -39,19 +39,18 @@ def discover_checkers(pack_path: Path | None = None) -> Dict[str, Any]:
 
 @functools.lru_cache(maxsize=16)
 def _load_checkers(standards_dir: Path, _stamps: tuple) -> Dict[str, Any]:
-    """Execute every checker module in one pack directory once per stamp set."""
+    """Execute every checker module in a pack once per stamp set; one that cannot load raises ImportError."""
     checkers = {}
     for cf in sorted(standards_dir.glob("*_check.py")):
         name = cf.stem.removesuffix("_check")
         spec = importlib.util.spec_from_file_location(cf.stem, cf)
         if spec is None or spec.loader is None:
-            continue
+            raise ImportError(f"checker {cf} has no import spec")
         mod = importlib.util.module_from_spec(spec)
         try:
             spec.loader.exec_module(mod)
-        except Exception:
-            logger.info("Skipped checker %s: failed to load", cf.name)
-            continue
+        except Exception as exc:
+            raise ImportError(f"checker {cf} failed to load: {type(exc).__name__}: {exc}") from exc
         if hasattr(mod, "check_module") or hasattr(mod, "check_branch"):
             checkers[name] = mod
     return checkers

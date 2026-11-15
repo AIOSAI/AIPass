@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests_lane.py
 # Description: Tests Lane Module — the retire lane and the test-template distribution
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-09-21
-# Modified: 2026-11-13
+# Modified: 2026-11-14
 # =============================================
 
 """Tests Lane Module
@@ -33,9 +33,9 @@ from aipass.sentry.apps.handlers.json import json_handler
 
 from aipass.cli import console, header
 from aipass.cli.apps.modules import err_console, error as display_error, warning
+from aipass.trigger.apps.modules import core as trigger_core
 
 from aipass.sentry.apps.handlers.cli.help_flags import wants_help
-from aipass.sentry.apps.handlers.module_root import module_file
 from aipass.sentry.apps.handlers.bypass.ignore_handler import find_repo_root
 from aipass.sentry.apps.handlers.tests_lane import pinning, retire_ops, template_ops
 from aipass.sentry.apps.modules import CommandRefused
@@ -134,7 +134,7 @@ def _refuse(subcommand: str) -> None:
     display_error(f"Unknown subcommand: '{subcommand}'")
     console.print("[yellow]Valid subcommands:[/yellow] " + ", ".join(_SUBCOMMANDS))
     console.print()
-    console.print(f"[dim]Module: {module_file(__file__)}[/dim]")
+    console.print(f"[dim]Module: {Path(__file__).resolve()}[/dim]")
     console.print()
     raise CommandRefused(EXIT_UNKNOWN_ARGUMENT, subcommand)
 
@@ -313,17 +313,10 @@ def _announce_bump(outcome: dict) -> None:
     """Announce a bump on @trigger's bus. Best effort — the bus never gates a stamp.
 
     Lives in the module layer: reaching the bus imports @trigger's module layer, which a handler must not do.
-    ImportError means @trigger is not installed here; anything else is our bug and is logged as one.
     """
-    try:
-        from aipass.trigger.apps.modules.core import trigger
-    except ImportError as exc:
-        logger.info("Event bus unavailable, template bump not announced: %s", exc)
-        return
-
     stamped = [row["branch"] for row in outcome["branches"] if row["action"] == "stamped"]
     try:
-        trigger.fire(
+        trigger_core.trigger.fire(
             template_ops.BUMP_EVENT,
             dry_run=outcome.get("dry_run", True),
             stamped=len(stamped),

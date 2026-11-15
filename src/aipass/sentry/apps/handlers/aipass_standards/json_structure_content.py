@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_structure_content.py
 # Description: JSON Structure Standards Content Handler
-# Version: 3.1.0
+# Version: 3.1.1
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -96,7 +96,8 @@ def get_json_structure_standards() -> str:
         "",
         "  The shim resolves NO paths of its own: the service derives this",
         "  branch's root from the shim's [dim]__file__[/dim], deliberately without",
-        "  [dim]resolve()[/dim] so a dead cwd cannot poison it. That is why",
+        "  [dim]resolve()[/dim], so a symlinked checkout keeps the path it was",
+        "  imported by. That is why",
         "  the check above accepts a shim with no [dim]Path(__file__)[/dim] in it.",
         "",
         "  [yellow]Bind, never wrap.[/yellow] The service reads the calling module at",

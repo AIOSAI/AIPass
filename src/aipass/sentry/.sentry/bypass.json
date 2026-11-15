@@ -211,11 +211,7 @@
       "standard": "unused_function",
       "reason": "Content functions (get_*_standards, get_*_proof) are discovered and called dynamically by standards_query.py via naming convention. The checker cannot trace convention-based dynamic dispatch."
     },
-    {
-      "file": "templates/",
-      "standard": "unused_function",
-      "reason": "Template files are reference implementations for other branches to copy. They contain function definitions that are not called within sentry itself."
-    },
+
     {
       "file": "apps/modules/permissions.py",
       "standard": "unused_function",
@@ -263,22 +259,22 @@
     {
       "file": "tests/test_audit_tests_static.py",
       "standard": "stdlib_patch",
-      "reason": "One patch, line 672 (fleet green leg 15): monkeypatch.setattr(sys, 'executable', ...) moves the interpreter's own table, as sys.argv and sys.path are acquitted for; the lookup under test reads sys.executable and a test that did not move it would measure the host. File-wide because stdlib_patch passes no line to is_bypassed."
+      "reason": "Eight patches (fleet green leg 15): line 626 monkeypatch.setattr(sys, 'executable', ...) moves the interpreter's own table, as sys.argv and sys.path are acquitted for; lines 652, 659, 667, 675, 682, 692 and 705 replace ruff_pt_check.shutil.which to put ruff on or off PATH. The lookup under test reads sys.executable and PATH, and a test that did not move them would measure the host. File-wide because stdlib_patch passes no line to is_bypassed."
     },
     {
       "file": "tests/test_checkers_batch10.py",
       "standard": "stdlib_patch",
-      "reason": "One patch, line 1004 (fleet green leg 15): Path.read_bytes is replaced only for 'locked.md' and delegates otherwise, to make one file unreadable; the portable alternatives (chmod, a lock) are not cross-platform. File-wide because stdlib_patch passes no line to is_bypassed."
+      "reason": "Two patches, lines 837 and 1415 (fleet green leg 15): Path.read_bytes is replaced only for 'locked.md' and delegates otherwise, to make one file unreadable; chmod 000 cannot make a file unreadable when the suite runs as root. File-wide because stdlib_patch passes no line to is_bypassed."
     },
     {
       "file": "tests/test_coverage_audit.py",
       "standard": "stdlib_patch",
-      "reason": "One patch, line 92 (fleet green leg 15; line 1007 before the 2026-10-08 split): importlib.util.spec_from_file_location answering None drives discover_checkers' 'no spec' branch, which no real *_check.py on disk can reach. File-wide because stdlib_patch passes no line to is_bypassed."
+      "reason": "Ten patches (fleet green leg 15): line 92 importlib.util.spec_from_file_location answering None drives discover_checkers' 'no spec' refusal, which no real *_check.py on disk can reach; lines 400-444 patch pathlib.Path.exists, spec_from_file_location and module_from_spec to drive _load_diagnostics_checker's absent, no-spec, load-failure and success answers without a second diagnostics_check.py on disk. File-wide because stdlib_patch passes no line to is_bypassed."
     },
     {
       "file": "tests/test_aipass_standards.py",
       "standard": "through_the_command",
-      "lines": [727],
+      "lines": [696],
       "reason": "No public route (fleet green leg 15; re-pinned +3 leg 16, +1 2026-10-26, -1 2026-11-01): json_handler_check._is_canonical_shim is the sha256 gate itself; check_branch reaches it only through a whole branch tree. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
@@ -287,12 +283,7 @@
       "lines": [630, 650, 664, 676, 689, 700, 710, 718, 725],
       "reason": "No public route (fleet green leg 15): runner._m10_proof is reached by the lane only after a full suite run under the gate. Named in the leg 15 reply to @devpulse as the checker asks."
     },
-    {
-      "file": "tests/test_audit_tests_lane_adapter.py",
-      "standard": "through_the_command",
-      "lines": [565],
-      "reason": "No public route (fleet green leg 15; moved with its test by the 10-08 split, re-pinned after the fire_canary tests): m10._fingerprint is reached only inside a gated run. Named in the leg 15 reply to @devpulse as the checker asks."
-    },
+
     {
       "file": "tests/test_audit_tests_lane_statement_deletion.py",
       "standard": "through_the_command",
@@ -404,7 +395,20 @@
     {
       "file": "apps/handlers/pytest_quality_standards/corpus.py",
       "standard": "silent_catch",
-      "reason": "NOT A SILENT CATCH - a third disposition the standard does not model. `_parse` catches OSError/SyntaxError/UnicodeDecodeError/ValueError and RETURNS the reason as `(None, \"SyntaxError: ...\")`; `build` records it in `Corpus.unparseable_reasons` and `no_oracle_check` renders it as a check line naming the file as NOT measured. The error reaches the human READING THE REPORT, which is strictly louder than a log entry. The standard accepts 'log or re-raise'; a logger is exactly what a stdlib-only generic pack cannot import, and re-raising would let one broken test file abort a whole project's score. STANDARD GAP LOGGED for the v5 campaign - returning a named reason to a caller that must handle it deserves to be a recognised disposition."
+      "lines": [134, 233],
+      "reason": "Stdlib-only generic pack: no prax logger to import. 134: _relpath's ValueError means the path is outside root, and the absolute path is the documented answer. 233: an unparseable production file goes in Corpus.production_unparseable, and the report names it as not measured. One broken file must not abort a project's score."
+    },
+    {
+      "file": "apps/handlers/bypass/dead_rules.py",
+      "standard": "fallback",
+      "functions": ["_line_count"],
+      "reason": "None is 'line count unknown' and the caller never convicts a rule on it (the docstring says so). The warning names the file, so a dead rule is kept, never deleted on a guess."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/fallback_check.py",
+      "standard": "fallback",
+      "lines": [316],
+      "reason": "An unparseable file is ruff's red. Its 'Not judged' message says the file was not checked, so a second red here would repeat the same defect."
     },
     {
       "file": "apps/handlers/context_standards/startup_budget_check.py",
@@ -419,21 +423,17 @@
       "standard": "hardcoded_path",
       "reason": "The POSIX home literals are INPUT to plugin.classify(), whose job is to judge a path SHAPE. The literal is the fixture; this file never opens it. Replacing it with pathlib would delete the test."
     },
-    {
-      "file": "apps/handlers/tests_pytest_standards/gutting.py",
-      "standard": "unused_function",
-      "reason": "TRUE FINDING, RECORDED NOT DENIED. discover_functions(), run_campaign() and summarize() are the pseudo_tested engine's public surface and nothing calls them, because the group is declared not_applicable: the adapter's nominate(spec) seam carries no options channel to opt a campaign in per run, and the campaign costs one suite execution per function (projected 35.6h on sentry, 58.8h ceiling) so it may not run by default. The engine is built and proven on .sentry/fixtures/canary_6500dce9. Tracked as sentry todo 120; the bypass goes when the run loop lands, and until then the audit is right and this entry is the record of why."
-    },
+
     {
       "file": "apps/handlers/audit/incremental_cache.py",
       "standard": "logged_fallback",
-      "lines": [243, 274, 285],
-      "reason": "A cache, and the checker is wrong on these lines (fleet green leg 14). An unreadable legacy doc migrates 0 entries (migrate_legacy_cache), and an unreadable or corrupt entry is a cache miss (load_branch_entry). Every caller needs the same answer to both: run the full audit and write the entry fresh, which is the documented fail-open. The corrupt entry is renamed aside to .corrupt and each failure is logged, so nothing is lost and nothing is silent."
+      "lines": [229, 240],
+      "reason": "A cache, and the checker is wrong on these lines (fleet green leg 14). An unreadable or a corrupt entry is a cache miss (load_branch_entry, two lines). Every caller needs the same answer to both: run the full audit and write the entry fresh, which is the documented fail-open. The corrupt entry is renamed aside to .corrupt and each failure is logged, so nothing is lost and nothing is silent."
     },
     {
       "file": "apps/handlers/audit_tests/artifact.py",
       "standard": "logged_fallback",
-      "lines": [57],
+      "lines": [56],
       "reason": "The checker is wrong on this line (fleet green leg 14). An unreadable previous artifact is no baseline, the same as an absent one, and load_previous's docstring says so: the caller records a missing baseline and skips the S3 diff, never 'nothing vanished'. The failure is logged as a warning and as the json op previous_artifact_unreadable."
     },
     {
@@ -448,12 +448,7 @@
       "lines": [52, 190],
       "reason": "The checker is wrong on these lines (fleet green leg 14): each failure answer is the STRICT answer. An unparseable file gets no console-import window (86) and no stderr-directed print lines (317), so it keeps every finding; ignorance never buys an exemption, as the comment at 86 says."
     },
-    {
-      "file": "apps/handlers/aipass_standards/handlers_check.py",
-      "standard": "logged_fallback",
-      "lines": [353, 407],
-      "reason": "The checker is wrong on these lines (fleet green legs 14 and 15): each parse-failure answer is the STRICT one. 'module_name is optional' (353) keeps the auto-detection check running, where 'required' would return None and acquit; 'walks no caller frame' (407) buys no exemption. Together they convict an unparseable file that names module_name. test_auto_detection_judges_an_unparseable_file_strictly pins it, and its mutant (353 answers False) dies at the assert."
-    },
+
     {
       "file": "apps/handlers/aipass_standards/json_structure_check.py",
       "standard": "logged_fallback",
@@ -475,19 +470,19 @@
     {
       "file": "apps/handlers/aipass_standards/architecture_check.py",
       "standard": "logged_fallback",
-      "lines": [321],
+      "lines": [320],
       "reason": "The checker is wrong on this line (fleet green leg 15): the failure answer is the strict one. The caller sees the passport still exists and fails Template baseline ('No citizen_class in ...passport.json'); only an absent passport skips, and that path never reaches this except."
     },
     {
       "file": "apps/handlers/aipass_standards/json_handler_check.py",
       "standard": "logged_fallback",
-      "lines": [51],
+      "lines": [50],
       "reason": "The checker is wrong on this line (fleet green leg 15): the failure answer is the strict one. check_branch reads None as 'Handler exists' failed, so an unreadable handler fails the row; the read error is logged as a warning."
     },
     {
       "file": "apps/handlers/audit/discovery.py",
       "standard": "logged_fallback",
-      "lines": [233],
+      "lines": [237],
       "reason": "No verdict reads this value (fleet green leg 15): measure_pack_corpus feeds the corpus banner only, its docstring says a raising measurer answers None so the caller keeps its own count rather than print a fabricated 0, and the failure is logged as a warning naming the measurer."
     },
     {
