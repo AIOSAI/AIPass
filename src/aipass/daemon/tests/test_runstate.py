@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_runstate.py
 # Description: Tests for the scheduler runstate — load/save, due-logic, catch-up, slots
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-06-15
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/schedule/runstate.py — the scheduler's runstate and its due-logic."""
@@ -668,3 +668,22 @@ def test_next_run_steps_from_the_window_that_fired(schedule, fired, expected):
     runstate = {"jobs": {}}
     update_job_runstate(runstate, "@a", "j", schedule, timestamp=fired)
     assert runstate["jobs"]["@a/j"]["next_run"] == expected
+
+
+class TestUnreadableTimesAreLogged:
+    """Medic sees every failure: an unreadable stored time still answers, and says so at warning."""
+
+    def test_an_unreadable_missed_window_is_queued_and_logged(self, caplog):
+        job = {"owner": "@a", "id": "j", "schedule": {"type": "daily", "time": "04:00", "catch_up": True}}
+        job["schedule"][recovery.CATCH_UP_MAX_AGE_FIELD] = 24
+        with caplog.at_level("WARNING"):
+            entry = recovery.queue_catch_up({}, job, ["not-a-time"], {"cause": "boot"}, now=datetime(2026, 11, 15))
+        assert entry["missed"] == ["not-a-time"]
+        assert "[recovery] missed window 'not-a-time' for @a/j unreadable" in caplog.text
+
+    def test_an_unreadable_last_run_still_heads_the_wake_and_is_logged(self, caplog):
+        job = {"owner": "@a", "id": "j", "schedule": {"type": "daily", "time": "04:00"}}
+        with caplog.at_level("WARNING"):
+            header = recovery.scheduled_header(job, {"last_run": "not-a-time"}, now=datetime(2026, 11, 15))
+        assert "Last run not-a-time." in header
+        assert "[recovery] last_run 'not-a-time' unreadable" in caplog.text

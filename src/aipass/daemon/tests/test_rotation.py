@@ -355,11 +355,6 @@ class TestFireRotation:
         assert "[rotation] ROUNDS: @backup — wake_branch(fresh=True, model=opus" in caplog.text
         assert "[rotation] ROUNDS: roster is empty — nobody to wake" in caplog.text
 
-    def test_a_wake_error_logs_that_the_pointer_advanced(self, roster, caplog):
-        with caplog.at_level("INFO"):
-            self._fire(roster, {}, (False, "boom", True))
-        assert "[rotation] ERROR: @backup — boom; pointer advances" in caplog.text
-
     def test_manager_skipped_by_name_when_lane_missing(self, fleet, classes):
         with (
             patch(f"{HANDLER}.active_citizens", return_value=fleet),
@@ -455,6 +450,16 @@ class TestManagerLane:
         _ok, _detail, mock_wake = self._fire(target, {}, return_value=(FakeStatus("woken"), True))
         assert "provider" not in mock_wake.call_args.kwargs, "wake_branch names the default, not rounds"
 
+    def test_a_wake_that_raises_is_one_prax_error_and_leaves_stderr_to_crashes(self, caplog, capsys):
+        target = {"email": "@commons", "citizen_class": "aipass_framework"}
+        with caplog.at_level("INFO"):
+            self._fire(target, {}, side_effect=RuntimeError("boom"))
+        errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+        assert errors == ["[rotation] ERROR: @commons — boom; pointer advances"]
+        out, err = capsys.readouterr()
+        assert "FAIL: @commons — boom; pointer advances" in out
+        assert err == "", "under the timer stderr is the crash record; a handled failure is not a crash"
+
     def test_wake_exception_is_reported_not_raised(self):
         """Mutant killed: _wake_steward reports a wake exception as errored=False (a miss)."""
         runstate = {}
@@ -513,6 +518,19 @@ class TestRotationCommand:
         assert status["last_target"] == "@backup"
         assert status["roster_size"] == 2
         assert status["manager_lane_available"] is False
+
+    def test_status_with_no_rotation_job_warns_through_prax(self, roster, caplog, capsys):
+        with (
+            caplog.at_level("WARNING"),
+            patch(f"{MODULE}.find_rotation_jobs", return_value=[]),
+            patch(f"{MODULE}.load_runstate", return_value={}),
+            patch(f"{MODULE}.build_roster", return_value=roster),
+            patch(f"{MODULE}._apply_wake_blocklist", side_effect=lambda r: r),
+            patch(f"{MODULE}._scheduled_lane_available", return_value=True),
+        ):
+            assert rotation_module.handle_command("rotation", []) is True
+        assert "No rotation job configured" in capsys.readouterr().err
+        assert "[rotation] No rotation job configured: the nightly rounds do not run" in caplog.text
 
     def test_status_without_a_rotation_job(self, roster, capsys):
         """Mutant killed: _build_status reports enabled=True with no job."""

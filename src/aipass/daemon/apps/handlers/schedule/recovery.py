@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: recovery.py
 # Description: Gap detection, missed-window enumeration, catch-up queue and drain policy
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-08
 # Modified: 2026-11-15
 # =============================================
@@ -222,10 +222,11 @@ def catch_up_enabled(schedule: dict) -> bool:
     return schedule.get("type") in WINDOWED_TYPES and rs.catch_up_on(schedule)
 
 
-def _within_max_age(schedule: dict, instant: str, now: datetime) -> bool:
+def _within_max_age(schedule: dict, instant: str, now: datetime, key: str) -> bool:
     """Is this missed window young enough to be worth firing?
 
     Unset or unreadable bound/instant answers True: a late wake costs less than a dropped window.
+    An unreadable one is logged at warning, so medic sees the bad row.
     """
     limit = schedule.get(CATCH_UP_MAX_AGE_FIELD)
     if limit is None:
@@ -238,6 +239,7 @@ def _within_max_age(schedule: dict, instant: str, now: datetime) -> bool:
     try:
         when = datetime.fromisoformat(instant)
     except (ValueError, TypeError):
+        logger.warning("[recovery] missed window %r for %s unreadable, kept with no age known", instant, key)
         return True
     return (now - when) <= timedelta(hours=hours)
 
@@ -260,11 +262,11 @@ def queue_catch_up(
     if not catch_up_enabled(schedule):
         return None
 
-    fresh = [i for i in instants if _within_max_age(schedule, i, now)]
+    key = rs.job_key(job["owner"], job["id"])
+    fresh = [i for i in instants if _within_max_age(schedule, i, now, key)]
     if not fresh:
         return None
 
-    key = rs.job_key(job["owner"], job["id"])
     queue = runstate.setdefault(QUEUE_FIELD, {})
     entry = queue.get(key)
 
@@ -394,6 +396,7 @@ def _humanise_ago(then: Optional[str], now: datetime) -> str:
     try:
         when = datetime.fromisoformat(then)
     except (ValueError, TypeError):
+        logger.warning("[recovery] last_run %r unreadable, the wake header names no age", then)
         return ""
     return f" ({format_duration(now - when)} ago)"
 

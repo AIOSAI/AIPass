@@ -659,6 +659,23 @@ class TestTickLinesThroughPrax:
             assert run_tick()["drained"] == 1
         assert "[run] CATCH-UP FIRED: @commons/live (2 window(s))" in caplog.text
 
+    def test_a_wake_that_raises_is_a_prax_error_and_leaves_stderr_to_crashes(self, caplog, capsys):
+        with (
+            caplog.at_level("INFO"),
+            patch(f"{RUN}.discover_jobs", return_value=[live_job()]),
+            patch(f"{RUN}.load_runstate", return_value={"jobs": {}}),
+            patch(f"{RUN}.is_job_due", return_value=True),
+            patch(f"{RUN}.missed_window", return_value=False),
+            patch(f"{RUN}.save_runstate", return_value=True),
+            patch("aipass.ai_mail.apps.modules.door_wake.wake_branch", side_effect=RuntimeError("boom")),
+        ):
+            assert run_tick()["failed"] == 1
+        errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+        assert errors == ["[run] Exception firing @commons/live: boom"]
+        out, err = capsys.readouterr()
+        assert "FAIL: @commons/live — exception: boom" in flat(out), "a hand run still sees it"
+        assert err == "", "under the timer stderr is the crash record; a handled failure is not a crash"
+
     def test_a_tick_that_finds_the_lock_held_says_so_in_the_prax_log(self, caplog):
         with (
             caplog.at_level("INFO"),
@@ -1084,14 +1101,18 @@ class TestCommandJobFire:
         assert outcome == OUTCOME_FAILED
         assert detail.startswith("exit 2, ")
 
-    def test_a_mail_that_fails_never_changes_the_answer(self, tmp_path, monkeypatch, no_wake, caplog):
+    def test_a_mail_that_fails_never_changes_the_answer(self, tmp_path, monkeypatch, no_wake, caplog, capsys):
         with caplog.at_level("WARNING"):
             outcome, _, runs, _ = self._fire(
                 tmp_path, monkeypatch, "print('ok')\n", mail_exit=1, notify={"email": "@devpulse"}
             )
         assert outcome == OUTCOME_FIRED
         assert len(runs) == 3, "both mails were attempted"
-        assert caplog.text.count("[run] notify mail to @devpulse not sent") == 2
+        warnings = [r for r in caplog.records if "notify mail to @devpulse not sent" in r.getMessage()]
+        assert [r.levelname for r in warnings] == ["WARNING", "WARNING"]
+        out, err = capsys.readouterr()
+        assert flat(out).count("Notify mail to @devpulse not sent") == 2
+        assert err == "", "under the timer stderr is the crash record"
 
 
 class TestCommandJobTick:

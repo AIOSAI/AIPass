@@ -91,6 +91,14 @@ prax line can be written; the traceback in `daemon-tick.err` is then the only re
 A healthy tick writes nothing there. Anything else that appears in it is a stray write to stderr
 from imported code, and is a defect in that code.
 
+A handled failure is not a crash. A wake that raises, a steward wake error, a notify mail that
+was not sent: each is a prax line at its true level (error, error, warning), so trigger and medic
+see it, and a plain console line on stdout in the tick's outcome words (`FAIL:`, `Notify mail ...
+not sent`) for a hand run. None of them uses `error()` or `warning()`, because those write to
+stderr, which under the timer is the crash record. A crash is what escapes: an import failure
+(Python's traceback) or an exception out of a module, which the router logs at error and names
+on stderr with `error()`.
+
 The journal is not used: on a host at journald's default size cap it keeps about a week, which
 is shorter than prax's own history.
 

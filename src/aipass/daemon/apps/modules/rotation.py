@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: rotation.py
 # Description: Rounds firing + status surface (drone @daemon rotation)
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-08-12
 # Modified: 2026-11-15
 # =============================================
@@ -145,7 +145,7 @@ def _wake_steward(target: dict, prompt: str, model: str, fresh: bool, provider: 
     try:
         status, ok = wake_branch(email, **kwargs)
     except Exception as e:
-        logger.error("[rotation] Exception waking steward %s: %s", email, e)
+        # Logged once, at error, by fire_rotation, which also knows the pointer advanced.
         return False, str(e), True
 
     return ok, status.summary, False
@@ -206,8 +206,8 @@ def fire_rotation(job: dict, runstate: dict, header: str = "") -> tuple:
         return True, detail
 
     if errored:
-        logger.warning("[rotation] ERROR: %s — %s; pointer advances", email, detail)
-        console.print(f"ERROR: {email} — {detail}; pointer advances")
+        logger.error("[rotation] ERROR: %s — %s; pointer advances", email, detail)
+        console.print(f"FAIL: {email} — {detail}; pointer advances")
         record_rotation(runstate, key, email, OUTCOME_FAILED, detail)
         return False, f"wake error for {email}: {detail}"
 
@@ -261,6 +261,7 @@ def _print_status(status: dict) -> None:
     console.print()
 
     if status["job_id"] is None:
+        logger.warning("[rotation] No rotation job configured: the nightly rounds do not run")
         warning("No rotation job configured")
         console.print("  [dim]Add one with schedule type 'rotation' — drone @daemon rotation --help[/dim]")
         console.print()

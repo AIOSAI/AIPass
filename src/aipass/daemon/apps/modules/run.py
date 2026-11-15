@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: run.py
 # Description: Manual one-tick scheduler command (drone @daemon run)
-# Version: 1.10.0
+# Version: 1.11.0
 # Created: 2026-06-15
 # Modified: 2026-11-15
 # =============================================
@@ -120,7 +120,8 @@ def _mail_notice(to: str, subject: str, body: str) -> None:
     """Send a command job's notify.email mail. A mail that fails is logged; it never changes the fire."""
     failure = command_job.send_mail(to, subject, body, _DAEMON_ROOT)  # signed @daemon: cwd is identity
     if failure:
-        console.print(f"WARNING: notify mail to {to} not sent — {failure}")
+        # stdout, not warning(): under the timer stderr is the crash record, and this is not a crash.
+        console.print(f"Notify mail to {to} not sent — {failure}")
         logger.warning("[run] notify mail to %s not sent: %s", to, failure)
 
 
@@ -214,7 +215,7 @@ def _fire_job(job: dict, runstate: dict, header: str = "") -> tuple:
         return OUTCOME_FAILED, msg
     except Exception as e:
         logger.error("[run] Exception firing %s/%s: %s", owner, job_id, e)
-        console.print(f"ERROR: {owner}/{job_id} — {e}")
+        console.print(f"FAIL: {owner}/{job_id} — exception: {e}")
         return OUTCOME_FAILED, str(e)
 
 

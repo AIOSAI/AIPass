@@ -37,7 +37,7 @@
     {
       "file": "apps/handlers/schedule/recovery.py",
       "standard": "logged_fallback",
-      "lines": [108, 195, 237, 241, 397],
+      "lines": [108, 195, 238, 243, 400],
       "reason": "Catch-up lane, built and OFF (RECOVERY_LANE_LIVE False) (daemon, fleet green leg 5). Each answer is the documented decision: an unparseable last_tick is no history, so no gap (181, as a missing one); an unreadable hourly time enumerates no windows, as the due check refuses the same value (286); an unreadable max-age bound or instant is unlimited, since one late wake with an honest header costs less than a window dropped unreported (350, 354); an unreadable instant has no age to print, '' (563, a header suffix)."
     },
     {
