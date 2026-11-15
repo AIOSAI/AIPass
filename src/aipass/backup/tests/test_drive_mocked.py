@@ -3,7 +3,7 @@
 # Description: Tests for the drive_* command modules, the settings verb and the suite-wide Drive seal
 # Version: 2.0.4
 # Created: 2026-06-12
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/drive_*.py and settings.py, and the Drive seal on apps/handlers/drive/client.py."""

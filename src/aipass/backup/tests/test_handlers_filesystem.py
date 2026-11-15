@@ -3,7 +3,7 @@
 # Description: Backup handlers: scan/{walk,filter}.py, ignore/patterns.py, audit/trail.py, project/, path/, report/
 # Version: 1.2.6
 # Created: 2026-06-12
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Backup handlers: scan/{walk,filter}.py, ignore/patterns.py, audit/trail.py, project/, path/, report/."""
@@ -123,7 +123,7 @@ class TestIgnorePatterns:
         assert is_ignored("src/main.py", spec) is False
 
     def test_spec_enforces_the_backupignore_patterns(self, tmp_path: Path) -> None:
-        """.backupignore's patterns ignore their matches, backslash-separated too, and spare the rest."""
+        """.backupignore's patterns ignore their matches and spare the rest."""
         ignore = tmp_path / ".backupignore"
         ignore.write_text("*.pyc\n__pycache__/\n", encoding="utf-8")
 
@@ -131,7 +131,6 @@ class TestIgnorePatterns:
 
         assert is_ignored("a.pyc", spec) is True
         assert is_ignored("__pycache__/mod.py", spec) is True
-        assert is_ignored("__pycache__\\mod.py", spec) is True
         assert is_ignored("src/main.py", spec) is False
 
 

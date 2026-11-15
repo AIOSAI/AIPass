@@ -3,7 +3,7 @@
 # Description: Tests for ignore/patterns.py: matching, seed template, *.tmp floor, cleanup
 # Version: 1.3.7
 # Created: 2026-06-12
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for src/aipass/backup/apps/handlers/ignore/patterns.py: matching, seed template, *.tmp floor, cleanup."""
@@ -470,7 +470,7 @@ class TestWalkSkipsIgnoredDirectories:
     @staticmethod
     def _walked(root: Path, whitelist: list[str]) -> list[str]:
         """The relative paths the walk yields under the project's own spec."""
-        return sorted(rel.replace("\\", "/") for _abs, rel in walk_project(str(root), load_spec(str(root)), whitelist))
+        return sorted(rel for _abs, rel in walk_project(str(root), load_spec(str(root)), whitelist))
 
     @pytest.mark.skipif(os.geteuid() == 0, reason="needs a directory a user cannot list")
     def test_an_ignored_directory_is_never_opened(self, tmp_path: Path) -> None:

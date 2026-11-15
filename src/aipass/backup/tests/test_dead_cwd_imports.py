@@ -3,7 +3,7 @@
 # Description: Dead-cwd import defect — safe path helper, the denied-cwd world, the fence with its cwd removed
 # Version: 2.0.4
 # Created: 2026-08-31
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/path/module_paths.py and the fence in apps/handlers/__init__.py under a dead cwd."""

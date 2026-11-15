@@ -3,7 +3,7 @@
 # Description: Mirror cleanup handler — removes snapshot files whose source no longer exists
 # Version: 2.1.0
 # Created: 2026-06-12
-# Modified: 2026-09-27
+# Modified: 2026-11-14
 # =============================================
 
 """Mirror cleanup handler — removes snapshot files whose source no longer exists."""
@@ -33,7 +33,7 @@ def _should_delete(backup_file: Path, backup_path: Path, source_dir: Path) -> st
     if source_file.exists():
         return None
 
-    return str(rel).replace("\\", "/")
+    return str(rel)
 
 
 def _delete_stale_files(
