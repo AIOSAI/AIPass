@@ -74,12 +74,11 @@ Default is continue (`-c`). Reason before dispatching:
 
  - Steer a working agent with `email` (no wake), never re-dispatch.
  - Email lands only at hook boundaries — not an interrupt. Briefs for builds over ~10 min carry: re-check inbox before reporting done.
- - A dispatch brief is a plan in the recipient's branch: `drone @flow create <branch path> "Subject" fplan`, the brief as its body, the mail names the plan id. Tracked, on the dashboard, the agent logs into it. docs.local never holds a brief; briefs as files are for sub-agents only (the owner, 2026-10-25).
+ - A dispatch brief is a plan in the recipient's branch: `drone @flow create <branch path> "Subject" fplan`, the brief as its body, the mail names the plan id. Tracked, on the dashboard, the agent logs into it. docs.local never holds a brief; briefs as files are for sub-agents only.
  - A contract between two sides lives in the plan driving the build, as a section — never a side file in docs.local. Amend it there and mail both sides what changed. When the build lands, the owning doc states the shape in its own words.
- - A tracked doc never points at a plan, a .trinity entry, docs.local/ or dropbox/ — a reader of the repo cannot open them. Docs are the result; the plan is the reference (the owner, 2026-10-17).
+ - A tracked doc never points at a plan, a .trinity entry, docs.local/ or dropbox/ — a reader of the repo cannot open them. Docs are the result; the plan is the reference.
  - Agents split by a project fence: extract the spec from the deciding side early, relay it as a file, never retyped.
  - No backticks in dispatch/email bodies — bash silently eats them.
- - projects/* dispatches answer in `drone @devpulse feedback`, not the inbox — check it on every project wake-back.
  - Max 2 concurrent dispatches; queue the rest on wake-backs. Never stack two race-probe briefs.
 
 # Interactive wake — tmux
@@ -88,7 +87,7 @@ Gives the user an interactive session, distinct from autonomous dispatch. Find t
 
 ```
 tmux new-session -d -s "name" -c "/path/to/branch"
-tmux send-keys -t "name" "claude --model opus" Enter   # fable is this seat only (the owner, 2026-09-08)
+tmux send-keys -t "name" "claude --model opus" Enter   # fable is this seat only
 ```
 
 # Compass — decisions, not memory
