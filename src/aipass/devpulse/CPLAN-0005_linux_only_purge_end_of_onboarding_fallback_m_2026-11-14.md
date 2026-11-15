@@ -138,6 +138,13 @@ Memory committed (ccafa559): 18 of 18. The owner gave a green light for the nigh
 A crossed wire: @aipass applied my overtaken correction mail hours late and restored the guided init stages; sent back, it undid the restore. Lesson: a correction mail that a later ruling overtakes must itself be corrected by mail, at once.
 Docker install test 2 (image aipass-local:test3): the install completes. New finding: the bootstrap's doctor judges the directory the installer started in, not the installed home, so a healthy install (46 pass, 0 error from inside the home) is reported as 3 errors on the final screen and in install_report.json. Back to @aipass.
 
+### 13. Both install paths green (11-15, 09:30)
+
+AIPass alone (repo Dockerfile, image aipass-local:test4): exit 0, doctor 46 pass, 3 warnings, 0 errors, report outcome `installed`. The doctor fix: the bootstrap runs the home's own `aipass doctor` with cwd and AIPASS_HOME set to the home; a real doctor error now exits 1.
+Through BAUD (its sandbox image, a bare Ubuntu; both sign-ins skipped, no credentials entered): run 1 failed on a false ERROR from hooks' wire verify (Codex hooks and OpenCode plugin "missing" on a machine with neither CLI). It predates sweep 3; it only bit once doctor errors became fatal. Cured in hooks: an absent provider CLI is a defined state, reported at INFO. Run 2: doctor 39 pass, 0 errors, phone face served (HTTP 200 on 127.0.0.1:8787), "BAUD v0.5.0 is installed". Logs: docs.local/sweep3_2026-11-14/baud_sandbox_run1.txt and run2.txt.
+Three install bugs in one morning, each hidden until a failure was made loud: the bootstrap's wrong ai_mail root, the doctor judging the wrong directory, the wire verify error nobody saw because install exited 0 anyway.
+Open after this: devpulse greeting from install_report.json (user_name is empty on a non-interactive install, the wake line still says "greet me by name"); the Tailscale-down warning says "Install it" when it is installed; the full suite, once; push on the owner's word.
+
 ### 7. State at capture
 
 dev is ahead of main by 72 commits, unpushed (push and merge only on the owner's word). Per-branch work lists exist for all 18 branches (110 purge items, 56 dead waivers or false greens, 120 fallbacks, 42 owner decisions). Dispatched so far: @aipass (end of onboarding), @sentry (its list), a builder on devpulse's own list. Order after that: prax, cli, ai_mail, hooks part 1, the rest; hooks removes its dead-cwd code last; sentry prunes its helper names after everyone.
