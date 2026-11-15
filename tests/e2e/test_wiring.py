@@ -205,11 +205,13 @@ def _fire_hook(clean_venv: CleanVenv, work: Path, command: str, agent_id: str) -
 
 
 def _hook_env(work: Path) -> dict:
-    """Build a minimal env for the hook subprocess, with AIPASS_HOME isolated."""
+    """Env for hook and trust-registry subprocesses: AIPASS_HOME, HOME and the trust registry all inside ``work``."""
     import os
 
     env = dict(os.environ)
     env["AIPASS_HOME"] = str(work)
+    env["HOME"] = str(work)
+    env["AIPASS_TRUST_REGISTRY"] = str(work / ".aipass" / "trusted_projects.json")
     return env
 
 
@@ -233,6 +235,7 @@ def _trust_registry(clean_venv: CleanVenv, op: str, work: Path) -> None:
             "-c",
             f"from aipass.hooks.apps.handlers.config.trust_registry import {op}; {op}({str(work)!r})",
         ],
+        env=_hook_env(work),
         capture_output=True,
         text=True,
         timeout=60,
