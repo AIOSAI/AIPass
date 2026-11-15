@@ -4,7 +4,7 @@
 # Description: No inspect.stack() call in the files that run at import
 # Version: 1.2.0
 # Created: 2026-08-31
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # Category: cli/tests
 # =============================================
 

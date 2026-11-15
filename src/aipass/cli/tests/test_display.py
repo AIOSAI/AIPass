@@ -3,7 +3,7 @@
 # Description: The display module — messages, header, routing, demo, exit seam, escape, live colour
 # Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/display.py — the render surface every branch imports."""
