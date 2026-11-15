@@ -3,7 +3,7 @@
 # Description: Test suite for spawn module
 # Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/core.py (spawn_agent) and apps/handlers/registry.py."""

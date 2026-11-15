@@ -3,7 +3,7 @@
 # Description: Atomic file write helper — stage, fsync, os.replace
 # Version: 1.1.1
 # Created: 2026-08-16
-# Modified: 2026-10-24
+# Modified: 2026-11-14
 # =============================================
 
 """Atomic text writes for every spawn handler that touches a live file."""

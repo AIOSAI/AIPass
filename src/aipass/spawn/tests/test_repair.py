@@ -3,7 +3,7 @@
 # Description: Tests for repair and adopt-citizen — move, rename, pollution, cross-project adoption
 # Version: 1.1.0
 # Created: 2026-05-15
-# Modified: 2026-11-09
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/repair_ops.py and adopt_citizen_ops.py — move, rename, pollution, adopt-citizen."""

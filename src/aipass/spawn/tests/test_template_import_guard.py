@@ -3,7 +3,7 @@
 # Description: What the newborn's handler guard must survive on its very first import
 # Version: 1.1.1
 # Created: 2026-08-30
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for templates/citizen/apps/handlers/__init__.py, the newborn's import-time access guard."""

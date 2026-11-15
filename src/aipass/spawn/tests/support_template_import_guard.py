@@ -3,7 +3,7 @@
 # Description: Shared child-script worlds for the template import guard tests (split from test_template_import_guard.py)
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Shared worlds for the tests of templates/citizen/apps/handlers/__init__.py (no test_ prefix: never collected)."""

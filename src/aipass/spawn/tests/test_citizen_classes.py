@@ -3,7 +3,7 @@
 # Description: Integration tests for citizen class system
 # Version: 1.3.4
 # Created: 2026-03-07
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/class_registry.py and the citizen-class-aware create and update paths."""

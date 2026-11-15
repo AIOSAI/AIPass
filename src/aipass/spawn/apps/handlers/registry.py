@@ -3,7 +3,7 @@
 # Description: *_REGISTRY.json discovery and CRUD operations
 # Version: 1.3.0
 # Created: 2026-03-05
-# Modified: 2026-11-09
+# Modified: 2026-11-14
 # =============================================
 
 """*_REGISTRY.json discovery and CRUD operations.
