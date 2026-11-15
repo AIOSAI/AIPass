@@ -31,7 +31,7 @@
   <a href="https://aipass.ai">aipass.ai</a>
 </p>
 
-> **AIPass is simplifying.** It is moving to Linux only: native, WSL2 on Windows, and a Docker image to come. Native macOS and Windows maintenance ends; a port is the community's to carry. AIPass stays open source and in daily development, the developer's lifetime project. If this changes how you use it, open a [discussion](https://github.com/AIOSAI/AIPass/discussions) or an [issue](https://github.com/AIOSAI/AIPass/issues) with `transition` in the title and tell us your setup. We will help you find your path: WSL2, Docker when it lands, or a fork.
+> **AIPass is Linux only.** It runs on Linux: native, WSL2, and a Docker image to come. AIPass stays open source and in daily development, the developer's lifetime project. If this changes how you use it, open a [discussion](https://github.com/AIOSAI/AIPass/discussions) or an [issue](https://github.com/AIOSAI/AIPass/issues) with `transition` in the title and tell us your setup. We will help you find your path: WSL2, Docker when it lands, or a fork.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/AIOSAI/AIPass/main/assets/demo.gif" alt="Terminal demo: the fleet listed, a memory an agent kept a month ago found by meaning, and an agent audited at 100%" width="760">
@@ -40,7 +40,7 @@
 
 ## Install
 
-**You need:** Python 3.10+, [Claude Code](https://code.claude.com/docs) on a Claude plan that includes it, and Linux (Windows through WSL2). [Codex](https://github.com/openai/codex) and [OpenCode](https://opencode.ai) if you want them: with a binary on your PATH, install sets it up as another CLI for the same agents, and each agent runs on any of them, your choice per task.
+**You need:** Python 3.10+, [Claude Code](https://code.claude.com/docs) on a Claude plan that includes it, and Linux (native or WSL2). [Codex](https://github.com/openai/codex) and [OpenCode](https://opencode.ai) if you want them: with a binary on your PATH, install sets it up as another CLI for the same agents, and each agent runs on any of them, your choice per task.
 
 ```bash
 pipx install aipass
@@ -162,7 +162,7 @@ The installer writes a layer outside the project. Remove all of it to erase AIPa
 - `~/.claude/settings.json` — hook wiring, plus `env.AIPASS_HOME`, `env.CLAUDE_CODE_DISABLE_AUTO_MEMORY`, `env.CLAUDE_CODE_DISABLE_AGENT_VIEW`, `includeGitInstructions: false`, the AIPass deny rules (git write verbs, `~/.secrets` reads) and one `ask` rule (edits under `~/.claude/`). Nothing of AIPass changes this file unseen: every write first drops a dated copy under `~/.claude/.backup/settings/` and a line in the `receipts.jsonl` beside it naming which door wrote; `aipass doctor --fix` lists the changes with a diff and asks once before writing (`--yes` for scripts), and the installer's own preflight writes once, with a receipt. Also `~/.claude/commands/memo.md`.
 - `~/.claude/.backup/settings/` — those dated copies and the receipts ledger.
 - `aipass`/`drone` symlinks in `/usr/local/bin` or `~/.local/bin`.
-- Your shell rc (`.bashrc`, `.zshrc` or `.bash_profile`) and, on Linux, `~/.profile`: an `AIPASS_HOME` export, a PATH line where the commands went to `~/.local/bin`, and the `claude()` boot-shim function between the `AIPass boot shim` markers in `.bashrc` and `.zshrc`.
+- Your shell rc (`.bashrc`, `.zshrc` or `.bash_profile`) and `~/.profile`: an `AIPASS_HOME` export, a PATH line where the commands went to `~/.local/bin`, and the `claude()` boot-shim function between the `AIPass boot shim` markers in `.bashrc` and `.zshrc`.
 - `~/.aipass/` — cross-project state: the trust registry, commons database, admin key, skills, the BAUD phone face and `baud-cli` under `baud/`, the logs of the `aipass` CLI installed from PyPI under `system_logs/` (a clone logs under its own `system_logs/` instead), and any Telegram bot state an earlier version left (the Telegram skill is out of the tree).
 - Your login keyring: one entry per secret under the service `aipass` (API keys, Google credentials, the host API's token, pairings and config) in SecretService. `drone @api secrets migrate` imports the files an earlier version kept under `~/.secrets/aipass/` and shreds them; that directory keeps only the host API's write lock and pairing receipts.
 - `git config --global pull.rebase true`, set only if install also set your identity.
@@ -231,7 +231,7 @@ curl -fsSL https://github.com/AIOSAI/baud/releases/latest/download/install.sh | 
 
 **Stable.** Built by one human and the AIPass agents, with a handful of outside contributions. From here the work is fine-tuning.
 
-Linux is the platform: the daily driver, the one CI proves. On Windows, AIPass runs inside WSL2. macOS and native Windows are not supported.
+Linux is the platform, native or WSL2: the daily driver, the one CI proves.
 
 **Version:** <a href="https://pypi.org/project/aipass/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/aipass?color=007ec6"></a> **Python:** <a href="https://pypi.org/project/aipass/"><img alt="Python versions" src="https://img.shields.io/pypi/pyversions/aipass?color=007ec6"></a> **Agents:** 18 core + user-created.
 
@@ -252,7 +252,7 @@ Linux is the platform: the daily driver, the one CI proves. On Windows, AIPass r
 - [Claude Code](https://code.claude.com/docs) on a Claude plan that includes it (Pro, Max, Team or Enterprise)
 - [Codex](https://github.com/openai/codex) optional: with its binary on PATH, install wires it as a second CLI for the same agents (`/codex` and `$claude` switch a seat between the two)
 - [OpenCode](https://opencode.ai) optional: with its binary on PATH, install adds the AIPass plugin so the same agents run on it (`/opencode` from Claude Code, `$opencode` from Codex, `/claude` and `/codex` back); signed out, it runs on OpenCode's free models
-- Linux (the only platform CI tests). On Windows, use [WSL2](https://learn.microsoft.com/windows/wsl/install) and install inside it: AIPass then runs as the Linux program CI tests.
+- Linux, native or [WSL2](https://learn.microsoft.com/windows/wsl/install): the platform CI tests.
 - `sudo` access optional (used for `/usr/local/bin` symlinks — falls back to `~/.local/bin` without it)
 - Node.js + npm optional (install uses them to add the `@anthropic-ai/sandbox-runtime` kernel sandbox; without them the sandbox is reported as optional and not set up, AIPass runs without it, and `aipass doctor` says how to add it later)
 - API keys / OAuth optional (OpenRouter, Google — only for optional add-on integrations)
