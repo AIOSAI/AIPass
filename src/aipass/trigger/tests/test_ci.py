@@ -3,7 +3,7 @@
 # Description: Tests for the CI red lane module - poll, reply, verdict, status - and the handlers it drives
 # Version: 1.1.2
 # Created: 2026-10-23
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/ci.py and the handlers/ci/ handlers it drives."""
@@ -15,9 +15,9 @@
 
 import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
-import aipass.ai_mail as ai_mail_pkg
-from aipass.trigger.apps.handlers.ci import outbound, replies, triage
+from aipass.trigger.apps.handlers.ci import ledger, replies, triage
 from aipass.trigger.apps.modules import ci
 
 AUDIT_LOG = (
@@ -387,10 +387,22 @@ class TestCommandSurface:
     def test_another_module_command_is_not_claimed(self):
         assert ci.handle_command("medic", ["status"]) is False
 
-    def test_the_feed_answers_no_door_when_ai_mail_publishes_none(self, ci_lane, monkeypatch):
-        monkeypatch.delattr(ai_mail_pkg, "send_notification")
-        assert outbound.feed("red", "t", "b", run_id="1") == "no_door"
-
     def test_the_ledger_lives_on_its_own_name(self, ci_lane):
         _dispatched_hooks_red(ci_lane)
         assert json.loads((ci_lane.root / "ci_ledger.json").read_text(encoding="utf-8"))["version"] == 1
+
+
+class TestClaimStamp:
+    """A missing claim is "not claimed"; a garbled one reads stale and says so."""
+
+    def test_a_garbled_stamp_warns(self, monkeypatch):
+        log = MagicMock()
+        monkeypatch.setattr(ledger, "logger", log)
+        assert ledger.claim_is_live({"claimed": "not-a-stamp"}) is False
+        log.warning.assert_called_once()
+
+    def test_no_stamp_is_quiet(self, monkeypatch):
+        log = MagicMock()
+        monkeypatch.setattr(ledger, "logger", log)
+        assert ledger.claim_is_live({}) is False
+        log.warning.assert_not_called()

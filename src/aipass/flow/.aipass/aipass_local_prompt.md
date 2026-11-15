@@ -26,7 +26,7 @@ apps/
     template_manager.py  registry_monitor.py  aggregate_central.py
     post_close_runner.py    detached worker, picks up after a close
   handlers/
-    repo_root.py          module_file / find_repo_root / exists_exactly — the one location answer
+    repo_root.py          find_repo_root / exists_exactly — the one location answer
     plan/                 lifecycle: create_ops, close_ops, restore_ops, list_ops, display,
                           validator, command_parser, registry_routing, project_scope, …
     registry/             load, save, heal, monitor_ops, statistics

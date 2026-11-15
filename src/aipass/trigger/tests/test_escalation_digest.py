@@ -3,7 +3,7 @@
 # Description: Tests for the escalation digest: sending, the mail it carries, reporting and the CLI
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/escalation.py's digest (send, mail, reporting) and apps/modules/escalation.py."""
@@ -479,7 +479,7 @@ class TestCliCommand:
     """The CLI claims its own module name and nothing else."""
 
     def test_bare_status_is_left_to_core(self, cli) -> None:
-        """`drone @trigger status` belongs to core.py — claiming it would hijack it."""
+        """Bare `status` is not escalation's — claiming it would hijack it."""
         assert cli.module.handle_command("status", []) is False
 
     def test_bare_list_is_left_to_core(self, cli) -> None:

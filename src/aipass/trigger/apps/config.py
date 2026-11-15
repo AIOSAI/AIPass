@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config.py
-# Description: Trigger package paths, cwd-free module resolve, atomic JSON writes, recursion-safe trail logger
+# Description: Trigger package paths, atomic JSON writes, recursion-safe trail logger
 # Version: 1.8.0
 # Created: 2026-03-09
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -19,28 +19,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-try:
-    from aipass.prax import append_jsonl as _append_jsonl
-except Exception:
-    _append_jsonl = None
+from aipass.prax import append_jsonl as _append_jsonl
 
-# Recorded, not logged: module_file runs before any logger exists, once per module import.
-UNRESOLVED: list[str] = []
-
-
-def module_file(file: str) -> Path:
-    """A module's own path, absolute, resolved when the filesystem allows."""
-    # The fallback is sound because __file__ is absolute (3.9+), just not symlink-resolved.
-    path = Path(file)
-    try:
-        return path.resolve()
-    except OSError as exc:
-        UNRESOLVED.append(f"{path}: {type(exc).__name__}: {exc}")
-        return path
-
-
-# module_file, not resolve(): this line runs at IMPORT.
-TRIGGER_ROOT = module_file(__file__).parents[1]
+TRIGGER_ROOT = Path(__file__).resolve().parents[1]
 
 _CONFIG_LOG = TRIGGER_ROOT / "logs" / "config.jsonl"
 
@@ -48,8 +29,6 @@ _CONFIG_LOG = TRIGGER_ROOT / "logs" / "config.jsonl"
 def append_trail(path: Path, entry: dict) -> bool:
     """Append one JSONL line to a sidecar file, reporting whether it landed."""
     # Never raises. Use a `.jsonl` path: the log watcher reads only `*.log` and would feed it back.
-    if _append_jsonl is None:
-        return False
     try:
         _append_jsonl(path, entry)
         return True
@@ -97,7 +76,7 @@ logger = TrailLogger(_CONFIG_LOG)
 
 AIPASS_PKG_ROOT = TRIGGER_ROOT.parent
 
-# json_handler regenerates any `<module>_<config|data|log>.json` here whose shape mismatches.
+# json_handler creates any absent `<module>_<config|data|log>.json` here; a misshaped one raises, never overwritten.
 TRIGGER_JSON_DIR = TRIGGER_ROOT / "trigger_json"
 
 ARCHIVE_DIR_NAME = ".archive"

@@ -3,7 +3,7 @@
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for trigger tests
 # Created: 2025-11-08
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # Version: 1.7.0
 # Category: trigger/tests
 #
@@ -385,6 +385,7 @@ def ci_lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
     monkeypatch.setattr(ci_ledger, "LEDGER_FILE", tmp_path / "ci_ledger.json")
     monkeypatch.setattr(ci_red, "logger", trail_logger(tmp_path / "ci_lane.jsonl"))
     monkeypatch.setattr(outbound, "logger", trail_logger(tmp_path / "ci_lane.jsonl"))
+    monkeypatch.setattr(ci_ledger, "logger", trail_logger(tmp_path / "ci_lane.jsonl"))
     monkeypatch.setattr(outbound, "_send_email", fake_mail)
     monkeypatch.setattr(git_door, "run_drone", fake_drone)
     monkeypatch.setattr(door_wake, "wake_branch", fake_wake)

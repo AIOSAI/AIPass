@@ -3,7 +3,7 @@
 # Description: Background post-close processing
 # Version: 1.3.2
 # Created: 2026-02-14
-# Modified: 2026-11-12
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -19,6 +19,7 @@ This script lives inside the flow branch so handler import guards allow it.
 """
 
 import sys
+from pathlib import Path
 
 
 from aipass.cli.apps.modules import console, error
@@ -29,9 +30,7 @@ from aipass.flow.apps.handlers.mbank.process import process_closed_plans
 from aipass.flow.apps.handlers.runner.lock_ops import acquire_lock, release_lock
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-from aipass.flow.apps.handlers.repo_root import module_file
-
-_PKG_ROOT = module_file(__file__).parents[3]
+_PKG_ROOT = Path(__file__).resolve().parents[3]
 FLOW_ROOT = _PKG_ROOT / "flow"
 MODULE_NAME = "post_close_runner"
 LOCK_FILE = FLOW_ROOT / ".post_close_runner.lock"

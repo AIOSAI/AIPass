@@ -3,7 +3,7 @@
 # Description: Plan Restore Implementation Handler
 # Version: 1.5.0
 # Created: 2026-03-08
-# Modified: 2026-10-26
+# Modified: 2026-11-15
 # =============================================
 
 """Plan Restore Operations Handler
@@ -27,9 +27,9 @@ from aipass.flow.apps.handlers.plan.registry_routing import (
 )
 
 
-from aipass.flow.apps.handlers.repo_root import find_repo_root, module_file
+from aipass.flow.apps.handlers.repo_root import find_repo_root
 
-_PKG_ROOT = module_file(__file__).parents[4]  # handlers/plan/ -> handlers/ -> apps/ -> flow/ -> aipass/
+_PKG_ROOT = Path(__file__).resolve().parents[4]  # handlers/plan/ -> handlers/ -> apps/ -> flow/ -> aipass/
 FLOW_ROOT = _PKG_ROOT / "flow"
 
 
@@ -368,12 +368,9 @@ def restore_plan_impl(
             {"type": "restore_success", "plan_key": plan_key, "location": restored_location, "prefix": plan_prefix}
         )
 
-        try:
-            from aipass.trigger.apps.modules.core import trigger
+        from aipass.trigger.apps.modules.core import trigger
 
-            trigger.fire("plan_restored", plan_number=plan_key, location=restored_location)
-        except ImportError:
-            logger.info(f"[{MODULE_NAME}] Trigger module not available, skipping event fire")
+        trigger.fire("plan_restored", plan_number=plan_key, location=restored_location)
 
         json_handler.log_operation(
             "plan_restored", {"plan_key": plan_key, "location": restored_location, "success": True}

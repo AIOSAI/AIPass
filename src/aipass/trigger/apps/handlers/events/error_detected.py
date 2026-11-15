@@ -3,7 +3,7 @@
 # Description: Error detected event handler with Medic v2 dispatch gating
 # Version: 2.11.0
 # Created: 2026-02-10
-# Modified: 2026-11-08
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -31,46 +31,17 @@ BRANCH_REGISTRY_FILE = _REPO_ROOT / "AIPASS_REGISTRY.json"
 # Set by the module layer, so this handler never imports from modules.
 _send_email: Optional[Callable[..., bool]] = None
 
-try:
-    from aipass.trigger.apps.handlers.error_registry import (
-        circuit_breaker_allows,
-        circuit_breaker_record_error,
-        circuit_breaker_probe_succeeded,
-        should_dispatch as registry_should_dispatch,
-        record_dispatch as registry_record_dispatch,
-        is_suppressed as registry_is_suppressed,
-    )
-
-    _REGISTRY_DISPATCH_AVAILABLE = True
-except ImportError:
-    _REGISTRY_DISPATCH_AVAILABLE = False
-
-    def circuit_breaker_allows() -> bool:
-        """Fallback circuit breaker check that always allows dispatch."""
-        return True
-
-    def circuit_breaker_record_error() -> None:
-        """Fallback no-op error recording when error_registry is unavailable."""
-        pass
-
-    def circuit_breaker_probe_succeeded() -> None:
-        """Fallback no-op when error_registry is unavailable."""
-        pass
-
-    def registry_should_dispatch(fingerprint: str) -> bool:
-        """Fallback dispatch check that always allows dispatch for any fingerprint."""
-        return True
-
-    def registry_record_dispatch(fingerprint: str) -> None:
-        """Fallback no-op dispatch recording when error_registry is unavailable."""
-        pass
-
-    def registry_is_suppressed(fingerprint: str) -> bool:
-        """Fallback suppression check — nothing is suppressed without the registry."""
-        return False
+from aipass.trigger.apps.handlers.error_registry import (
+    circuit_breaker_allows,
+    circuit_breaker_record_error,
+    circuit_breaker_probe_succeeded,
+    should_dispatch as registry_should_dispatch,
+    record_dispatch as registry_record_dispatch,
+    is_suppressed as registry_is_suppressed,
+)
 
 
-# Per-branch rate limiting, used only when error_registry is unavailable.
+# Per-branch rate limiting, used only for an error with no fingerprint.
 _dispatch_timestamps: Dict[str, List[float]] = {}
 MAX_DISPATCHES_PER_WINDOW = 3
 RATE_LIMIT_WINDOW_SECONDS = 600  # 10 minutes
@@ -313,8 +284,7 @@ def handle_error_detected(
             return
 
         # The breaker counts at detection time, not dispatch time.
-        if _REGISTRY_DISPATCH_AVAILABLE:
-            circuit_breaker_record_error()
+        circuit_breaker_record_error()
 
         if _send_email is None:
             return
@@ -330,7 +300,7 @@ def handle_error_detected(
             _write_suppression_log(f"Unknown branch skipped: {recipient}", branch, module, message)
             return
 
-        if _REGISTRY_DISPATCH_AVAILABLE and fingerprint:
+        if fingerprint:
             # Backoff first: a half-open breaker's one probe must go to a fingerprint that would be sent.
             if not registry_should_dispatch(fingerprint):
                 # Keep a permanent suppression from reading as a timing wait on the trail.
@@ -403,7 +373,7 @@ def handle_error_detected(
 
         json_handler.log_operation("dispatch_sent", {"recipient": recipient})
 
-        if _REGISTRY_DISPATCH_AVAILABLE and fingerprint:
+        if fingerprint:
             registry_record_dispatch(fingerprint)
             circuit_breaker_probe_succeeded()
         else:

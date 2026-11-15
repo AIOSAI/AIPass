@@ -3,7 +3,7 @@
 # Description: Error reporting handler for registry and source fix email
 # Version: 1.0.0
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -28,7 +28,7 @@ def send_source_fix_email(entry: dict) -> Optional[bool]:
         from aipass.ai_mail.apps.modules.email_send import deliver_email_to_branch
     # OSError too: an uncured peer's import guard raises FileNotFoundError.
     except (ImportError, OSError):
-        logger.info("[ERRORS] Could not import deliver_email_to_branch - ai_mail not available")
+        logger.warning("[ERRORS] Could not import deliver_email_to_branch - ai_mail not available")
         return None
 
     try:
@@ -88,7 +88,7 @@ Reply to @trigger with your fix status."""
         logger.info(f"[ERRORS] Source fix email sent to {recipient} for {fingerprint}")
         return True
     except Exception as exc:
-        logger.info(f"[ERRORS] Failed to send source fix email: {exc}")
+        logger.error(f"[ERRORS] Failed to send source fix email: {exc}")
         return None
 
 

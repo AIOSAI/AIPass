@@ -3,7 +3,7 @@
 # Description: Tests for error_detected event handler with Medic v2 dispatch gating
 # Version: 1.4.0
 # Created: 2026-04-25
-# Modified: 2026-11-08
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/events/error_detected.py and the dispatch gates it runs."""
@@ -16,7 +16,6 @@
 # sentry: no-test-needed(constant) — the fixed investigation-step prose _build_notification_message() wraps
 
 import json
-import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -53,7 +52,6 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     monkeypatch.setattr(error_detected, "registry_should_dispatch", MagicMock(return_value=True))
     monkeypatch.setattr(error_detected, "registry_record_dispatch", MagicMock())
     monkeypatch.setattr(error_detected, "registry_is_suppressed", MagicMock(return_value=False))
-    monkeypatch.setattr(error_detected, "_REGISTRY_DISPATCH_AVAILABLE", True)
     monkeypatch.setattr(error_detected.json_handler, "log_operation", MagicMock(return_value=True))
     monkeypatch.setattr(medic_state, "MEDIC_STATE_FILE", json_dir / "medic_state.json")
     monkeypatch.setattr(medic_state, "LEGACY_MEDIC_STATE_FILE", json_dir / "trigger_config.json")
@@ -90,7 +88,6 @@ def _setup_happy_path(mod: object) -> MagicMock:
     mod.registry_is_suppressed = MagicMock(return_value=False)  # type: ignore[attr-defined]
     mod.registry_record_dispatch = MagicMock()  # type: ignore[attr-defined]
     mod.circuit_breaker_record_error = MagicMock()  # type: ignore[attr-defined]
-    mod._REGISTRY_DISPATCH_AVAILABLE = True  # type: ignore[attr-defined]
     return send_mock
 
 
@@ -464,51 +461,6 @@ class TestHandleErrorDetectedHappyPath:
         # But nothing after it should have run
         json_handler.log_operation.assert_not_called()  # type: ignore[union-attr]
         mod.registry_record_dispatch.assert_not_called()  # type: ignore[attr-defined]
-
-
-class TestFallbackStubs:
-    """Tests for fallback functions defined when error_registry is unavailable."""
-
-    @pytest.fixture
-    def fallback_mod(self, monkeypatch: pytest.MonkeyPatch) -> Any:
-        """A second copy of error_detected, imported while error_registry cannot be.
-        HELD for import_site: these stubs exist only in the `except ImportError` arm, and no
-        setattr on the real module can make its import-time `from ... import` fail again.
-        """
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.error_registry", None)
-        monkeypatch.delitem(sys.modules, "aipass.trigger.apps.handlers.events.error_detected")
-        import aipass.trigger.apps.handlers.events.error_detected as fresh
-
-        return fresh
-
-    def test_registry_should_dispatch_returns_true(self, fallback_mod: Any) -> None:
-        """Fallback always allows dispatch for any fingerprint."""
-        mod = fallback_mod
-        assert mod.registry_should_dispatch("any-fingerprint") is True
-
-    def test_registry_is_suppressed_returns_false(self, fallback_mod: Any) -> None:
-        """Fallback suppresses nothing — no registry means no silencing."""
-        mod = fallback_mod
-        assert mod.registry_is_suppressed("any-fingerprint") is False
-
-    def test_registry_record_dispatch_is_a_no_op_with_the_real_arity(self, fallback_mod: Any) -> None:
-        """The fallback takes the same one argument and answers None like the real one.
-        "It did not raise" passes a stub that took no argument or returned a truthy sentinel;
-        record_dispatch returns nothing, so the stub must too.
-        """
-        mod = fallback_mod
-
-        assert mod.registry_record_dispatch("any-fingerprint") is None
-        assert mod._REGISTRY_DISPATCH_AVAILABLE is False
-
-    def test_circuit_breaker_record_error_takes_no_argument_and_answers_none(self, fallback_mod: Any) -> None:
-        """The fallback breaker records nothing and says nothing.
-        Without a registry there is no breaker state, so the stub must not fabricate one.
-        """
-        mod = fallback_mod
-
-        assert mod.circuit_breaker_record_error() is None
-        assert mod.circuit_breaker_allows() is True
 
 
 class TestMedicEnabledTTL:

@@ -3,7 +3,7 @@
 # Description: Memory Processing Handler
 # Version: 1.9.0
 # Created: 2025-11-25
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -20,10 +20,10 @@ from aipass.flow.apps.handlers.json import json_handler
 from aipass.flow.apps.handlers.plan.project_scope import archive_dir_for
 from aipass.flow.apps.handlers.registry.load_registry import load_registry
 from aipass.flow.apps.handlers.registry.save_registry import registry_lock, save_registry
-from aipass.flow.apps.handlers.repo_root import find_repo_root, module_file
+from aipass.flow.apps.handlers.repo_root import find_repo_root
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-_PKG_ROOT = module_file(__file__).parents[4]
+_PKG_ROOT = Path(__file__).resolve().parents[4]
 
 FLOW_ROOT = _PKG_ROOT / "flow"
 

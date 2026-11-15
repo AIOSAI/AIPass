@@ -3,7 +3,7 @@
 # Description: Plan Closure Implementation Handler
 # Version: 1.7.0
 # Created: 2026-03-08
-# Modified: 2026-10-26
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -69,10 +69,10 @@ def _make_project_resolver() -> Any:
 
     cache: Dict[Path, Any] = {}
 
-    def resolve(location: Path) -> Any:
+    def _resolve(location: Path) -> Any:
         return find_project_root(location, cache)
 
-    return resolve
+    return _resolve
 
 
 def _scope_reason(row_project: Any) -> str:

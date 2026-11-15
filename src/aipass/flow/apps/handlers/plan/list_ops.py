@@ -3,7 +3,7 @@
 # Description: Plan Listing Implementation Handler
 # Version: 2.1.0
 # Created: 2026-03-08
-# Modified: 2026-10-26
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -27,24 +27,21 @@ _UNSET = object()
 def _get_all_registry_info() -> Tuple[list[str], Dict[str, str]]:
     """Return per-type registry filenames and a registry_file -> prefix map.
 
-    An empty file list means the caller must fall back to the default registry.
+    Raises when discovery fails or finds no registry: listing the default alone would hide the rest.
     """
-    try:
-        from aipass.flow.apps.handlers.template.plan_type_loader import discover_plan_types  # type: ignore[import-not-found]
+    from aipass.flow.apps.handlers.template.plan_type_loader import discover_plan_types  # type: ignore[import-not-found]
 
-        files: list[str] = []
-        prefix_map: Dict[str, str] = {}
-        for _key, config in discover_plan_types().items():
-            rf = config.get("registry_file")
-            if rf:
-                prefix_map[rf] = config.get("prefix", "FPLAN")
-                if rf not in files:
-                    files.append(rf)
-        if files:
-            return files, prefix_map
-    except Exception as e:
-        logger.warning(f"[{MODULE_NAME}] Failed to discover plan types for registry info: {e}")
-    return [], {}  # empty means caller should fall back to default
+    files: list[str] = []
+    prefix_map: Dict[str, str] = {}
+    for _key, config in discover_plan_types().items():
+        rf = config.get("registry_file")
+        if rf:
+            prefix_map[rf] = config.get("prefix", "FPLAN")
+            if rf not in files:
+                files.append(rf)
+    if not files:
+        raise RuntimeError(f"[{MODULE_NAME}] plan-type discovery found no registry files")
+    return files, prefix_map
 
 
 def list_plans_impl(
@@ -81,23 +78,19 @@ def list_plans_impl(
         merged_plans: Dict[str, Any] = {}
         reg_files, reg_prefix_map = _get_all_registry_info()
 
-        if reg_files:
-            for reg_file in reg_files:
-                try:
-                    registry = load_registry(registry_file=reg_file)
-                    source_prefix = reg_prefix_map.get(reg_file, "FPLAN")
-                    for plan_num, plan_info in registry.get("plans", {}).items():
-                        plan_info["_source_prefix"] = source_prefix
-                        plan_info["_plan_num"] = plan_num
-                        # Plan numbers repeat across registries; the prefix keeps keys unique.
-                        merge_key = f"{source_prefix}-{plan_num}"
-                        merged_plans[merge_key] = plan_info
-                except Exception as e:
-                    logger.warning(f"[{MODULE_NAME}] Failed to load registry '{reg_file}' for plan listing: {e}")
-                    continue
-        else:
-            registry = load_registry()
-            merged_plans = registry.get("plans", {})
+        for reg_file in reg_files:
+            try:
+                registry = load_registry(registry_file=reg_file)
+                source_prefix = reg_prefix_map.get(reg_file, "FPLAN")
+                for plan_num, plan_info in registry.get("plans", {}).items():
+                    plan_info["_source_prefix"] = source_prefix
+                    plan_info["_plan_num"] = plan_num
+                    # Plan numbers repeat across registries; the prefix keeps keys unique.
+                    merge_key = f"{source_prefix}-{plan_num}"
+                    merged_plans[merge_key] = plan_info
+            except Exception as e:
+                logger.warning(f"[{MODULE_NAME}] Failed to load registry '{reg_file}' for plan listing: {e}")
+                continue
 
         if not whole_fleet:
             cache: Dict[Path, Any] = {}

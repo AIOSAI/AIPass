@@ -3,7 +3,7 @@
 # Description: Branch log events module for log watcher public API
 # Version: 1.2.0
 # Created: 2026-02-02
-# Modified: 2026-11-08
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -170,7 +170,6 @@ def handle_command(command: str, args: list) -> bool:
         # The daemon runs the watcher, not this CLI process: report both, never one as the other.
         console.print(f"  Service: {service_state()}")
         console.print(f"  This process: {info['active']}")
-        console.print(f"  Watchdog available: {info['watchdog_available']}")
         console.print(f"  Seen error hashes: {info['seen_hashes_count']}")
         console.print(f"  Pending flush: {info['pending_flush']}")
         console.print(f"  AIPASS root: {info['aipass_root']}")

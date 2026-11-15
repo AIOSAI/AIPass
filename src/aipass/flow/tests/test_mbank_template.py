@@ -3,7 +3,7 @@
 # Description: Tests for mbank/process.py and template handler functions
 # Version: 1.2.0
 # Created: 2026-09-20
-# Modified: 2026-11-03
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for mbank/process.py and template handler functions."""
@@ -23,7 +23,9 @@ from aipass.flow.apps.handlers.mbank.process import (
     process_closed_plans,
     verify_and_heal_orphaned_plans,
 )
+from aipass.flow.apps.handlers.plan import get_open_plans, list_ops
 from aipass.flow.apps.handlers.template import plan_type_loader as loader
+from aipass.flow.apps.handlers.template import registry_ops
 from aipass.flow.apps.handlers.template.get_template import (
     TEMPLATES_DIR,
     get_template,
@@ -852,3 +854,24 @@ class TestGetPrefixMap:
         assert result["dev_plans"] == "DPLAN"
         # Registry file should now exist
         assert reg_path.exists()
+
+
+class TestDiscoveryFailsLoud:
+    """No silent default: a failed or empty plan-type discovery raises."""
+
+    def test_an_unreadable_template_registry_raises(self, monkeypatch):
+        monkeypatch.setattr(registry_ops, "get_prefix_map", MagicMock(side_effect=ValueError("misshaped")))
+        monkeypatch.setattr(loader, "_plan_type_cache", None)
+        with pytest.raises(ValueError, match="misshaped"):
+            discover_plan_types()
+
+    def test_listing_fails_when_discovery_finds_no_registry(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(loader, "discover_plan_types", lambda: {})
+        result = list_ops.list_plans_impl(caller_project=tmp_path, host_project=tmp_path)
+        assert result["success"] is False
+        assert "no registry files" in result["error"]
+
+    def test_open_plan_scan_raises_when_discovery_finds_no_registry(self, monkeypatch):
+        monkeypatch.setattr(loader, "discover_plan_types", lambda: {})
+        with pytest.raises(RuntimeError, match="no registry files"):
+            get_open_plans.get_open_plans()

@@ -3,7 +3,7 @@
 # Description: Plan Closure Helper Functions
 # Version: 1.4.0
 # Created: 2026-05-16
-# Modified: 2026-10-26
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -24,9 +24,9 @@ from aipass.flow.apps.handlers.plan.registry_routing import _load_template_regis
 from aipass.flow.apps.handlers.registry.load_registry import next_free_number
 from aipass.flow.apps.handlers.registry.monitor_ops import is_plan_file
 
-from aipass.flow.apps.handlers.repo_root import find_repo_root, module_file
+from aipass.flow.apps.handlers.repo_root import find_repo_root
 
-_PKG_ROOT = module_file(__file__).parents[4]
+_PKG_ROOT = Path(__file__).resolve().parents[4]
 FLOW_ROOT = _PKG_ROOT / "flow"
 
 MODULE_NAME = "close_plan"

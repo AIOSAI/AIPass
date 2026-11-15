@@ -3,7 +3,7 @@
 # Description: Unit tests for the branch log watcher's parsing, detection and line pipeline
 # Version: 1.6.0
 # Created: 2026-04-03
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/log_watcher.py — parsing, detection and the line pipeline that fires events."""
@@ -912,7 +912,6 @@ class TestTheFleetCensusComesFromMemorysDoor:
     @pytest.fixture(autouse=True)
     def real_door(self, log_watcher_infrastructure, fleet, monkeypatch):
         monkeypatch.setattr(lw, "fleet_branches", door_fleet_branches)
-        monkeypatch.setattr(lw, "WATCHDOG_AVAILABLE", True)
         monkeypatch.setattr(lw, "AIPASS_PKG_ROOT", fleet.pkg_root)
         monkeypatch.setattr(lw, "SYSTEM_LOGS_DIR", fleet.root / "system_logs")
 

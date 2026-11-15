@@ -3,7 +3,7 @@
 # Description: Template registry CRUD operations
 # Version: 1.2.0
 # Created: 2026-03-18
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """Template Registry CRUD Operations.
@@ -22,12 +22,11 @@ from typing import Any, Dict, Tuple
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.flow.apps.handlers.json import json_handler
-from aipass.flow.apps.handlers.repo_root import module_file
 
 MODULE_NAME = "registry_ops"
 
 # registry_ops.py -> template/ -> handlers/ -> apps/ -> flow/
-FLOW_ROOT: Path = module_file(__file__).parents[3]
+FLOW_ROOT: Path = Path(__file__).resolve().parents[3]
 REGISTRY_PATH: Path = FLOW_ROOT / "flow_json" / "template_registry.json"
 
 _DEFAULT_TYPES: Dict[str, Dict[str, str]] = {

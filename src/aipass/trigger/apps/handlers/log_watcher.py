@@ -3,7 +3,7 @@
 # Description: Branch log watcher event producer for error detection
 # Version: 2.10.0
 # Created: 2026-02-02
-# Modified: 2026-11-08
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -62,16 +62,8 @@ _SEMANTIC_EXCLUSION_PATTERNS: re.Pattern = re.compile(
     re.IGNORECASE,
 )
 
-try:
-    from watchdog.observers import Observer as WatchdogObserver
-    from watchdog.events import FileSystemEventHandler as WatchdogFileSystemEventHandler
-
-    WATCHDOG_AVAILABLE = True
-except ImportError:
-    logger.info("watchdog not available, log watcher disabled")
-    WATCHDOG_AVAILABLE = False
-    WatchdogObserver = None  # type: ignore
-    WatchdogFileSystemEventHandler = object  # type: ignore
+from watchdog.observers import Observer as WatchdogObserver
+from watchdog.events import FileSystemEventHandler as WatchdogFileSystemEventHandler
 
 _branch_log_observer: Any = None
 _active_watcher: Any = None
@@ -397,7 +389,7 @@ def set_event_callback(callback: Callable[..., object]) -> None:
     _fire_event = callback
 
 
-class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else object):  # type: ignore[misc]
+class BranchLogWatcher(WatchdogFileSystemEventHandler):
     """Watch branch log files and fire error_detected events."""
 
     def __init__(self):
@@ -672,9 +664,6 @@ def start_branch_log_watcher() -> Any:
     # The caller must keep a reference to the returned observer to keep it alive.
     global _branch_log_observer, _active_watcher
 
-    if not WATCHDOG_AVAILABLE:
-        return None
-
     if _branch_log_observer and _branch_log_observer.is_alive():
         stop_branch_log_watcher()
 
@@ -739,7 +728,6 @@ def get_watcher_status() -> Dict[str, Any]:
         tracked_files = len(_active_watcher.log_positions)
     return {
         "active": is_branch_log_watcher_active(),
-        "watchdog_available": WATCHDOG_AVAILABLE,
         "seen_hashes_count": len(_seen_error_hashes),
         "tracked_log_files": tracked_files,
         "pending_flush": _data_dirty,
@@ -770,8 +758,6 @@ if __name__ == "__main__":
 
     if not observer:
         print("Failed to start branch log watcher")
-        if not WATCHDOG_AVAILABLE:
-            print("  - watchdog package not installed")
         sys.exit(1)
 
     print(f"Status: {get_watcher_status()}")

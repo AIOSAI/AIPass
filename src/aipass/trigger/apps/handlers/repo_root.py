@@ -3,7 +3,7 @@
 # Description: One guarded answer to "where is my file" and "where is the repo root" — never the process cwd
 # Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Module-file and repo-root resolution, defined once for trigger.
@@ -14,7 +14,7 @@ import os
 from collections.abc import Callable
 from pathlib import Path
 
-from aipass.trigger.apps.config import TRIGGER_ROOT, module_file, trail_logger
+from aipass.trigger.apps.config import TRIGGER_ROOT, trail_logger
 
 MODULE_NAME = "repo_root"
 
@@ -33,7 +33,7 @@ RECORD_FAILURES: list[str] = []
 CORE_REGISTRY = "AIPASS_REGISTRY.json"
 
 
-_THIS_FILE = module_file(__file__)
+_THIS_FILE = Path(__file__).resolve()
 
 # Last resort is the filesystem root: never raises, and fails loudly downstream instead of quietly.
 SOURCE_ROOT = next(
@@ -45,7 +45,8 @@ SOURCE_ROOT = next(
 def exists_exactly(path: Path, exists_fn: Callable[[Path], bool] | None = None) -> bool:
     """True when *path* exists AND is spelled on disk exactly as asked.
 
-    Lists the parent (exists() case-folds, resolve() follows symlinks); an unlistable parent returns True."""
+    Lists the parent (exists() case-folds on a WSL2 /mnt/c drvfs mount, resolve() follows symlinks);
+    an unlistable parent returns True."""
     candidate = Path(path)
     exists = candidate.exists() if exists_fn is None else exists_fn(candidate)
     if not exists:

@@ -3,7 +3,7 @@
 # Description: PLAN closure module with registry cleanup
 # Version: 3.7.0
 # Created: 2025-11-25
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -22,10 +22,9 @@ Usage:
 import sys
 
 from typing import List, Dict, Any
+from pathlib import Path
 
-from aipass.flow.apps.handlers.repo_root import module_file
-
-_PKG_ROOT = module_file(__file__).parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
+_PKG_ROOT = Path(__file__).resolve().parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
 FLOW_ROOT = _PKG_ROOT / "flow"
 
 from aipass.prax import logger
@@ -60,13 +59,9 @@ from aipass.flow.apps.handlers.mbank.process import is_template_content, archive
 
 from aipass.flow.apps.handlers.plan.close_ops import close_plan_impl, close_all_plans_impl
 
-try:
-    from aipass.trigger.apps.modules.core import trigger as _trigger_module
+from aipass.trigger.apps.modules.core import trigger as _trigger_module
 
-    _trigger_fire = _trigger_module.fire
-except ImportError:
-    logger.info("[close_plan] Trigger module not available, plan events will be skipped")
-    _trigger_fire = None
+_trigger_fire = _trigger_module.fire
 
 MODULE_NAME = "close_plan"
 

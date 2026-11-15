@@ -3,7 +3,7 @@
 # Description: Registry auto-healing module
 # Version: 3.6.0
 # Created: 2025-11-21
-# Modified: 2026-11-08
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -37,9 +37,9 @@ import sys
 from pathlib import Path
 from typing import Dict, Any, List
 
-from aipass.flow.apps.handlers.repo_root import find_repo_root, module_file
+from aipass.flow.apps.handlers.repo_root import find_repo_root
 
-_PKG_ROOT = module_file(__file__).parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
+_PKG_ROOT = Path(__file__).resolve().parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
 FLOW_ROOT = _PKG_ROOT / "flow"
 
 from aipass.prax.apps.modules.logger import system_logger as logger

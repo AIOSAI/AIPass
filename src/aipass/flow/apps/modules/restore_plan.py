@@ -3,7 +3,7 @@
 # Description: PLAN restore module (reopen closed plans)
 # Version: 1.6.0
 # Created: 2025-11-22
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -21,10 +21,9 @@ Usage:
 import sys
 
 from typing import List, Dict, Any
+from pathlib import Path
 
-from aipass.flow.apps.handlers.repo_root import module_file
-
-_PKG_ROOT = module_file(__file__).parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
+_PKG_ROOT = Path(__file__).resolve().parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
 FLOW_ROOT = _PKG_ROOT / "flow"
 
 from aipass.prax.apps.modules.logger import system_logger as logger

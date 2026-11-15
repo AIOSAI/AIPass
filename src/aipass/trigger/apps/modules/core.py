@@ -3,7 +3,7 @@
 # Description: Trigger event bus for AIPass system-wide event handling
 # Version: 1.4.0
 # Created: 2026-02-03
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -280,12 +280,12 @@ def _print_help(console):
     console.print()
     console.print("[bold]COMMANDS:[/bold]")
     console.print("  fire <event> \\[key=value ...]  Fire an event with optional data")
-    console.print("  status                        Show registered event handlers")
-    console.print("  list                          Alias for status")
+    console.print("  status                        Show the branch log watcher (branch_log_events answers it)")
+    console.print("  list                          Show registered event handlers")
     console.print()
     console.print("[bold]EXAMPLES:[/bold]")
     console.print("  drone @trigger fire deploy_complete branch=main")
-    console.print("  drone @trigger status")
+    console.print("  drone @trigger list")
     console.print()
 
 

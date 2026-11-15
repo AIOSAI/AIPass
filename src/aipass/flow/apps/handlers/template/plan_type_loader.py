@@ -3,7 +3,7 @@
 # Description: Plan type plugin discovery and loading
 # Version: 1.0.0
 # Created: 2026-03-17
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Plan Type Loader"""
@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 from typing import Dict
+from pathlib import Path
 
 from aipass.flow.apps.handlers.json import json_handler
 from aipass.prax.apps.modules.logger import system_logger as logger
@@ -18,31 +19,15 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 MODULE_NAME = "plan_type_loader"
 
-from aipass.flow.apps.handlers.repo_root import module_file
-
-FLOW_ROOT = module_file(__file__).parents[3]
+FLOW_ROOT = Path(__file__).resolve().parents[3]
 PLAN_TYPES_DIR = FLOW_ROOT / "templates"
-
-# Used only when template_registry.json cannot be read.
-_FALLBACK_PREFIX_MAP: Dict[str, str] = {
-    "flow_plans": "FPLAN",
-    "dev_plans": "DPLAN",
-}
 
 
 def _get_prefix_map() -> Dict[str, str]:
-    """Load prefix map from persistent template registry."""
-    try:
-        from aipass.flow.apps.handlers.template.registry_ops import get_prefix_map
+    """Load prefix map from persistent template registry; a failed read raises."""
+    from aipass.flow.apps.handlers.template.registry_ops import get_prefix_map
 
-        return get_prefix_map()
-    except Exception as exc:
-        logger.warning(
-            "%s: failed to load template registry, using fallback -- %s",
-            MODULE_NAME,
-            exc,
-        )
-        return _FALLBACK_PREFIX_MAP
+    return get_prefix_map()
 
 
 STANDARD_DIGITS = 4

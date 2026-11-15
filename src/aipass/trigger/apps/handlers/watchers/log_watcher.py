@@ -3,7 +3,7 @@
 # Description: Centralized log file watcher for system_logs directory
 # Version: 1.3.0
 # Created: 2026-01-31
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -30,16 +30,7 @@ SYSTEM_LOGS_OWNER = "branch_log_events"
 # Must match prax RotatingFileHandler backup_count.
 MAX_BACKUP_CHAIN_DEPTH = 3
 
-try:
-    from watchdog.observers import Observer as WatchdogObserver
-    from watchdog.events import FileSystemEventHandler as WatchdogFileSystemEventHandler
-
-    WATCHDOG_AVAILABLE = True
-except ImportError:
-    logger.info("watchdog not available, log watcher disabled")
-    WATCHDOG_AVAILABLE = False
-    WatchdogObserver = None  # type: ignore
-    WatchdogFileSystemEventHandler = object  # type: ignore
+from watchdog.events import FileSystemEventHandler as WatchdogFileSystemEventHandler
 
 _log_observer: Any = None
 
@@ -114,7 +105,7 @@ def should_skip_log(log_line: str) -> bool:
     return False
 
 
-class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else object):  # type: ignore[misc]
+class LogFileWatcher(WatchdogFileSystemEventHandler):
     """Watch log files and fire Trigger events."""
 
     def __init__(self):
@@ -316,19 +307,6 @@ def start_log_watcher() -> Any:
         SYSTEM_LOGS_OWNER,
     )
     return None
-
-    watcher = LogFileWatcher()
-    watcher.initialize_positions()
-    _callback = watcher.on_modified  # watchdog dispatches FileSystemEvents here
-    if WatchdogObserver is None:
-        return None
-    observer = WatchdogObserver()
-    observer.schedule(watcher, str(SYSTEM_LOGS_DIR), recursive=False)
-    observer.start()
-
-    _log_observer = observer
-
-    return observer
 
 
 def stop_log_watcher() -> None:

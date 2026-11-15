@@ -3,7 +3,7 @@
 # Description: CI red lane's doors out - mail, dispatch (mail plus wake), the notification feed, the awake count
 # Version: 1.0.0
 # Created: 2026-10-22
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -76,7 +76,7 @@ def dispatch(to_branch: str, subject: str, body: str) -> bool:
 
 
 def feed(state: str, title: str, body: str, /, **extra: Any) -> str:
-    """One `system` event from source `ci` on the feed: answers written, refused, no_door or unavailable."""
+    """One `system` event from source `ci` on the feed: answers written, refused or unavailable."""
     payload: Dict[str, str] = {
         key: str(extra.get(key, "") or "") for key in ("run_id", "workflow", "step", "owner", "url")
     }
@@ -84,14 +84,10 @@ def feed(state: str, title: str, body: str, /, **extra: Any) -> str:
     try:
         import aipass.ai_mail as ai_mail
 
-        send = getattr(ai_mail, "send_notification", None)
+        send = ai_mail.send_notification
     except (ImportError, OSError) as exc:
         logger.warning(f"feed not written, ai_mail unavailable: {exc}")
         return "unavailable"
-    # ai_mail publishes no feed writer yet; the call is built to the contract and waits on that door.
-    if send is None:
-        logger.warning(f"feed not written, ai_mail publishes no send_notification: {state} {title}")
-        return "no_door"
     written = bool(send(kind="system", source="ci", title=title.splitlines()[0][:120], body=body, extra=payload))
     json_handler.log_operation("ci_feed", {"state": state, "written": written})
     return "written" if written else "refused"

@@ -3,7 +3,7 @@
 # Description: Plan Creation Implementation Handler
 # Version: 1.4.0
 # Created: 2026-03-08
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """Plan Creation Operations Handler
@@ -22,9 +22,8 @@ from aipass.flow.apps.handlers.json import json_handler
 
 
 from aipass.flow.apps.handlers.registry.load_registry import next_free_number
-from aipass.flow.apps.handlers.repo_root import module_file
 
-_PKG_ROOT = module_file(__file__).parents[4]  # handlers/plan/ -> handlers/ -> apps/ -> flow/ -> aipass/
+_PKG_ROOT = Path(__file__).resolve().parents[4]  # handlers/plan/ -> handlers/ -> apps/ -> flow/ -> aipass/
 
 MODULE_NAME = "create_plan"
 
@@ -216,12 +215,9 @@ def create_plan_impl(
         )
         messages.append({"type": "display", "text": display_msg})
 
-        try:
-            from aipass.trigger.apps.modules.core import trigger
+        from aipass.trigger.apps.modules.core import trigger
 
-            trigger.fire("plan_created", plan_number=NEXT_NUM, location=RELATIVE_LOCATION, subject=subject)
-        except ImportError:
-            logger.info(f"[{MODULE_NAME}] Trigger module not available, skipping plan_created event")
+        trigger.fire("plan_created", plan_number=NEXT_NUM, location=RELATIVE_LOCATION, subject=subject)
 
         json_handler.log_operation(
             "plan_created",

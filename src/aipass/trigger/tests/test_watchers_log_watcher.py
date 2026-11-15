@@ -3,7 +3,7 @@
 # Description: Unit tests for centralized system_logs log watcher
 # Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for the centralized system_logs watcher (apps/handlers/watchers/log_watcher.py)."""
@@ -46,8 +46,6 @@ def _mock_infrastructure(monkeypatch, tmp_path):
     # Never the live bus that would run medic's handlers.
     monkeypatch.setattr(trigger_core, "trigger", MagicMock())
 
-    # -- watchdog: no real observer is ever armed over a directory.
-    monkeypatch.setattr(wlw, "WatchdogObserver", MagicMock())
     monkeypatch.setattr(wlw, "_log_observer", None)
 
 
@@ -653,11 +651,6 @@ class TestLogFileWatcherInodeRotation:
 class TestStartStopActive:
     """Tests for start_log_watcher, stop_log_watcher, is_log_watcher_active."""
 
-    def test_start_returns_none_when_watchdog_unavailable(self, monkeypatch):
-        """start_log_watcher returns None when WATCHDOG_AVAILABLE is False."""
-        monkeypatch.setattr(wlw, "WATCHDOG_AVAILABLE", False)
-        assert wlw.start_log_watcher() is None
-
     def test_start_returns_none_when_dir_missing(self, tmp_path, monkeypatch):
         """start_log_watcher returns None when SYSTEM_LOGS_DIR does not exist."""
         monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", tmp_path / "nonexistent")
@@ -805,31 +798,19 @@ class TestSystemLogsOwnership:
     One condition must not mint two escalation signatures with different attribution."""
 
     def test_start_declines_even_when_it_could_start(self, tmp_path, monkeypatch):
-        """Watchdog available and the directory present — still declines.
-
-        A deliberate refusal, proven where the old code WOULD have started an observer."""
-        monkeypatch.setattr(wlw, "WATCHDOG_AVAILABLE", True)
+        """The directory present — still declines: a deliberate refusal."""
         monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", tmp_path)
         (tmp_path / "hooks_edit_gate.log").write_text("x", encoding="utf-8")
 
-        scheduled = MagicMock()
-        monkeypatch.setattr(wlw, "WatchdogObserver", MagicMock(return_value=scheduled))
-
         assert wlw.start_log_watcher() is None
-        scheduled.schedule.assert_not_called()
-        scheduled.start.assert_not_called()
 
     def test_start_leaves_no_observer_behind(self, tmp_path, monkeypatch):
-        """Declining must not build an observer or park one in module state (mutant: WatchdogObserver() built)."""
-        monkeypatch.setattr(wlw, "WATCHDOG_AVAILABLE", True)
+        """Declining must not park an observer in module state."""
         monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", tmp_path)
         monkeypatch.setattr(wlw, "_log_observer", None)
-        observer_cls = MagicMock()
-        monkeypatch.setattr(wlw, "WatchdogObserver", observer_cls)
 
         wlw.start_log_watcher()
 
-        observer_cls.assert_not_called()
         assert wlw.is_log_watcher_active() is False
 
     def test_owner_is_named_in_module_state(self):

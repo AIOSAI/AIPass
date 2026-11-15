@@ -3,7 +3,7 @@
 # Description: CI red lane ledger - run verdicts and cure states in trigger_json/ci_ledger.json
 # Version: 1.2.1
 # Created: 2026-10-22
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -17,8 +17,10 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterator
 
-from aipass.trigger.apps.config import TRIGGER_JSON_DIR, atomic_write_json, json_file_lock
+from aipass.trigger.apps.config import TRIGGER_JSON_DIR, TRIGGER_ROOT, atomic_write_json, json_file_lock, trail_logger
 from aipass.trigger.apps.handlers.json import json_handler
+
+logger = trail_logger(TRIGGER_ROOT / "logs" / "ci_lane.jsonl")
 
 LEDGER_FILE = TRIGGER_JSON_DIR / "ci_ledger.json"
 
@@ -35,9 +37,12 @@ def utc_now() -> str:
 
 def claim_is_live(entry: Dict[str, Any]) -> bool:
     """True while the entry's `claimed` stamp is younger than CLAIM_STALE_SECONDS; unreadable is stale."""
+    stamp = entry.get("claimed", "")
     try:
-        claimed = datetime.strptime(entry.get("claimed", ""), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        claimed = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     except ValueError:
+        if stamp:  # no stamp is "not claimed"; a garbled one is worth a line
+            logger.warning(f"unparseable claim stamp {stamp!r}, read as stale")
         return False
     return (datetime.now(timezone.utc) - claimed).total_seconds() < CLAIM_STALE_SECONDS
 

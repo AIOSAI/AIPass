@@ -3,7 +3,7 @@
 # Description: Aggregate Central Plans Module
 # Version: 1.5.0
 # Created: 2025-11-30
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -34,9 +34,9 @@ import sys
 from pathlib import Path
 from typing import List
 
-from aipass.flow.apps.handlers.repo_root import find_repo_root, module_file
+from aipass.flow.apps.handlers.repo_root import find_repo_root
 
-_PKG_ROOT = module_file(__file__).parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
+_PKG_ROOT = Path(__file__).resolve().parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
 FLOW_ROOT = _PKG_ROOT / "flow"
 
 from aipass.cli.apps.modules import console, error

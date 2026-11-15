@@ -156,48 +156,6 @@
       "reason": "Local variables in monitor operations, not constants"
     },
     {
-      "file": "apps/handlers/template/registry_ops.py",
-      "standard": "documentation",
-      "category": "false_positive",
-      "reason": "add_type has docstring \u2014 checker 5-line lookahead too small for multi-line signature (6 lines to closing paren)"
-    },
-    {
-      "file": "apps/handlers/template/get_template.py",
-      "standard": "documentation",
-      "category": "false_positive",
-      "reason": "get_template has docstring \u2014 checker 5-line lookahead too small for multi-line signature (9 lines to closing paren)"
-    },
-    {
-      "file": "apps/handlers/plan/list_ops.py",
-      "standard": "documentation",
-      "category": "false_positive",
-      "reason": "list_plans_impl has docstring \u2014 checker 5-line lookahead too small for multi-line signature (8 lines to closing paren)"
-    },
-    {
-      "file": "apps/modules/create_plan.py",
-      "standard": "documentation",
-      "category": "false_positive",
-      "reason": "create_plan has docstring \u2014 checker 5-line lookahead too small for multi-line signature"
-    },
-    {
-      "file": "apps/handlers/plan/close_ops.py",
-      "standard": "documentation",
-      "category": "false_positive",
-      "reason": "Functions have docstrings \u2014 checker 5-line lookahead too small for multi-line signatures"
-    },
-    {
-      "file": "apps/handlers/mbank/process.py",
-      "standard": "documentation",
-      "category": "false_positive",
-      "reason": "Functions have docstrings \u2014 checker 5-line lookahead too small for multi-line signatures"
-    },
-    {
-      "file": "apps/handlers/plan/display.py",
-      "standard": "documentation",
-      "category": "false_positive",
-      "reason": "Functions have docstrings \u2014 checker 5-line lookahead too small for multi-line signatures"
-    },
-    {
       "file": "apps/handlers/plan/aggregate_ops.py",
       "standard": "handlers",
       "category": "architectural",
@@ -345,15 +303,8 @@
       "file": "apps/modules/create_plan.py",
       "standard": "logged_fallback",
       "category": "false_positive",
-      "lines": [246],
+      "lines": [245],
       "reason": "handle_command's True means 'this command was mine', never 'it succeeded' (the module contract in flow.py). The handler calls cli_error() first, which flow.py's resolve_exit turns into exit 2: measured 2026-10-04, `drone @flow create . probe NOSUCHTYPE` exits 2. The failure reaches the caller through the exit code, not the bool (flow's decision, leg 5)."
-    },
-    {
-      "file": "apps/modules/post_close_runner.py",
-      "standard": "logged_fallback",
-      "category": "false_positive",
-      "lines": [71],
-      "reason": "handle_command's True means 'this command was mine', never 'it succeeded' (the module contract in flow.py). The handler calls error() first, which flow.py's resolve_exit turns into a failing exit code; False would route the command on to the next module and end in 'unknown command' (flow's decision, leg 5)."
     },
     {
       "file": "apps/modules/registry_monitor.py",
@@ -366,15 +317,8 @@
       "file": "apps/handlers/runner/lock_ops.py",
       "standard": "logged_fallback",
       "category": "false_positive",
-      "lines": [42, 78, 95],
+      "lines": [42, 75, 92],
       "reason": "The exception is the answer, not a failure. 97: os.kill(pid, 0) raising PermissionError means the process exists and belongs to someone else, so alive is the true answer. 160 and 186 (147 and 173 until leg 11's seam moved them): FileNotFoundError on the lock means its holder released it between our create and our read, so stale (take over) is the true answer; every other OSError on those reads re-raises (leg 3) (flow's decision, leg 5)."
-    },
-    {
-      "file": "apps/handlers/registry/save_registry.py",
-      "standard": "logged_fallback",
-      "category": "false_positive",
-      "lines": [85],
-      "reason": "False means 'not saved' on every path, the lock timeout and the except alike; the success path returns True only. Leg 10 re-read every caller. Ten ignored the False; each now says 'could not save': close (step 2 fails, step 3 and orphan cleanup warn), restore and its backup recovery fail, self-heal and the four heal saves raise into their sweep's logged failure. create_ops step 2 (auto-cleanup) is re-saved with the same dict at step 10, whose False fails the create and names the registry file. registry_ops' load-time prune re-derives on the next read (flow's decision, leg 10)."
     },
     {
       "file": "apps/handlers/mbank/process.py",

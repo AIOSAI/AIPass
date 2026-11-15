@@ -1,14 +1,14 @@
 # =================== AIPass ====================
 # META DATA HEADER
 # Name: test_import_dead_cwd.py
-# Description: repo_root and module_file never answer with the process cwd
+# Description: repo_root never answers with the process cwd
 # Created: 2026-08-31
-# Modified: 2026-11-14
-# Version: 1.4.0
+# Modified: 2026-11-15
+# Version: 1.5.0
 # Category: trigger/tests
 # =============================================
 
-"""Tests for apps/handlers/repo_root.py and apps/config.py's module_file: the source tree, never the process cwd."""
+"""Tests for apps/handlers/repo_root.py: the source tree, never the process cwd."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(behaviour) — _frame_path's dead-cwd fallback: resolve() reads the cwd only for a relative path
@@ -17,7 +17,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-from aipass.trigger.apps.config import module_file
 from aipass.trigger.apps.handlers import repo_root
 
 
@@ -123,13 +122,3 @@ def test_the_folding_injection_is_a_real_negative_control(tmp_path, monkeypatch)
         assert not repo_root.exists_exactly(bait_dir / "AIPASS_REGISTRY.json")
     else:
         assert not repo_root.exists_exactly(bait_dir / "AIPASS_REGISTRY.json")
-
-
-def test_module_file_resolves_through_a_symlink(tmp_path):
-    """module_file hands back the real file behind a symlinked __file__."""
-    real = tmp_path / "real_module.py"
-    real.write_text("", encoding="utf-8")
-    link = tmp_path / "linked_module.py"
-    link.symlink_to(real)
-
-    assert module_file(str(link)) == real.resolve()

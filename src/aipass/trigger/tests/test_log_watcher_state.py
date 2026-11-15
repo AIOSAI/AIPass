@@ -3,7 +3,7 @@
 # Description: Tests for the branch log watcher's state: positions, seen hashes, start/stop and the debounced writer
 # Version: 1.0.2
 # Created: 2026-10-08
-# Modified: 2026-11-08
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/log_watcher.py's persisted state and lifecycle (trigger_data.json, start/stop)."""
@@ -54,15 +54,8 @@ class TestCallbackAndState:
 class TestStartStopStatus:
     """Tests for start_branch_log_watcher, stop, is_active, get_watcher_status."""
 
-    def test_start_returns_none_when_watchdog_unavailable(self, monkeypatch):
-        """start_branch_log_watcher returns None when WATCHDOG_AVAILABLE is False."""
-        monkeypatch.setattr(lw, "WATCHDOG_AVAILABLE", False)
-        result = lw.start_branch_log_watcher()
-        assert result is None
-
     def test_start_records_each_scheduled_logs_dir(self, monkeypatch):
         """The twin rule reads this set: a logs/ dir is in it only when it got a watch."""
-        monkeypatch.setattr(lw, "WATCHDOG_AVAILABLE", True)
         logs_dir = _a_branch_log().parent
         observer = lw.start_branch_log_watcher()
         watcher = observer.schedule.call_args_list[0].args[0]
@@ -79,7 +72,6 @@ class TestStartStopStatus:
         assert isinstance(status, dict)
         expected_keys = {
             "active",
-            "watchdog_available",
             "seen_hashes_count",
             "tracked_log_files",
             "pending_flush",
@@ -205,7 +197,6 @@ class TestLoadSeenHashes:
     @staticmethod
     def _seen_count_after_start(monkeypatch) -> int:
         """Start the watcher (observer is the fixture's recorder) and read the loaded hash count."""
-        monkeypatch.setattr(lw, "WATCHDOG_AVAILABLE", True)
         lw.AIPASS_PKG_ROOT.mkdir(parents=True, exist_ok=True)
         lw.start_branch_log_watcher()
         return lw.get_watcher_status()["seen_hashes_count"]

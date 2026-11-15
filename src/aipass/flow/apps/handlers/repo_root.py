@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repo_root.py
-# Description: The one guarded answer to "where is my file" and "which repo root is this"
+# Description: The one guarded answer to "which repo root is this"
 # Version: 1.0.0
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Location discovery for flow, defined once and guarded.
@@ -21,19 +21,8 @@ MODULE_NAME = "repo_root"
 CORE_REGISTRY = "AIPASS_REGISTRY.json"
 
 
-def module_file(file: str) -> Path:
-    """A module's own path, absolute, resolved when the filesystem allows."""
-    path = Path(file)
-    try:
-        return path.resolve()
-    except OSError as exc:
-        # debug, not warning: every module import takes this path in that world.
-        logger.debug(f"[{MODULE_NAME}] Cannot resolve {path} ({type(exc).__name__}) — using its absolute spelling")
-        return path
-
-
 # Last resort is the filesystem root: never raises, and fails loudly downstream.
-_THIS_FILE = module_file(__file__)
+_THIS_FILE = Path(__file__).resolve()
 SOURCE_ROOT = next(
     (parent.parent for parent in _THIS_FILE.parents if parent.name == "src"),
     _THIS_FILE.parents[-1],
@@ -78,7 +67,7 @@ def _record_fallback(caller: str, marker: str, current: Path) -> None:
 
 def find_repo_root(start: Path | None = None, *, marker: str = CORE_REGISTRY, caller: str = MODULE_NAME) -> Path:
     """Walk up from *start* to the directory holding *marker*."""
-    current = Path(start) if start is not None else module_file(__file__).parent
+    current = Path(start) if start is not None else _THIS_FILE.parent
     for parent in [current] + list(current.parents):
         if exists_exactly(parent / marker):
             return parent

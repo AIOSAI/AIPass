@@ -3,19 +3,18 @@
 # Description: Load Registry Handler
 # Version: 1.4.0
 # Created: 2025-11-07
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Load Registry Handler"""
 
 import json
 from typing import Dict, Any
+from pathlib import Path
 
 from aipass.flow.apps.handlers.json import json_handler
 
-from aipass.flow.apps.handlers.repo_root import module_file
-
-_PKG_ROOT = module_file(__file__).parents[4]
+_PKG_ROOT = Path(__file__).resolve().parents[4]
 FLOW_ROOT = _PKG_ROOT / "flow"
 
 MODULE_NAME = "load_registry"

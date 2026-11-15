@@ -3,7 +3,7 @@
 # Description: PLAN listing module with filtering
 # Version: 1.2.0
 # Created: 2025-11-21
-# Modified: 2026-10-26
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -32,10 +32,9 @@ import sys
 import os
 
 from typing import List
+from pathlib import Path
 
-from aipass.flow.apps.handlers.repo_root import module_file
-
-_PKG_ROOT = module_file(__file__).parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
+_PKG_ROOT = Path(__file__).resolve().parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
 FLOW_ROOT = _PKG_ROOT / "flow"
 
 from aipass.prax.apps.modules.logger import system_logger as logger

@@ -3,7 +3,7 @@
 # Description: Entry point CLI for drone @trigger — event bus and error registry
 # Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -46,9 +46,8 @@ def discover_modules() -> List[Any]:
 
             if hasattr(module, "handle_command"):
                 modules.append(module)
-                pass  # Module loaded successfully
             else:
-                pass  # No handle_command() - skip silently
+                logger.warning(f"[TRIGGER] {module_name} has no handle_command(), not routed")
 
         except Exception as e:
             logger.error(f"[TRIGGER] Failed to load module {module_name}: {e}")

@@ -7,11 +7,10 @@ The one location answer for the branch, and the test worlds that keep it honest.
 ---
 
 **Nothing in flow reads the process working directory to find itself.** One
-module answers both location questions, and every caller routes through it.
+module answers the repo-root question, and every caller routes through it.
 
 | Function | Answers | Guard it carries |
 |----------|---------|------------------|
-| `module_file(__file__)` | where is *this module* | `.resolve()` attempted, falls back to the absolute spelling |
 | `find_repo_root(start=None)` | which repo root is this | falls back to `SOURCE_ROOT`, **never** `Path.cwd()` |
 | `exists_exactly(path)` | is this filename spelled exactly so | lists the parent; `exists()` alone folds case |
 
@@ -27,12 +26,8 @@ process directory only when `AIPASS_CALLER_CWD` is absent. They are named in
 `tests/test_import_dead_cwd.py` so the ban can never delete a right answer, and
 the exemption is keyed on **(file, function)**, not on the name alone.
 
-Enforced by `tests/test_import_dead_cwd.py`: an injected world with its own
-liveness control, an AST ban, **and** a behavioural sibling that reaches the
-caller-is-None branch by calling the guard directly from a `python -c` child
-under a realpath denial. Each catches what the other cannot — the ban names the
-offending line anywhere in the tree with no subprocess, the behavioural pin
-proves the cure in the world it was built for.
+Enforced by `tests/test_import_dead_cwd.py`: an AST ban names any other cwd read
+anywhere in the tree, with no subprocess.
 
 ### The bare-checkout world is a tested world
 
@@ -58,19 +53,5 @@ walk before any test window exists on every machine. The list is guarded by
 `TestThePreImportListIsComplete`, which measures the callers off the tree by
 parse and compares them against what conftest actually imports — neither side
 hand-copied, because a hand-written list is where an undercount hides.
-
-### An injected world has to ARM, and the arming is version-shaped
-
-The dead-cwd pins install their world by patching `os.path.realpath` in a
-subprocess. On **Python 3.10 that patch reaches nothing**: `pathlib` still has
-`_NormalAccessor`, whose `realpath = staticmethod(os.path.realpath)` takes its
-copy when `pathlib` is first imported, and `Path.resolve` reads it as
-`self._accessor.realpath(self, strict=strict)`. Patching the module attribute
-afterwards rebinds a name nothing reads again. 3.11 removed the accessor and
-calls `os.path.realpath` at use.
-
-The world therefore ends in `_ACCESSOR_CURE`, which patches the accessor as a
-`staticmethod` behind a `hasattr` — order-independent on 3.10, inert on 3.11+.
-A plain function would arrive **bound** and eat the path into `self`.
 
 ---

@@ -3,7 +3,7 @@
 # Description: Process lock file operations handler
 # Version: 1.4.0
 # Created: 2026-04-22
-# Modified: 2026-10-25
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -31,7 +31,7 @@ def _sleep(seconds: float) -> None:
 
 
 def _pid_alive(pid: int) -> bool:
-    """Return True if the process is alive."""
+    """Return True if the process is alive; any other OSError raises: no proof either way."""
     try:
         os.kill(pid, 0)
     except ProcessLookupError as exc:
@@ -40,9 +40,6 @@ def _pid_alive(pid: int) -> bool:
     except PermissionError as exc:
         logger.info("PID %s permission denied (alive): %s", pid, exc)
         return True
-    except OSError as exc:
-        logger.info("PID %s os.kill error (assuming dead): %s", pid, exc)
-        return False
     return True
 
 
