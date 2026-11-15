@@ -3,7 +3,7 @@
 # Description: Tests for the host API fleet lane — baud --snapshot contract
 # Version: 1.1.6
 # Created: 2026-08-14
-# Modified: 2026-11-05
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/host/fleet.py, the baud --snapshot contract, and the host lane that serves it."""
@@ -1016,11 +1016,11 @@ def _absent(reason: str, **values: Any) -> dict:
     return {"available": False, "reason": reason, "sentence": system_status.REASONS[reason], "detail": None, **values}
 
 
-def _macos_vitals(sampled_at: str = "2026-09-13T07:20:00.000+00:00") -> dict:
+def _sensorless_vitals(sampled_at: str = "2026-09-13T07:20:00.000+00:00") -> dict:
     """
-    What machine_vitals() answers on a Mac running macOS, manufactured here.
+    What machine_vitals() answers on a host with no fan or temperature sensors (a VM, a container), manufactured here.
 
-    psutil has no sensors_temperatures/sensors_fans on macOS, so both answer `platform`."""
+    psutil finds no sensors there, so both answer `platform`."""
     return {
         "ok": True,
         "schema": 1,
@@ -1058,19 +1058,19 @@ class TestTheMachineRoute:
         assert response.status_code == 401
         machine_door.assert_not_called()
 
-    def test_a_mac_with_no_sensors_is_a_200_that_says_so(self, client, auth: dict, machine_door) -> None:
+    def test_a_host_with_no_sensors_is_a_200_that_says_so(self, client, auth: dict, machine_door) -> None:
         """
-        The manufactured macOS host: temp and fan answer `platform`, the rest are numbers.
+        The manufactured sensorless host: temp and fan answer `platform`, the rest are numbers.
 
         Absence carries the skill's sentence and a None where a zero would lie."""
-        machine_door.return_value = _macos_vitals()
+        machine_door.return_value = _sensorless_vitals()
         assert all(name in machine_door.return_value for name in system_status.SECTIONS), "stand-in drifted"
 
         response = client.get("/v1/machine", headers=auth)
 
         assert response.status_code == 200
         body = response.json()
-        assert body == _macos_vitals()
+        assert body == _sensorless_vitals()
         assert body["fan"]["available"] is False
         assert body["fan"]["reason"] == "platform"
         assert body["fan"]["sentence"] == system_status.REASONS["platform"]
@@ -1163,7 +1163,7 @@ class TestTheMachineCache:
 
     def test_two_reads_inside_a_second_are_one_read(self, machine_door) -> None:
         """The second read is the first one's answer: one call, one sampled_at — absent sections included."""
-        machine_door.return_value = _macos_vitals()
+        machine_door.return_value = _sensorless_vitals()
 
         first = host_machine.read_machine()
         second = host_machine.read_machine()
@@ -1176,7 +1176,7 @@ class TestTheMachineCache:
         """Inside 1.0 s the stored answer; past it a fresh read. On a clock this case owns."""
         clock = {"now": 100.0}
         monkeypatch.setattr(host_read_cache, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
-        machine_door.side_effect = [_macos_vitals("first"), _macos_vitals("second")]
+        machine_door.side_effect = [_sensorless_vitals("first"), _sensorless_vitals("second")]
 
         assert host_machine.read_machine()["sampled_at"] == "first"
         clock["now"] = 100.9
@@ -1189,7 +1189,7 @@ class TestTheMachineCache:
         """A skill switched back on answers on the very next request, not after the window."""
         machine_door.side_effect = [
             {"ok": False, "reason": "switched_off", "detail": "off"},
-            _macos_vitals(),
+            _sensorless_vitals(),
         ]
 
         with pytest.raises(host_machine.MachineRefused) as refused:
@@ -1201,7 +1201,7 @@ class TestTheMachineCache:
 
     def test_a_failed_door_is_never_cached(self, machine_door) -> None:
         """A door that raised once is asked again, not refused for the rest of the second."""
-        machine_door.side_effect = [RuntimeError("once"), _macos_vitals()]
+        machine_door.side_effect = [RuntimeError("once"), _sensorless_vitals()]
 
         with pytest.raises(host_machine.MachineDoorFailed):
             host_machine.read_machine()

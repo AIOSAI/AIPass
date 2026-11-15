@@ -3,7 +3,7 @@
 # Description: Tests for usage data cleanup handler
 # Version: 1.0.1
 # Created: 2026-05-12
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/usage/cleanup.py, the usage data retention handler."""
@@ -13,6 +13,8 @@
 # sentry: no-test-needed(json_handler) — the json_handler.log_operation() audit line cleanup writes
 
 import json
+import os
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 import pytest
@@ -133,6 +135,23 @@ class TestCleanupOldData:
             cleanup_old_data(file_path)
 
         assert file_path.read_bytes() == before
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root creates in a read-only directory")
+    def test_a_lock_the_directory_denies_is_refused_at_once(self, tmp_path: Path, monkeypatch):
+        """A permission denial never clears, so the lock refuses now instead of polling out its wait."""
+        wait = 2.0
+        monkeypatch.setattr(cleanup, "LOCK_WAIT_SECONDS", wait)
+        file_path = tmp_path / "usage.json"
+        file_path.write_text(json.dumps({"data": {}}), encoding="utf-8")
+        tmp_path.chmod(0o500)
+        started = time.monotonic()
+        try:
+            with pytest.raises(PermissionError):
+                cleanup_old_data(file_path)
+        finally:
+            tmp_path.chmod(0o700)
+
+        assert time.monotonic() - started < wait
 
     def test_no_old_entries(self, tmp_path: Path):
         """Returns 0 when all generation entries are within retention period."""

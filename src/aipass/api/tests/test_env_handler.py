@@ -3,7 +3,7 @@
 # Description: Tests for .env template creation handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/auth/env.py -- .env template creation, and keys.py's no-key diagnosis."""

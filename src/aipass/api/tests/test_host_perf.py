@@ -3,7 +3,7 @@
 # Description: Tests for the host API's cost doctrine — threadpool, cache, pin
 # Version: 1.0.5
 # Created: 2026-08-18
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/host/server.py's cost doctrine: threadpool routes, the fleet cache, the pump cap."""

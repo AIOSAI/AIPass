@@ -3,7 +3,7 @@
 # Description: Tests for the host API photo lane — bytes onto disk, named by the server
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/host/uploads.py and its POST /v1/files/upload route."""

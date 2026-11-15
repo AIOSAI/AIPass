@@ -3,7 +3,7 @@
 # Description: Tests for the supervisor seam — a server that comes back on its own
 # Version: 1.2.0
 # Created: 2026-08-27
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/host/autostart.py and the host-api autostart verb that drives it."""

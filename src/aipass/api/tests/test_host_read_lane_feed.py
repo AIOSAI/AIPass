@@ -3,7 +3,7 @@
 # Description: Tests for the read lane's feed cursor and name fence — limits, robustness, branch roots, the seat
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/host/feed.py (the cursor) and the name fence in apps/handlers/host/reads.py."""

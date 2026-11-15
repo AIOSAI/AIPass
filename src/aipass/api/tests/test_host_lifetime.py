@@ -3,7 +3,7 @@
 # Description: Tests for a serve that outlives the shell that started it
 # Version: 1.1.2
 # Created: 2026-08-20
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/host/lifetime.py, a detached serve, its record and its log."""

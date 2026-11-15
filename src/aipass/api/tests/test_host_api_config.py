@@ -3,7 +3,7 @@
 # Description: Tests for the host API's config, face dir, baud binary and tokens — the bind gate and the store
 # Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-11-06
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/host/config.py (bind gate, face dir, baud binary) and apps/handlers/host/tokens.py."""

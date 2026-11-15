@@ -78,10 +78,10 @@
       "file": "apps/handlers/host/lifetime.py",
       "standard": "logged_fallback",
       "lines": [
-        192,
-        195
+        166,
+        169
       ],
-      "reason": "_alive's two handlers ARE its answers, not failures: ProcessLookupError from kill(pid, 0) is the kernel saying the pid is gone (False), PermissionError is the kernel saying it exists under another owner (True). No failure is dressed as an answer (api, fleet green leg 9). Lines moved 343/349 -> 407/413 with DPLAN-0408's server_home above them, 407/413 -> 413/419 when _runtime_dir followed it, 413/419 -> 192/195 in the comment sweep (2026-10-17)."
+      "reason": "_alive's two handlers ARE its answers, not failures: ProcessLookupError from kill(pid, 0) is the kernel saying the pid is gone (False), PermissionError is the kernel saying it exists under another owner (True). No failure is dressed as an answer (api, fleet green leg 9). Lines moved 343/349 -> 407/413 with DPLAN-0408's server_home above them, 407/413 -> 413/419 when _runtime_dir followed it, 413/419 -> 192/195 in the comment sweep (2026-10-17). Lines shifted by the Linux-only purge (2026-11-14): 192 -> 166, 195 -> 169."
     },
     {
       "file": "apps/handlers/host/tokens.py",
@@ -168,9 +168,9 @@
       "file": "apps/handlers/host/autostart.py",
       "standard": "logged_fallback",
       "lines": [
-        184
+        180
       ],
-      "reason": "A status probe whose None means unknown and is shown as unknown: _port_in, an absent and an unreadable --port are both a port nobody can state (never a guess) (api, fleet green leg 9). Lines moved 374/438 -> 380/444 with FPLAN-0642's constant and Functions entries above them, 380/444 -> 182/223 in the comment sweep (2026-10-17); 182 -> 184 with the session-target lines, and 223 went with linger_enabled (2026-10-22)."
+      "reason": "A status probe whose None means unknown and is shown as unknown: _port_in, an absent and an unreadable --port are both a port nobody can state (never a guess) (api, fleet green leg 9). Lines moved 374/438 -> 380/444 with FPLAN-0642's constant and Functions entries above them, 380/444 -> 182/223 in the comment sweep (2026-10-17); 182 -> 184 with the session-target lines, and 223 went with linger_enabled (2026-10-22). Lines shifted by the Linux-only purge (2026-11-14): 184 -> 180."
     },
     {
       "file": "apps/handlers/openrouter/caller.py",
@@ -199,14 +199,14 @@
       "file": "tests/test_host_attach_pump.py",
       "standard": "through_the_command",
       "lines": [
-        366
+        363
       ],
-      "reason": "kwargs['preexec_fn'] is host_attach._acquire_controlling_tty: the identity IS the claim (open_attach hands Popen this very hook), so the name must be read; kept under compass 481 and accepted in leg 8 (api, fleet green leg 9). Moved with the test from test_host_attach.py:716 in the oversize split (api, 2026-10-08). Line moved 529 -> 531 with DPLAN-0414 C-C's asyncio and pump imports, 531 -> 354 in the comment sweep (2026-10-17), 354 -> 365 with the argv-builder fence test (2026-10-17), 365 -> 366 with the --relay vector (2026-10-19)."
+      "reason": "kwargs['preexec_fn'] is host_attach._acquire_controlling_tty: the identity IS the claim (open_attach hands Popen this very hook), so the name must be read; kept under compass 481 and accepted in leg 8 (api, fleet green leg 9). Moved with the test from test_host_attach.py:716 in the oversize split (api, 2026-10-08). Line moved 529 -> 531 with DPLAN-0414 C-C's asyncio and pump imports, 531 -> 354 in the comment sweep (2026-10-17), 354 -> 365 with the argv-builder fence test (2026-10-17), 365 -> 366 with the --relay vector (2026-10-19). Lines shifted by the Linux-only purge (2026-11-14): 366 -> 363."
     },
     {
       "file": "tests/test_host_lifetime.py",
       "standard": "stdlib_patch",
-      "reason": "FILE-WIDE, the checker passes no line. os.kill is replaced in the stop tests because the subject is a SIGTERM to a pid the record names, and an unpatched kill would signal a real process; time.monotonic drives stop's 10s deadline without waiting it; sys.platform/shutil.which answer linger_enabled's own platform probe. A kill or clock parameter on stop() would be a door for these tests alone (api, fleet green leg 10)."
+      "reason": "FILE-WIDE, the checker passes no line. os.kill is replaced in the stop tests because the subject is a SIGTERM to a pid the record names, and an unpatched kill would signal a real process; time.monotonic drives stop's 10s deadline without waiting it; shutil.which answers linger_enabled's own loginctl probe. A kill or clock parameter on stop() would be a door for these tests alone (api, fleet green leg 10)."
     },
     {
       "file": "tests/test_host_attach_pump.py",
@@ -244,11 +244,6 @@
       "reason": "FILE-WIDE, the checker passes no line. discover_modules' subject is what importlib hands back for each module file (no handle_command, an import that raises); importlib.import_module is answered per test, scoped to the api entry module's own reference. An importer parameter would be a door for these tests alone (api, fleet green leg 10)."
     },
     {
-      "file": "tests/test_host_token_store.py",
-      "standard": "stdlib_patch",
-      "reason": "FILE-WIDE, the checker passes no line. os.open is answered with the Windows delete-pending PermissionError and with a permanent denial, the two lock states the platform will not produce on demand on Linux CI. An opener parameter on the lock would be a door for these tests alone; the stale-lock race stays logged per devpulse's 09-19 ruling (api, fleet green leg 10)."
-    },
-    {
       "file": "tests/test_host_uploads.py",
       "standard": "stdlib_patch",
       "reason": "FILE-WIDE, the checker passes no line. os.open raising ENOSPC and Path.mkdir raising EPERM are the server-side failures (503, not 400) a test cannot make a real disk produce; the asserts read the product's own status, never the error type. A filesystem parameter on store_image would be a door for these tests alone (api, fleet green leg 10)."
@@ -256,7 +251,7 @@
     {
       "file": "tests/test_host_autostart.py",
       "standard": "stdlib_patch",
-      "reason": "FILE-WIDE, the checker passes no line. The one patch left (sys.platform = win32) is in the test of is_supported itself, whose subject is the platform answer; the stop_unit refusal now goes through is_supported (leg 10) (api, fleet green leg 10)."
+      "reason": "FILE-WIDE, the checker passes no line. Path.home is pointed at tmp_path so install_unit and enable_unit write their unit under a test home; unpatched they would write the owner's real ~/.config/systemd/user. The sys.platform patch this row first named went with the Linux-only purge (api, 2026-11-14); the row was ruled bypass in fleet green leg 10."
     },
     {
       "file": "tests/test_host_settings.py",
@@ -282,31 +277,23 @@
       "reason": "The fake PTY's resize validates with the product's own _require_dimension, so the double refuses exactly what the real session refuses; a copied validator would drift, and a public one would be a door for the double alone. HELD since leg 8 (api, fleet green leg 11). Moved with StubSession from test_host_attach.py:1513 in the oversize split (api, 2026-10-08). Line moved 171 -> 101 in the comment sweep (2026-10-17)."
     },
     {
-      "file": "tests/test_host_attach_route.py",
-      "standard": "through_the_command",
-      "lines": [
-        741
-      ],
-      "reason": "_acquire_controlling_tty's off-POSIX refusal is reached by no caller (all sit behind PTY_AVAILABLE) and runs in a forked child; its injected defaults are the only way in. HELD since leg 8 (api, fleet green leg 11). Moved with the test from test_host_attach.py:2274 in the oversize split (api, 2026-10-08). Ruled bypass by devpulse 2026-10-10 (3ef9df96): the alternative to a refusal there is None() raised inside a forked child, so a private-helper unit test is the only way to pin it. Line drifted 1016 -> 1020, 1020 -> 722 in the comment sweep (2026-10-17), 722 -> 734 with the room-name fence test (2026-10-17), 734 -> 738 with the option-shaped watch target pin (2026-10-19), 738 -> 741 with the 2026-11-05 edits above it, re-ruled bypass by devpulse the same day."
-    },
-    {
       "file": "tests/test_host_perf.py",
       "standard": "through_the_command",
       "lines": [
+        702,
+        712,
         713,
-        723,
-        724,
-        727
+        716
       ],
-      "reason": "649: the close order of the two PTY ends on a failed spawn is visible only through _spawn_pty's close_fd seam. 659-663: an over-release of the session semaphore is an accounting bug no request can produce; the test uses the module's own bounded semaphore, since a stand-in would pass with the module downgraded. A public door would exist for these tests alone. HELD since leg 9 (api, fleet green leg 11). Lines moved 920/945/946/949 -> 923/948/949/952 with DPLAN-0406's /v1/pair entry in LOOP_FREE_POSTS, 923/948/949/952 -> 925/950/951/954 with DPLAN-0411's /v1/backup/run entry, 925/950/951/954 -> 928/953/954/957 with DPLAN-0412's /v1/backup/cancel entry, 928/953/954/957 -> 931/956/957/960 with FPLAN-0649's /v1/verbs/new-project entry, 931/956/957/960 -> 649/659/660/663 in the comment sweep (2026-10-17); 649/659/660/663 -> 713/723/724/727 after the ruff format (2026-10-24)."
+      "reason": "649: the close order of the two PTY ends on a failed spawn is visible only through _spawn_pty's close_fd seam. 659-663: an over-release of the session semaphore is an accounting bug no request can produce; the test uses the module's own bounded semaphore, since a stand-in would pass with the module downgraded. A public door would exist for these tests alone. HELD since leg 9 (api, fleet green leg 11). Lines moved 920/945/946/949 -> 923/948/949/952 with DPLAN-0406's /v1/pair entry in LOOP_FREE_POSTS, 923/948/949/952 -> 925/950/951/954 with DPLAN-0411's /v1/backup/run entry, 925/950/951/954 -> 928/953/954/957 with DPLAN-0412's /v1/backup/cancel entry, 928/953/954/957 -> 931/956/957/960 with FPLAN-0649's /v1/verbs/new-project entry, 931/956/957/960 -> 649/659/660/663 in the comment sweep (2026-10-17); 649/659/660/663 -> 713/723/724/727 after the ruff format (2026-10-24). Lines shifted by the Linux-only purge (2026-11-14): 713 -> 702, 723 -> 712, 724 -> 713, 727 -> 716."
     },
     {
       "file": "tests/test_cleanup.py",
       "standard": "through_the_command",
       "lines": [
-        22
+        24
       ],
-      "reason": "_write_json is imported by name: its parent mkdir and its two failure paths cannot be reached through cleanup_old_data, which only writes a store it has just read and parsed. A public writer would be a door for these tests alone. HELD since leg 9 (api, fleet green leg 11). Line moved 33 -> 22 in the comment sweep (2026-10-17)."
+      "reason": "_write_json is imported by name: its parent mkdir and its two failure paths cannot be reached through cleanup_old_data, which only writes a store it has just read and parsed. A public writer would be a door for these tests alone. HELD since leg 9 (api, fleet green leg 11). Line moved 33 -> 22 in the comment sweep (2026-10-17), 22 -> 24 with the os/time imports (2026-11-14)."
     },
     {
       "file": "tests/test_caller_detection.py",
@@ -320,9 +307,9 @@
       "file": "tests/test_host_uploads.py",
       "standard": "through_the_command",
       "lines": [
-        618
+        610
       ],
-      "reason": "_validation_sentence([]): FastAPI never raises a validation error with an empty list, so no request reaches this input, and a public door would exist for this test alone. HELD since leg 9 (api, fleet green leg 11). Line moved 809 -> 618 in the comment sweep (2026-10-17)."
+      "reason": "_validation_sentence([]): FastAPI never raises a validation error with an empty list, so no request reaches this input, and a public door would exist for this test alone. HELD since leg 9 (api, fleet green leg 11). Line moved 809 -> 618 in the comment sweep (2026-10-17). Lines shifted by the Linux-only purge (2026-11-14): 618 -> 610."
     },
     {
       "file": "tests/test_host_read_lane_changes.py",
@@ -352,25 +339,25 @@
       "file": "tests/test_host_perf.py",
       "standard": "through_the_command",
       "lines": [
-        206
+        205
       ],
-      "reason": "getattr(host_server, '_WRITE_LOCK') is read, never called, to record whether the shared lock is held while each read-modify-write route runs; the lock is the only serialization those routes have off the loop, and whether it is held is visible to no request. A public lock accessor would be a door for the test alone (api, 2026-10-24)."
+      "reason": "getattr(host_server, '_WRITE_LOCK') is read, never called, to record whether the shared lock is held while each read-modify-write route runs; the lock is the only serialization those routes have off the loop, and whether it is held is visible to no request. A public lock accessor would be a door for the test alone (api, 2026-10-24). Lines shifted by the Linux-only purge (2026-11-14): 206 -> 205."
     },
     {
       "file": "tests/test_host_perf.py",
       "standard": "through_the_command",
       "lines": [
-        509
+        507
       ],
-      "reason": "host_fleet._snapshots._flights is inspected after 50 distinct project reads to prove no per-project flight lock is left behind; a leaked lock grows for the life of the server and no route reports the cache's internals. An inspection between tests is not a route the product has, and a public one would be a door for the test alone (api, 2026-10-24)."
+      "reason": "host_fleet._snapshots._flights is inspected after 50 distinct project reads to prove no per-project flight lock is left behind; a leaked lock grows for the life of the server and no route reports the cache's internals. An inspection between tests is not a route the product has, and a public one would be a door for the test alone (api, 2026-10-24). Lines shifted by the Linux-only purge (2026-11-14): 509 -> 507."
     },
     {
       "file": "tests/test_host_attach_pump.py",
       "standard": "through_the_command",
       "lines": [
-        705
+        691
       ],
-      "reason": "_spawn_pty is called with its close_fd seam so a failed openpty or set_winsize shows which PTY ends were closed and that the reserved slot came back; the same seam as test_host_perf.py's 713 row. open_attach and open_monitor reach _spawn_pty but cannot hand it close_fd, and a public door would exist for these tests alone (api, 2026-10-24)."
+      "reason": "_spawn_pty is called with its close_fd seam so a failed openpty or set_winsize shows which PTY ends were closed and that the reserved slot came back; the same seam as test_host_perf.py's 713 row. open_attach and open_monitor reach _spawn_pty but cannot hand it close_fd, and a public door would exist for these tests alone (api, 2026-10-24). Lines shifted by the Linux-only purge (2026-11-14): 705 -> 691."
     },
     {
       "file": "apps/modules/host_api.py",

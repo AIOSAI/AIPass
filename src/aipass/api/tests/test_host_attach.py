@@ -3,7 +3,7 @@
 # Description: Tests for the host API attach lane — the pump's shape and the socket's records
 # Version: 1.2.0
 # Created: 2026-08-14
-# Modified: 2026-11-05
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for the attach socket's records in apps/handlers/host/server.py, pump.py's shape, and speech.py's stream."""

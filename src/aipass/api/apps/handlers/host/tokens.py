@@ -3,7 +3,7 @@
 # Description: Host API Token Handler — bearer token issue, verify, revoke
 # Version: 1.4.0
 # Created: 2026-08-14
-# Modified: 2026-11-06
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -160,11 +160,8 @@ def _store_lock(wait: Optional[float] = None) -> Iterator[None]:
                 raise OSError(f"Token store lock held longer than {wait}s at {path}") from None
             time.sleep(LOCK_POLL_SECONDS)
         except PermissionError as e:
-            # Windows answers a delete-pending lock with ACCESS DENIED: still held, so poll it.
-            # Never a staleness check (a stale lock answers FILE EXISTS); past the wait, a real denial.
-            if time.monotonic() >= deadline:
-                raise OSError(f"Token store lock at {path} still denied access after {wait}s: {e}") from e
-            time.sleep(LOCK_POLL_SECONDS)
+            # Rewrapped: socket_bearer reads a raw PermissionError as a refused token, not a store outage.
+            raise OSError(f"Token store lock at {path} denied access: {e}") from e
 
     try:
         yield
@@ -178,7 +175,7 @@ def _lock_is_stale(path: Path) -> bool:
     try:
         age = time.time() - path.stat().st_mtime
     except OSError as e:
-        # Gone (or Windows delete-pending ACCESS DENIED) since the failed create: raced, not stale.
+        # Gone since the failed create: raced, not stale.
         logger.debug("[host_api] token store lock vanished while checking its age: %s", e)
         return False
 

@@ -3,7 +3,7 @@
 # Description: Host API settings handler — the desktop's gear rules, held in Python
 # Version: 1.2.0
 # Created: 2026-08-16
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/host/settings.py, the desktop's settings lane."""
@@ -419,20 +419,13 @@ class TestTheCorpusForcedTwoFixes:
     def test_a_parent_that_is_a_file_is_a_fault_not_a_fresh_branch(self, tmp_path) -> None:
         """
         Divergence 2. A missing directory on the way to the file means nobody
-        has written settings yet; where the OS reads it as missing (Windows), blank is the answer."""
+        has written settings yet; a file in the way is NotADirectoryError, a fault."""
         blocking = tmp_path / "claude-settings"
         blocking.write_text("I am a file, not a directory", encoding="utf-8")
         target = blocking / "settings.local.json"
 
-        with pytest.raises(OSError) as blocked:
-            target.read_bytes()
-        world_distinguishes_the_fault = not isinstance(blocked.value, FileNotFoundError)
-
-        if world_distinguishes_the_fault:
-            with pytest.raises(host_settings.SettingsUnavailable):
-                host_settings.read_object(target)
-        else:
-            assert host_settings.read_object(target) == {}
+        with pytest.raises(host_settings.SettingsUnavailable):
+            host_settings.read_object(target)
 
     def test_a_negative_window_reads_as_null_not_as_a_negative(self, tmp_path) -> None:
         """

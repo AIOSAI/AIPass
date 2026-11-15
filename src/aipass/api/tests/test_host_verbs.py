@@ -3,7 +3,7 @@
 # Description: Tests for the host API verb lane — wake, kill, lock (FPLAN-0411 Phase 3)
 # Version: 1.2.0
 # Created: 2026-08-14
-# Modified: 2026-11-05
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/host/verbs.py and agent_route.py: wake, kill, lock, typing and model switches in a room."""

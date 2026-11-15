@@ -3,7 +3,7 @@
 # Description: Tests for the attach route and its seats — opening, socket auth, watches, outside rooms, the ping
 # Version: 1.0.3
 # Created: 2026-10-08
-# Modified: 2026-11-03
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for the WS /v1/room/attach route in apps/handlers/host/server.py and open_attach/open_monitor in attach.py."""

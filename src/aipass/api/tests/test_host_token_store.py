@@ -3,7 +3,7 @@
 # Description: Tests for token provenance, revocation time and live/dormant telemetry
 # Version: 1.2.0
 # Created: 2026-08-14
-# Modified: 2026-11-06
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/host/tokens.py, the token store's accountability fields and its lock."""
@@ -461,32 +461,6 @@ class TestTheLockIsRealNotDecorative:
         assert not hasattr(host_tokens, "store_path")
         assert not hasattr(host_tokens, "write_private_json")
 
-    def test_a_lock_being_deleted_is_waited_for_and_the_revoke_lands(self, store: Path) -> None:
-        """
-        CI 35192484222, Windows: the answer that killed a revoke.
-
-        An exclusive create on a delete-pending lock answers ACCESS DENIED on Windows, not FILE EXISTS.
-        """
-        record, raw = host_tokens.issue_token("pixel-8", scope="read")
-        lock_file = str(host_tokens.lock_path())
-        real_open = os.open
-        lock_attempts = []
-
-        def delete_pending_once(path: Any, flags: int, mode: int = 0o777, **kwargs: Any) -> int:
-            if path == lock_file:
-                lock_attempts.append(flags)
-                if len(lock_attempts) == 1:
-                    raise PermissionError(13, "Permission denied", path)
-            return real_open(path, flags, mode, **kwargs)
-
-        with patch.object(host_tokens.os, "open", new=delete_pending_once):
-            assert host_tokens.revoke_token(record["id"]) is True
-
-        assert len(lock_attempts) == 2
-        assert _record(record["id"])["revoked"] is True
-        assert host_tokens.verify_token(raw) is None
-        assert not host_tokens.lock_path().exists()
-
     def test_a_held_lock_fails_issue_at_the_deadline(self, store: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """
         A fresh lock another writer holds (FILE EXISTS) is waited for, then refused.
@@ -510,17 +484,17 @@ class TestTheLockIsRealNotDecorative:
         assert raised.value.__cause__ is None
         assert lock.exists(), "a fresh lock held by another writer was broken"
 
-    def test_an_access_denial_that_never_clears_still_fails_at_the_deadline(
+    def test_an_access_denial_is_refused_at_once_as_an_oserror(
         self, store: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """
-        Waiting out a delete is not forgiving a permissions problem.
+        A store directory this process cannot write never clears: refuse now, not at the deadline.
 
-        The host is probed first: root and Windows create in a read-only directory anyway.
+        An OSError, never the raw PermissionError: socket_bearer reads PermissionError as a refused token.
+        The host is probed first: root creates in a read-only directory anyway.
         """
-        wait = 0.1
+        wait = 2.0
         monkeypatch.setattr(host_tokens, "LOCK_WAIT_SECONDS", wait)
-        monkeypatch.setattr(host_tokens, "LOCK_POLL_SECONDS", 0.01)
         lock = host_tokens.lock_path()
         lock.parent.mkdir(parents=True, exist_ok=True)
         mode = lock.parent.stat().st_mode
@@ -537,13 +511,12 @@ class TestTheLockIsRealNotDecorative:
 
             started = time.monotonic()
             if host_refusals:
-                host_refusal = host_refusals[0]
                 with pytest.raises(OSError) as raised:
                     host_tokens.issue_token("pixel-8", scope="read")
-                elapsed = time.monotonic() - started
-                assert elapsed >= wait
-                assert str(raised.value).startswith(f"Token store lock at {lock} still denied access after {wait}s: ")
-                assert type(raised.value.__cause__) is type(host_refusal)
+                assert time.monotonic() - started < wait
+                assert type(raised.value) is OSError
+                assert str(raised.value).startswith(f"Token store lock at {lock} denied access: ")
+                assert type(raised.value.__cause__) is PermissionError
             else:
                 record, _raw = host_tokens.issue_token("pixel-8", scope="read")
                 assert _record(record["id"])["revoked"] is False
@@ -554,32 +527,22 @@ class TestTheLockIsRealNotDecorative:
         """
         A release refused by the platform has not found the lock already gone.
 
-        POSIX unlinks a held file, so a directory takes the lock's place; Windows keeps a handle open.
+        A held file unlinks, so a directory takes the lock's place.
         """
         lock = host_tokens.lock_path()
-        refusals: list = []
-        held: list = []
 
         def save_and_wedge(*args: Any, **kwargs: Any) -> None:
-            try:
-                os.unlink(str(lock))
-            except PermissionError as refusal:
-                refusals.append(refusal)
-                held.append(open(lock, "rb"))
-            else:
-                lock.mkdir()
+            os.unlink(str(lock))
+            lock.mkdir()
 
         try:
             with patch.object(host_tokens, "save_tokens", side_effect=save_and_wedge):
                 with patch(PATCH_TOKENS_LOGGER) as log:
                     host_tokens.issue_token("pixel-8", scope="read")
         finally:
-            for handle in held:
-                handle.close()
             if lock.is_dir():
                 lock.rmdir()
 
-        assert len(held) == len(refusals), "every refused unlink kept its handle open past the release"
         assert log.warning.call_count == 1
         message, *values = log.warning.call_args.args
         # The lock's path stays off the line (sentry clear_text_secret_logging).
@@ -590,24 +553,18 @@ class TestTheLockIsRealNotDecorative:
     def test_a_lock_already_gone_at_release_stays_quiet(self, store: Path) -> None:
         """
         The ordinary outcome of a stale-lock break racing a release: debug, not a warning.
-
-        Windows cannot unlink a held file, so there the release removes the lock quietly instead.
         """
         lock = host_tokens.lock_path()
-        refusals: list = []
 
         def save_and_break_the_lock(*args: Any, **kwargs: Any) -> None:
-            try:
-                os.unlink(str(lock))
-            except PermissionError as refusal:
-                refusals.append(refusal)
+            os.unlink(str(lock))
 
         with patch.object(host_tokens, "save_tokens", side_effect=save_and_break_the_lock):
             with patch(PATCH_TOKENS_LOGGER) as log:
                 host_tokens.issue_token("pixel-8", scope="read")
 
         assert log.warning.call_count == 0
-        assert log.debug.call_count == (0 if refusals else 1)
+        assert log.debug.call_count == 1
         assert not lock.exists()
 
 

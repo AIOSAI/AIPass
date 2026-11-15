@@ -3,7 +3,7 @@
 # Description: Tests for the attach lane's room and pump — the tmux command, a real PTY, resize and hangup
 # Version: 1.1.2
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/host/attach.py's room and PTY, and apps/handlers/host/pump.py's control frames."""

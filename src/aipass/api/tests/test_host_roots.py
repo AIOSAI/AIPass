@@ -3,7 +3,7 @@
 # Description: Tests for the roots roster and the widened name fence
 # Version: 1.1.1
 # Created: 2026-08-18
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/host/reads.py's four-kind name fence, /v1/dir paging and the /v1/roots route."""

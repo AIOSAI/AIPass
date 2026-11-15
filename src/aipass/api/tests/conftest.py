@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for api tests
 # Version: 2.5.1
 # Created: 2026-03-05
-# Modified: 2026-11-10
+# Modified: 2026-11-14
 # Category: api/tests
 #
 # CHANGELOG (Max 5 entries):

@@ -3,7 +3,7 @@
 # Description: Tests for the host API's live app — the extra guard, ping, bearer auth, scopes, the declared routes
 # Version: 1.4.0
 # Created: 2026-10-08
-# Modified: 2026-11-10
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for create_app(), its auth and the declared routes in apps/handlers/host/server.py."""
