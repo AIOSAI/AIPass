@@ -17,7 +17,7 @@ import threading
 from aipass.trigger.apps import config
 
 
-class TestThePosixLockArmIsRealToo:
+class TestThePosixLockIsReal:
     """fcntl.flock on separate open file descriptions serialises threads."""
 
     def test_four_threads_never_hold_it_at_once(self, tmp_path):

@@ -3,7 +3,7 @@
 # Description: Tests for the escalation digest: sending, the mail it carries, reporting and the CLI
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/escalation.py's digest (send, mail, reporting) and apps/modules/escalation.py."""

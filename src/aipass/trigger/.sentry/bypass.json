@@ -122,7 +122,7 @@
       "file": "apps/log_watcher_service.py",
       "standard": "encapsulation",
       "lines": [
-        17
+        16
       ],
       "pattern": "import aipass.trigger.apps.handlers.reload_sentinel",
       "reason": "LINE-SCOPED AND HONOURED: encapsulation_check is the one checker in the pack that passes a line to is_bypassed(). trigger publishes no modules/ entry point for the reload sentinel and should not - it is not a CLI surface, it is the service's own supervisor hook, while modules/ is auto-discovered for drone routing. Same shape as the ai_mail dispatch.wake exemption. Line drifts if anything above L26 changes - re-derive rather than nudge it.",
@@ -163,7 +163,7 @@
       "file": "apps/modules/errors.py",
       "standard": "logged_fallback",
       "lines": [
-        304
+        296
       ],
       "pattern": "_cmd_detail returns True after an unreadable registry",
       "reason": "True there means routed, not succeeded (fleet green leg 5, kept leg 10). The failure goes out through cli error() and its failure flag, which trigger.main reads.",
@@ -173,7 +173,7 @@
       "file": "apps/handlers/error_registry.py",
       "standard": "logged_fallback",
       "lines": [
-        491
+        490
       ],
       "pattern": "update_status returns False on an exception",
       "reason": "The success path returns _save_registry's answer, so False is always a failure: invalid status, not found, save failed or an exception (fleet green leg 4, kept leg 10). Its callers in errors.py (suppress, unsuppress, resolve) print the failure on False and do nothing else, and the warning names the exception.",
@@ -183,7 +183,7 @@
       "file": "apps/handlers/error_registry.py",
       "standard": "logged_fallback",
       "lines": [
-        605
+        604
       ],
       "pattern": "update_source_fix_status returns False on an exception",
       "reason": "Fleet green leg 5, kept leg 10. Its caller, errors suppress, ignores the answer and runs after the suppression write and after the source-fix send. A raise would crash after the mail went, and a distinct value would need that caller changed.",

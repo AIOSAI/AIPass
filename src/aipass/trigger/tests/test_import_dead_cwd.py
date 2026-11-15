@@ -3,12 +3,15 @@
 # Name: test_import_dead_cwd.py
 # Description: repo_root and module_file never answer with the process cwd
 # Created: 2026-08-31
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # Version: 1.4.0
 # Category: trigger/tests
 # =============================================
 
-"""Tests that repo_root and module_file answer from the source tree, never the process cwd."""
+"""Tests for apps/handlers/repo_root.py and apps/config.py's module_file: the source tree, never the process cwd."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# sentry: no-test-needed(behaviour) — _frame_path's dead-cwd fallback: resolve() reads the cwd only for a relative path
 
 import subprocess
 import sys

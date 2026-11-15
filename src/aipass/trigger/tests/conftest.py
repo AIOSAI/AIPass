@@ -3,7 +3,7 @@
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for trigger tests
 # Created: 2025-11-08
-# Modified: 2026-11-08
+# Modified: 2026-11-14
 # Version: 1.7.0
 # Category: trigger/tests
 #

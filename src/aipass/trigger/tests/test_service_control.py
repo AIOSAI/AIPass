@@ -3,7 +3,7 @@
 # Description: Tests for the systemd unit lifecycle of the log watcher
 # Version: 1.1.1
 # Created: 2026-08-31
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/service_control.py, the systemd control surface extracted from medic.py."""

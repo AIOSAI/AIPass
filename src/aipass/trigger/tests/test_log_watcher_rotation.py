@@ -3,7 +3,7 @@
 # Description: Tests for the branch log watcher's file reading, rotation drain and inode detection
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/log_watcher.py's file reading and rotation (_read_new_lines, on_modified)."""

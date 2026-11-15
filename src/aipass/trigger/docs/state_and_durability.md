@@ -44,7 +44,8 @@ leaves an unreadable legacy file in place for a human rather than guessing.
 
 ## Durability
 
-- **Atomic writes:** All JSON state files use `config.atomic_write_json()` — writes to a temp file in the same directory, then an atomic rename. No partial writes on crash.- **File locking:** All read-modify-write cycles wrapped in `config.json_file_lock()` with `.lock` sidecar files — `fcntl.flock`. Prevents concurrent corruption from watcher + CLI. `flock` takes a fresh open file description per call, so it conflicts even inside one process. Pinned by a test of concurrent threads.
+- **Atomic writes:** All JSON state files use `config.atomic_write_json()` — writes to a temp file in the same directory, then an atomic rename. No partial writes on crash.
+- **File locking:** All read-modify-write cycles wrapped in `config.json_file_lock()` with `.lock` sidecar files — `fcntl.flock`. Prevents concurrent corruption from watcher + CLI. `flock` takes a fresh open file description per call, so it conflicts even inside one process. Pinned by a test of concurrent threads.
   Scope: these two helpers serialise trigger's **own** state files — the error registry, the circuit breaker, medic state, escalation state, `.aipass/alerts.json` and `trigger_data.json`. Trio documents under `trigger_json/` are written by the fleet json service, which carries its own durability machinery; trigger's `config.py` is not on that path.
 - **Atomic is not serialised.** `atomic_write_json` stops a *torn* file, not a *lost* one. Two unlocked read-modify-write cycles each produce a whole file and one update vanishes; only the lock prevents that.
 - **Unreadable is not corrupt.** A read that fails raises its `OSError`: an unreadable document is never treated as a corrupt one to be regenerated.

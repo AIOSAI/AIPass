@@ -3,7 +3,7 @@
 # Description: Unit tests for the branch log watcher's parsing, detection and line pipeline
 # Version: 1.6.0
 # Created: 2026-04-03
-# Modified: 2026-11-08
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/log_watcher.py — parsing, detection and the line pipeline that fires events."""
@@ -880,7 +880,7 @@ class TestSystemLogAttributionComesFromTheLiveTree:
         assert lw.detect_branch_from_path(path) == "SENTRY"
 
 
-class TestLogPathClassificationOnBothPlatforms:
+class TestLogPathClassification:
     """Classification reads path components, never a `"/logs/"` substring."""
 
     def test_posix_branch_log_is_a_branch_log(self):
@@ -896,7 +896,7 @@ class TestLogPathClassificationOnBothPlatforms:
 
         assert lw.classify_log_path(PurePosixPath("/p/system_logs/x.log")) == "system"
 
-    def test_unrelated_path_is_foreign_on_both(self):
+    def test_unrelated_path_is_foreign(self):
         """A log outside both trees stays foreign."""
         assert lw.classify_log_path(_SYNTHETIC_ELSEWHERE / "random" / "output.log") == "foreign"
 
