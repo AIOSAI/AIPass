@@ -1385,7 +1385,7 @@
       "file": "apps/handlers/bridges/codex.py",
       "standard": "fallback",
       "lines": [
-        89
+        86
       ],
       "reason": "Not a file read: None means \"plain text\", a legitimate engine answer the bridge carries as context. A deny never rests on the parse: exit 2 on a guarded event denies whatever the text, and the engine's stdin is parsed again by the engine itself."
     },
@@ -1771,7 +1771,7 @@
       "file": "apps/handlers/bridges/codex.py",
       "standard": "silent_catch",
       "lines": [
-        235
+        232
       ],
       "reason": "The refusal path takes no logger (prax can be what broke). An exception whose own message raises still denies: the deny text names its type and says the message could not be read, and the same line lands in logs/bridge.log at ERROR, which medic reads."
     },
@@ -1779,7 +1779,7 @@
       "file": "apps/handlers/bridges/codex.py",
       "standard": "fallback",
       "lines": [
-        235
+        232
       ],
       "reason": "The refusal path takes no logger (prax can be what broke). An exception whose own message raises still denies: the deny text names its type and says the message could not be read, and the same line lands in logs/bridge.log at ERROR, which medic reads."
     },

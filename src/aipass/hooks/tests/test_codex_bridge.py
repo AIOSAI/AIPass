@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_codex_bridge.py
-# Version: 2.11.0
+# Version: 2.12.0
 # Description: Tests for the Codex, OpenCode and Seed bridges: payload mapping, output envelope, apply_patch, fail closed
 # Branch: hooks
 # Layer: tests
@@ -29,6 +29,7 @@ import pytest
 
 from aipass.hooks.apps.handlers.bridges import codex, opencode, seed
 from aipass.hooks.apps.modules import engine
+import aipass.prax as prax
 from aipass.prax.apps.modules import logger as prax_logger
 
 
@@ -251,6 +252,33 @@ class TestApplyPatchMapping:
         patch = "*** Begin Patch\n*** Add File: new.py\n+x\n*** Update File: old.py\n@@\n-1\n+2\n*** End Patch"
         result = bridge.run("PostToolUse", _patch_payload(tmp_path, patch))
         assert result["hookSpecificOutput"]["additionalContext"] == "lint fixed in new.py\nlint fixed in old.py"
+
+
+class TestTheBridgeLogsThroughPrax:
+    def test_a_log_line_goes_to_prax_and_never_to_stderr(self, bridge, monkeypatch, capsys, tmp_path):
+        logged: list[tuple[str, str]] = []
+
+        class _Spy:
+            def warning(self, message, *args):
+                logged.append(("warning", message % args))
+
+        monkeypatch.setattr(prax, "logger", _Spy(), raising=False)
+        result = bridge.run("PreToolUse", _patch_payload(tmp_path, "*** Begin Patch\n*** End Patch"))
+        assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert [level for level, _ in logged] == ["warning"]
+        assert "apply_patch names no file" in logged[0][1]
+        assert capsys.readouterr().err == ""
+
+    def test_with_prax_down_a_log_line_is_a_broken_engine_refused_not_a_stderr_line(
+        self, bridge, monkeypatch, capsys, tmp_path
+    ):
+        monkeypatch.delattr(prax, "logger", raising=False)
+        monkeypatch.delattr(prax_logger, "system_logger")
+        monkeypatch.setattr(codex, "BREAK_LOG", str(tmp_path / "bridge.log"))
+        result = bridge.run("PreToolUse", _patch_payload(tmp_path, "*** Begin Patch\n*** End Patch"))
+        assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert "HOOKS BROKEN" in result["hookSpecificOutput"]["permissionDecisionReason"]
+        assert "prax unavailable" not in capsys.readouterr().err
 
 
 class TestBrokenEngine:

@@ -56,7 +56,7 @@ When the engine cannot load, every PreToolUse in every session of the fleet is r
 4. Prove the gate answers again: `echo '{"tool_name":"Read","tool_input":{"file_path":"README.md"},"cwd":"'"$PWD"'"}' | .venv/bin/python src/aipass/hooks/apps/handlers/bridges/claude.py PreToolUse; echo "exit $?"` prints `exit 0`. A `HOOKS BROKEN` text and `exit 2` means it is still down.
 5. The agents need nothing: their next tool call goes through.
 
-A bridge file that is itself half-edited cannot refuse at all on Claude Code and Codex: they run the tool when the hook process dies before answering (the table in [wiring.md](wiring.md#when-a-bridge-breaks)). Edit a bridge only from a terminal, and run step 4 after.
+A bridge file that is itself half-edited cannot answer at all; the shell guard on the PreToolUse row refuses for it, with `HOOKS BROKEN: claude.py exited <n> without an answer` (the table in [wiring.md](wiring.md#when-a-bridge-breaks)). Edit a bridge only from a terminal, and run step 4 after.
 
 ## Dynamic Dispatch
 

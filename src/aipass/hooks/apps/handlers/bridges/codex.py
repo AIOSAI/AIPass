@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: codex.py
-# Version: 2.6.0
+# Version: 2.7.0
 # Description: Codex bridge — mounts the promoted hook code, maps apply_patch, fails closed on PreToolUse
 # Branch: hooks
 # Layer: apps/handlers/bridges
@@ -56,13 +56,10 @@ LIVE_BREAK_LOG = BREAK_LOG
 
 
 def _log(level: str, message: str, *args: object) -> None:
-    """Log through prax, or to stderr when prax cannot load: the bridge's answer never waits on prax."""
-    try:
-        from aipass.prax.apps.modules.logger import system_logger as logger
+    """Log through prax. Imported per call, inside main's try: a prax that cannot load is a broken engine (_broken)."""
+    from aipass.prax import logger
 
-        getattr(logger, level)(message, *args)
-    except Exception as exc:
-        sys.stderr.write(f"{message % args} (prax unavailable: {exc})\n")
+    getattr(logger, level)(message, *args)
 
 
 def _normalize_stdin(stdin_data: str) -> str:

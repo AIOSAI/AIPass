@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_wire_verify.py
-# Version: 1.8.0
+# Version: 1.8.1
 # Description: Tests for wire_verify module — provider ↔ project hook wiring checker
 # Branch: hooks
 # Created: 2026-07-09
@@ -397,6 +397,23 @@ class TestCodexOnlyHandlers:
         claude_row = {"PreToolUse": [_CODEX_PRETOOL], "SessionStart": [_provider_entry("SessionStart:culture")]}
         codex_path.write_text(json.dumps({"hooks": claude_row}), encoding="utf-8")
         assert self._verify(tmp_path, codex_path)["errors"] == [_never_fires("SessionStart", "culture")]
+
+    @pytest.mark.parametrize("gap", [" ", ""], ids=["space_before_shell", "no_space"])
+    def test_a_guarded_pretooluse_row_still_reaches_the_bridge_on_both_sides(self, tmp_path, gap):
+        claude_guard = f"{_BRIDGE_CMD} PreToolUse{gap}; c=$?; [ $c -eq 0 ] || [ $c -eq 2 ] || exit 2; exit $c"
+        settings = tmp_path / "settings.json"
+        provider = {"PreToolUse": [{"hooks": [{"type": "command", "command": claude_guard}]}]}
+        settings.write_text(json.dumps({"hooks": provider}), encoding="utf-8")
+        codex_row = {
+            "matcher": "Bash|apply_patch",
+            "hooks": [{"type": "command", "command": f"python3 bridges/codex.py PreToolUse{gap}|| printf '%s' '{{}}'"}],
+        }
+        codex_path = tmp_path / "codex_hooks.json"
+        codex_path.write_text(json.dumps({"hooks": {"PreToolUse": [codex_row]}}), encoding="utf-8")
+        result = wire_verify.verify_wiring(
+            provider_path=settings, project_config={"hooks_enabled": True}, codex_path=codex_path
+        )
+        assert result["errors"] == []
 
     def test_a_codex_file_whose_pretooluse_misses_a_tool_is_an_error_naming_it(self, tmp_path):
         result = self._verify(tmp_path, _codex_file(tmp_path, "SessionStart:culture", pretool=False))

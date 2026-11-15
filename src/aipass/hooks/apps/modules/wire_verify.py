@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: wire_verify.py
-# Version: 1.9.2
+# Version: 1.9.3
 # Description: Wire verification — cross-checks provider settings vs project hook config
 # Branch: hooks
 # Layer: apps/modules
@@ -76,7 +76,8 @@ def _read_provider_hooks(errors, path=None):
 def _extract_bridge_arg(entry, marker=_BRIDGE_MARKER):
     """Extract the bridge event arg from a provider entry's command string.
 
-    Returns e.g. 'UserPromptSubmit:tier0_kernel' or 'Stop', or None if not a bridge entry.
+    Returns e.g. 'UserPromptSubmit:tier0_kernel' or 'Stop', or None if not a bridge entry. A shell
+    guard after the event (`PreToolUse; c=$?` or `PreToolUse|| printf`) ends the word with or without a space.
     """
     for hook in entry.get("hooks", []):
         cmd = hook.get("command", "")
@@ -85,8 +86,8 @@ def _extract_bridge_arg(entry, marker=_BRIDGE_MARKER):
         parts = cmd.split()
         for i, part in enumerate(parts):
             if part.endswith(marker.rsplit("/", 1)[-1]) or marker in part:
-                if i + 1 < len(parts):
-                    return parts[i + 1]
+                event = re.match(r"[\w:.-]+", parts[i + 1]) if i + 1 < len(parts) else None
+                return event.group() if event else None
     return None
 
 
