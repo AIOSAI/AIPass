@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: bootstrap.py
 # Description: Init handler — bootstrap an AIPass project in any directory
-# Version: 2.6.2
+# Version: 2.7.0
 # Created: 2026-03-14
-# Modified: 2026-11-03
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -203,13 +203,13 @@ def _is_managed_legacy_prep(target: Path, legacy: Path) -> bool:
 
 
 def navmap_stub(target: Path, name: str) -> str:
-    """The project's navmap stub, its citizens read from the project registry; none when it is unreadable."""
+    """The project's navmap stub, its citizens read from the project registry; an unreadable registry raises."""
     registries = registries_in(target)
     try:
         branches = json.loads(registries[0].read_text(encoding="utf-8")).get("branches", []) if registries else []
     except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("navmap stub: registry unreadable, listing no citizens: %s", exc)
-        branches = []
+        logger.warning("navmap stub: registry unreadable: %s", exc)
+        raise RuntimeError(f"{registries[0]} is unreadable ({exc}): fix its JSON, then re-run") from exc
     citizens = [
         (b.get("email") or f"@{str(b.get('name', '?')).lower()}", " ".join(str(b.get("description", "")).split()))
         for b in branches
@@ -424,6 +424,7 @@ def init_project(
     registry_id = str(uuid.uuid4())
     today = date.today().isoformat()
     created = []
+    trusted: bool | None = False
     aipass_home = _detect_aipass_home()
 
     registry_filename = f"{name}_REGISTRY.json"
@@ -466,7 +467,7 @@ def init_project(
         if template.is_file():
             sm.write_text_lf(hooks_json_path, template.read_text(encoding="utf-8"))
             created.append(str(hooks_json_path))
-            _enroll_project(target)
+            trusted = _enroll_project(target)
         else:
             logger.info("hooks template not found at %s — skipping", template)
 
@@ -509,6 +510,10 @@ def init_project(
         created.append(str(prep_path))
     created.extend(str(target / rel) for rel in write_switch_pair(target))
     notes: list[str] = []
+    if trusted is None:
+        notes.append(
+            f"Trust registry unavailable — not enrolled. Run 'aipass trust {target}' once AIPass is installed."
+        )
     if shared_skills_state(target)["link"] == LINK_STATE_MISSING:
         note = link_skills(target)
         notes.extend([note] if note else [])
@@ -591,12 +596,32 @@ def _local_settings_reason(existing: dict, merged: dict, aipass_home: str) -> st
 
 
 def _read_text(path: Path) -> str | None:
-    """Read a text file, or None when it is absent or not decodable as UTF-8."""
+    """Read a text file, or None when it is absent; unreadable or not UTF-8 raises ValueError naming it."""
     try:
         return path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        logger.info("unreadable, treating as absent: %s (%s)", path, exc)
+    except FileNotFoundError:
         return None
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.warning("unreadable: %s (%s)", path, exc)
+        raise ValueError(_UNUSABLE.format(path=path, why=exc)) from exc
+
+
+_UNUSABLE = "{path} is unusable ({why}): fix or move it aside, then re-run 'aipass init update'"
+
+
+def _load_json(path: Path) -> dict | None:
+    """A JSON object file, or None when it is absent; corrupt or not an object raises ValueError naming it."""
+    text = _read_text(path)
+    if text is None:
+        return None
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        logger.warning("not JSON: %s (%s)", path, exc)
+        raise ValueError(_UNUSABLE.format(path=path, why=exc)) from exc
+    if not isinstance(data, dict):
+        raise ValueError(_UNUSABLE.format(path=path, why="not a JSON object"))
+    return data
 
 
 def _managed_manifest_entries(target: Path) -> dict:
@@ -705,15 +730,10 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
     # Merge files keep user values through the merge itself, so they are never "kept (local edits)".
     settings_path = claude_dir / "settings.json"
     generated_settings = _claude_settings()
-    existing_settings_text = _read_text(settings_path)
-    if existing_settings_text is None:
+    existing = _load_json(settings_path)
+    if existing is None:
         record(".claude/settings.json", settings_path, sm.ACTION_CREATE, "absent", generated_settings)
     else:
-        try:
-            existing = json.loads(existing_settings_text)
-        except json.JSONDecodeError as exc:
-            logger.info("settings.json parse failed, rebuilding: %s", exc)
-            existing = {}
         merged = _merge_settings(existing, json.loads(generated_settings))
         merged_content = json.dumps(merged, indent=2, ensure_ascii=False) + "\n"
         if existing != merged:
@@ -730,16 +750,11 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
     if aipass_home and not is_throwaway_path(aipass_home):
         local_path = claude_dir / "settings.local.json"
         generated = json.loads(claude_local_settings(aipass_home, nested=is_projects_child(target)))
-        existing_local_text = _read_text(local_path)
-        if existing_local_text is None:
+        existing = _load_json(local_path)
+        if existing is None:
             content = json.dumps(generated, indent=2, ensure_ascii=False) + "\n"
             record(".claude/settings.local.json", local_path, sm.ACTION_CREATE, "absent", content)
         else:
-            try:
-                existing = json.loads(existing_local_text)
-            except json.JSONDecodeError as exc:
-                logger.info("settings.local.json parse failed, rebuilding: %s", exc)
-                existing = {}
             merged = merge_local_settings(existing, generated)
             merged_content = json.dumps(merged, indent=2, ensure_ascii=False) + "\n"
             if existing != merged:
@@ -758,15 +773,8 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
     template_path = Path(aipass_home) / ".aipass" / "project_hooks.json" if aipass_home else None
     if template_path and template_path.is_file():
         template_data = json.loads(template_path.read_text(encoding="utf-8"))
-        existing_hooks_text = _read_text(hooks_path)
-        if existing_hooks_text is None:
-            existing_hooks: dict = {}
-        else:
-            try:
-                existing_hooks = json.loads(existing_hooks_text)
-            except json.JSONDecodeError as exc:
-                logger.info("hooks.json parse failed, rebuilding: %s", exc)
-                existing_hooks = {}
+        loaded_hooks = _load_json(hooks_path)
+        existing_hooks: dict = loaded_hooks or {}
         merged_hooks = sm.prune_retired(_merge_hooks_json(existing_hooks, template_data))
         merged_hooks_content = json.dumps(merged_hooks, indent=2, ensure_ascii=False) + "\n"
 
@@ -776,7 +784,7 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
         for handler in sm.retired_handlers_in(existing_hooks):
             handlers.append({"name": handler, "action": "retire"})
 
-        if existing_hooks_text is None:
+        if loaded_hooks is None:
             record(".aipass/hooks.json", hooks_path, sm.ACTION_CREATE, "absent", merged_hooks_content)
             trust_reenrol = True
         elif existing_hooks != merged_hooks:
@@ -926,11 +934,16 @@ def _plan_ignore_files(target: Path, ignored: list, files: list, writes: list) -
             continue
         if content:
             continue
-        existing = _read_text(dest)
-        missing = sc.gitignore_lines_missing(existing, sc.gitignore()) if existing is not None else []
-        if existing is None or not missing:
-            reason = "unreadable as UTF-8, left as it is" if existing is None else "holds every template line"
-            files.append({"path": rel, "action": sm.ACTION_CURRENT, "reason": reason, "writes": False})
+        try:
+            existing = _read_text(dest) or ""
+        except ValueError as exc:
+            files.append({"path": rel, "action": sm.ACTION_CURRENT, "reason": f"left as it is: {exc}", "writes": False})
+            continue
+        missing = sc.gitignore_lines_missing(existing, sc.gitignore())
+        if not missing:
+            files.append(
+                {"path": rel, "action": sm.ACTION_CURRENT, "reason": "holds every template line", "writes": False}
+            )
             continue
         head = existing if existing.endswith("\n") or not existing else existing + "\n"
         merged = f"{head}\n# Added by aipass init update {date.today().isoformat()}\n" + "".join(

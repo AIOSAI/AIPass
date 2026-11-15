@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: scaffold_manifest.py
 # Description: Scaffold manifest + the conffile rule that decides what an update may overwrite
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-09
-# Modified: 2026-10-27
+# Modified: 2026-11-15
 # =============================================
 
 """Scaffold manifest: which AIPass version wrote which file, and its hash. Conffile rule (dpkg's):
@@ -62,11 +62,10 @@ def write_text_lf(path: Path, content: str) -> None:
 
 
 def hash_file(path: Path) -> str | None:
-    """Hash a file's bytes, or None when it is absent or unreadable."""
+    """Hash a file's bytes, or None when it is absent; an unreadable file raises (absent would plan its overwrite)."""
     try:
         return hashlib.sha256(path.read_bytes()).hexdigest()
-    except (OSError, ValueError) as exc:
-        logger.info("[scaffold] unreadable, treating as absent: %s (%s)", path, exc)
+    except FileNotFoundError:
         return None
 
 

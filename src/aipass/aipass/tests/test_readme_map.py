@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_readme_map.py
 # Description: Tests for readme_map handler
-# Version: 1.3.2
+# Version: 1.4.0
 # Created: 2026-05-12
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/readme_map.py and the handlers it drives."""
@@ -140,6 +140,17 @@ class TestListBranches:
         _root_at(monkeypatch, tmp_path)
 
         assert list_branches() == ["drone", "prax"]
+
+    def test_a_dot_dir_with_a_readme_is_not_a_branch(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """Shipped defect: pytest's .pytest_cache/README.md made `aipass read` list .pytest_cache as a branch."""
+        src_aipass = tmp_path / "src" / "aipass"
+        for name in ["drone", ".pytest_cache"]:
+            (src_aipass / name).mkdir(parents=True)
+            (src_aipass / name / "README.md").write_text(f"# {name}\n", encoding="utf-8")
+        _root_at(monkeypatch, tmp_path)
+
+        assert list_branches() == ["drone"]
+        assert get_readme_path(".pytest_cache") is None
 
     def test_empty_when_no_readmes(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Returns empty list when no branches have READMEs."""

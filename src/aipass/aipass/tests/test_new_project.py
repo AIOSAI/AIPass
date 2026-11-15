@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_new_project.py
 # Description: Tests for aipass new — project creation handler
-# Version: 1.5.2
+# Version: 1.6.1
 # Created: 2026-07-17
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/new_project/__init__.py and apps/modules/new_project.py."""
@@ -394,6 +394,24 @@ def test_create_project_refuses_without_git_identity_before_building(host_env, m
     enroll.assert_not_called()
 
 
+@pytest.mark.parametrize("enrolled", [None, False, True])
+def test_a_project_the_trust_registry_did_not_take_says_so_in_its_notes(host_env, monkeypatch, tmp_path, enrolled):
+    """Mutant: _enroll_project's answer ignored again -> a None/False enrolment leaves no note -> red."""
+    monkeypatch.chdir(host_env)
+    home = tmp_path / "home"
+    (home / ".aipass").mkdir(parents=True)
+    (home / ".aipass" / "project_hooks.json").write_text('{"hooks_enabled": true}\n', encoding="utf-8")
+    with (
+        patch("subprocess.run", side_effect=_mock_git_run),
+        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=str(home)),
+        patch("aipass.aipass.shared.project_home._enroll_project", return_value=enrolled),
+    ):
+        result = create_project("trustme", no_agent=True)
+
+    note = f"Not in the trust registry, so its hooks stay inactive: aipass trust {result['target']}"
+    assert (note in result["notes"]) is (enrolled is not True)
+
+
 def test_create_project_registry_before_scaffold(host_env, monkeypatch):
     """Registry file must exist before scaffold runs (order invariant).
 
@@ -738,6 +756,12 @@ def test_template_prompt_answer_reaches_the_build(host_env, monkeypatch, typed: 
     """
     create = _new_answering(host_env, monkeypatch, io.StringIO(typed), ["demo", "--no-agent"])
     create.assert_called_once_with("demo", template, True)
+
+
+def test_end_of_input_at_the_template_prompt_says_the_default_it_took(host_env, monkeypatch, capsys):
+    """Mutant: the EOFError branch only logs again (the default is taken unseen) -> red."""
+    _new_answering(host_env, monkeypatch, io.StringIO(""), ["demo", "--no-agent"])
+    assert "No answer (end of input): using the default template, empty" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(

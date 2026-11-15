@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_bootstrap.py
 # Description: Tests for init bootstrap handler (DPLAN-0164)
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-05-04
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py and the init/update flows it drives."""
@@ -27,6 +27,8 @@ from aipass.aipass.apps.handlers.init.bootstrap import (
 )
 from aipass.aipass.apps.handlers.init import bootstrap
 from aipass.aipass.apps.handlers.init.scaffold_manifest import read_ignore
+from aipass.aipass.shared import project_home
+from aipass.hooks.apps.modules import door_trust_registry
 from aipass.aipass.shared import scaffold_content as sc
 from aipass.aipass.shared.registry_discovery import registries_in
 from aipass.aipass.tests.support_bootstrap import _expected_aipass_home
@@ -687,6 +689,20 @@ def test_init_repoints_a_venv_link_left_dangling_by_a_moved_home(tmp_path, monke
     init_project(target, project_name="zeta")
 
     assert (target / ".venv").resolve() == (host / ".venv").resolve()
+
+
+def test_init_says_when_the_trust_registry_cannot_be_imported(tmp_path, monkeypatch):
+    """Mutant: init_project drops _enroll_project's None again (init said nothing) -> red."""
+    host = _host(tmp_path, {".aipass/project_hooks.json": "{}"})
+    monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
+    target = tmp_path / "proj"
+    target.mkdir()
+    monkeypatch.setattr(project_home, "is_throwaway_path", lambda path: str(path) != str(target.resolve()))
+    monkeypatch.delattr(door_trust_registry, "enroll")  # the import inside _enroll_project now raises ImportError
+
+    result = init_project(target, project_name="untrusted")
+
+    assert f"Trust registry unavailable — not enrolled. Run 'aipass trust {target}'" in " ".join(result["notes"])
 
 
 def _refuse_skills_symlink(monkeypatch) -> None:

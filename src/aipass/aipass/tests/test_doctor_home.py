@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_doctor_home.py
 # Description: Tests for doctor's home, owner-seating, preflight, citizen-count, shared-skills, shadow and smoke rows
-# Version: 1.7.0
+# Version: 1.8.1
 # Created: 2026-10-08
 # Modified: 2026-11-15
 # =============================================
 
-"""Tests for apps/modules/doctor.py and _doctor_smoke.py: home, seating, preflight, drone, skills, shadows, gitignore, smoke."""
+"""Tests for apps/modules/doctor.py and _doctor_smoke.py: home, seating, preflight, drone, skills, shadows, smoke."""
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that every module this file imports parses and imports
 
@@ -124,12 +124,17 @@ class TestCheckOwnerSeating:
 
     @pytest.fixture(autouse=True)
     def _identity_edges(self, tmp_path, monkeypatch) -> None:
-        registry = tmp_path / "AIPASS_REGISTRY.json"
+        self.home = tmp_path / "home"
+        self.home.mkdir()
+        registry = self.home / "AIPASS_REGISTRY.json"
         registry.write_text(json.dumps({"branches": [{"name": "vera"}]}), encoding="utf-8")
         mod = "aipass.aipass.apps.modules.doctor"
         monkeypatch.setattr(f"{mod}._find_registry", lambda: registry)
         monkeypatch.setattr(f"{mod}._check_global_aipass_home", lambda: [])
         monkeypatch.setattr(f"{mod}._configured_aipass_home", lambda: "")
+        monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
+        monkeypatch.delenv("AIPASS_HOME", raising=False)
+        monkeypatch.chdir(self.home)
 
     @staticmethod
     def _owner_rows():
@@ -210,12 +215,43 @@ class TestCheckOwnerSeating:
         assert len(results) == 1
         assert results[0].glyph == GLYPH_WARN
 
-    def test_empty_stdout_exit_zero(self):
+    def test_an_empty_check_output_with_exit_zero_warns_not_passes(self):
+        """Mutant: the rc-0 empty branch returns PASS "clean (no details)" again -> red."""
         mock_proc = MagicMock(returncode=0, stdout="", stderr="")
         with patch("aipass.aipass.apps.modules.doctor.subprocess.run", return_value=mock_proc):
             results = self._owner_rows()
-        assert len(results) == 1
-        assert results[0].glyph == GLYPH_PASS
+        assert [(r.label, r.glyph) for r in results] == [("owner", GLYPH_WARN)]
+        assert "printed nothing" in results[0].detail
+        assert "sync-registry --check" in results[0].remediation
+
+    def test_outside_any_project_the_check_runs_in_aipass_home(self, tmp_path, monkeypatch):
+        """Mutant: subprocess.run without cwd=root (the caller's cwd) -> red."""
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+        monkeypatch.setenv("AIPASS_HOME", str(self.home))
+        check_json = json.dumps({"clean": True, "owner": "vera", "owner_uid": "8fb38c96", "issues": []})
+        seen: list = []
+
+        def _run(cmd, **kw):
+            seen.append(kw.get("cwd"))
+            return MagicMock(returncode=0, stdout=check_json, stderr="")
+
+        with patch("aipass.aipass.apps.modules.doctor.subprocess.run", side_effect=_run):
+            results = self._owner_rows()
+        assert seen == [self.home]
+        assert [r.glyph for r in results] == [GLYPH_PASS]
+
+    def test_with_no_project_and_no_aipass_home_the_row_warns_and_names_the_fix(self, tmp_path, monkeypatch):
+        """Mutant: the no-root guard dropped, the check runs in a bare dir -> red (run is called)."""
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+        with patch("aipass.aipass.apps.modules.doctor.subprocess.run", side_effect=AssertionError("ran")):
+            results = self._owner_rows()
+        assert [(r.label, r.glyph) for r in results] == [("owner", GLYPH_WARN)]
+        assert "no AIPASS_HOME" in results[0].detail
+        assert "export AIPASS_HOME" in results[0].remediation
 
 
 class TestFixOwnerSeating:
@@ -225,8 +261,11 @@ class TestFixOwnerSeating:
     """
 
     @pytest.fixture(autouse=True)
-    def _every_other_edge(self, monkeypatch) -> None:
+    def _every_other_edge(self, tmp_path, monkeypatch) -> None:
         mod = "aipass.aipass.apps.modules.doctor"
+        (tmp_path / "AIPASS_REGISTRY.json").write_text('{"branches": []}', encoding="utf-8")
+        monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
+        monkeypatch.chdir(tmp_path)
         for name in ("_check_system", "check_identity", "_check_community", "_check_structure", "_check_scaffold"):
             monkeypatch.setattr(f"{mod}.{name}", lambda: [])
         monkeypatch.setattr(f"{mod}._check_sandbox", lambda: [])
@@ -247,8 +286,8 @@ class TestFixOwnerSeating:
         return [r for r in self.printed["Identity"] if r.label.startswith("owner")]
 
     def test_fix_success_returns_pass(self):
-        """A fix that exits 0 shows the re-check's row (here a clean, empty --check), not its own tick."""
-        mock_proc = MagicMock(returncode=0, stdout="", stderr="")
+        """A fix that exits 0 shows the re-check's row (here a clean --check), not its own tick."""
+        mock_proc = MagicMock(returncode=0, stdout='{"clean": true, "issues": []}', stderr="")
         with patch("aipass.aipass.apps.modules.doctor.subprocess.run", return_value=mock_proc):
             results = self._fix_rows()
         assert len(results) == 1
@@ -384,6 +423,37 @@ class TestDroneCitizenCount:
         row = self._run(stdout, ["aipass"])
 
         assert row.detail == "1 citizens"
+
+    def test_no_routed_names_is_a_warn_not_a_pass(self) -> None:
+        """Mutant: an empty `drone systems` read as PASS "ok" -> red."""
+        row = self._run("", ["drone"])
+
+        assert (row.glyph, row.detail) == (GLYPH_WARN, "drone systems listed no agents")
+
+    def test_a_group_that_raises_is_one_fail_row_and_the_run_goes_on(self) -> None:
+        """Mutant: the group's try removed -> the whole run raises -> red."""
+        mod = "aipass.aipass.apps.modules.doctor"
+        printed: dict = {}
+
+        def _record(groups):
+            printed.update(groups)
+            return 0, 0, 1
+
+        with (
+            patch(f"{mod}._check_system", side_effect=RuntimeError("RAM unreadable: psutil failed")),
+            patch(f"{mod}.check_identity", return_value=[]),
+            patch(f"{mod}._check_services", return_value=[]),
+            patch(f"{mod}._check_community", return_value=[]),
+            patch(f"{mod}._check_structure", return_value=[]),
+            patch(f"{mod}._check_scaffold", return_value=[]),
+            patch(f"{mod}._check_sandbox", return_value=[]),
+            patch(f"{mod}._print_doctor_groups", side_effect=_record),
+        ):
+            assert run_doctor() == 1
+        assert printed["System"] == [
+            CheckResult("system", GLYPH_FAIL, "could not run: RAM unreadable: psutil failed", "Repair what it names")
+        ]
+        assert printed["Sandbox"] == []
 
 
 class TestHomeAgreement:

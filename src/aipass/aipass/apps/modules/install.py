@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: install.py
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + doctor + report)
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2026-07-05
 # Modified: 2026-11-15
 # =============================================
@@ -580,7 +580,8 @@ def _phone_print(dry_run: bool, face_installed: bool, non_interactive: bool = Fa
 
 
 def _check_and_fix_owner(home: Path, drone_bin: str = "drone") -> None:
-    """Run sync-registry --check in `home`; if issues found, auto-heal with --fix."""
+    """Run sync-registry --check in `home`; if issues found, auto-heal with --fix. A check that cannot run is shown."""
+    fix_cmd = f"cd {home} && drone @spawn sync-registry --fix"
     try:
         check_proc = subprocess.run(
             [drone_bin, "@spawn", "sync-registry", "--check"],
@@ -602,14 +603,12 @@ def _check_and_fix_owner(home: Path, drone_bin: str = "drone") -> None:
                 success("Registry owner/identity reconciled.")
             else:
                 logger.warning("[install] sync-registry --fix exit %s", fix_proc.returncode)
+                warning(f"Owner/identity repair failed (exit {fix_proc.returncode}): run {fix_cmd}")
         else:
             success("Owner/identity OK.")
-    except FileNotFoundError:
-        logger.info("[install] drone not on PATH — skipping owner check")
-    except subprocess.TimeoutExpired:
-        logger.warning("[install] sync-registry timed out during install")
-    except Exception as exc:
-        logger.warning("[install] owner check skipped: %s", exc)
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("[install] owner check could not run: %s", exc)
+        warning(f"Owner/identity NOT checked ({exc}): run {fix_cmd}")
 
 
 def run_finish(

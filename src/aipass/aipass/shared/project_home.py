@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: project_home.py
 # Description: Shared AIPass-home detection, project-path validation, and settings content
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-07-21
-# Modified: 2026-10-27
+# Modified: 2026-11-15
 # =============================================
 
 """Project home — AIPASS_HOME detection, path validation, settings content.
@@ -29,11 +29,7 @@ def is_throwaway_path(path: str | Path) -> bool:
     tmp_roots = [tempfile.gettempdir()]
     tmp_roots.append("/tmp")
     for root in tmp_roots:
-        try:
-            r = str(Path(root).resolve())
-        except OSError:
-            logger.info("is_throwaway_path: could not resolve %s", root)
-            continue
+        r = str(Path(root).resolve())
         if resolved == r or resolved.startswith(r + os.sep):
             return True
     if "scratchpad" in resolved.lower():
@@ -42,13 +38,10 @@ def is_throwaway_path(path: str | Path) -> bool:
 
 
 def _detect_aipass_home() -> str | None:
-    """Detect the AIPass installation root from the aipass package location."""
-    try:
-        spec = importlib.util.find_spec("aipass")
-        if spec and spec.origin:
-            return str(Path(spec.origin).resolve().parent.parent.parent)
-    except Exception as exc:
-        logger.info("AIPASS_HOME detection skipped: %s", exc)
+    """Detect the AIPass installation root from the aipass package location; None when it has no file origin."""
+    spec = importlib.util.find_spec("aipass")
+    if spec and spec.origin:
+        return str(Path(spec.origin).resolve().parent.parent.parent)
     return None
 
 
@@ -161,6 +154,11 @@ def _enroll_project(target: Path) -> bool | None:
         return None
 
 
+def not_enrolled_note(target: Path) -> str:
+    """What a caller shows when _enroll_project did not return True: the project's hooks stay off."""
+    return f"Not in the trust registry, so its hooks stay inactive: aipass trust {target}"
+
+
 def is_projects_child(target: Path) -> bool:
     """True if *target* is ``<host>/projects/<name>`` — a valid nested project path.
 
@@ -179,7 +177,7 @@ def is_projects_child(target: Path) -> bool:
 def find_fenceless_projects(aipass_home: str) -> list[Path]:
     """Nested ``<aipass_home>/projects/<name>`` dirs missing the instruction-file ancestor fence.
 
-    Fenceless: ``.claude/settings.local.json`` missing, unparseable, or lacking the excludes."""
+    Fenceless: ``.claude/settings.local.json`` missing, unparseable or lacking the excludes; unreadable raises."""
     projects_dir = Path(aipass_home) / "projects"
     if not projects_dir.is_dir():
         return []
@@ -191,8 +189,8 @@ def find_fenceless_projects(aipass_home: str) -> list[Path]:
         try:
             is_project = any(f.is_file() and f.name.endswith("_REGISTRY.json") for f in child.iterdir())
         except OSError as exc:
-            logger.info("find_fenceless_projects: could not read %s: %s", child, exc)
-            continue
+            logger.warning("find_fenceless_projects: could not read %s: %s", child, exc)
+            raise RuntimeError(f"Could not read {child} to tell whether it is fenced: {exc}") from exc
         if not is_project:
             continue
         local_settings = child / ".claude" / "settings.local.json"

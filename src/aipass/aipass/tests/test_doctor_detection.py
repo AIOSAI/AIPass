@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor_detection.py
 # Description: Tests for doctor's system detection and progress helpers
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-10-08
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/system_detect/system_detector.py and apps/handlers/ui/progress.py."""
@@ -161,6 +161,16 @@ class TestDetectRam:
             result = detect_ram()
         assert result["ok"] is True
 
+    def test_an_unreadable_ram_raises_instead_of_reading_as_zero_gb(self, monkeypatch) -> None:
+        """Mutant: a try/except around psutil returning 0.0 -> red (the old 0 GB FAIL row)."""
+
+        def _boom() -> None:
+            raise OSError("meminfo unreadable")
+
+        monkeypatch.setattr(system_detector.psutil, "virtual_memory", _boom)
+        with pytest.raises(OSError, match="meminfo unreadable"):
+            detect_ram()
+
 
 class TestDetectOS:
     def test_returns_os_keys(self) -> None:
@@ -293,7 +303,7 @@ class TestDetectInstallMethod:
         [("dev", "dev"), ("clone", "clone"), ("empty_git", "unknown"), ("site", "pip")],
     )
     def test_reads_the_tree_around_the_module(self, tmp_path, monkeypatch, layout, expected) -> None:
-        """Mutant: an empty .git counted as a repo -> red at empty_git. Mutant: pyproject check dropped -> red at clone."""
+        """Mutants: an empty .git read as a repo -> red at empty_git; pyproject check dropped -> red at clone."""
         root = tmp_path / ("lib/site-packages" if layout == "site" else "proj")
         module = root / "src" / "pkg" / "system_detector.py"
         module.parent.mkdir(parents=True)

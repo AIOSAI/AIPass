@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor.py
 # Description: Tests for aipass doctor: the command, the run and the provider checks
-# Version: 1.9.1
+# Version: 1.10.0
 # Created: 2026-04-16
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/doctor.py and apps/modules/_doctor_wire.py: the run and the provider checks."""
@@ -436,6 +436,18 @@ class TestProviderManifest:
         assert len(results) == 1
         assert results[0].glyph == GLYPH_WARN
         assert "unreadable" in results[0].detail
+
+    def test_corrupt_provider_settings_fail_the_hooks_row_not_read_as_empty(self, tmp_path) -> None:
+        """Mutant: the read error falls back to {} again (every hook reads as missing) -> red."""
+        manifest = tmp_path / "provider_manifest.json"
+        manifest.write_text(json.dumps({"cli": {"claude": {"hooks": []}}}), encoding="utf-8")
+        settings = tmp_path / "settings.json"
+        settings.write_text("{not json", encoding="utf-8")
+        with patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest):
+            results = check_provider_manifest(settings_path=settings)
+        assert [(r.label, r.glyph) for r in results] == [("hooks", GLYPH_FAIL)]
+        assert "unreadable" in results[0].detail
+        assert settings.read_text(encoding="utf-8") == "{not json"
 
     def test_manifest_no_claude_section(self, tmp_path) -> None:
         """Manifest with no cli.claude → WARN."""
@@ -1489,7 +1501,7 @@ class TestDoctorFixAsks:
     def test_f_an_unattended_install_writes_nothing_and_its_row_names_why(
         self, tmp_path, monkeypatch, tty, non_interactive, why
     ) -> None:
-        """Mutant: the install door's old auto-consent -> written, red. Mutant: non_interactive ignored -> y read, red."""
+        """Mutant: the install door's auto-consent -> written, red. Mutant: non_interactive ignored -> y read, red."""
         settings, original, _folder = self._world(tmp_path, monkeypatch)
         stdin = _Stdin("y\n", tty=tty)
         with patch("sys.stdin", stdin), _home_at(tmp_path):

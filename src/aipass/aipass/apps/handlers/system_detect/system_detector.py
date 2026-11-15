@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: system_detector.py
 # Description: Pure system detection logic for aipass doctor
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-16
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -22,6 +22,8 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Callable, Dict
+
+import psutil  # type: ignore[import-untyped]
 
 from aipass.prax import logger
 from aipass.aipass.apps.handlers.json import json_handler
@@ -136,34 +138,9 @@ def detect_os() -> Dict[str, Any]:
     }
 
 
-def _read_meminfo_kb() -> int:
-    """Read MemTotal from /proc/meminfo and return value in kB, or 0 on failure."""
-    meminfo = Path("/proc/meminfo")
-    if not meminfo.exists():
-        return 0
-    try:
-        with open(meminfo, "r", encoding="utf-8") as f:
-            for line in f:
-                if line.startswith("MemTotal:"):
-                    return int(line.split()[1])
-    except Exception as exc:
-        logger.warning("[system_detector] /proc/meminfo read failed: %s", exc)
-    return 0
-
-
 def _total_ram_gb() -> float:
-    """Return total RAM in GB using psutil or /proc/meminfo fallback."""
-    try:
-        import psutil  # type: ignore[import-untyped]
-
-        return psutil.virtual_memory().total / (1024**3)
-    except ImportError as exc:
-        logger.info("[system_detector] psutil not installed, using /proc/meminfo fallback: %s", exc)
-        kb = _read_meminfo_kb()
-        return kb / (1024**2) if kb else 0.0
-    except Exception as exc:
-        logger.warning("[system_detector] psutil RAM check failed: %s", exc)
-        return 0.0
+    """Return total RAM in GB; psutil is a declared dependency, so a failure raises."""
+    return psutil.virtual_memory().total / (1024**3)
 
 
 def detect_ram() -> Dict[str, Any]:

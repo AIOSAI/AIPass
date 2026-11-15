@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.16.0
+# Version: 1.17.0
 # Created: 2026-04-16
 # Modified: 2026-11-15
 # =============================================
@@ -261,14 +261,36 @@ def _check_home_agreement(active: str, configured: str) -> List[CheckResult]:
     ]
 
 
+_NO_OWNER_ROOT = (
+    "no AIPass project here and no AIPASS_HOME",
+    "cd into an AIPass project, or export AIPASS_HOME=/path/to/aipass",
+)
+
+
+def _owner_project_root() -> Path | None:
+    """The project sync-registry reads: cwd's, else AIPASS_HOME's (env, then global settings)."""
+    home = os.environ.get("AIPASS_HOME", "") or _configured_aipass_home()
+    for start in (Path.cwd(), Path(home) if home else None):
+        if start is None:
+            continue
+        reg = _discover_registry(start_path=start)
+        if reg is not None and reg.exists():
+            return reg.parent
+    return None
+
+
 def _check_owner_seating() -> List[CheckResult]:
     """Check owner/identity health via the frozen sync-registry --check contract."""
+    root = _owner_project_root()
+    if root is None:
+        return [CheckResult("owner", GLYPH_WARN, *_NO_OWNER_ROOT)]
     try:
         proc = subprocess.run(
             ["drone", "@spawn", "sync-registry", "--check", "--json"],
             capture_output=True,
             text=True,
             timeout=30,
+            cwd=root,
         )
     except FileNotFoundError:
         logger.info("[doctor] drone not on PATH — skipping owner seating check")
@@ -278,10 +300,15 @@ def _check_owner_seating() -> List[CheckResult]:
         return [CheckResult("owner", GLYPH_WARN, "check timed out", "")]
 
     stdout = proc.stdout.strip()
-    if not stdout:
-        if proc.returncode == 0:
-            return [CheckResult("owner", GLYPH_PASS, "clean (no details)", "")]
-        return [CheckResult("owner", GLYPH_WARN, "no output from check", "")]
+    if not stdout:  # an exit code alone is no verdict: the check printed nothing
+        return [
+            CheckResult(
+                "owner",
+                GLYPH_WARN,
+                f"sync-registry --check printed nothing (exit {proc.returncode})",
+                f"Run 'drone @spawn sync-registry --check --json' in {root}",
+            )
+        ]
 
     try:
         data = json.loads(stdout)
@@ -313,12 +340,16 @@ def _check_owner_seating() -> List[CheckResult]:
 
 def _fix_owner_seating() -> List[CheckResult]:
     """Delegate owner/identity repair to spawn's sync-registry --fix."""
+    root = _owner_project_root()
+    if root is None:
+        return [CheckResult("owner fix", GLYPH_WARN, *_NO_OWNER_ROOT)]
     try:
         proc = subprocess.run(
             ["drone", "@spawn", "sync-registry", "--fix"],
             capture_output=True,
             text=True,
             timeout=60,
+            cwd=root,
         )
     except FileNotFoundError:
         logger.info("[doctor] drone not on PATH — skipping owner fix")
@@ -468,13 +499,18 @@ def check_provider_manifest(
         return results
 
     manifest_hooks = claude_section.get("hooks", [])
-    provider: dict = {}
+    provider: object = {}
+    unreadable = "Repair its JSON by hand; doctor judges nothing against it until then"
     if settings_path.exists():
         try:
             provider = json.loads(settings_path.read_text(encoding="utf-8"))
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             logger.warning("[doctor] provider settings read error: %s", exc)
-    provider = provider if isinstance(provider, dict) else {}
+            return [
+                CheckResult("hooks", GLYPH_FAIL, f"provider settings unreadable: {settings_path}: {exc}", unreadable)
+            ]
+    if not isinstance(provider, dict):
+        return [CheckResult("hooks", GLYPH_FAIL, f"provider settings not a JSON object: {settings_path}", unreadable)]
     provider_hooks: dict = provider.get("hooks", {})
 
     missing_hooks = []
@@ -645,7 +681,8 @@ def _check_drone_systems() -> List[CheckResult]:
 
     routed = _drone_system_names(proc.stdout)
     if not routed:
-        return [CheckResult("drone", GLYPH_PASS, "ok", "")]
+        logger.warning("[doctor] drone systems listed no agents: %r", proc.stdout[:200])
+        return [CheckResult("drone", GLYPH_WARN, "drone systems listed no agents", "Run 'drone systems' to see why")]
 
     registered = _registry_citizen_names()
     # Only drone-side extras matter here. A citizen the registry lists but drone
@@ -1172,7 +1209,12 @@ def _compute_doctor_groups(
     with make_doctor_progress() as progress:
         for name, runner in group_specs:
             task_id = progress.add_task(f"checking {name}...", total=None)
-            groups[name] = runner()
+            try:
+                groups[name] = runner()
+            except (OSError, ValueError, RuntimeError) as exc:
+                # A corrupt or unreadable input raises in the handlers; the group shows it, the run goes on.
+                logger.error("[doctor] %s checks could not run: %s", name, exc)
+                groups[name] = [CheckResult(name.lower(), GLYPH_FAIL, f"could not run: {exc}", "Repair what it names")]
             progress.remove_task(task_id)
 
     if fix:

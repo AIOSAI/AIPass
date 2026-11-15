@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_bootstrap_update.py
 # Description: Tests for update_project: the plan, stamp-only, the retrofit, seeds and cleanup
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-10-08
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py: update_project and the plans it reads."""
@@ -702,6 +702,74 @@ def test_update_refuses_when_the_ignore_file_is_there_but_unreadable(tmp_path):
         update_project(target)
 
     assert type(refused.value.__cause__) is type(platform_error)
+    assert _files_and_bytes(target) == before
+
+
+@pytest.mark.parametrize(
+    ("rel", "content"),
+    [
+        (".claude/settings.json", "not json{"),
+        (".claude/settings.json", "[]"),
+        (".claude/settings.local.json", "not json{"),
+        (".aipass/hooks.json", "not json{"),
+    ],
+)
+def test_update_refuses_a_corrupt_merge_file_and_writes_nothing(tmp_path, monkeypatch, rel, content):
+    """Mutant: a merge file's parse error read as {} again (a rebuild over the owner's file) -> red."""
+    host, target = _make_nested_project(tmp_path)
+    (host / ".aipass").mkdir()
+    (host / ".aipass" / "project_hooks.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda home: home != str(host))
+    monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
+    (target / rel).parent.mkdir(parents=True, exist_ok=True)
+    (target / rel).write_text(content, encoding="utf-8")
+    before = _files_and_bytes(target)
+
+    with pytest.raises(ValueError, match=rf"{Path(rel).name} is unusable .*re-run 'aipass init update'"):
+        update_project(target)
+
+    assert _files_and_bytes(target) == before
+
+
+def test_update_refuses_a_non_utf8_settings_json_instead_of_recreating_it(tmp_path):
+    """Mutant: _read_text reads an undecodable file as absent again (the plan says create, apply overwrites) -> red."""
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="bytes")
+    (target / ".claude" / "settings.json").write_bytes(b"\xff\xfe{")
+    before = _files_and_bytes(target)
+
+    with pytest.raises(ValueError, match=r"settings\.json is unusable"):
+        update_project(target)
+
+    assert _files_and_bytes(target) == before
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads any file")
+def test_an_unreadable_managed_file_stops_the_plan_instead_of_planning_its_create(tmp_path):
+    """Mutant: hash_file reads an unreadable file as absent again (the plan says 'create' over it) -> red."""
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="locked")
+    agents = target / "AGENTS.md"
+    agents.chmod(0o000)
+    try:
+        with pytest.raises(PermissionError, match="AGENTS.md"):
+            update_project(target, apply=False)
+    finally:
+        agents.chmod(0o644)
+
+
+def test_update_refuses_a_corrupt_registry_instead_of_a_roster_of_no_citizens(tmp_path, monkeypatch):
+    """Mutant: navmap_stub reads the corrupt registry as no branches again -> red."""
+    host, target = _make_nested_project(tmp_path)
+    monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
+    (target / "MYAPP_REGISTRY.json").write_text("{broken", encoding="utf-8")
+    before = _files_and_bytes(target)
+
+    with pytest.raises(RuntimeError, match=r"MYAPP_REGISTRY\.json is unreadable"):
+        update_project(target)
+
     assert _files_and_bytes(target) == before
 
 

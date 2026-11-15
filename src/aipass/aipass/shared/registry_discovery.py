@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_discovery.py
 # Description: Shared registry file discovery (walk-up search)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-06-06
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Registry discovery — find *_REGISTRY.json by walking up the directory tree."""
@@ -18,12 +18,8 @@ _REGISTRY_GLOB = "*" + _REGISTRY_SUFFIX
 
 
 def registries_in(directory):
-    """Every ``*_REGISTRY.json`` in *directory*, sorted."""
-    try:
-        entries = list(directory.glob(_REGISTRY_GLOB))
-    except (OSError, ValueError):
-        return []
-    return sorted(entries)
+    """Every ``*_REGISTRY.json`` in *directory*, sorted; an unreadable or missing directory has none (glob's rule)."""
+    return sorted(directory.glob(_REGISTRY_GLOB))
 
 
 def _glob_registry(directory):

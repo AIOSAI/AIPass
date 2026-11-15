@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_adopt.py
 # Description: Tests for aipass adopt — project adoption handler
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-07-20
-# Modified: 2026-11-08
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/new_project/adopt.py and apps/modules/adopt.py."""
@@ -677,6 +677,19 @@ class TestContractorMode:
         assert (client_repo / ".aipass" / "hooks.json").read_text(encoding="utf-8") == '{"hooks_enabled": true}\n'
         assert result["gitignore_action"] == "untouched"
         enroll.assert_called_once_with(client_repo.resolve())
+
+    @pytest.mark.parametrize("enrolled", [None, False, True])
+    def test_an_enrolment_that_did_not_take_is_a_note(self, client_repo, tmp_path, enrolled):
+        """Mutant: _enroll_project's answer ignored -> a None/False enrolment leaves no note -> red."""
+        home = _fake_home(tmp_path)
+        with (
+            patch("aipass.aipass.apps.handlers.new_project.adopt._detect_aipass_home", return_value=str(home)),
+            patch("aipass.aipass.apps.handlers.new_project.adopt.is_throwaway_path", return_value=False),
+            patch("aipass.aipass.apps.handlers.new_project.adopt._enroll_project", return_value=enrolled),
+        ):
+            result = adopt_project(client_repo, mode="contractor", no_agent=True)
+        note = f"Not in the trust registry, so its hooks stay inactive: aipass trust {client_repo.resolve()}"
+        assert result["notes"] == ([] if enrolled else [note])
 
     def test_a_rerun_appends_no_exclude_line_twice(self, client_repo, tmp_path):
         home = _fake_home(tmp_path)

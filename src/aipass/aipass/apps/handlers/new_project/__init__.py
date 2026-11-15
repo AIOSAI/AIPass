@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: New project handler — create projects inside AIPass
-# Version: 1.6.1
+# Version: 1.6.2
 # Created: 2026-07-17
-# Modified: 2026-11-01
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -159,9 +159,11 @@ def _scaffold_aipass(target: Path, name: str) -> tuple[list[str], list[str]]:
         agents_md_seed,
         is_projects_child,
         is_throwaway_path,
+        not_enrolled_note,
     )
 
     created: list[str] = []
+    notes: list[str] = []
     aipass_home = _detect_aipass_home()
     reg = _registry_name(name)
 
@@ -183,7 +185,8 @@ def _scaffold_aipass(target: Path, name: str) -> tuple[list[str], list[str]]:
         if template.is_file():
             sm.write_text_lf(aipass_dir / "hooks.json", template.read_text(encoding="utf-8"))
             created.append(".aipass/hooks.json")
-            _enroll_project(target)
+            if _enroll_project(target) is not True:
+                notes.append(not_enrolled_note(target))
 
     if not (target / "AGENTS.md").exists():
         sm.write_text_lf(target / "AGENTS.md", agents_md_seed(reg, aipass_home))
@@ -223,7 +226,7 @@ def _scaffold_aipass(target: Path, name: str) -> tuple[list[str], list[str]]:
             link.symlink_to(venv)
             created.append(".venv")
 
-    return created, [note] if note else []
+    return created, notes + ([note] if note else [])
 
 
 def _git_init(target: Path, name: str, template: str) -> None:

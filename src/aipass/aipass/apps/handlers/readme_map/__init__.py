@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: readme_map/__init__.py
 # Description: Branch-name to README-path lookup and live README reads
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-04-16
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """readme_map — branch-name → README-path lookup for `aipass read`; the map is cached, content never."""
@@ -40,7 +40,8 @@ _README_MAP: dict[str, Path] | None = None
 def _build_readme_map() -> dict[str, Path]:
     """Build the branch → README.md path map. Called once, result cached.
 
-    No hardcoded roster: any src/aipass/<dir>/README.md counts, so a new branch is findable."""
+    No hardcoded roster: any src/aipass/<dir>/README.md counts, so a new branch is findable.
+    A dot-dir is tooling, never a branch: pytest's .pytest_cache ships a README.md."""
     global _AIPASS_ROOT
     if _AIPASS_ROOT is None:
         _AIPASS_ROOT = _detect_aipass_root()
@@ -50,7 +51,8 @@ def _build_readme_map() -> dict[str, Path]:
     if not src_aipass.is_dir():
         return result
     for readme in sorted(src_aipass.glob("*/README.md")):
-        result[readme.parent.name] = readme
+        if not readme.parent.name.startswith("."):
+            result[readme.parent.name] = readme
     return result
 
 

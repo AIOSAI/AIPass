@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_install.py
 # Description: Tests for aipass install — one-command bootstrap (DPLAN-0233)
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-07-05
 # Modified: 2026-11-15
 # =============================================
@@ -298,8 +298,6 @@ class TestInstallLock:
         assert lock.read_text(encoding="utf-8") == "garbage\n"
         assert f"(lock: {lock})" in err.call_args[0][0]
 
-    # A POSIX shell stub stands in for the home's drone.
-    @pytest.mark.skipif(sys.platform == "win32", reason="the drone stub is a POSIX shell script")
     def test_a_bootstrap_outside_the_home_fires_through_the_homes_drone_from_the_home(self, tmp_path: Path) -> None:
         """Mutant: `cwd=str(home)` dropped -> the drone runs from pytest's cwd -> red."""
         home = tmp_path / "AIPass"
@@ -1419,19 +1417,23 @@ class TestCheckAndFixOwner:
         fix_args = mock_run.call_args_list[1][0][0]
         assert "--fix" in fix_args
 
-    def test_drone_not_found_is_silent(self, tmp_path) -> None:
-        with patch(
-            "aipass.aipass.apps.modules.install.subprocess.run",
-            side_effect=FileNotFoundError("drone"),
-        ):
+    @pytest.mark.parametrize("failure", [FileNotFoundError("drone"), _sp.TimeoutExpired("drone", 30)])
+    def test_a_check_that_cannot_run_says_so_and_names_the_fix(self, tmp_path, capsys, failure) -> None:
+        """Mutant: the except only logs again (the install reads as checked) -> red."""
+        with patch("aipass.aipass.apps.modules.install.subprocess.run", side_effect=failure):
             _check_and_fix_owner(tmp_path)
+        _out, err = capsys.readouterr()
+        assert "Owner/identity NOT checked" in err
+        assert "sync-registry --fix" in err
 
-    def test_timeout_is_silent(self, tmp_path) -> None:
-        with patch(
-            "aipass.aipass.apps.modules.install.subprocess.run",
-            side_effect=_sp.TimeoutExpired("drone", 30),
-        ):
+    def test_a_failed_repair_says_so_and_names_the_fix(self, tmp_path, capsys) -> None:
+        """Mutant: the failed --fix only logs again -> red."""
+        procs = [MagicMock(returncode=1, stdout="", stderr=""), MagicMock(returncode=2, stdout="", stderr="")]
+        with patch("aipass.aipass.apps.modules.install.subprocess.run", side_effect=procs):
             _check_and_fix_owner(tmp_path)
+        _out, err = capsys.readouterr()
+        assert "repair failed (exit 2)" in err
+        assert "sync-registry --fix" in err
 
 
 # =============================================================================

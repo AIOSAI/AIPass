@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_project_home.py
 # Description: Tests for shared/project_home.py — instruction-file ancestor fence helpers
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-07-31
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for shared/project_home.py and the instruction-file ancestor-fence helpers it drives."""
@@ -209,6 +209,19 @@ def _make_nested(projects_dir: Path, name: str, registry: bool = True) -> Path:
     if registry:
         (proj / f"{name.upper()}_REGISTRY.json").write_text("{}", encoding="utf-8")
     return proj
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads any directory")
+def test_find_fenceless_projects_raises_naming_a_project_it_could_not_read(tmp_path):
+    """Mutant: the OSError arm skips the dir again (doctor read it as 'all nested projects fenced') -> red."""
+    child = tmp_path / "projects" / "locked"
+    child.mkdir(parents=True)
+    child.chmod(0o300)
+    try:
+        with pytest.raises(RuntimeError, match=str(child)):
+            find_fenceless_projects(str(tmp_path))
+    finally:
+        child.chmod(0o755)
 
 
 def test_find_fenceless_projects_no_projects_dir(tmp_path):

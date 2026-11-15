@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_sandbox_check.py
 # Description: Tests for sandbox prerequisite checker and doctor integration
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-06-10
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/sandbox_check/sandbox_checker.py and the doctor integration it drives."""
@@ -274,7 +274,8 @@ class TestCheckSrtResolvable:
         assert result["found"] is False
         assert "npm install" in result["install_hint"]
 
-    def test_srt_timeout(self, monkeypatch, tmp_path):
+    def test_a_resolver_timeout_names_itself_not_a_missing_srt(self, monkeypatch, tmp_path):
+        """Mutant: the except logs and falls through to the npm install hint -> red."""
         resolver = tmp_path / "_srt_resolve.mjs"
         resolver.touch()
         _path_with(monkeypatch, tmp_path, "node")
@@ -288,18 +289,22 @@ class TestCheckSrtResolvable:
         ):
             result = check_srt_resolvable()
         assert result["found"] is False
+        assert "did not run" in result["install_hint"]
+        assert "timed out" in result["install_hint"]
+        assert "npm install" not in result["install_hint"]
 
-    def test_srt_resolver_missing_falls_back(self, monkeypatch, tmp_path):
-        """When aipass.hooks isn't importable / resolver file is absent, fail gracefully."""
+    def test_an_unimportable_hooks_branch_names_the_reason_and_setup_sh(self, monkeypatch, tmp_path):
+        """Mutants: the reason drops the exception -> red; the pre-cure npm hint -> red."""
         _path_with(monkeypatch, tmp_path, "node")
-        monkeypatch.setattr(
-            "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker._find_srt_resolver",
-            lambda find_spec: None,
-        )
-        result = check_srt_resolvable()
+
+        def _broken(name):
+            raise ImportError("no aipass")
+
+        result = check_srt_resolvable(_broken)
         assert result["found"] is False
         assert result["path"] is None
-        assert "npm install" in result["install_hint"]
+        assert "aipass.hooks not importable (no aipass)" in result["install_hint"]
+        assert "setup.sh" in result["install_hint"]
 
 
 # =============================================================================
@@ -331,21 +336,23 @@ class TestFindSrtResolver:
         assert resolver.name == "_srt_resolve.mjs"
         assert resolver.is_file()
 
-    def test_missing_spec_returns_none(self, monkeypatch, tmp_path):
+    def test_missing_spec_names_the_missing_hooks_package(self, monkeypatch, tmp_path):
         """Mutant: `if spec is None or not spec.submodule_search_locations:` -> `if False:` reddens this test."""
         _path_with(monkeypatch, tmp_path, "node")
         with patch("aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.subprocess.run") as mock_run:
             result = check_srt_resolvable(_hooks_package_at(None))
         assert mock_run.call_count == 0
         assert result["found"] is False
+        assert result["install_hint"] == "aipass.hooks package not found: re-run setup.sh in AIPASS_HOME"
 
-    def test_missing_file_returns_none(self, monkeypatch, tmp_path):
+    def test_missing_file_names_the_missing_script(self, monkeypatch, tmp_path):
         """Mutant: `if not resolver.is_file():` -> `if False:` reddens this test."""
         _path_with(monkeypatch, tmp_path, "node")
         with patch("aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.subprocess.run") as mock_run:
             result = check_srt_resolvable(_hooks_package_at(tmp_path))
         assert mock_run.call_count == 0
         assert result["found"] is False
+        assert "srt resolver script missing" in result["install_hint"]
 
 
 # =============================================================================
@@ -353,10 +360,22 @@ class TestFindSrtResolver:
 # =============================================================================
 
 
+def _resolver_finds_no_srt(tmp_path: Path):
+    """A find_spec whose hooks package holds the resolver script; the resolver run itself is mocked."""
+    script = tmp_path / "hooks" / "apps" / "modules" / "_srt_resolve.mjs"
+    script.parent.mkdir(parents=True)
+    script.touch()
+    return _hooks_package_at(tmp_path / "hooks")
+
+
+_NO_SRT = MagicMock(returncode=1, stdout="", stderr="")
+
+
 class TestSrtInstallHint:
     def test_no_npm_falls_back_to_plain(self, monkeypatch, tmp_path):
         _path_with(monkeypatch, tmp_path, "node")
-        hint = check_srt_resolvable(_hooks_package_at(None))["install_hint"]
+        with patch("aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.subprocess.run", return_value=_NO_SRT):
+            hint = check_srt_resolvable(_resolver_finds_no_srt(tmp_path))["install_hint"]
         assert hint == "npm install -g @anthropic-ai/sandbox-runtime"
 
     def test_npm_root_success_names_prefix(self, monkeypatch, tmp_path):
@@ -365,9 +384,9 @@ class TestSrtInstallHint:
         mock_proc = MagicMock(returncode=0, stdout="/usr/local/lib/node_modules\n", stderr="")
         with patch(
             "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.subprocess.run",
-            return_value=mock_proc,
+            side_effect=[_NO_SRT, mock_proc],
         ) as mock_run:
-            hint = check_srt_resolvable(_hooks_package_at(None))["install_hint"]
+            hint = check_srt_resolvable(_resolver_finds_no_srt(tmp_path))["install_hint"]
         npm, *rest = mock_run.call_args[0][0]
         assert npm == bins["npm"]
         assert rest == ["root", "-g"]
@@ -378,9 +397,9 @@ class TestSrtInstallHint:
         _path_with(monkeypatch, tmp_path, "node", "npm")
         with patch(
             "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.subprocess.run",
-            side_effect=subprocess.TimeoutExpired(cmd="npm", timeout=5),
+            side_effect=[_NO_SRT, subprocess.TimeoutExpired(cmd="npm", timeout=5)],
         ):
-            hint = check_srt_resolvable(_hooks_package_at(None))["install_hint"]
+            hint = check_srt_resolvable(_resolver_finds_no_srt(tmp_path))["install_hint"]
         assert hint == "npm install -g @anthropic-ai/sandbox-runtime"
 
 
