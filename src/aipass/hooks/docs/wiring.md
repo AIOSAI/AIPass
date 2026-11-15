@@ -34,19 +34,17 @@ Provider settings are protected files (`modules/protected_paths.py`, enforced by
 
 | Event | Hooks | Description |
 |---|---|---|
-| UserPromptSubmit | presence_gate, persistent_alert, identity, email, branch_loader, tier0_kernel, navmap, compass_recall, feedback_pulse, context_gauge, temporal, auto_process, user_message_relay | Presence gate + alerts + prompt injection + inbox + governance recall + feedback + context gauge + temporal + auto-process + TG mirror |
+| UserPromptSubmit | presence_gate, persistent_alert, identity, email, branch_loader, tier0_kernel, navmap, compass_recall, feedback_pulse, context_gauge, temporal, auto_process | Presence gate + alerts + prompt injection + inbox + governance recall + feedback + context gauge + temporal + auto-process |
 | PreToolUse | tool_sound, edit_gate, git_gate, rm_gate, testwrite_gate, registry_gate | Security gates + guardrails + sound. `edit_gate` reads Bash too (the scripted cross-project lane — see [bash_writes.md](bash_writes.md)) |
 | PostToolUse | auto_fix, post_compact_regrounding | Diagnostics + post-compaction re-ground backstop |
 | SubagentStop | subagent_gate | Sentry validation |
-| Stop | stop_sound, telegram_response, presence_release | Bell + Telegram delivery + presence release |
+| Stop | stop_sound, presence_release | Bell + presence release |
 | Notification | announce | Announcement tone |
 | SessionStart | cadence_reset | Cadence reset on new chat / clear |
 | PreCompact | compact, rollover, pre_compact_prep, auto_process | Memory archival + rollover + mechanical snapshot stamp + inbox/task processing |
 
-That table mixes handler filenames with `hooks.json` entry names, because three of the names are not
-handler files in this branch. `user_message_relay` belongs to @skills
-(`skills/lib/telegram/apps/handlers/user_message_relay.py`) and rides the engine as a guest.
-`presence_release` is a hooks.json entry name pointing at `security/presence_gate.py:handle_stop`.
+That table mixes handler filenames with `hooks.json` entry names, because two of the names are not
+handler files in this branch. `presence_release` is a hooks.json entry name pointing at `security/presence_gate.py:handle_stop`.
 `cadence_reset` is likewise an entry name — the handler file is `lifecycle/session_start.py`.
 `feedback_pulse` is wired but `enabled: false` in this repo, so it is listed and does not fire.
 

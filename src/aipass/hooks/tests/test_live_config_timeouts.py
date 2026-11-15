@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_live_config_timeouts.py
-# Version: 1.2.0
+# Version: 1.2.1
 # Description: Pins against the live .aipass/hooks.json, .aipass/project_hooks.json and the provider manifest
 # Branch: hooks
 # Created: 2026-08-13
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for the live .aipass/ hook configs that apps/handlers/config/loader.py hands the engine."""
@@ -141,7 +141,7 @@ class TestTheTemplateRuling:
 
     def test_the_framework_only_handlers_stay_out(self):
         """Silence here is the ruling too: each of these needs an AIPass-only
-        service (@memory, the compass, the fleet seat rule, Telegram) a project lacks."""
+        service (@memory, the compass, the fleet seat rule) a project lacks."""
         entries = self._entries()
         for name in (
             "presence_gate",
@@ -149,8 +149,6 @@ class TestTheTemplateRuling:
             "auto_process",
             "comment_budget",
             "compass_recall",
-            "user_message_relay",
-            "telegram_response",
         ):
             assert name not in entries, f"{name} was ruled framework-only"
 

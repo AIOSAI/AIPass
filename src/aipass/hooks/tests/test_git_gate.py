@@ -1099,7 +1099,7 @@ class TestReadingTheSecretsStoreIsRefusedForEverySeat:
     @pytest.mark.parametrize(
         "command",
         (
-            "drone @api get-secret telegram prax_monitor",
+            "drone @api get-secret openai prax_monitor",
             "drone @api --help",
             "drone @api list ~/.secrets/aipass",
             'grep -rn ".secrets" src/aipass/backup',

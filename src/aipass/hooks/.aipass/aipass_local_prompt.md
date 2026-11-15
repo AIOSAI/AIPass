@@ -62,8 +62,8 @@ apps/
     lifecycle/             # Session + compaction
       auto_fix.py comment_budget.py auto_process.py compact.py rollover.py pre_compact_prep.py
       post_compact_regrounding.py session_start.py session_boot.py release_notice.py
-    notification/          # Sound, mail, Telegram
-      announce.py email.py stop_sound.py tool_sound.py telegram_response.py
+    notification/          # Sound, mail
+      announce.py email.py stop_sound.py tool_sound.py
     config/                # NOTE: under handlers/ -- apps/config/ is an empty package
       loader.py            #   Which config runs; never "no hooks"
       gates.py             #   FAIL_CLOSED / FAIL_OPEN, built-in gate set (code, not config)
