@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_search.py
 # Description: Tests for the search orchestration module
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/search.py."""
@@ -449,6 +449,28 @@ class TestShowSearchResults:
 
         assert result is False
         mocks["error"].assert_called_once()
+
+
+class TestFailedCollectionsAreLogged:
+    """A collection that could not be searched is shown on screen and logged."""
+
+    def test_each_failed_collection_is_logged_at_warning(self, monkeypatch):
+        search_mod, mocks = _import_search(monkeypatch)
+        said = MagicMock()
+        monkeypatch.setattr(search_mod, "logger", said)
+        mocks["execute_search"].return_value = {
+            "success": True,
+            "collections_searched": 1,
+            "total_results": 0,
+            "results": [],
+            "collections_failed": [{"collection": "flow_plans", "error": "RuntimeError: segment unreadable"}],
+        }
+
+        search_mod.show_search_results("q")
+
+        said.warning.assert_called_once()
+        line = said.warning.call_args.args[0]
+        assert "flow_plans" in line and "segment unreadable" in line
 
 
 class TestResultMetadataDisplay:

@@ -32,21 +32,6 @@
       "reason": "Subprocess IPC — print() is the output mechanism (JSON to stdout). Not debug output."
     },
     {
-      "file": "apps/handlers/vector/embed_subprocess.py",
-      "standard": "silent_catch",
-      "reason": "Self-contained subprocess — cannot import prax logger. Uses stdlib logging."
-    },
-    {
-      "file": "apps/handlers/storage/chroma_subprocess.py",
-      "standard": "error_handling",
-      "reason": "Self-contained subprocess — runs in memory venv without aipass package. Cannot import prax. Uses stdlib logging."
-    },
-    {
-      "file": "apps/handlers/storage/chroma_subprocess.py",
-      "standard": "log_visibility",
-      "reason": "Self-contained subprocess — runs in memory venv without aipass package. Cannot import prax. Uses stdlib logging.getLogger()."
-    },
-    {
       "file": "apps/handlers/storage/chroma_subprocess.py",
       "standard": "debug_print",
       "reason": "Subprocess IPC — print(json.dumps()) is the output mechanism (JSON to stdout). Not debug output."
@@ -418,13 +403,13 @@
     {
       "file": "apps/handlers/monitor/registry_scope.py",
       "standard": "logged_fallback",
-      "lines": [192],
+      "lines": [201],
       "reason": "declared_roots: an unreadable AIPASS_ROOTS.json answers [] (no external roots), logged at error. Never None: ai_mail registry/read.py 474 and drone registry_handler.py 458 loop over the answer outside their try. Not a raise: detector.py 298 (read_scope, feeding health and lint) calls it bare. No caller writes [] out as truth. Rollover's write scope (_read_registry), the push, the todo lane and the normalizer all exclude the external tier. read_scope only reports, and an external name then answers 'Unknown branch', never another branch. Leg 12 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "apps/handlers/monitor/registry_scope.py",
       "standard": "logged_fallback",
-      "lines": [66, 189],
+      "lines": [66, 198],
       "reason": "Both lines are FileNotFoundError: an absent passport declares nothing (None), and an absent declared-roots file declares no roots ([]). That is the answer for an absent file, not a failure value; the unreadable roots branch (470) is not covered here. Leg 8 of DPLAN-0354, @memory's decision; lines moved in leg 10."
     },
     {

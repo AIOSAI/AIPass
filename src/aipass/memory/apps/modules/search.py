@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: search.py
 # Description: Search Orchestration Module
-# Version: 0.6.0
+# Version: 0.7.0
 # Created: 2025-11-27
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -151,6 +151,7 @@ def show_search_results(
 
     success(f"Found {total_results} results in {collections_searched} collections")
     for failed in result.get("collections_failed", []):
+        logger.warning(f"[search] Collection {failed['collection']} could not be searched: {failed['error']}")
         warning(f"Collection {failed['collection']} could not be searched", details=failed["error"])
     console.print()
 

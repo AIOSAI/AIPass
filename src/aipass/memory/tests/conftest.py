@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for memory tests — write fence, infrastructure stand-ins, live-fleet guards
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-07
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # Category: memory/tests
 # =============================================
 
@@ -248,3 +248,17 @@ def clean_command_state() -> Generator[None, None, None]:
 def verbs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """Real config_loader + rollover module wired to a MINTED config and registry (see :func:`_real_verbs`)."""
     return _real_verbs(tmp_path, monkeypatch)
+
+
+@pytest.fixture(autouse=True)
+def _registry_refusals_start_unlogged(monkeypatch):
+    """The once-per-state refusal set is process-wide: a fresh one per test, or one test silences the next."""
+    monkeypatch.setattr(registry_scope, "_LOGGED_REFUSALS", {})
+
+
+@pytest.fixture(autouse=True)
+def _prax_stand_in_carries_append_jsonl(_mock_infrastructure, monkeypatch):
+    """A module first imported under the prax stand-in must resolve its door, and no test appends a real record."""
+    import sys
+
+    monkeypatch.setattr(sys.modules["aipass.prax"], "append_jsonl", MagicMock(), raising=False)

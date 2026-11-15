@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests/test_intake.py
 # Description: Tests for the intake/pool_processor handler
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/intake/pool_processor.py."""
@@ -17,6 +17,8 @@ import json
 from unittest.mock import MagicMock
 
 from aipass.memory.apps.handlers.intake import pool_processor
+from aipass.memory.apps.handlers.storage import lane
+from aipass.memory.apps.modules import door_subprocess_lane as door
 
 
 class TestFindSourceFile:
@@ -621,3 +623,13 @@ class TestGetPoolStatus:
         result = mod.get_pool_status()
 
         assert result["vectors_stored"] == 0
+
+
+class TestTheSubprocessLaneDoor:
+    """@ai_mail's purge reaches the lane through this door instead of carrying its own interpreter copy."""
+
+    def test_the_door_opens_the_lane_itself(self):
+        assert set(door.__all__) == {"memory_python", "run_json", "CHROMA_SUBPROCESS_SCRIPT"}
+        assert door.memory_python is lane.memory_python
+        assert door.run_json is lane.run_json
+        assert door.CHROMA_SUBPROCESS_SCRIPT is lane.CHROMA_SUBPROCESS_SCRIPT

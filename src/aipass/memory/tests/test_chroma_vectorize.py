@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_chroma_vectorize.py
 # Description: Text-in vectorize_and_store — the store owns the embedding model choice
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-08-24
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/storage/chroma_subprocess.py _vectorize_and_store."""
@@ -222,3 +222,28 @@ class TestOperationIsRouted:
         with open(source, encoding="utf-8") as fh:
             body = fh.read()
         assert 'operation == "vectorize_and_store"' in body
+
+
+class TestTheChildReportsInItsReply:
+    """The child logs nothing: every failure it sees coming is named in the JSON it returns."""
+
+    def test_the_module_imports_no_logging(self):
+        import ast
+
+        with open(chroma_subprocess.__file__, encoding="utf-8") as fh:
+            tree = ast.parse(fh.read())
+        imported = {alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
+        imported |= {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
+        assert "logging" not in imported
+
+    def test_a_reply_with_no_json_names_it_and_carries_stderr(self):
+        reason = chroma_subprocess.embedder_reason(_FakeCompleted("", 1, "Traceback: segfault in onnx"))
+
+        assert "no JSON reply on stdout" in reason
+        assert "Traceback: segfault in onnx" in reason
+
+    def test_an_empty_stderr_is_said_to_be_empty(self):
+        reason = chroma_subprocess.embedder_reason(_FakeCompleted("garbage", 1, ""))
+
+        assert "no JSON reply on stdout" in reason
+        assert reason.endswith("stderr: empty")

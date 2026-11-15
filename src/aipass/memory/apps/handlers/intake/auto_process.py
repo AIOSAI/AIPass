@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auto_process.py
 # Description: Automated pool + rollover entry point
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-06-06
-# Modified: 2026-10-27
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict
 
-from aipass.prax import logger
+from aipass.prax import append_jsonl, logger
 from aipass.memory.apps.handlers.json import json_handler, config_loader
 
 _MEMORY_ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -33,7 +33,7 @@ _MEMORY_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 # Staleness is time-based, so a crashed child frees the lane.
 _LOCK_PATH = Path(tempfile.gettempdir()) / "aipass-memory-auto-process.lock"
 _LOCK_STALE_SECONDS = 900
-_CHILD_LOG = Path(tempfile.gettempdir()) / "aipass-memory-auto-process.log"
+CHILD_OUT = _MEMORY_ROOT / "logs" / "auto_process_child.out"  # crash output only; trigger reads every *.log
 
 
 def _lock_is_stale(data: Dict[str, Any] | None) -> bool:
@@ -131,14 +131,14 @@ def spawn_background() -> Dict[str, Any]:
         return {"success": True, "skipped": True, "reason": reason, "pid": None}
 
     try:
-        log_handle = open(_CHILD_LOG, "a", encoding="utf-8")
+        out_handle = open(CHILD_OUT, "a", encoding="utf-8")
     except OSError as e:
-        logger.error(f"[auto_process] Cannot open child log: {e}")
+        logger.error(f"[auto_process] Cannot open child output: {e}")
         return {"success": False, "error": str(e), "pid": None}
 
     kwargs: Dict[str, Any] = {
         "stdin": subprocess.DEVNULL,
-        "stdout": log_handle,
+        "stdout": out_handle,
         "stderr": subprocess.STDOUT,
         "cwd": str(_MEMORY_ROOT),
         "start_new_session": True,
@@ -151,7 +151,7 @@ def spawn_background() -> Dict[str, Any]:
         json_handler.log_operation("spawn_background", {"success": False, "error": str(e)})
         return {"success": False, "error": str(e), "pid": None}
     finally:
-        log_handle.close()
+        out_handle.close()
 
     logger.info(f"[auto_process] Spawned background run (pid {child.pid})")
     json_handler.log_operation("spawn_background", {"success": True, "pid": child.pid})
@@ -339,7 +339,15 @@ def run_locked() -> Dict[str, Any]:
         _release_lock()
 
 
+RUNS_LOG = _MEMORY_ROOT / "logs" / "auto_process_runs.jsonl"
+
+
+def run_child() -> None:
+    """The detached child: its run summary is a record, so stdout stays empty for a crash."""
+    append_jsonl(RUNS_LOG, run_once())
+
+
 # This file IS the detached child.
 
 if __name__ == "__main__":
-    print(json.dumps(run_once()))
+    run_child()

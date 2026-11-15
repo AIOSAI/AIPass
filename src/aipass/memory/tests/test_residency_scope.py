@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_residency_scope.py
 # Description: Red-first pins for passport-declared residency as the fleet classifier (DPLAN-0319)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-28
 # Modified: 2026-11-15
 # =============================================
@@ -535,6 +535,82 @@ class TestMalformedJsonDeclaresNothingAndNeverRaises:
         (record,) = rs.read_registry_branches(registry, name_from="name")
         assert record["name"] == "alpha"
         assert record["email"] is None
+
+
+class TestARefusedRowIsLoggedOncePerRegistryState:
+    """@trigger's watcher dispatches every ERROR line: a stale row must not page @memory on every read."""
+
+    @staticmethod
+    def _refusals(caplog) -> int:
+        return sum("not an object" in record.getMessage() for record in caplog.records)
+
+    def test_a_bad_row_read_twice_from_an_unchanged_registry_logs_once(self, tmp_path, caplog):
+        """Mutant: the helper logs before its seen-check — killed (2 lines)."""
+        registry = tmp_path / "ROW_REGISTRY.json"
+        registry.write_text(json.dumps({"branches": ["not-a-row"]}), encoding="utf-8")
+
+        with caplog.at_level(logging.ERROR):
+            rs.read_registry_branches(registry)
+            rs.read_registry_branches(registry)
+
+        assert self._refusals(caplog) == 1
+
+    def test_an_edited_registry_logs_its_refusal_again(self, tmp_path, caplog):
+        """Mutant: the key drops the file's size and mtime — killed (1 line)."""
+        registry = tmp_path / "ROW_REGISTRY.json"
+        registry.write_text(json.dumps({"branches": ["not-a-row"]}), encoding="utf-8")
+
+        with caplog.at_level(logging.ERROR):
+            rs.read_registry_branches(registry)
+            registry.write_text(json.dumps({"branches": ["not-a-row", "still-not-a-row"]}), encoding="utf-8")
+            rs.read_registry_branches(registry)
+
+        assert self._refusals(caplog) == 2
+
+    def test_strict_on_an_unreadable_registry_raises_its_stable_message_and_logs_nothing(self, tmp_path, caplog):
+        """@trigger dispatches @spawn once keyed on str(exc): the message carries no per-read value."""
+        registry = tmp_path / "BROKEN_REGISTRY.json"
+        registry.write_text("{not json", encoding="utf-8")
+
+        messages = []
+        with caplog.at_level(logging.DEBUG):
+            for _ in range(2):
+                with pytest.raises(rs.RegistryUnreadable) as exc:
+                    rs.read_registry_branches(registry, strict=True)
+                messages.append(str(exc.value))
+
+        assert messages[0] == messages[1]
+        assert messages[0].startswith(f"Unreadable registry {registry}: ")
+        assert caplog.records == []
+
+    def test_a_non_strict_unreadable_registry_logs_once_per_state(self, tmp_path, caplog):
+        """The watcher's non-strict read: a broken file read twice logs once; mended then broken again logs again."""
+        registry = tmp_path / "BROKEN_REGISTRY.json"
+        registry.write_text("{not json", encoding="utf-8")
+
+        with caplog.at_level(logging.ERROR):
+            rs.read_registry_branches(registry)
+            rs.read_registry_branches(registry)
+            registry.write_text(json.dumps({"branches": []}), encoding="utf-8")
+            rs.read_registry_branches(registry)
+            registry.write_text("{not json at all", encoding="utf-8")
+            rs.read_registry_branches(registry)
+
+        assert sum("Unreadable registry" in r.getMessage() for r in caplog.records) == 2
+
+    def test_an_absent_registry_logs_once_until_it_returns_and_goes_again(self, tmp_path, caplog):
+        """Absent is a state of its own: no stat must not mean log on every read."""
+        registry = tmp_path / "GONE_REGISTRY.json"
+
+        with caplog.at_level(logging.ERROR):
+            rs.read_registry_branches(registry)
+            rs.read_registry_branches(registry)
+            registry.write_text(json.dumps({"branches": []}), encoding="utf-8")
+            rs.read_registry_branches(registry)
+            registry.unlink()
+            rs.read_registry_branches(registry)
+
+        assert sum("Unreadable registry" in r.getMessage() for r in caplog.records) == 2
 
 
 # REPO_ROOT resolves at import, so a registry-less tree in a dead cwd must not crash or

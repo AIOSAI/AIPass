@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lane.py
 # Description: The memory interpreter and the JSON-over-stdin subprocess lane every ML handler shares
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-23
-# Modified: 2026-10-23
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -69,17 +69,23 @@ def run_json(script: Path, payload: Dict[str, Any], timeout: int, label: str) ->
         logger.warning(f"[lane] {label} could not run: {exc}")
         return {"success": False, "error": f"{label} could not run: {exc}"}
 
-    if completed.returncode != 0:
-        reason = embedder_reason(completed)
-        return {"success": False, "error": f"{label} failed (exit {completed.returncode}): {reason}"}
-
+    failed = f"{label} failed (exit {completed.returncode})"
     try:
         reply = json.loads(completed.stdout)
     except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        if completed.returncode != 0:
+            # No reply means the child died before it could speak; its stderr is the only crash record.
+            tail = "\n".join((completed.stderr or "").strip().splitlines()[-20:])[-2000:] or "empty"
+            logger.warning(f"[lane] {failed}, died before replying; stderr tail:\n{tail}")
+            return {"success": False, "error": f"{failed}: {embedder_reason(completed)}"}
         logger.warning(f"[lane] Invalid JSON from {label}: {exc}")
         return {"success": False, "error": f"Invalid JSON response: {exc}"}
 
+    if completed.returncode != 0:
+        return {"success": False, "error": f"{failed}: {embedder_reason(completed)}"}
+
     if not isinstance(reply, dict):
+        logger.warning(f"[lane] {label} reply was not an object: {type(reply).__name__}")
         return {"success": False, "error": f"{label} reply was not an object"}
     json_handler.log_operation(
         "subprocess_lane",

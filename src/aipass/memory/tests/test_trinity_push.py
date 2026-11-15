@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trinity_push.py
 # Description: Red-first pins for the trinity push — the archive-verify-prune law above all
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-08-27
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/templates/trinity_push.py and the push lane that drives it."""
@@ -346,6 +346,33 @@ class TestNothingIsPrunedWithoutProof:
         tp.apply_plan(plan, store, [("global", None)])
 
         assert store.readback_calls, "nothing was read back — the success flag was taken on trust"
+
+
+class TestARefusedArchiveIsLogged:
+    """A refusal returned up the push is also said at WARNING where it happens."""
+
+    def _prune(self):
+        return {"file_key": "local", "container": "sessions", "number": 1, "entry": _entry(1), "reason": "drift"}
+
+    def test_a_store_refusal_logs_a_warning(self, monkeypatch):
+        said = MagicMock()
+        monkeypatch.setattr(tp, "logger", said)
+
+        result = tp.archive_prunes(FakeStore("store_refuses"), "guinea", [self._prune()], [("global", None)])
+
+        assert result["verified"] is False
+        said.warning.assert_called_once()
+        assert "embedding refused" in said.warning.call_args.args[0]
+
+    def test_a_failed_read_back_logs_a_warning(self, monkeypatch):
+        said = MagicMock()
+        monkeypatch.setattr(tp, "logger", said)
+
+        result = tp.archive_prunes(FakeStore("readback_fails"), "guinea", [self._prune()], [("global", None)])
+
+        assert result["verified"] is False
+        said.warning.assert_called_once()
+        assert "collection not found" in said.warning.call_args.args[0]
 
 
 class TestArchivedContentIsTheEntry:

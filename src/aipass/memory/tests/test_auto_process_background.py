@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: tests/test_auto_process_background.py
 # Description: Tests for auto_process background spawn, single-flight lock and run_once
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-08-14
 # Modified: 2026-11-15
 # Category: memory/tests
@@ -13,7 +13,7 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(covered_elsewhere) — run_pool_processing and auto_process() work, in tests/test_auto_process.py
-# sentry: no-test-needed(external) — what the detached child writes to _CHILD_LOG; that is the child's own run
+# sentry: no-test-needed(external) — what the detached child's crash output holds in CHILD_OUT; that is the child's own run
 
 import json
 import os
@@ -30,9 +30,9 @@ from aipass.memory.apps.handlers.intake import auto_process as ap
 
 @pytest.fixture(autouse=True)
 def isolated_lock(tmp_path, monkeypatch):
-    """Point the lock and the child log at tmp_path — never touch the real ones during tests."""
+    """Point the lock and the child's crash output at tmp_path — never touch the real ones during tests."""
     monkeypatch.setattr(ap, "_LOCK_PATH", tmp_path / "auto-process.lock")
-    monkeypatch.setattr(ap, "_CHILD_LOG", tmp_path / "auto-process.log")
+    monkeypatch.setattr(ap, "CHILD_OUT", tmp_path / "auto-process.out")
     yield tmp_path / "auto-process.lock"
 
 
@@ -73,7 +73,7 @@ class TestSpawnBackground:
         kwargs = popen.call_args.kwargs
         assert kwargs["stdin"] == subprocess.DEVNULL
         assert kwargs["stderr"] == subprocess.STDOUT
-        assert kwargs["stdout"].name == str(isolated_lock.parent / "auto-process.log")
+        assert kwargs["stdout"].name == str(isolated_lock.parent / "auto-process.out")
 
     def test_spawn_failure_is_reported_not_raised(self):
         """Fail to errors: the hook gets a result, never an exception."""
@@ -258,8 +258,34 @@ class TestCompletionIsAnnounced:
         assert not isolated_lock.exists(), "a failed fire must still release the lock"
 
 
+# Read at import, before the autouse fixture patches it: the path the child ships with.
+_SHIPPED_CHILD_OUT = ap.CHILD_OUT
+_MEMORY_LOGS = Path(ap.__file__).resolve().parents[3] / "logs"
+
+
 class TestScriptContract:
     """The child is executed as a script by path — it must survive that."""
+
+    def test_the_child_records_its_summary_through_append_jsonl_and_prints_nothing(self, capsys):
+        """The summary is a record in logs/auto_process_runs.jsonl; stdout is left to a crash.
+
+        Mutant: ``run_child`` prints the summary as well — killed.
+        """
+        summary = {"success": True, "pool": None, "rollover": None}
+        with patch.object(ap, "run_once", return_value=summary), patch.object(ap, "append_jsonl") as record:
+            ap.run_child()
+
+        record.assert_called_once_with(_MEMORY_LOGS / "auto_process_runs.jsonl", summary)
+        assert capsys.readouterr().out == ""
+        assert "run_child()" in Path(ap.__file__).read_text(encoding="utf-8").split('__name__ == "__main__"')[1]
+
+    def test_the_crash_output_lives_in_memorys_logs_and_is_no_log(self):
+        """trigger's watcher reads every *.log in a logs dir: a transcript must not pass for one.
+
+        Mutant: ``CHILD_OUT`` named ``auto_process_child.log`` — killed.
+        """
+        assert _SHIPPED_CHILD_OUT.parent == _MEMORY_LOGS
+        assert _SHIPPED_CHILD_OUT.suffix != ".log"
 
     def test_handler_has_a_main_block(self):
         source = Path(ap.__file__).read_text(encoding="utf-8")
