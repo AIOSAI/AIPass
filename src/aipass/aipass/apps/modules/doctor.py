@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.15.1
+# Version: 1.16.0
 # Created: 2026-04-16
 # Modified: 2026-11-15
 # =============================================
@@ -16,6 +16,8 @@ import re
 import subprocess
 from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional
+
+from rich.text import Text
 from aipass.cli.apps.modules import console, error as cli_error
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
@@ -1288,6 +1290,30 @@ def run_doctor_preflight(
     return groups, counts
 
 
+def write_preflight_rows(rows_path: Path, non_interactive: bool = False, yes: bool = False) -> None:
+    """``doctor --fix --rows-json PATH``: the install's health check, run in the home, its rows for the report.
+
+    Writes {"counts": {pass, warn, error}, "rows": every non-PASS row after the fix}; an unwritable path raises.
+    """
+    groups, (passed, warned, errored) = run_doctor_preflight(non_interactive=non_interactive, yes=yes)
+    rows = [
+        {
+            "group": group,
+            "label": row.label,
+            "severity": "warning" if row.glyph == GLYPH_WARN else "error",
+            "detail": Text.from_markup(row.detail).plain,
+            "remediation": row.remediation,
+        }
+        for group, checks in groups.items()
+        for row in checks
+        if row.glyph != GLYPH_PASS
+    ]
+    rows_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"counts": {"pass": passed, "warn": warned, "error": errored}, "rows": rows}
+    rows_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    json_handler.log_operation("doctor_preflight_rows", {"path": str(rows_path), "rows": len(rows)})
+
+
 def print_introspection() -> None:
     """Display module info and connected handlers."""
     console.print()
@@ -1310,6 +1336,10 @@ def print_help() -> None:
     console.print("  [green]aipass doctor --fix[/green]     [dim]# Settings plan + diff, ask once; owner repair[/dim]")
     console.print("  [green]aipass doctor --fix --yes[/green][dim]# The same, writing without the question[/dim]")
     console.print("  [green]aipass doctor --fix --json[/green][dim]# Remediation + settings plan as JSON[/dim]")
+    console.print(
+        "  [green]aipass doctor --fix --rows-json PATH[/green] [dim]# install's health check: rows + counts to PATH;"
+        " --non-interactive writes no settings[/dim]"
+    )
     console.print("  [green]aipass doctor --smoke[/green]   [dim]# + one live model turn per installed provider[/dim]")
     console.print("  [green]aipass doctor --smoke --json[/green] [dim]# hooks' smoke results as JSON[/dim]")
     console.print(
@@ -1342,6 +1372,14 @@ def handle_command(command: str, args: list[str]) -> bool:
     yes_mode = "--yes" in args
     smoke_mode = "--smoke" in args
     model = args[args.index("--model") + 1] if "--model" in args[:-1] else ""
+    rows_json = args[args.index("--rows-json") + 1] if "--rows-json" in args[:-1] else ""
+
+    if rows_json:
+        if not fix_mode:
+            cli_error("--rows-json reports the install's health check: run it with --fix")
+            raise SystemExit(2)
+        write_preflight_rows(Path(rows_json), non_interactive="--non-interactive" in args, yes=yes_mode)
+        return True
 
     if smoke_mode and fix_mode:
         cli_error("--smoke spends model turns and never runs with --fix: run them apart")

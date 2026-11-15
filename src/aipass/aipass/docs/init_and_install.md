@@ -32,6 +32,16 @@ with its fix step.
 | `install --baud-tag TAG` | The baud release to install, default latest |
 | `install --dry-run` | Walk the steps, no side effects, no install lock |
 
+The Health check runs the home's own doctor, `<home>/.venv/bin/aipass doctor
+--fix --rows-json <home>/.aipass/install_doctor_rows.json`, with the home as its
+directory and `AIPASS_HOME` set to it: an install started elsewhere, or from a
+wheel, still judges the home it installed. A doctor that does not run or does
+not write its rows is one error row naming `aipass doctor --fix` in the home. A
+doctor error fails the install: the final screen says
+`AIPass installed at <home>, but the health check found N error(s)`, the report
+records `"outcome": "doctor_errors"` (`step_failed` wins when a step failed),
+and the install exits 1.
+
 The Health check is the one place the install may change the machine beyond
 its own tree: the provider settings (hooks, env, permissions for Claude Code,
 Codex and OpenCode). On a terminal the plan and its diff print and you are
@@ -49,8 +59,8 @@ The install then ends on its final screen and launches nothing:
 - The report, overwritten each install, at
   `<home>/src/aipass/devpulse/dropbox/install_report.json`: `kind`
   (`aipass_install_report`), `version`, `written_at`, `home`, `aipass_version`,
-  `user_name` (from `AIPASS_REGISTRY.json`), `outcome` (`installed` or
-  `step_failed`), `failed_steps` (`[]`, or `["phone face"]`), the doctor's
+  `user_name` (from `AIPASS_REGISTRY.json`), `outcome` (`installed`,
+  `step_failed` or `doctor_errors`), `failed_steps` (`[]`, or `["phone face"]`), the doctor's
   `pass`/`warn`/`error` counts, and the `attention` rows.
 - One command that opens devpulse in its directory on that report:
   `cd <home>/src/aipass/devpulse && claude "Read dropbox/install_report.json: ..."`.

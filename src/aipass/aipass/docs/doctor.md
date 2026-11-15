@@ -137,7 +137,9 @@ step, its wire receipt naming the door `install`: it asks on a terminal, `aipass
 writes without the question, and with no terminal or under `--non-interactive` without `--yes` it writes nothing and its row says
 `not applied: no tty` or `not applied: --non-interactive`, each naming
 `aipass doctor --fix --yes`. Each receipt records the door and the consent,
-`y (tty)` or `--yes`. Code: [`apps/handlers/provider_wire.py`](../apps/handlers/provider_wire.py),
+`y (tty)` or `--yes`. The install runs it as `aipass doctor --fix --rows-json PATH`
+in the home: the same run, then every non-pass row and the counts written to PATH
+as JSON for the install report; `--non-interactive` there writes no settings. Code: [`apps/handlers/provider_wire.py`](../apps/handlers/provider_wire.py),
 [`apps/handlers/provider_reconcile.py`](../apps/handlers/provider_reconcile.py)
 and [`apps/modules/_doctor_wire.py`](../apps/modules/_doctor_wire.py).
 

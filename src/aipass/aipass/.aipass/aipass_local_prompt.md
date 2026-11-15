@@ -116,6 +116,7 @@ aipass/
  - Bare `init` prints usage; `init run` is refused; `init <dir>` takes no flags. Unknown commands error, nothing falls back. `doctor --json` alone gives the normal report; JSON comes from `doctor --fix --json`.
  - The install asks once before the provider settings write; `--yes` consents up front (also `AIPASS_YES=1` to setup.sh); no tty or `--non-interactive` without `--yes` writes nothing, a warning naming `aipass doctor --fix --yes`.
  - A requested phone face (no `--no-baud`) that does not install fails the install: exit 1, report `outcome` `step_failed`, `failed_steps` `["phone face"]`.
+ - The install's health check runs `<home>/.venv/bin/aipass doctor --fix --rows-json` in the home, never in-process; a doctor error is exit 1, outcome `doctor_errors`.
  - Run the suite from this branch or the repo root; from `src/aipass` four subprocess tests fail on import shadowing.
  - `python apps/aipass.py` fails on package imports; use the installed `aipass`.
  - `init update` can replace files: a decision, not a repair. The plan goes to a human first, stamp-only plans excepted.

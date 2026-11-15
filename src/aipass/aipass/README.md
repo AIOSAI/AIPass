@@ -34,7 +34,9 @@ that wakes devpulse on the report, and launches nothing. `aipass install --finis
 is that last step alone, the doctor and the report; `setup.sh` ends with it.
 A phone face that was asked for (no `--no-baud`) and did not install fails the
 install: the final screen says a requested step failed, the report records
-`"outcome": "step_failed"` and `"failed_steps": ["phone face"]`, and the exit is 1.
+`"outcome": "step_failed"` and `"failed_steps": ["phone face"]`, and the exit is 1. The health check runs the
+home's own doctor in the home; a doctor error also ends on an error line, the
+outcome `doctor_errors` and exit 1.
 With a phone face installed, the install starts the phone server itself when
 nothing else will, and on a terminal waits for Enter and shows a pairing QR.
 `--source PATH|URL` clones AIPass from a local checkout's committed HEAD or

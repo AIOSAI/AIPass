@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_install.py
 # Description: Tests for aipass install — one-command bootstrap (DPLAN-0233)
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-07-05
 # Modified: 2026-11-15
 # =============================================
@@ -88,6 +88,36 @@ def doctor_stays_stubbed(monkeypatch):
             calls.append({"non_interactive": non_interactive, "yes": yes}) or ({}, (0, 0, 0))
         ),
     )
+    return calls
+
+
+_REAL_RUN = _sp.run
+
+
+def _the_homes_aipass(argv, **_kw) -> _sp.CompletedProcess:
+    """The home's `aipass doctor ...` answered in this process: doctor's own handle_command reads the argv."""
+    try:
+        doctor.handle_command("doctor", argv[1:])
+    except SystemExit as exc:
+        return _sp.CompletedProcess(argv, int(exc.code or 0))
+    return _sp.CompletedProcess(argv, 0)
+
+
+@pytest.fixture(autouse=True)
+def homes_doctor(monkeypatch) -> list:
+    """Step 5 runs `<home>/.venv/bin/aipass doctor`; that one process is answered in-process, the rest run.
+
+    Returns each doctor call as (argv, kwargs).
+    """
+    calls: list = []
+
+    def run(argv, **kw):
+        if Path(argv[0]).parts[-3:] == (".venv", "bin", "aipass"):
+            calls.append((argv, kw))
+            return _the_homes_aipass(argv, **kw)
+        return _REAL_RUN(argv, **kw)
+
+    monkeypatch.setattr(_sp, "run", run)
     return calls
 
 
@@ -572,7 +602,7 @@ class TestRunSetup:
         assert "--force-symlink" in argv
 
     def test_symlink_flags_absent_by_default(self, tmp_path: Path) -> None:
-        """No symlink flags forwarded unless requested (#660), and nothing exported. Mutant: env always a dict -> red."""
+        """No symlink flags forwarded unless requested (#660), nothing exported. Mutant: env always a dict -> red."""
         (tmp_path / "setup.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
         with patch(f"{_MOD}.subprocess.run", return_value=MagicMock(returncode=0)) as run:
             assert _run_setup(tmp_path, dry_run=False) is True
@@ -834,6 +864,7 @@ class TestHandleCommand:
             patch(f"{_MOD}.subprocess.run", return_value=MagicMock(returncode=0)) as run,
             patch(f"{_MOD}._verify_binaries", return_value={"drone": "/x/drone", "aipass": "/x/aipass"}),
             patch(f"{_MOD}._check_and_fix_owner"),
+            patch(f"{_MOD}._health_check", return_value=([], {"pass": 0, "warn": 0, "error": 0})),
             patch(_BUS),
         ):
             with pytest.raises(SystemExit) as exc:
@@ -902,7 +933,7 @@ _ROWS = {
 }
 
 
-def _finish(home: Path, monkeypatch, capsys, rows=None, counts=(1, 1, 1)) -> "tuple[int, str, str]":
+def _finish(home: Path, monkeypatch, capsys, rows=None, counts=(1, 1, 0)) -> "tuple[int, str, str]":
     """`aipass install --finish --non-interactive` on `home` with the doctor answering `rows`."""
     monkeypatch.setattr(
         doctor, "run_doctor_preflight", lambda non_interactive=False, yes=False: (rows or _ROWS, counts)
@@ -935,13 +966,20 @@ def _doctor_world(tmp_path: Path, monkeypatch) -> Path:
 
 
 def _full_install(home: Path, monkeypatch, *flags: str) -> "tuple[int, list]":
-    """`aipass install --path home --non-interactive *flags` on an AIPass tree; every subprocess recorded, none run."""
+    """`aipass install --path home --non-interactive *flags` on an AIPass tree; every subprocess recorded.
+
+    None runs: the home's doctor is answered in-process (homes_doctor), every other call exits 0.
+    """
     home.mkdir(exist_ok=True)
     _aipass_tree(home)
     ran: list = []
-    monkeypatch.setattr(
-        _sp, "run", lambda argv, **kw: ran.append((argv, kw.get("env"))) or _sp.CompletedProcess(argv, 0, "", "")
-    )
+    homes = _sp.run
+
+    def run(argv, **kw):
+        ran.append((argv, kw.get("env")))
+        return homes(argv, **kw) if argv[1:2] == ["doctor"] else _sp.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(_sp, "run", run)
     monkeypatch.setattr(sys, "argv", ["aipass", "install"])
     with patch(f"{_MOD}.is_throwaway_path", return_value=False), patch(_BUS), pytest.raises(SystemExit) as exc:
         handle_command("install", ["--path", str(home), "--non-interactive", *flags])
@@ -954,7 +992,11 @@ class TestInstallReport:
     def test_the_report_lands_in_the_dropbox_with_the_contract_shape_and_every_attention_row(
         self, tmp_path: Path, monkeypatch, capsys
     ) -> None:
-        """Mutants: markup kept in detail; severity inverted; setup.sh's lines dropped -> each red."""
+        """The rows arrive through the home doctor's rows file.
+
+        Mutants: markup kept in detail; severity inverted; setup.sh's lines dropped; the file's rows or counts
+        not returned by the health check -> each red.
+        """
         home = tmp_path / "AIPass"
         home.mkdir()
         (home / "AIPASS_REGISTRY.json").write_text('{"metadata": {"user": "someone"}}', encoding="utf-8")
@@ -975,7 +1017,7 @@ class TestInstallReport:
         assert (report["kind"], report["version"], report["outcome"]) == ("aipass_install_report", 1, "installed")
         assert report["failed_steps"] == []
         assert (report["home"], report["user_name"]) == (str(home), "someone")
-        assert report["doctor"] == {"pass": 1, "warn": 1, "error": 1}
+        assert report["doctor"] == {"pass": 1, "warn": 1, "error": 0}
         assert datetime.fromisoformat(report["written_at"]).utcoffset() == timedelta(0)
         setup = {"group": "Setup", "label": "setup.sh", "severity": "warning", "remediation": ""}
         assert report["attention"] == [
@@ -1025,30 +1067,30 @@ class TestInstallReport:
         assert lines.count(wake) == 1
         assert lines.index(f"Report: {install_report_path(home)}") < lines.index(wake)
 
-    def test_a_clean_doctor_says_nothing_needs_attention(self, tmp_path: Path, monkeypatch, capsys) -> None:
-        """Mutant: the empty-attention line dropped -> red."""
+    def test_a_clean_doctor_is_installed_exit_0_with_the_success_line_and_nothing_needs_attention(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        """Mutants: the empty-attention line dropped; the error test reads "pass" not "error" -> each red."""
         home = tmp_path / "AIPass"
         home.mkdir()
-        rc, out, _err = _finish(home, monkeypatch, capsys, rows={"System": _ROWS["System"]}, counts=(1, 0, 0))
+        rc, out, err = _finish(home, monkeypatch, capsys, rows={"System": _ROWS["System"]}, counts=(1, 0, 0))
 
+        report = json.loads(install_report_path(home).read_text(encoding="utf-8"))
         assert rc == 0
+        assert f"AIPass installed at {home}" in " ".join(out.split())
+        assert f"{home}, but" not in " ".join(err.split())
         assert "Nothing needs attention." in out.splitlines()
-        assert json.loads(install_report_path(home).read_text(encoding="utf-8"))["attention"] == []
+        assert (report["outcome"], report["attention"]) == ("installed", [])
 
     def test_a_full_install_launches_nothing(self, tmp_path: Path, monkeypatch, capsys) -> None:
         """Mutant: a `claude` subprocess run after the report -> red."""
         home = tmp_path / "AIPass"
-        home.mkdir()
-        _aipass_tree(home)
-        ran: list = []
-        monkeypatch.setattr(_sp, "run", lambda argv, **_kw: ran.append(argv) or _sp.CompletedProcess(argv, 0, "", ""))
-        monkeypatch.setattr(sys, "argv", ["aipass", "install"])
-        with patch(f"{_MOD}.is_throwaway_path", return_value=False), patch(_BUS), pytest.raises(SystemExit) as exc:
-            handle_command("install", ["--path", str(home), "--non-interactive", "--no-baud"])
+        rc, ran = _full_install(home, monkeypatch, "--no-baud")
 
-        assert exc.value.code == 0
-        assert ["bash", str(home / "setup.sh"), "--no-finish"] in ran
-        assert [argv for argv in ran if "claude" in " ".join(map(str, argv))] == []
+        argvs = [argv for argv, _env in ran]
+        assert rc == 0
+        assert ["bash", str(home / "setup.sh"), "--no-finish"] in argvs
+        assert [argv for argv in argvs if "claude" in " ".join(map(str, argv))] == []
         assert install_report_path(home).is_file()
 
     def test_a_non_interactive_install_writes_no_settings_and_shows_the_warn_row(
@@ -1108,7 +1150,7 @@ class TestInstallReport:
     def test_a_requested_phone_face_that_misses_exits_1_and_the_report_names_it_first(
         self, tmp_path: Path, monkeypatch, capsys
     ) -> None:
-        """Mutants: `failed` always []; the success line kept; outcome "installed"; exit 0; phone row last -> each red."""
+        """Mutants: `failed` always []; the success line kept; "installed"; exit 0; phone row last -> each red."""
         monkeypatch.setattr(doctor, "run_doctor_preflight", lambda non_interactive=False, yes=False: (_ROWS, (1, 1, 1)))
         home = tmp_path / "AIPass"
         rc, _ran = _full_install(home, monkeypatch)
@@ -1153,6 +1195,88 @@ class TestInstallReport:
         assert not install_report_path(home).exists()
         assert "[dry-run] would run: aipass doctor --fix" in out
         assert f"[dry-run] would write the install report: {install_report_path(home)}" in out
+
+
+class TestHealthCheck:
+    """Step 5 runs the home's own `aipass doctor --fix` in the home, never the bootstrap's doctor in-process."""
+
+    def test_the_homes_doctor_runs_in_the_home_with_its_argv_env_and_no_terminal_under_non_interactive(
+        self, tmp_path: Path, monkeypatch, capsys, homes_doctor
+    ) -> None:
+        """Mutants: cwd dropped; no AIPASS_HOME; os.environ dropped; stdin always None; --yes dropped -> each red."""
+        home = tmp_path / "AIPass"
+        home.mkdir()
+        monkeypatch.setenv("AIPASS_PROBE", "kept")
+        with pytest.raises(SystemExit):
+            handle_command("install", ["--finish", "--path", str(home), "--non-interactive", "--yes"])
+
+        ((argv, kw),) = homes_doctor
+        rows_file = home / ".aipass" / "install_doctor_rows.json"
+        assert argv == [
+            str(home / ".venv" / "bin" / "aipass"), "doctor", "--fix", "--rows-json", str(rows_file), "--yes",
+            "--non-interactive",
+        ]  # fmt: skip
+        assert kw["cwd"] == str(home)
+        assert (kw["env"]["AIPASS_HOME"], kw["env"]["AIPASS_PROBE"]) == (str(home), "kept")
+        assert kw["stdin"] is _sp.DEVNULL
+        assert kw["timeout"] == 600
+
+    def test_an_interactive_install_hands_the_doctor_the_users_terminal_and_no_flags(
+        self, tmp_path: Path, homes_doctor
+    ) -> None:
+        """Mutants: stdin always DEVNULL; --non-interactive always passed -> each red."""
+        home = tmp_path / "AIPass"
+        home.mkdir()
+        run_finish(path=str(home))
+
+        ((argv, kw),) = homes_doctor
+        assert argv[2:] == ["--fix", "--rows-json", str(home / ".aipass" / "install_doctor_rows.json")]
+        assert kw["stdin"] is None
+
+    def _did_not_run(self, home: Path, detail: str) -> dict:
+        crash = {"group": "Doctor", "label": "doctor", "severity": "error", "detail": detail}
+        return {**crash, "remediation": f"cd {shlex.quote(str(home))} && aipass doctor --fix"}
+
+    def test_a_doctor_that_exits_non_zero_is_one_error_row_and_fails_the_install(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        """Mutant: the returncode check dropped -> the missing rows file is the detail, not the exit -> red."""
+        home = tmp_path / "my home"
+        home.mkdir()
+        monkeypatch.setattr(_sp, "run", lambda argv, **_kw: _sp.CompletedProcess(argv, 3))
+        rc = run_finish(non_interactive=True, path=str(home))
+
+        report = json.loads(install_report_path(home).read_text(encoding="utf-8"))
+        assert rc == 1
+        assert report["attention"] == [self._did_not_run(home, "did not run: exit 3")]
+        assert report["doctor"] == {"pass": 0, "warn": 0, "error": 1}
+        assert "Health check did not run" in capsys.readouterr().err
+
+    def test_a_home_with_no_aipass_binary_is_the_same_row_not_a_raise(self, tmp_path: Path, monkeypatch) -> None:
+        """The real subprocess.run on a missing binary. Mutant: OSError dropped from the except -> it raises -> red."""
+        home = tmp_path / "AIPass"
+        home.mkdir()
+        monkeypatch.setattr(_sp, "run", _REAL_RUN)
+        rc = run_finish(non_interactive=True, path=str(home))
+
+        (row,) = json.loads(install_report_path(home).read_text(encoding="utf-8"))["attention"]
+        assert rc == 1
+        assert row == self._did_not_run(home, row["detail"])
+        assert row["detail"].startswith("did not run: [Errno")
+
+    def test_a_doctor_error_is_the_closing_error_line_outcome_doctor_errors_and_exit_1(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        """Mutants: the counts' error clause dropped; outcome "installed" on errors; exit 0 on errors -> each red."""
+        home = tmp_path / "AIPass"
+        home.mkdir()
+        rc, out, err = _finish(home, monkeypatch, capsys, counts=(1, 1, 1))
+
+        report = json.loads(install_report_path(home).read_text(encoding="utf-8"))
+        assert rc == 1
+        assert f"AIPass installed at {home}, but the health check found 1 error(s)" in " ".join(err.split())
+        assert "✅ AIPass installed" not in out + err
+        assert (report["outcome"], report["failed_steps"]) == ("doctor_errors", [])
 
 
 class TestSmoke:

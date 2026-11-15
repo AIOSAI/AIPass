@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: install.py
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + doctor + report)
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-07-05
 # Modified: 2026-11-15
 # =============================================
@@ -24,8 +24,6 @@ from pathlib import Path
 from typing import Callable, Dict
 from urllib.parse import urlsplit, urlunsplit
 
-from rich.text import Text
-
 from aipass.cli.apps.modules import console, error, success, warning
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
@@ -33,7 +31,7 @@ from aipass.prax import logger
 from aipass.aipass.apps.handlers.baud import LATEST, FetchError, validate_tag
 from aipass.aipass.apps.handlers.init.bootstrap import is_throwaway_path
 from aipass.aipass.apps.handlers.json import json_handler
-from aipass.aipass.apps.handlers.ui.progress import GLYPH_PASS, GLYPH_WARN, render_step_header
+from aipass.aipass.apps.handlers.ui.progress import render_step_header
 
 COMMAND = "install"
 TOTAL_STEPS = 5
@@ -44,6 +42,7 @@ DEFAULT_HOME = Path.home() / "AIPass"
 # Clone can be slow on a cold network; setup.sh compiles a venv + installs deps.
 _CLONE_TIMEOUT = 600
 _SETUP_TIMEOUT = 1800
+_DOCTOR_TIMEOUT = 600
 # Exported to setup.sh under --non-interactive, for it to read before its own [ -t 0 ].
 NON_INTERACTIVE_ENV = "AIPASS_NON_INTERACTIVE"
 # Exported under --yes: consent to setup.sh's machine changes, given up front.
@@ -423,33 +422,39 @@ def _setup_attention(home: Path) -> list[dict]:
     ]
 
 
-def _health_check(dry_run: bool, non_interactive: bool, yes: bool = False) -> tuple[list[dict], dict]:
-    """Run 'aipass doctor --fix'. Returns (attention rows, doctor counts), every non-PASS row after the fix."""
-    if dry_run:
-        console.print(f"[yellow]\\[dry-run][/yellow] would run: aipass doctor --fix{' --yes' if yes else ''}")
-        return [], {"pass": 0, "warn": 0, "error": 0}
-    from aipass.aipass.apps.modules.doctor import run_doctor_preflight
+def _health_check(home: Path, dry_run: bool, non_interactive: bool, yes: bool = False) -> tuple[list[dict], dict]:
+    """Run the home's own 'aipass doctor --fix' in the home. Returns (attention rows, doctor counts).
 
+    In-process, a bootstrap from a wheel would judge its own cwd, environment and code, not the home.
+    """
+    flags = [*(["--yes"] if yes else []), *(["--non-interactive"] if non_interactive else [])]
+    if dry_run:
+        console.print(f"[yellow]\\[dry-run][/yellow] would run: aipass doctor --fix {' '.join(flags)}".rstrip())
+        return [], {"pass": 0, "warn": 0, "error": 0}
+    aipass_bin = home / ".venv" / "bin" / "aipass"
+    rows_file = home / ".aipass" / "install_doctor_rows.json"
+    cmd = [str(aipass_bin), "doctor", "--fix", "--rows-json", str(rows_file), *flags]
     try:
-        groups, (passed, warned, errored) = run_doctor_preflight(non_interactive=non_interactive, yes=yes)
-    except Exception as exc:
-        logger.error("[install] doctor --fix crashed: %s", exc)
-        error(f"Health check crashed: {exc}. Run 'aipass doctor --fix' yourself.")
-        crash = {"group": "Doctor", "label": "doctor", "severity": "error", "detail": f"crashed: {exc}"}
-        return [{**crash, "remediation": "aipass doctor --fix"}], {"pass": 0, "warn": 0, "error": 1}
-    rows = [
-        {
-            "group": group,
-            "label": row.label,
-            "severity": "warning" if row.glyph == GLYPH_WARN else "error",
-            "detail": Text.from_markup(row.detail).plain,
-            "remediation": row.remediation,
+        proc = subprocess.run(
+            cmd,
+            cwd=str(home),
+            env={**os.environ, "AIPASS_HOME": str(home)},
+            stdin=subprocess.DEVNULL if non_interactive else None,
+            timeout=_DOCTOR_TIMEOUT,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(f"exit {proc.returncode}")
+        data = json.loads(rows_file.read_text(encoding="utf-8"))
+        return data["rows"], data["counts"]
+    except (OSError, subprocess.TimeoutExpired, RuntimeError, ValueError, KeyError, TypeError) as exc:
+        logger.error("[install] the home's doctor did not report (%s): %s", aipass_bin, exc)
+        error(f"Health check did not run: {aipass_bin} doctor: {exc}. Run 'aipass doctor --fix' in {home}.")
+        crash = {"group": "Doctor", "label": "doctor", "severity": "error", "detail": f"did not run: {exc}"}
+        return [{**crash, "remediation": f"cd {shlex.quote(str(home))} && aipass doctor --fix"}], {
+            "pass": 0,
+            "warn": 0,
+            "error": 1,
         }
-        for group, checks in groups.items()
-        for row in checks
-        if row.glyph != GLYPH_PASS
-    ]
-    return rows, {"pass": passed, "warn": warned, "error": errored}
 
 
 def install_report_path(home: Path) -> Path:
@@ -475,15 +480,19 @@ def _final_screen(
 ) -> int:
     """Installed line, what needs attention, the report, the wake command. Returns the exit code.
 
-    *failed* names the requested steps that did not land: the exit is 1 once the report is written.
+    *failed* names the requested steps that did not land; they and any doctor error make the exit 1,
+    once the report is written.
     """
     report_path = install_report_path(home)
     if dry_run:
         console.print(f"[yellow]\\[dry-run][/yellow] would write the install report: {report_path}")
         return 0
     console.print()
-    if failed:
-        error(f"AIPass installed at {home}, but a requested step failed: {', '.join(failed)}")
+    faults = [f"a requested step failed: {', '.join(failed)}"] if failed else []
+    if counts.get("error", 0):
+        faults.append(f"the health check found {counts['error']} error(s)")
+    if faults:
+        error(f"AIPass installed at {home}, but {'; '.join(faults)}")
     else:
         success(f"AIPass installed at {home}")
     console.print()
@@ -503,7 +512,7 @@ def _final_screen(
         "home": str(home),
         "aipass_version": _aipass_version(),
         "user_name": _registry_user_name(home),
-        "outcome": "step_failed" if failed else "installed",
+        "outcome": "step_failed" if failed else "doctor_errors" if counts.get("error", 0) else "installed",
         "failed_steps": failed or [],
         "doctor": counts,
         "attention": attention,
@@ -522,7 +531,7 @@ def _final_screen(
     console.print()
     for line in _CLOSING_NOTE:
         console.print(f"[dim]{line}[/dim]")
-    return 1 if failed else 0
+    return 1 if faults else 0
 
 
 def _finish(
@@ -539,7 +548,7 @@ def _finish(
     """
     console.print()
     console.print(render_step_header(5, TOTAL_STEPS, "Health check"))
-    attention, counts = _health_check(dry_run, non_interactive, yes)
+    attention, counts = _health_check(home, dry_run, non_interactive, yes)
     if last_print is not None:
         last_print()
     failed = failed or []

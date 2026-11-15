@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_doctor_home.py
 # Description: Tests for doctor's home, owner-seating, preflight, citizen-count, shared-skills, shadow and smoke rows
-# Version: 1.6.3
+# Version: 1.7.0
 # Created: 2026-10-08
 # Modified: 2026-11-15
 # =============================================
@@ -981,3 +981,54 @@ class TestDoctorSmoke:
         _out, err = capsys.readouterr()
         assert "never runs with --fix" in err
         assert self.calls == [] and self.printed == {}
+
+
+class TestDoctorRowsJson:
+    """aipass doctor --fix --rows-json PATH: the install's health check, its non-PASS rows and counts as JSON."""
+
+    MOD = "aipass.aipass.apps.modules.doctor"
+
+    def test_the_rows_file_holds_the_counts_and_each_non_pass_row_plain(self, tmp_path, monkeypatch) -> None:
+        """Mutants: PASS rows kept; severity inverted; markup kept in detail -> each red."""
+        groups = {
+            "System": [CheckResult("python", GLYPH_PASS, "3.12", "")],
+            "Services": [
+                CheckResult("wire verify", GLYPH_FAIL, "[red]2 orphan entries[/red]", "drone @hooks verify"),
+                CheckResult("hooks", GLYPH_WARN, "2 hook(s) missing", "aipass doctor --fix"),
+            ],
+        }
+        monkeypatch.setattr(f"{self.MOD}.run_doctor_preflight", lambda **_kw: (groups, (1, 1, 1)))
+        rows_file = tmp_path / "home" / ".aipass" / "install_doctor_rows.json"
+
+        assert handle_command("doctor", ["--fix", "--rows-json", str(rows_file)]) is True
+
+        assert json.loads(rows_file.read_text(encoding="utf-8")) == {
+            "counts": {"pass": 1, "warn": 1, "error": 1},
+            "rows": [
+                {"group": "Services", "label": "wire verify", "severity": "error", "detail": "2 orphan entries",
+                 "remediation": "drone @hooks verify"},
+                {"group": "Services", "label": "hooks", "severity": "warning", "detail": "2 hook(s) missing",
+                 "remediation": "aipass doctor --fix"},
+            ],
+        }  # fmt: skip
+
+    def test_rows_json_without_fix_is_refused_with_2_and_writes_nothing(self, tmp_path, capsys) -> None:
+        """Mutant: the --fix guard dropped -> the doctor runs and writes the file -> red."""
+        rows_file = tmp_path / "rows.json"
+        with patch(f"{self.MOD}.run_doctor_preflight") as preflight, pytest.raises(SystemExit) as exc:
+            handle_command("doctor", ["--rows-json", str(rows_file)])
+
+        assert exc.value.code == 2
+        preflight.assert_not_called()
+        assert not rows_file.exists()
+        assert "run it with --fix" in capsys.readouterr().err
+
+    def test_the_install_flags_reach_the_rows_writer(self, tmp_path, monkeypatch) -> None:
+        """Mutants: --non-interactive not read; --yes not read -> each red."""
+        calls: list = []
+        monkeypatch.setattr(f"{self.MOD}.write_preflight_rows", lambda *a, **kw: calls.append((a, kw)))
+        rows_file = tmp_path / "rows.json"
+
+        handle_command("doctor", ["--fix", "--rows-json", str(rows_file), "--non-interactive", "--yes"])
+
+        assert calls == [((rows_file,), {"non_interactive": True, "yes": True})]
