@@ -102,8 +102,8 @@ deliberate: `/assets` mounts one bundle, and a `phone.html` re-resolved per requ
 name assets that mount lacks.
 
 **Why the feed cursor is a timestamp:** `notifications.jsonl` is trimmed 400→200 lines
-and the trim replaces the file, so a line or byte offset goes stale under any reader —
-the 10-hour Telegram outage's shape. The cursor clamps at both ends and re-delivers the
+and the trim replaces the file, so a line or byte offset goes stale under any reader:
+the reader holding one misses lines or re-reads them. The cursor clamps at both ends and re-delivers the
 boundary event: a duplicate alert is a nuisance, a dropped one defeats the app.
 
 **Names, not paths:** `/v1/files` has no path parameter. The client names a branch; the
@@ -198,7 +198,7 @@ with nothing after it watches every branch — the desktop's default pane — an
 session to take over. The fence is mirrored from their `pty.rs` character for character
 and still refuses the empty string; whether a target was *named at all* is a different
 question, asked once before the fence is consulted. A target starting with `-` is refused besides:
-past the fence it would reach drone as a flag, and `--relay` starts the Telegram relay. @prax also documents `run all` for the
+past the fence it would reach drone as a flag, not a branch. @prax also documents `run all` for the
 same thing; this lane deliberately does not use it — the desktop's argv is what is mirrored.
 
 **The bearer rides `Sec-WebSocket-Protocol`, never the query string.** A browser cannot set

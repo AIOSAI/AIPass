@@ -3,7 +3,7 @@
 # Description: API Key Management Module
 # Version: 1.2.0
 # Created: 2025-11-15
-# Modified: 2026-10-31
+# Modified: 2026-11-15
 # =============================================
 
 """API Key Management Module"""
@@ -224,7 +224,7 @@ def _show_secret(provider: str, parts: List[str], has_json: bool, has_list: bool
         return
 
     if len(parts) != 2 or not parts[1]:
-        error("Expected format: <provider>/<slug>  (e.g. telegram/bot)")
+        error("Expected format: <provider>/<slug>  (e.g. openrouter/api_key)")
         return
 
     slug = parts[1]
@@ -274,10 +274,10 @@ def print_help():
     console.print("  [cyan]drone @api get-key openrouter[/cyan]")
     console.print()
     console.print("  [dim]# Check if a secret exists (masked summary, no raw value)[/dim]")
-    console.print("  [cyan]drone @api get-secret telegram/bot[/cyan]")
+    console.print("  [cyan]drone @api get-secret openrouter/api_key[/cyan]")
     console.print()
     console.print("  [dim]# List secrets for a provider[/dim]")
-    console.print("  [cyan]drone @api get-secret telegram --list[/cyan]")
+    console.print("  [cyan]drone @api get-secret openrouter --list[/cyan]")
     console.print()
     console.print("  [dim]# Programmatic access (in-process, no stdout):[/dim]")
     console.print("  [dim]from aipass.api.apps.modules.secrets import get_secret[/dim]")

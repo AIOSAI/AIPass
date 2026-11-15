@@ -3,7 +3,7 @@
 # Description: Host API Attach Handler — a real PTY running a tmux client, for the phone
 # Version: 1.0.3
 # Created: 2026-08-14
-# Modified: 2026-11-03
+# Modified: 2026-11-15
 # =============================================
 
 """Host API Attach Handler
@@ -120,7 +120,7 @@ def valid_monitor_target(target: str) -> bool:
 
 
 def _option_shaped(target: str) -> bool:
-    """A leading '-' reaches drone as a flag, not a branch: `--relay` would start the Telegram relay."""
+    """A leading '-' reaches drone as a flag, not a branch: every flag is refused, whatever it would do."""
     return target.startswith("-")
 
 

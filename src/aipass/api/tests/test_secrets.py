@@ -3,7 +3,7 @@
 # Description: Tests for the keyring-backed secrets handler, its module door, migrate and get_secret_cmd
 # Version: 2.0.2
 # Created: 2026-06-15
-# Modified: 2026-11-06
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/auth/secrets.py, apps/modules/secrets.py, and api_key.get_secret_cmd."""
@@ -56,12 +56,12 @@ PATCH_MOD_HANDLER = "aipass.api.apps.modules.secrets._handler"
 PATCH_MOD_JSON_HANDLER = "aipass.api.apps.modules.secrets.json_handler"
 
 SERVICE = "aipass"
-TG_DOC = {"bot_token": "tg-fixture-token", "chat_id": 42}
+DOC = {"api_key": "doc-fixture-token", "account_id": 42}
 RAW_VALUE = "raw-fixture-value"
 ENV_KEY = "sk-or-v1-" + "0" * 40
 CLIENT_DOC = {"installed": {"client_id": "cid-fixture", "client_secret": "cs-fixture"}}
 CREDS_DOC = {"token": "gtok-fixture", "refresh_token": "gref-fixture"}
-FIXTURE_VALUES = ("tg-fixture-token", RAW_VALUE, ENV_KEY, "cs-fixture", "gtok-fixture", "gref-fixture")
+FIXTURE_VALUES = ("doc-fixture-token", RAW_VALUE, ENV_KEY, "cs-fixture", "gtok-fixture", "gref-fixture")
 
 
 @pytest.fixture
@@ -125,17 +125,17 @@ class TestTheKeyringHoldsTheValues:
     def test_a_string_round_trips_through_one_entry_named_provider_slug(
         self, store: Path, keyring_store: Any, quiet: dict
     ) -> None:
-        assert set_secret("telegram", "bot", "round-trip-token") == "telegram/bot"
+        assert set_secret("example", "bot", "round-trip-token") == "example/bot"
 
-        assert keyring_store.entries[(SERVICE, "telegram/bot")] == "round-trip-token"
-        assert get_secret("telegram", "bot") == "round-trip-token"
+        assert keyring_store.entries[(SERVICE, "example/bot")] == "round-trip-token"
+        assert get_secret("example", "bot") == "round-trip-token"
         assert list(store.iterdir()) == []
 
     def test_a_json_document_round_trips_and_rests_as_json(self, keyring_store: Any, quiet: dict) -> None:
-        set_secret("telegram", "bot", TG_DOC, as_json=True)
+        set_secret("example", "bot", DOC, as_json=True)
 
-        assert json.loads(keyring_store.entries[(SERVICE, "telegram/bot")]) == TG_DOC
-        assert get_secret("telegram", "bot", as_json=True) == TG_DOC
+        assert json.loads(keyring_store.entries[(SERVICE, "example/bot")]) == DOC
+        assert get_secret("example", "bot", as_json=True) == DOC
 
     def test_a_json_entry_read_as_a_string_gives_its_token_key(self, quiet: dict) -> None:
         set_secret("discord", "creds", {"token": "second", "api_key": "first"}, as_json=True)
@@ -148,26 +148,26 @@ class TestTheKeyringHoldsTheValues:
         assert get_secret("custom", "config") == json.dumps({"username": "admin"})
 
     def test_a_missing_entry_is_none_and_the_warning_names_no_slug(self, quiet: dict) -> None:
-        assert get_secret("telegram", "missing_slug") is None
+        assert get_secret("example", "missing_slug") is None
 
         message, *values = quiet["logger"].warning.call_args.args
         assert "missing_slug" not in message % tuple(values)
 
     def test_nothing_is_read_from_a_file_left_in_the_store(self, store: Path, quiet: dict) -> None:
-        (store / "telegram").mkdir()
-        (store / "telegram" / "bot.json").write_text(json.dumps(TG_DOC), encoding="utf-8")
-        (store / "telegram" / "raw").write_text(RAW_VALUE, encoding="utf-8")
+        (store / "example").mkdir()
+        (store / "example" / "bot.json").write_text(json.dumps(DOC), encoding="utf-8")
+        (store / "example" / "raw").write_text(RAW_VALUE, encoding="utf-8")
 
-        assert get_secret("telegram", "bot") is None
-        assert get_secret("telegram", "raw") is None
+        assert get_secret("example", "bot") is None
+        assert get_secret("example", "raw") is None
 
     def test_list_secrets_works_with_no_file_on_disk(self, store: Path, quiet: dict) -> None:
-        set_secret("telegram", "webhook", "w")
-        set_secret("telegram", "bot", TG_DOC, as_json=True)
-        set_secret("telegram", "bot", TG_DOC, as_json=True)
+        set_secret("example", "webhook", "w")
+        set_secret("example", "bot", DOC, as_json=True)
+        set_secret("example", "bot", DOC, as_json=True)
         set_secret("discord", "creds", "d")
 
-        assert list_secrets("telegram") == ["bot", "webhook"]
+        assert list_secrets("example") == ["bot", "webhook"]
         assert list(store.iterdir()) == []
 
     def test_list_secrets_for_an_unknown_provider_is_empty(self, quiet: dict) -> None:
@@ -189,14 +189,14 @@ class TestTheKeyringHoldsTheValues:
 class TestABackendThatCannotHoldASecretRaises:
     def test_get_raises_naming_the_backend(self, store: Path, quiet: dict, make: Any, named: str) -> None:
         with patch("keyring.core._keyring_backend", make()), pytest.raises(SecretsUnavailable) as raised:
-            get_secret("telegram", "bot")
+            get_secret("example", "bot")
 
         assert named in str(raised.value)
         assert str(store) not in str(raised.value)
 
     def test_set_raises_and_the_value_is_not_in_the_error(self, quiet: dict, make: Any, named: str) -> None:
         with patch("keyring.core._keyring_backend", make()), pytest.raises(SecretsUnavailable) as raised:
-            set_secret("telegram", "bot", RAW_VALUE)
+            set_secret("example", "bot", RAW_VALUE)
 
         assert named in str(raised.value)
         assert RAW_VALUE not in str(raised.value)
@@ -204,19 +204,19 @@ class TestABackendThatCannotHoldASecretRaises:
 
     def test_list_raises_never_an_empty_list(self, quiet: dict, make: Any, named: str) -> None:
         with patch("keyring.core._keyring_backend", make()), pytest.raises(SecretsUnavailable) as raised:
-            list_secrets("telegram")
+            list_secrets("example")
 
         assert named in str(raised.value)
 
 
 class TestTheOperationsLog:
     def test_get_and_set_rows_carry_provider_and_slug_only(self, quiet: dict) -> None:
-        set_secret("telegram", "bot", RAW_VALUE)
-        get_secret("telegram", "bot")
+        set_secret("example", "bot", RAW_VALUE)
+        get_secret("example", "bot")
 
         rows = [call.args for call in quiet["json"].log_operation.call_args_list]
         assert [name for name, _ in rows] == ["secret_written", "secret_retrieved"]
-        assert all(data == {"provider": "telegram", "slug": "bot"} for _, data in rows)
+        assert all(data == {"provider": "example", "slug": "bot"} for _, data in rows)
 
 
 class TestSecretsModule:
@@ -229,35 +229,35 @@ class TestSecretsModule:
         mock_jh = MagicMock()
 
         with patch(PATCH_MOD_HANDLER, mock_handler), patch(PATCH_MOD_JSON_HANDLER, mock_jh):
-            result = secrets_module.get_secret("telegram", "bot")
+            result = secrets_module.get_secret("example", "bot")
 
         assert result == "token123"
-        mock_handler.get_secret.assert_called_once_with("telegram", "bot", as_json=False)
+        mock_handler.get_secret.assert_called_once_with("example", "bot", as_json=False)
         mock_jh.log_operation.assert_called_once()
 
     def test_get_secret_as_json(self) -> None:
         """Module get_secret passes as_json through to handler."""
         mock_handler = MagicMock()
-        data = {"bot_token": "abc"}
+        data = {"api_key": "abc"}
         mock_handler.get_secret.return_value = data
         mock_jh = MagicMock()
 
         with patch(PATCH_MOD_HANDLER, mock_handler), patch(PATCH_MOD_JSON_HANDLER, mock_jh):
-            result = secrets_module.get_secret("telegram", "bot", as_json=True)
+            result = secrets_module.get_secret("example", "bot", as_json=True)
 
         assert result == data
-        mock_handler.get_secret.assert_called_once_with("telegram", "bot", as_json=True)
+        mock_handler.get_secret.assert_called_once_with("example", "bot", as_json=True)
 
     def test_set_secret_returns_the_entry_name_and_logs_that_it_wrote(self, quiet: dict) -> None:
         mock_jh = MagicMock()
 
         with patch(PATCH_MOD_JSON_HANDLER, mock_jh):
-            written = secrets_module.set_secret("telegram", "bot", "my-token-value")
+            written = secrets_module.set_secret("example", "bot", "my-token-value")
 
-        assert written == "telegram/bot"
+        assert written == "example/bot"
         operation, data = mock_jh.log_operation.call_args[0]
         assert operation == "secrets_set"
-        assert data == {"provider": "telegram", "slug": "bot", "wrote": True}
+        assert data == {"provider": "example", "slug": "bot", "wrote": True}
 
     def test_get_secret_not_found_logs(self) -> None:
         """Module get_secret logs even when handler returns None."""
@@ -266,7 +266,7 @@ class TestSecretsModule:
         mock_jh = MagicMock()
 
         with patch(PATCH_MOD_HANDLER, mock_handler), patch(PATCH_MOD_JSON_HANDLER, mock_jh):
-            result = secrets_module.get_secret("telegram", "missing")
+            result = secrets_module.get_secret("example", "missing")
 
         assert result is None
         log_call = mock_jh.log_operation.call_args
@@ -278,10 +278,10 @@ class TestSecretsModule:
         mock_handler.list_secrets.return_value = ["bot", "webhook"]
 
         with patch(PATCH_MOD_HANDLER, mock_handler):
-            result = secrets_module.list_secrets("telegram")
+            result = secrets_module.list_secrets("example")
 
         assert result == ["bot", "webhook"]
-        mock_handler.list_secrets.assert_called_once_with("telegram")
+        mock_handler.list_secrets.assert_called_once_with("example")
 
 
 class TestGetSecretCmd:
@@ -294,11 +294,11 @@ class TestGetSecretCmd:
         """Default (no flags) prints masked summary, never the raw value."""
         mock_secrets.get_secret.return_value = "my-secret-token-value"
 
-        get_secret_cmd(["telegram/bot"])
+        get_secret_cmd(["example/bot"])
 
-        mock_secrets.get_secret.assert_called_once_with("telegram", "bot", as_json=False)
+        mock_secrets.get_secret.assert_called_once_with("example", "bot", as_json=False)
         msg = mock_success.call_args[0][0]
-        assert "telegram/bot" in msg
+        assert "example/bot" in msg
         assert "set" in msg
         assert "chars" in msg
         assert "my-secret-token-value" not in msg
@@ -310,7 +310,7 @@ class TestGetSecretCmd:
         mock_secrets.get_secret.return_value = "secret-token-here"
         out_file = tmp_path / "token.txt"
 
-        get_secret_cmd(["telegram/bot", "--out", str(out_file)])
+        get_secret_cmd(["example/bot", "--out", str(out_file)])
 
         mock_error.assert_called_once_with("Unknown option: --out", suggestion=GET_SECRET_USAGE)
         mock_secrets.get_secret.assert_not_called()
@@ -327,7 +327,7 @@ class TestGetSecretCmd:
         mock_secrets.SecretsUnavailable = SecretsUnavailable
         mock_secrets.get_secret.side_effect = SecretsUnavailable("The keyring backend X is locked")
 
-        get_secret_cmd(["telegram/bot"])
+        get_secret_cmd(["example/bot"])
 
         mock_error.assert_called_once_with("The keyring backend X is locked")
 
@@ -338,9 +338,9 @@ class TestGetSecretCmd:
         """--list prints slug names via console.print."""
         mock_secrets.list_secrets.return_value = ["bot", "webhook"]
 
-        get_secret_cmd(["telegram", "--list"])
+        get_secret_cmd(["example", "--list"])
 
-        mock_secrets.list_secrets.assert_called_once_with("telegram")
+        mock_secrets.list_secrets.assert_called_once_with("example")
         calls = [c for c in mock_console.print.call_args_list if c[0][0] in ("bot", "webhook")]
         assert len(calls) == 2
 
@@ -356,9 +356,9 @@ class TestGetSecretCmd:
     @patch(PATCH_CMD_ERROR)
     def test_provider_only_without_list_calls_error(self, mock_error, mock_jh) -> None:
         """Single provider name without --list flag calls error() with format message."""
-        get_secret_cmd(["telegram"])
+        get_secret_cmd(["example"])
 
-        mock_error.assert_called_once_with("Expected format: <provider>/<slug>  (e.g. telegram/bot)")
+        mock_error.assert_called_once_with("Expected format: <provider>/<slug>  (e.g. openrouter/api_key)")
 
     @patch(PATCH_CMD_JSON_HANDLER)
     @patch(PATCH_CMD_ERROR)
@@ -375,9 +375,9 @@ class TestGetSecretCmd:
         """When get_secret returns None, error() is called."""
         mock_secrets.get_secret.return_value = None
 
-        get_secret_cmd(["telegram/bot"])
+        get_secret_cmd(["example/bot"])
 
-        mock_error.assert_called_once_with("Secret not found: telegram/bot")
+        mock_error.assert_called_once_with("Secret not found: example/bot")
 
     @patch(PATCH_CMD_JSON_HANDLER)
     @patch(PATCH_CMD_SECRETS)
@@ -397,14 +397,14 @@ class TestSetSecretModule:
     def test_set_secret_wraps_handler(self) -> None:
         """Module set_secret delegates to handler and logs the operation."""
         mock_handler = MagicMock()
-        mock_handler.set_secret.return_value = "telegram/bot"
+        mock_handler.set_secret.return_value = "example/bot"
         mock_jh = MagicMock()
 
         with patch(PATCH_MOD_HANDLER, mock_handler), patch(PATCH_MOD_JSON_HANDLER, mock_jh):
-            result = secrets_module.set_secret("telegram", "bot", "token-val")
+            result = secrets_module.set_secret("example", "bot", "token-val")
 
-        assert result == "telegram/bot"
-        mock_handler.set_secret.assert_called_once_with("telegram", "bot", "token-val", as_json=False)
+        assert result == "example/bot"
+        mock_handler.set_secret.assert_called_once_with("example", "bot", "token-val", as_json=False)
         mock_jh.log_operation.assert_called_once()
         assert mock_jh.log_operation.call_args[0][0] == "secrets_set"
 
@@ -412,12 +412,12 @@ class TestSetSecretModule:
         """Module set_secret passes as_json through to handler."""
         mock_handler = MagicMock()
         mock_jh = MagicMock()
-        data = {"bot_token": "abc"}
+        data = {"api_key": "abc"}
 
         with patch(PATCH_MOD_HANDLER, mock_handler), patch(PATCH_MOD_JSON_HANDLER, mock_jh):
-            secrets_module.set_secret("telegram", "bot", data, as_json=True)
+            secrets_module.set_secret("example", "bot", data, as_json=True)
 
-        mock_handler.set_secret.assert_called_once_with("telegram", "bot", data, as_json=True)
+        mock_handler.set_secret.assert_called_once_with("example", "bot", data, as_json=True)
 
 
 class TestSecretsHandleCommand:
@@ -445,10 +445,10 @@ HOST_TOKENS_DOC = {"version": 2, "tokens": []}
 
 
 def _seed_store(base: Path) -> None:
-    """A store of the three shapes, plus a Telethon session, a pairing receipt and the host's file store that stay."""
-    (base / "telegram").mkdir()
-    (base / "telegram" / "bot.json").write_text(json.dumps(TG_DOC), encoding="utf-8")
-    (base / "telegram" / "mirror.session").write_text("sqlite-fixture", encoding="utf-8")
+    """A store of the three shapes, plus a session file, a pairing receipt and the host's file store that stay."""
+    (base / "example").mkdir()
+    (base / "example" / "bot.json").write_text(json.dumps(DOC), encoding="utf-8")
+    (base / "example" / "client.session").write_text("sqlite-fixture", encoding="utf-8")
     (base / "generic").mkdir()
     (base / "generic" / "api_token").write_text(f"  {RAW_VALUE}\n", encoding="utf-8")
     (base / "host_api").mkdir()
@@ -460,7 +460,7 @@ def _seed_store(base: Path) -> None:
 
 
 MOVED = {
-    "telegram/bot": TG_DOC,
+    "example/bot": DOC,
     "generic/api_token": RAW_VALUE,
     "openrouter/api_key": ENV_KEY,
     "google/client_secret": CLIENT_DOC,
@@ -480,14 +480,14 @@ class TestSecretsMigrate:
             provider, slug = name.split("/")
             assert get_secret(provider, slug, as_json=isinstance(value, dict)) == value
         assert sorted(p.relative_to(store).as_posix() for p in store.rglob("*") if p.is_file()) == [
+            "example/client.session",
             "host_api/pixel.token",
             "host_api/tokens.json",
-            "telegram/mirror.session",
         ]
         assert json.loads((store / "host_api" / "tokens.json").read_text(encoding="utf-8")) == HOST_TOKENS_DOC
         assert get_secret("host_api", "tokens", as_json=True) is None
         out = capsys.readouterr().out
-        assert "telegram/mirror.session" in out and "host_api/pixel.token" in out
+        assert "example/client.session" in out and "host_api/pixel.token" in out
         assert not any(value in out for value in FIXTURE_VALUES)
 
     def test_each_file_is_zeroed_before_it_is_unlinked(
@@ -497,7 +497,7 @@ class TestSecretsMigrate:
         _seed_store(store)
         witnesses = tmp_path_factory.mktemp("witness")
         linked = {}
-        for index, name in enumerate(("telegram/bot.json", "generic/api_token", ".env", "google_creds.json")):
+        for index, name in enumerate(("example/bot.json", "generic/api_token", ".env", "google_creds.json")):
             witness = witnesses / str(index)
             os.link(store / name, witness)
             linked[store / name] = (witness, witness.stat().st_size)

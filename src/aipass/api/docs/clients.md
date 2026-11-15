@@ -18,10 +18,10 @@ from aipass.api.apps.modules.google_client import get_google_service
 service = get_google_service("calendar", "v3")
 
 from aipass.api.apps.modules.secrets import get_secret, set_secret, list_secrets
-token = get_secret("telegram", "bot")               # Returns bot_token string
-config = get_secret("telegram", "bot", as_json=True) # Returns full dict
-set_secret("telegram", "newbot", cfg, as_json=True)  # Writes ~/.secrets/aipass/telegram/newbot.json
-slugs = list_secrets("telegram")                     # Returns ["bot", "newbot", ...]
+key = get_secret("openrouter", "api_key")              # Returns the stored string
+creds = get_secret("google", "creds", as_json=True)    # Returns the full dict
+set_secret("google", "creds", creds, as_json=True)     # Writes keyring entry aipass / google/creds
+slugs = list_secrets("google")                         # Returns ["client_secret", "creds", ...]
 # Values never reach stdout — use the Python API above for programmatic access
 ```
 

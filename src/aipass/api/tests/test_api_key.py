@@ -3,7 +3,7 @@
 # Description: Tests for API Key Management Module
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/api_key.py, the API key management module."""
@@ -584,7 +584,7 @@ class TestTrailingHelpDoesNotExecute:
             patch("aipass.api.apps.modules.api_key.print_help") as mock_help,
             patch("aipass.api.apps.modules.api_key.get_secret_cmd") as mock_secret,
         ):
-            assert api_key.handle_command("get-secret", ["telegram/bot", "--help"]) is True
+            assert api_key.handle_command("get-secret", ["openrouter/api_key", "--help"]) is True
 
         mock_secret.assert_not_called()
         mock_help.assert_called_once()
@@ -626,10 +626,10 @@ class TestTheKeyringIsTheOnlyKeySource:
         assert "Failed to retrieve API key for openrouter" in err
 
     def test_get_secret_out_is_unknown_and_no_value_reaches_a_file(self, keyring_store, tmp_path, capsys):
-        keyring_store.set_password("aipass", "telegram/bot", FIXTURE_KEY)
+        keyring_store.set_password("aipass", "openrouter/api_key", FIXTURE_KEY)
         target = tmp_path / "token.txt"
 
-        assert api_key.handle_command("get-secret", ["telegram/bot", "--out", str(target)]) is True
+        assert api_key.handle_command("get-secret", ["openrouter/api_key", "--out", str(target)]) is True
 
         out, err = capsys.readouterr()
         assert "Unknown option: --out" in err
@@ -641,7 +641,7 @@ class TestTheKeyringIsTheOnlyKeySource:
         api_key.print_help()
 
         out, _ = capsys.readouterr()
-        assert "get-secret telegram/bot" in out
+        assert "get-secret openrouter/api_key" in out
         assert "--out" not in out
 
 

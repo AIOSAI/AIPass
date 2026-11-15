@@ -3,7 +3,7 @@
 # Description: Secrets Store Handler — values rest in the login keyring; files are only the import source
 # Version: 2.0.2
 # Created: 2026-06-15
-# Modified: 2026-11-06
+# Modified: 2026-11-15
 # =============================================
 
 """Secrets Store Handler"""
@@ -29,7 +29,7 @@ SECRETS_BASE = Path.home() / ".secrets" / "aipass"
 # The host's own file store: migrate importing it would shred the tokens every paired device presents.
 HOST_STORE_DIR = "host_api"
 
-_TOKEN_KEYS = ("bot_token", "api_key", "token", "secret", "password", "key")
+_TOKEN_KEYS = ("api_key", "token", "secret", "password", "key")
 
 _GOOGLE_FILES = {"google_client_secret.json": "client_secret", "google_creds.json": "creds"}
 _ENV_FILE = ".env"
