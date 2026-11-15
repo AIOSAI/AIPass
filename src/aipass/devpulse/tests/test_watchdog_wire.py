@@ -3,7 +3,7 @@
 # Description: Tests for the watchdog wire handler (DPLAN-0317 r4 — report, filter, deliver)
 # Version: 2.4.1
 # Created: 2026-08-19
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/watchdog/wire.py: arm_wire delivering THIS seat's dispatch completions."""

@@ -3,7 +3,7 @@
 # Description: Tests for the watchdog agent handler
 # Version: 1.8.0
 # Created: 2026-04-14
-# Modified: 2026-11-09
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/watchdog/agent.py: watch_agent, TranscriptScanner and StallTracker."""

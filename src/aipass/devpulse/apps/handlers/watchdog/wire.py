@@ -49,6 +49,7 @@ _WIRE_KIND = "baseline_wire"
 
 _REGISTRY_FILENAME = "AIPASS_REGISTRY.json"
 
+
 def _stderr(msg: str) -> None:
     """Arm-time/diagnostic channel — never a wake event."""
     sys.stderr.write(msg + "\n")

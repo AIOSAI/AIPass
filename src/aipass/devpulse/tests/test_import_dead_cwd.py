@@ -3,16 +3,20 @@
 # Description: Pins devpulse imports against a dead working directory
 # Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/__init__.py and apps/handlers/module_root.py with no readable working directory."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# sentry: no-test-needed(stdlib) — Path.resolve's own behaviour; the worlds deny it as a condition
 
 import subprocess
 import sys
 from pathlib import Path
 
 from aipass.devpulse.apps.handlers import module_root
+
 
 def _inspect_stack_calls(source: str) -> list[int]:
     """Line numbers of every inspect.stack() call in *source*, by parse: prose naming it is not a call."""

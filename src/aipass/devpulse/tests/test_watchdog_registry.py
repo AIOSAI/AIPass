@@ -3,7 +3,7 @@
 # Description: Tests for the watchdog watch registry (Phase 4, FPLAN-0186)
 # Version: 1.4.1
 # Created: 2026-04-14
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/watchdog/registry.py and the handlers that register through it."""

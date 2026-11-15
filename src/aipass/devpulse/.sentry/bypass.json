@@ -7,12 +7,6 @@
   "bypass": [
     {
       "standard": "through_the_command",
-      "file": "tests/test_watchdog_wire.py",
-      "lines": [95, 701, 702, 703, 720, 727, 759, 768, 775, 784, 794, 802, 810],
-      "reason": "Wire-identity primitives (_stdout_target, _session_dir_of, _cmdline, _looks_like_ours). Their one public caller, arm_wire, registers a live wire, installs a SIGTERM handler, and sweeps and signals other live wires by pid, so a test through it acts on real processes. Each row pins one primitive's answer for one platform, with the platform pretended on wire's own sys name and ps/lsof stubbed. 95 is the host probe that decides whether this machine can see fd/1 (fleet green, 2026-10-04)."
-    },
-    {
-      "standard": "through_the_command",
       "file": "tests/test_watchdog_agent.py",
       "lines": [704],
       "reason": "Pins a cache guarantee no public answer shows: an unchanged transcript is parsed once, then every tick reuses the verdict. The counter wraps the real _tail_lines and returns its answer, so the verdicts asserted are the product's."
@@ -32,7 +26,7 @@
     {
       "standard": "logged_fallback",
       "file": "apps/devpulse.py",
-      "lines": [116],
+      "lines": [107],
       "reason": "route_command's bool is the module's claim on the command, not its verdict. A module that raised is reported by name through error(), which marks the command failed, so resolve_exit answers 2 and a chained next step does not run; the shell can tell. A re-raise would hand drone a traceback for a module defect, and False would exit 1 as 'unknown command', which it is not (pinned in tests/test_devpulse.py test_route_command_catches_module_errors)."
     },
     {
@@ -99,6 +93,11 @@
       "standard": "json_structure",
       "file": "devpulse_json/compass",
       "reason": "compass/ is the devpulse-owned Compass decision store (SQLite/FTS5 \u2014 db + wal + shm) which needs its own directory. Legitimate data subdir, not operator-config (custom_config/) nor auto-gen root data. Sanctioned exception per #643."
+    },
+    {
+      "standard": "json_structure",
+      "file": "apps/handlers/file_lock.py",
+      "reason": "A lock primitive with no operation of its own to log; its callers (watch registry, feedback inbox) log the reads and writes it guards. Its one log_operation was the fcntl-absent (Windows) path, removed with Linux only (2026-11-14)."
     },
     {
       "standard": "cli",
