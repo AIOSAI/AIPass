@@ -3,7 +3,7 @@
 # Target env: ubuntu-latest, Python 3.13. ruff has no dependencies, and
 # --generate-hashes emits every PyPI file hash for the pinned version (all 18
 # platform wheels + sdist), so this lock stays valid if lint ever runs on
-# another OS/arch.
+# another arch.
 #
 # 0.15.21 == what the previous unpinned `pip install ruff` resolved to on
 # 2026-07-15, so pinning is a no-op for lint results today. Bumping this file

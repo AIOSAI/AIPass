@@ -18,8 +18,6 @@ build/
 .env
 .devpulse_secret.md
 
-# OS
-.DS_Store
 .vscode
 
 # AIPass runtime state (local to each installation)

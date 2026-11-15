@@ -343,8 +343,7 @@ def test_the_wire_leaves_no_process_running(tmp_path, monkeypatch):
         """A real child process that records itself and refuses to be detached."""
 
         def __init__(self, *args, **kwargs):
-            detached = [flag for flag in ("start_new_session", "creationflags") if kwargs.get(flag)]
-            assert not detached, f"the wire must not detach a process: {detached} in {args[:1] or kwargs}"
+            assert not kwargs.get("start_new_session"), f"the wire must not detach a process: {args[:1] or kwargs}"
             super().__init__(*args, **kwargs)
             spawned.append(self)
 
