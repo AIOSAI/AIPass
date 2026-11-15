@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: release_notice.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: Manager-only "AIPass release available" notice builder (DPLAN-0335 leg 2)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-09
-# Modified: 2026-10-31
+# Modified: 2026-11-15
 # =============================================
 
 """Builds the manager-only notice that a project's scaffold is behind AIPass.
@@ -27,7 +27,7 @@ MANAGER_CLASS = "manager"
 #: The same project marker edit_gate and @ai_mail's find_project_root use, identical on purpose.
 _PROJECT_MARKER = "*_REGISTRY.json"
 
-#: Written by @aipass's init run / adopt / init update; only aipass_version and stamped_at are read.
+#: Written by @aipass's init scaffold, adopt and init update; only aipass_version and stamped_at are read.
 MANIFEST_REL = Path(".aipass") / "scaffold_manifest.json"
 
 

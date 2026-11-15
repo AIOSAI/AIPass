@@ -84,9 +84,8 @@ printed by `drone @hooks testwrite`, so this list and the code cannot drift apar
 
 **New projects inherit it.** `.aipass/project_hooks.json` — the template `aipass init` stamps —
 carries the `testwrite_gate` entry, so the ruling is fleet-wide rather than AIPass-tree-wide.
-The scaffold (`aipass init <target>`) does **not** stamp a `test_write_policy.json`, so a project
-created that way lands on the fail-closed missing-policy path; the guided `aipass init` setup stamps a
-default policy (create-only, never over an existing file) in its first stage. The missing-policy
+`aipass init` does **not** stamp a `test_write_policy.json`, so a new project lands on the
+fail-closed missing-policy path. The missing-policy
 refusal names the owner's ruling and the one-file opt-in, and `TestTheProjectTemplateCarriesTheTestWriteGate` in `tests/test_live_config_timeouts.py` pins the
 template entry against silent drift. Stamping a default policy is @aipass's call, not this branch's.
 

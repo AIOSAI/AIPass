@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_auto_fix.py
-# Version: 1.4.2
+# Version: 1.5.0
 # Description: Tests for auto_fix lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
@@ -18,6 +18,7 @@
 # sentry: no-test-needed(documentation) — that auto_fix's functions carry docstrings
 # sentry: no-test-needed(stdlib) — subprocess.run's timeout mechanics; the tests stub it at the edge
 
+import contextlib
 import json
 import os
 import sys
@@ -43,7 +44,7 @@ from aipass.hooks.apps.handlers.lifecycle.auto_fix import (
     handle,
 )
 from aipass.prax.apps.modules.logger import system_logger
-from aipass.sentry.apps.modules.checklist import FINDING_MARKER
+from aipass.sentry.apps.modules.checklist import ADVICE_MARKER, FINDING_MARKER
 
 
 def _kept_redirect() -> dict[str, str]:
@@ -659,7 +660,7 @@ class TestScratchIsNotJudged:
     )
     def test_a_tree_path_that_only_resembles_scratch_is_still_judged(self, parts, tmp_path, monkeypatch):
         monkeypatch.setattr(auto_fix, "_run_python_checks", lambda path: ["LINT: mod.py:1:1: F401 unused"])
-        monkeypatch.setattr(auto_fix, "_run_sentry_checklist", lambda path, unanswered: [])
+        monkeypatch.setattr(auto_fix, "_run_sentry_checklist", lambda path, unanswered, **_: [])
         monkeypatch.setattr(auto_fix, "_run_pyright_check", lambda path, unanswered: [])
         monkeypatch.setattr(auto_fix, "_run_ruff_lint_structured", lambda path, unanswered: [])
 
@@ -668,3 +669,110 @@ class TestScratchIsNotJudged:
         context = json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"]
         assert context.startswith("[AUTO-FIX] 1 error(s) in mod.py")
         assert result.get("sound") == "auto fix diagnostics"
+
+
+class TestTheFallbackWarning:
+    """An edit that ADDS a fallback is told so in sentry's words; a site already in the file is not repeated.
+
+    The checklist's real output shape: [FAIL] rows, then behind a blank line its [ADVISORY] rows.
+    """
+
+    SOURCE = (
+        "def a():\n    pass\n\n\ndef b():\n    try:\n        return read()\n    except OSError:\n        return {}\n"
+    )
+    CHECKLIST = (
+        "mod.py\n"
+        "  [FAIL] — logged_fallback: mod.py:2 except returns None - re-raise\n"
+        "  ✓ meta\n"
+        "\n"
+        f"  {ADVICE_MARKER} — fallback: mod.py:2 default with no warning-level log - raise, or waive\n"
+        "this one site mod.py:9 unreadable file read as a default - raise, or waive this one site\n"
+        "\n"
+        "Not judged here (branch-level, run by `drone @sentry audit`): dead_code\n"
+    )
+
+    def _edit(self, tmp_path, tool_input: dict, checklist: str | None = None, **loader) -> str:
+        target = tmp_path / "mod.py"
+        target.write_text(self.SOURCE, encoding="utf-8")
+        with (
+            contextlib.ExitStack() as stack,
+            patch.object(auto_fix, "_run_python_checks", return_value=[]),
+            patch.object(auto_fix, "_run_pyright_check", return_value=[]),
+            patch.object(auto_fix, "_run_ruff_lint_structured", return_value=[]),
+            patch.dict("os.environ", {"AIPASS_HOME": str(tmp_path)}),
+            patch("subprocess.run", return_value=MagicMock(returncode=0, stdout=checklist or self.CHECKLIST)),
+        ):
+            if loader:
+                stack.enter_context(patch.object(auto_fix, "_load_checklist_module", **loader))
+            result = handle(
+                {"tool_name": tool_input.pop("tool", "Edit"), "tool_input": {"file_path": str(target), **tool_input}}
+            )
+        return json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"] if result["stdout"] else ""
+
+    def test_an_edit_adding_a_fallback_is_warned_in_sentrys_words(self, tmp_path):
+        context = self._edit(tmp_path, {"old_string": "x", "new_string": "    except OSError:\n        return {}\n"})
+        assert context.startswith("[FALLBACK] this edit adds a fallback (sentry standard fallback):")
+        assert "  - fallback: mod.py:9 unreadable file read as a default" in context
+        assert "mod.py:2" not in context
+        assert context.endswith(auto_fix.FALLBACK_WARNING)
+
+    def test_the_warning_never_blocks_and_never_demands_a_fix(self, tmp_path):
+        context = self._edit(tmp_path, {"old_string": "x", "new_string": "        return {}"})
+        assert "[AUTO-FIX]" not in context
+        assert "Do not skip or defer" not in context
+
+    def test_an_edit_elsewhere_hears_nothing_of_the_sites_already_there(self, tmp_path):
+        """The noise: every edit listed the file's old logged_fallback sites as errors to fix now."""
+        assert self._edit(tmp_path, {"old_string": "x", "new_string": "def b():"}) == ""
+
+    def test_an_edit_on_an_old_logged_fallback_site_still_shows_it(self, tmp_path):
+        context = self._edit(tmp_path, {"old_string": "x", "new_string": "    pass"})
+        assert "SENTRY: logged_fallback: mod.py:2 except returns None" in context
+        assert "  - fallback: mod.py:2 default with no warning-level log" in context
+
+    def test_a_write_is_every_line_so_every_site_shows(self, tmp_path):
+        context = self._edit(tmp_path, {"tool": "Write", "content": self.SOURCE})
+        assert "mod.py:2 default" in context
+        assert "mod.py:9 unreadable" in context
+
+    def test_a_multiedit_counts_each_edits_lines(self, tmp_path):
+        edits = [{"old_string": "x", "new_string": "def a():"}, {"old_string": "y", "new_string": "        return {}"}]
+        context = self._edit(tmp_path, {"tool": "MultiEdit", "edits": edits})
+        assert "mod.py:9 unreadable" in context
+        assert "mod.py:2" not in context
+
+    def test_a_new_string_no_longer_in_the_file_shows_every_site_never_none(self, tmp_path):
+        context = self._edit(tmp_path, {"old_string": "x", "new_string": "gone since"})
+        assert "mod.py:2 default" in context
+        assert "mod.py:9 unreadable" in context
+
+    def test_every_occurrence_of_a_replace_all_counts(self, tmp_path):
+        """SOURCE says return on lines 7 and 9: both count, line 2 does not."""
+        checklist = f"  {ADVICE_MARKER} — fallback: mod.py:2 a - raise mod.py:7 b - raise mod.py:9 c - raise\n"
+        context = self._edit(tmp_path, {"old_string": "x", "new_string": "return", "replace_all": True}, checklist)
+        assert "mod.py:7 b" in context
+        assert "mod.py:9 c" in context
+        assert "mod.py:2" not in context
+
+    def test_a_sentry_publishing_no_advisory_marker_says_no_answer_never_silence(self, tmp_path):
+        """A fallback to a restated '[ADVISORY]' would be the very thing this warns about."""
+        published = MagicMock(spec=["FINDING_MARKER"], FINDING_MARKER=FINDING_MARKER)
+        context = self._edit(tmp_path, {"old_string": "x", "new_string": "        return {}"}, return_value=published)
+        assert "NO ANSWER from sentry fallback advice (sentry publishes no ADVICE_MARKER)" in context
+        assert "[FALLBACK]" not in context
+
+    def test_a_file_unreadable_for_its_added_lines_says_no_answer(self, tmp_path):
+        """No line set to cut by: said, and the checklist's every site is shown, never none."""
+        target = tmp_path / "mod.py"
+        target.mkdir()
+        with (
+            patch.object(auto_fix, "_run_python_checks", return_value=[]),
+            patch.object(auto_fix, "_run_pyright_check", return_value=[]),
+            patch.object(auto_fix, "_run_ruff_lint_structured", return_value=[]),
+            patch.dict("os.environ", {"AIPASS_HOME": str(tmp_path)}),
+            patch("subprocess.run", return_value=MagicMock(returncode=0, stdout=self.CHECKLIST)),
+        ):
+            result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(target), "new_string": "x"}})
+        context = json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"]
+        assert "NO ANSWER from added lines (IsADirectoryError" in context
+        assert "mod.py:9 unreadable" in context

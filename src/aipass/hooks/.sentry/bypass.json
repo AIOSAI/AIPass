@@ -1003,7 +1003,7 @@
       "file": "tests/test_auto_fix.py",
       "standard": "through_the_command",
       "lines": [
-        32
+        33
       ],
       "reason": "Fleet green leg 9, ruling (c), hooks' decision: _check_syntax, _check_ruff_lint, _check_ruff_format, _check_line_pattern, _check_patterns, _run_pyright_check, _run_ruff_lint_structured, _run_sentry_checklist, _checklist_marker and _CHECKLIST_MARKER_FALLBACK. Their one public door is handle() on a .py edit, whose far side spawns py_compile, ruff (lint, format, structured), pyright and the sentry checklist as subprocesses and writes the seat's diagnostics state; no seam may bind on a spawn. Contract: each check answers its own violation lines (SYNTAX/LINT/FORMAT/PATTERN/TYPE/SENTRY), a check that cannot run answers nothing or NO ANSWER, the checklist marker is sentry's FINDING_MARKER with a loud fallback. The json path and handle()'s refusal shape are read through handle()."
     },
