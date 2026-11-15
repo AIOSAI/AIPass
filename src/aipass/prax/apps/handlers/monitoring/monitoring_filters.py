@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: monitoring_filters.py
 # Description: Monitoring Filter Patterns
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2025-11-23
-# Modified: 2026-10-28
+# Modified: 2026-11-14
 # =============================================
 
 """Monitoring Filter Patterns"""
@@ -17,7 +17,6 @@ MONITOR_IGNORE_PATTERNS = [
     "__pycache__",
     "*.pyc",
     "*.pyo",
-    "*.pyd",
     ".venv",
     "venv",
     "env",
@@ -110,9 +109,6 @@ MONITOR_IGNORE_PATTERNS = [
     "*.swp",
     "*.swo",
     "*~",
-    ".DS_Store",
-    "Thumbs.db",
-    "desktop.ini",
     "nul",
 ]
 
