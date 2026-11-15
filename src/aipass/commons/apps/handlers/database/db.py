@@ -16,15 +16,13 @@ from typing import Optional, TypeVar, Callable
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.commons.apps.handlers.json import json_handler
-from aipass.commons.apps.handlers.module_root import module_file
 from aipass.memory.apps.modules.door_registry_scope import fleet_branches
 
 
 def find_branch_root(start_path: Optional[Path] = None) -> Optional[Path]:
     """Walk up from a starting path to find the commons branch root."""
     # .aipass/ is git-tracked (.trinity/ is not): it is what resolves a fresh clone.
-    # module_file(), not .resolve(): DB_PATH calls this at import.
-    current = start_path if start_path is not None else module_file(__file__).parent
+    current = start_path if start_path is not None else Path(__file__).resolve().parent
     for _ in range(10):
         if (current / ".trinity").is_dir() or (current / ".aipass").is_dir():
             return current
@@ -85,7 +83,7 @@ def get_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     if path is None:
         raise CommonsRootNotFound(
             "Could not resolve the commons database path: walked up from "
-            f"{module_file(__file__).parent} looking for a '.trinity/' or "
+            f"{Path(__file__).resolve().parent} looking for a '.trinity/' or "
             "'.aipass/' directory and found neither. Set the AIPASS_ROOT "
             "environment variable to the repo root, or run from inside a "
             "checked-out AIPass branch."

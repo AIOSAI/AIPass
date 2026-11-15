@@ -3,9 +3,9 @@
 # Name: test_rooms.py - Room and Space Module Tests
 # Description: Tests for apps/handlers/rooms/room_ops.py and apps/modules/space.py
 # Date: 2026-03-24
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -261,6 +261,14 @@ def test_get_all_room_state_with_multiple_keys(mock_json: object, initialized_db
     assert "decor_plant" in state
     assert "decor_poster" in state
     assert state["decor_plant"] == "A fern"
+
+
+def test_set_room_state_raises_when_the_write_fails() -> None:
+    """A failed upsert raises; it is never reported as a quiet False."""
+    conn = sqlite3.connect(":memory:")
+    with pytest.raises(sqlite3.OperationalError, match="room_state"):
+        set_room_state(conn, "general", "decor_lamp", "A glowing desk lamp")
+    conn.close()
 
 
 def test_get_room_state_missing_key(initialized_db: sqlite3.Connection) -> None:

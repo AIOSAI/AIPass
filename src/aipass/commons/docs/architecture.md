@@ -42,10 +42,6 @@ handler imports the console at all, which is what lets the same handler serve a
 CLI verb, the dashboard writer and a test without any of them seeing each
 other's output.
 
-`apps/handlers/module_root.py` sits at the root of that tree rather than in a
-domain: it is the guarded `__file__` resolution every handler uses to find the
-branch root without resolving paths at import time.
-
 ## Storage
 
 SQLite, with WAL journal mode so a read never blocks a write, and FTS5 virtual

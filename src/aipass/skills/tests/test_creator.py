@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_creator.py
 # Description: Tests for creator module orchestration layer
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/creator.py — routing, the create_skill wrapper and introspection."""
@@ -105,12 +105,6 @@ class TestCreateSkillModule:
         with patch("aipass.skills.apps.modules.creator.trigger", mock_trigger):
             create_skill("", template_type="markdown_only")
         mock_trigger.fire.assert_not_called()
-
-    def test_trigger_none_does_not_crash(self, tmp_path):
-        """When trigger is None (import failed), create_skill still works."""
-        with patch("aipass.skills.apps.modules.creator.trigger", None):
-            result = create_skill("no-trigger", template_type="markdown_only", target_dir=tmp_path)
-        assert result["success"] is True
 
     # autospec: a bare MagicMock answers every attribute, so a deleted log_operation would stay green.
     @patch("aipass.skills.apps.modules.creator.json_handler", autospec=True)

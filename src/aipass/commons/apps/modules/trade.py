@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trade.py
 # Description: Trade Orchestration Module
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -17,17 +17,8 @@ Handles: gift, trade, drop, find, mint commands.
 
 from typing import List
 
-from aipass.prax.apps.modules.logger import system_logger as logger
-
-try:
-    from aipass.cli.apps.modules import console, error, warning
-except (ImportError, OSError):
-    logger.warning("[trade] CLI console unavailable, using fallback")
-    from rich.console import Console
-
-    console = Console()
-    error = console.print  # type: ignore[assignment]
-    warning = console.print  # type: ignore[assignment]
+from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: F401 - the imports standard requires the prax logger in every module
+from aipass.cli.apps.modules import console, error, warning
 
 from rich.panel import Panel
 

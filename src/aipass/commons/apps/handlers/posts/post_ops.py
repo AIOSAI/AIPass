@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: post_ops.py
 # Description: Post operations handler
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -72,46 +72,30 @@ def create_post(args: List[str]) -> dict:
         if not room:
             return {"success": False, "error": f"Room '{room_name}' not found"}
 
+        # Resolved before the insert: one transaction below, so a failed side write leaves no half post.
+        mentions = extract_mentions(f"{title} {content}")
+        mentions_error = ""
+        if mentions is None:
+            # The post still lands: a success, the lost mentions named.
+            mentions_error = "mentions not delivered: the agents lookup failed"
+            logger.warning(f"[post_ops] Post '{title}': {mentions_error}")
+            mentions = []
+
         cursor = conn.execute(
             "INSERT INTO posts (room_name, author, title, content, post_type) VALUES (?, ?, ?, ?, ?)",
             (room_name, author, title, content, post_type),
         )
         post_id = cursor.lastrowid
         assert post_id is not None, "INSERT must return a lastrowid"
-        conn.commit()
-
-        full_text = f"{title} {content}"
-        mentions = extract_mentions(full_text)
-        mentions_error = ""
-        if mentions is None:
-            # The post is committed: still a success, the lost mentions named.
-            mentions_error = "mentions not delivered: the agents lookup failed"
-            logger.warning(f"[post_ops] Post #{post_id}: {mentions_error}")
-            mentions = []
 
         for mentioned in mentions:
-            try:
-                conn.execute(
-                    "INSERT INTO mentions (post_id, mentioned_agent, mentioner_agent) VALUES (?, ?, ?)",
-                    (post_id, mentioned, author),
-                )
-            except Exception as e:
-                logger.warning(f"[post_ops] Failed to store mention {mentioned}: {e}")
-
-        if mentions:
-            conn.commit()
-
-        try:
-            sync_post_to_fts(conn, post_id, title, content, author, room_name)
-            conn.commit()
-        except Exception as e:
-            logger.warning(f"[post_ops] FTS sync failed for post #{post_id}: {e}")
-
-        try:
-            increment_post_count(conn, author)
-            conn.commit()
-        except Exception as e:
-            logger.warning(f"[post_ops] Post count increment failed for {author}: {e}")
+            conn.execute(
+                "INSERT INTO mentions (post_id, mentioned_agent, mentioner_agent) VALUES (?, ?, ?)",
+                (post_id, mentioned, author),
+            )
+        sync_post_to_fts(conn, post_id, title, content, author, room_name)
+        increment_post_count(conn, author)
+        conn.commit()
 
         logger.info(f"[post_ops] Post #{post_id} created by {author} in {room_name}: {title}")
         json_handler.log_operation("create_post", {"post_id": post_id, "room": room_name, "author": author})

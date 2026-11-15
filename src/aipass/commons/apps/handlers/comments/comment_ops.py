@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: comment_ops.py
 # Description: Comment and voting operations handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -105,6 +105,15 @@ def add_comment(args: List[str]) -> dict:
                 "error": "Duplicate comment detected (same content within 5 minutes)",
             }
 
+        # Resolved before the insert: one transaction below, so a failed side write leaves no half comment.
+        mentions = extract_mentions(content)
+        mentions_error = ""
+        if mentions is None:
+            # The comment still lands: a success, the lost mentions named.
+            mentions_error = "mentions not delivered: the agents lookup failed"
+            logger.warning(f"[comment_ops] Comment on post #{post_id}: {mentions_error}")
+            mentions = []
+
         cursor = conn.execute(
             "INSERT INTO comments (post_id, parent_id, author, content) VALUES (?, ?, ?, ?)",
             (post_id, parent_id, author, content),
@@ -119,39 +128,14 @@ def add_comment(args: List[str]) -> dict:
             (post_id,),
         )
 
-        conn.commit()
-
-        mentions = extract_mentions(content)
-        mentions_error = ""
-        if mentions is None:
-            # The comment is committed: still a success, the lost mentions named.
-            mentions_error = "mentions not delivered: the agents lookup failed"
-            logger.warning(f"[comment_ops] Comment #{comment_id}: {mentions_error}")
-            mentions = []
-
         for mentioned in mentions:
-            try:
-                conn.execute(
-                    "INSERT INTO mentions (comment_id, mentioned_agent, mentioner_agent) VALUES (?, ?, ?)",
-                    (comment_id, mentioned, author),
-                )
-            except Exception as e:
-                logger.warning(f"[comment_ops] Failed to store mention {mentioned}: {e}")
-
-        if mentions:
-            conn.commit()
-
-        try:
-            sync_comment_to_fts(conn, comment_id, content, author)
-            conn.commit()
-        except Exception as e:
-            logger.warning(f"[comment_ops] FTS sync failed for comment #{comment_id}: {e}")
-
-        try:
-            increment_comment_count(conn, author)
-            conn.commit()
-        except Exception as e:
-            logger.warning(f"[comment_ops] Comment count increment failed for {author}: {e}")
+            conn.execute(
+                "INSERT INTO mentions (comment_id, mentioned_agent, mentioner_agent) VALUES (?, ?, ?)",
+                (comment_id, mentioned, author),
+            )
+        sync_comment_to_fts(conn, comment_id, content, author)
+        increment_comment_count(conn, author)
+        conn.commit()
 
         logger.info(f"[comment_ops] Comment #{comment_id} on post #{post_id} by {author}")
         json_handler.log_operation("add_comment", {"comment_id": comment_id, "post_id": post_id, "author": author})

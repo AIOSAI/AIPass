@@ -3,7 +3,7 @@
 # Description: Unit tests for identity module and identity_ops handler
 # Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/commons_identity.py and apps/handlers/identity/identity_ops.py."""
@@ -364,6 +364,27 @@ def test_get_caller_branch_returns_none_when_no_detection(
 
     result = _id_mod.get_caller_branch()
     assert result is None
+
+
+@patch("aipass.commons.apps.handlers.identity.identity_ops.json_handler", autospec=True)
+def test_get_caller_branch_never_reads_the_process_cwd(
+    mock_json: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Without AIPASS_CALLER_CWD the process cwd is never asked: under drone it is commons' own dir."""
+    branch_dir = tmp_path / "branch"
+    (branch_dir / ".trinity").mkdir(parents=True)
+    monkeypatch.chdir(branch_dir)
+    monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+    monkeypatch.delenv("AIPASS_CALLER_BRANCH", raising=False)
+
+    with patch(
+        "aipass.commons.apps.handlers.identity.identity_ops.get_branch_info_from_registry",
+        return_value={"name": "COMMONS", "email": "@commons"},
+    ) as lookup:
+        assert _id_mod.get_caller_branch() is None
+    lookup.assert_not_called()
 
 
 _REGISTRY_ATTR = "aipass.commons.apps.handlers.identity.identity_ops.BRANCH_REGISTRY_PATH"
@@ -879,10 +900,13 @@ def test_external_registries_with_lowercase_stems_still_resolve(
     assert result["email"] == "@app"
 
 
-def test_get_caller_branch_raises_a_named_failure_when_the_lookup_breaks():
+def test_get_caller_branch_raises_a_named_failure_when_the_lookup_breaks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     """A broken lookup raises CallerLookupFailed; None stays "no branch detected".
 
     Mutant: identity_ops `raise CallerLookupFailed(...) from e` -> `return None` turns this red."""
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
     with patch.object(_ops, "find_branch_root", side_effect=OSError("registry unreadable")) as lookup:
         with pytest.raises(_ops.CallerLookupFailed, match="Caller lookup failed: registry unreadable"):
             _ops.get_caller_branch()
@@ -890,8 +914,11 @@ def test_get_caller_branch_raises_a_named_failure_when_the_lookup_breaks():
     lookup.assert_called_once()
 
 
-def test_whoami_refuses_naming_a_failed_caller_lookup(capsys: pytest.CaptureFixture[str]):
+def test_whoami_refuses_naming_a_failed_caller_lookup(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     """whoami names a broken lookup instead of "run from a branch directory"."""
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
     # whoami's one database route is identity_ops' lazy import of db.get_db; guarded there.
     with (
         patch.object(_ops, "find_branch_root", side_effect=OSError("registry unreadable")),

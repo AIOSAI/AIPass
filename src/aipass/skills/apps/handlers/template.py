@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: template.py
 # Description: Skill template management
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-14
 # =============================================
 
 """Skill scaffolding templates: resolve a tier, copy it, fill placeholders."""
@@ -13,10 +13,9 @@ from pathlib import Path
 
 from aipass.prax import logger
 from aipass.skills.apps.handlers.json import json_handler
-from aipass.skills.apps.handlers.module_paths import module_file
 
 
-TEMPLATES_DIR = module_file(__file__).parent.parent.parent / "templates"
+TEMPLATES_DIR = Path(__file__).resolve().parent.parent.parent / "templates"
 
 VALID_TYPES = ("markdown_only", "with_handler", "full")
 

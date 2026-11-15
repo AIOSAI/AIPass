@@ -21,17 +21,9 @@ from typing import List, Any
 
 # Run as a script, apps/ is sys.path[0] and this file shadows the commons package.
 # Both spellings go: through a symlinked checkout sys.path[0] is the REAL dir while
-# __file__ keeps the link. The guard is inline (not handlers.module_root) because
-# importing the package before this repair is unsafe; resolve() can raise with a dead cwd.
+# __file__ keeps the link. Inline, before any aipass import: importing the package first is unsafe.
 _script_dirs = [str(Path(__file__).parent)]
-try:
-    _script_dirs.append(str(Path(__file__).resolve().parent))
-except OSError as _exc:
-    # stderr, not the logger: @prax is not importable until after this repair.
-    sys.stderr.write(
-        f"[commons] Cannot resolve {__file__} ({type(_exc).__name__}) — "
-        "sys.path repair limited to its unresolved spelling\n"
-    )
+_script_dirs.append(str(Path(__file__).resolve().parent))
 for _script_dir in _script_dirs:
     if _script_dir in sys.path:
         sys.path.remove(_script_dir)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: database.py
 # Description: Database Module Layer
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -14,15 +14,8 @@ Service module: the entry point and other modules import init_db/close_db/get_db
 
 from typing import List
 
-from aipass.prax import logger
-
-try:
-    from aipass.cli.apps.modules import console
-except (ImportError, OSError):
-    logger.warning("[database] CLI console unavailable, using fallback")
-    from rich.console import Console
-
-    console = Console()
+from aipass.prax import logger  # noqa: F401 - the imports standard requires the prax logger in every module
+from aipass.cli.apps.modules import console
 
 from aipass.commons.apps.handlers.database import init_db, close_db, get_db
 from aipass.commons.apps.handlers.json import json_handler

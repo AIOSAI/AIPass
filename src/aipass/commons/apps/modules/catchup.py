@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: catchup.py
 # Description: Catchup Orchestration Module
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -14,16 +14,8 @@ Handles: catchup command.
 
 from typing import List
 
-from aipass.prax.apps.modules.logger import system_logger as logger
-
-try:
-    from aipass.cli.apps.modules import console, error
-except (ImportError, OSError):
-    logger.warning("[catchup] CLI console unavailable, using fallback")
-    from rich.console import Console
-
-    console = Console()
-    error = console.print  # type: ignore[assignment]
+from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: F401 - the imports standard requires the prax logger in every module
+from aipass.cli.apps.modules import console, error
 
 from aipass.commons.apps.handlers.catchup.catchup_ops import run_catchup
 from aipass.commons.apps.handlers.json import json_handler

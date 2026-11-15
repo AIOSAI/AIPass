@@ -8,107 +8,107 @@
     {
       "file": "apps/modules/feed.py",
       "standard": "introspection",
-      "reason": "Action command — feed with no args shows the feed, not introspection"
+      "reason": "Action command — feed with no args shows the feed, not introspection. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/catchup.py",
       "standard": "introspection",
-      "reason": "Action command — catchup with no args shows missed activity"
+      "reason": "Action command — catchup with no args shows missed activity. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/activity.py",
       "standard": "introspection",
-      "reason": "Action command — activity with no args shows recent activity"
+      "reason": "Action command — activity with no args shows recent activity. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/welcome.py",
       "standard": "introspection",
-      "reason": "Action command — welcome with no args generates welcome post"
+      "reason": "Action command — welcome with no args generates welcome post. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/digest.py",
       "standard": "introspection",
-      "reason": "Action command — digest with no args shows 24h digest"
+      "reason": "Action command — digest with no args shows 24h digest. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/engagement.py",
       "standard": "introspection",
-      "reason": "Action command — prompt/event with no args generates content"
+      "reason": "Action command — prompt/event with no args generates content. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/search.py",
       "standard": "introspection",
-      "reason": "Action command — search requires query arg but log does not"
+      "reason": "Action command — search requires query arg but log does not. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/explore.py",
       "standard": "introspection",
-      "reason": "Action command — explore with no args discovers hints"
+      "reason": "Action command — explore with no args discovers hints. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/leaderboard.py",
       "standard": "introspection",
-      "reason": "Action command — leaderboard with no args shows rankings"
+      "reason": "Action command — leaderboard with no args shows rankings. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/commons_identity.py",
       "standard": "introspection",
-      "reason": "Identity utility module — not a user-facing command"
+      "reason": "Identity utility module — not a user-facing command. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/capsule.py",
       "standard": "introspection",
-      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/database.py",
       "standard": "introspection",
-      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/reaction.py",
       "standard": "introspection",
-      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/profile.py",
       "standard": "introspection",
-      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/trade.py",
       "standard": "introspection",
-      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/space.py",
       "standard": "introspection",
-      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/notification.py",
       "standard": "introspection",
-      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/comment.py",
       "standard": "introspection",
-      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/room.py",
       "standard": "introspection",
-      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/artifact.py",
       "standard": "introspection",
-      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/modules/post.py",
       "standard": "introspection",
-      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
+      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary. File-wide, so it also waives the Rich-markup sub-check: print_introspection here prints plain text."
     },
     {
       "file": "apps/commons.py",
@@ -338,26 +338,20 @@
     {
       "file": "apps/commons.py",
       "standard": "logged_fallback",
-      "lines": [108],
+      "lines": [100],
       "reason": "True here means the command was claimed, not that it succeeded: the reader of stdout closed the pipe, so there is no caller left to tell (commons' decision, DPLAN-0354 leg 5)"
     },
     {
       "file": "apps/modules/commons_identity.py",
       "standard": "logged_fallback",
-      "lines": [109],
+      "lines": [100],
       "reason": "Router after error(): error() marks the command failed and cli resolve_exit answers 2; True means claimed, the protocol of every handle_command (commons' decision, DPLAN-0354 leg 5)"
     },
     {
       "file": "apps/modules/space.py",
       "standard": "logged_fallback",
-      "lines": [242],
+      "lines": [233],
       "reason": "Router after error(): error() marks the command failed and cli resolve_exit answers 2; True means claimed, pinned by test_decorate_refuses_naming_a_failed_caller_lookup (commons' decision, DPLAN-0354 leg 5)"
-    },
-    {
-      "file": "apps/handlers/artifacts/artifact_ops.py",
-      "standard": "logged_fallback",
-      "lines": [65],
-      "reason": "_validate_metadata: every None means the same thing, the input is not valid shallow JSON, and its one caller refuses all three with one true message; no system failure is hidden (commons' decision, DPLAN-0354 leg 5)"
     },
     {
       "file": "tests/__init__.py",

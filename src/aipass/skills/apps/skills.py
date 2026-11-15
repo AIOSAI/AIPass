@@ -1,33 +1,26 @@
 # =================== AIPass ====================
 # Name: skills.py
 # Description: Entry point CLI for drone @skills
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-08
-# Modified: 2026-10-24
+# Modified: 2026-11-14
 # =============================================
 
 """Skills system entry point."""
 
 import importlib
-import os
 import sys
 from pathlib import Path
 
 # Runs before any aipass import: the script dir would shadow the 'skills' package.
-# A dead cwd falls back to abspath.
-try:
-    _script_dir = str(Path(__file__).resolve().parent)
-except OSError as _resolve_error:
-    # No logger yet (prax is not importable before this block): stderr is the last resort.
-    sys.stderr.write(f"[skills] resolve() unavailable ({_resolve_error}); using the unresolved absolute spelling\n")
-    _script_dir = str(Path(os.path.abspath(__file__)).parent)
+_script_dir = str(Path(__file__).resolve().parent)
 if _script_dir in sys.path:
     sys.path.remove(_script_dir)
 
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, escape
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 
 def _header_description(path):

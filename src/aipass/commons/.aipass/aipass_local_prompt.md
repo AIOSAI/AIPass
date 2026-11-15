@@ -40,8 +40,7 @@ commons/
 │   │   ├── activity/  artifacts/  catchup/  comments/  curation/
 │   │   ├── database/  digest/  engagement/
 │   │   ├── feed/  identity/  json/  notifications/  posts/
-│   │   ├── profiles/  rooms/  search/  social/  welcome/
-│   │   └── module_root.py      # guarded __file__ resolution, no domain
+│   │   └── profiles/  rooms/  search/  social/  welcome/
 │   ├── integrations/           # README only, no code yet
 │   ├── plugins/                # README + __init__ only
 │   └── logs/

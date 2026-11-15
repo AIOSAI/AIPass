@@ -18,7 +18,6 @@ apps/
   modules/                 discovery loader runner creator validator switch
   handlers/                discovery_handler loader_handler runner_handler creator_handler
                            switch_handler registry template validator
-                           module_paths (dead-cwd-safe location, stdlib only)
                            json/ (the fleet shim, binds prax's json service)
   integrations/            empty
   plugins/                 empty
@@ -27,12 +26,12 @@ lib/                       built-in skills, one directory each:
                            branch_health drone_commands github inbox_check
                            screen_lock system_status
 templates/                 markdown_only with_handler full
-tests/                     branch suite, plus dead_cwd_world.py (the denial worlds)
+tests/                     branch suite, plus dead_cwd_world.py (the getcwd-denied world)
 docs/                      tracked pages, every one linked from README.md
 tools/                     verify_branch.py, suspend/
 skills_json/               switch_state.json and per-module operation logs
 .aipass/skills/            project-local skills for THIS project
-.sentry/bypass.json        one carried waiver
+.sentry/bypass.json        two carried waivers
 ```
 
 One skill carries its own suite: `lib/screen_lock/tests/`.
@@ -49,7 +48,7 @@ First match for a name wins, so a project shadows a built-in without editing it.
 
  - Counting the suite: bare `pytest` here collects `tests/` only. The skill suite joins under `pytest .` or from the repo root — that is the figure to quote.
  - The off-switch gates the runner, not an import. Any function published for in-process use must consult the switch itself — `machine_vitals()` and `machine_processes()` do.
- - No module-level `Path(__file__).resolve()`. Use `module_paths.module_file()`. See `docs/dead_cwd.md`.
+ - No `Path.cwd()` at import: a host process can hold a dead cwd. `Path(__file__).resolve()` is safe on Linux (`__file__` is absolute).
  - `apps/handlers/json/json_handler.py` is a hash-checked fleet shim. Add nothing to it; ask the service for a path instead of capturing one at import.
  - Tests redirect json and log output with `AIPASS_TEST_LOG_DIR`, never by patching a shim attribute.
  - `host_portability` is the one audit rule whose corpus includes `lib/`; the per-file rows still read `apps/` only, so a green audit is not a sweep of the skills.

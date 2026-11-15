@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runner.py
 # Description: Execute skills
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-11-14
 # =============================================
 
 """Skill runner module."""
@@ -25,7 +25,7 @@ def handle_command(command: str, args: list) -> bool:
         error("Error: skill name required. Usage: skills run <name> [action] [args...]")
         return False
     if args[0] in ("--help", "-h", "help"):
-        print_introspection()
+        print_run_help()
         return True
 
     name = args[0]
@@ -111,6 +111,15 @@ def run_skill(name, action=None, args=None, config=None):
         },
     )
     return result
+
+
+def print_run_help():
+    """Print the usage page for this verb."""
+    console.print("Skills Run - Execute a skill")
+    console.print()
+    console.print("Usage:")
+    console.print("  drone @skills run <name> \\[action] \\[args]    Run a handler action, or render a markdown skill")
+    console.print("  drone @skills run <name> --help             Show the skill's SKILL.md instead of running it")
 
 
 def print_introspection():

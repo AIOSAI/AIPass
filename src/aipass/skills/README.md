@@ -66,10 +66,8 @@ under `apps/handlers/`. Discovery scans the search paths and parses frontmatter;
 the loader parses a full `SKILL.md` and imports a handler dynamically; the runner
 dispatches an action or renders a markdown-only skill; the creator stamps a new
 skill from a template; the validator checks requirements; the switch owns the
-on/off state and its systemd actuation. Two handlers are infrastructure rather
-than a verb: `module_paths.py`, which locates a module without ever reading the
-working directory, and the `json/` shim, which binds the fleet's one JSON
-service. `apps/handlers/__init__.py` is a fence: another branch that imports
+on/off state and its systemd actuation. One handler is infrastructure rather
+than a verb: the `json/` shim, which binds the fleet's one JSON service. `apps/handlers/__init__.py` is a fence: another branch that imports
 this branch's handlers is refused.
 
 Built-in skills live under `lib/`, one directory each, and the templates the
@@ -85,7 +83,6 @@ re-derived from the real tree and read on every prompt.
 | [docs/off_switch.md](docs/off_switch.md) | What OFF means, what it stops, how it fails closed |
 | [docs/runner_notes.md](docs/runner_notes.md) | How a skill is executed, and the doors that bypass the runner |
 | [docs/system_status.md](docs/system_status.md) | The system_status skill and its published reads, `machine_vitals()` and `machine_processes()` |
-| [docs/dead_cwd.md](docs/dead_cwd.md) | Importing without a readable working directory |
 | [docs/json_handler.md](docs/json_handler.md) | Why the JSON handler is a shim, and what may not be added to it |
 
 The same index, with the pages beside each other, is in [docs/](docs/).

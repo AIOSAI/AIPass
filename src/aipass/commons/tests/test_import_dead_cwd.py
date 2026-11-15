@@ -4,7 +4,7 @@
 # Description: Pins that commons imports with a deleted cwd, and the sys.path[0] repair in apps/commons.py
 # Version: 1.2.0
 # Created: 2026-08-31
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # Category: commons/tests
 # =============================================
 
@@ -143,62 +143,6 @@ def test_the_fence_refuses_an_elsewhere_caller_under_a_dead_cwd(tmp_path):
 
     assert out.strip().splitlines()[-1:] == ["DENIED Caller branch: unknown"], f"stdout={out}\nstderr={result.stderr}"
     _assert_probe_armed(out)
-
-
-# A peer with an uncured guard raises FileNotFoundError at import, an OSError `except ImportError`
-# misses; commons' optional cross-branch imports must survive it. A meta_path finder raises it,
-# because the claim is the exception type crossing the branch boundary, not how the peer raised it.
-
-_DENY_PEER = r"""
-import importlib.abc
-import sys
-
-DENIED = "{denied}"
-
-
-class _UncuredPeer(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname == DENIED or fullname.startswith(DENIED + "."):
-            raise FileNotFoundError(2, "uncured peer guard", "")
-        return None
-
-
-sys.meta_path.insert(0, _UncuredPeer())
-
-# Prove the denial can fire before relying on it.
-try:
-    __import__(DENIED)
-    print("DENIAL_VACUOUS")
-except FileNotFoundError:
-    print("DENIAL_ARMED")
-except ImportError:
-    print("DENIAL_WRONG_TYPE")
-"""
-
-
-def _peer_world(denied: str, body: str) -> str:
-    return _DENY_PEER.format(denied=denied) + body
-
-
-def test_modules_import_when_cli_peer_raises_oserror():
-    """A module keeps its own fallback console when @cli cannot be imported."""
-    world = _peer_world(
-        "aipass.cli.apps.modules",
-        r"""
-import aipass.commons.apps.modules.post  # noqa: F401
-import aipass.commons.apps.modules.feed  # noqa: F401
-import aipass.commons.apps.modules.database  # noqa: F401
-
-print("IMPORTED")
-""",
-    )
-    result = _run(world)
-    out = result.stdout
-
-    assert "DENIAL_ARMED" in out, f"the peer denial never fired - the pin proves nothing:\n{out}"
-    assert "IMPORTED" in out, (
-        f"an OSError from an uncured peer escaped `except ImportError`:\nstdout={out}\nstderr={result.stderr}"
-    )
 
 
 # The entry point's sys.path repair. Through a symlinked directory sys.path[0] may be the real

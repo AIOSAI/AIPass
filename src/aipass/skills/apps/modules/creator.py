@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: creator.py
 # Description: Scaffold new skills from templates
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-11-14
 # =============================================
 
 """Skill creator module."""
@@ -12,12 +12,7 @@ from aipass.prax import logger
 from aipass.cli.apps.modules import console, error
 from aipass.skills.apps.handlers.creator_handler import create_skill as _handler_create_skill
 from aipass.skills.apps.handlers.json import json_handler
-
-try:
-    from aipass.trigger.apps.modules.core import trigger
-except ImportError:
-    logger.warning("trigger module not available — skill events disabled")
-    trigger = None
+from aipass.trigger.apps.modules.core import trigger
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -69,8 +64,7 @@ def create_skill(name, template_type="markdown_only", target_dir=None):
     result = _handler_create_skill(name, template_type=template_type, target_dir=target_dir)
 
     if result["success"]:
-        if trigger is not None:
-            trigger.fire("skill_created", name=name, template_type=template_type, path=result["path"])
+        trigger.fire("skill_created", name=name, template_type=template_type, path=result["path"])
 
         console.print(f"  Created skill '{name}' at {result['path']}")
         console.print(f"  Template: {template_type}")

@@ -1,23 +1,22 @@
 # =================== AIPass ====================
 # Name: test_discovery.py
 # Description: Unit tests for skills discovery
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-07
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # Category: skills/tests
 # =============================================
 
 """Tests for apps/modules/discovery.py, apps/handlers/discovery_handler.py and the skill discovery they power."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(ruff) — that discovery_handler.py and module_paths.py parse and import
+# sentry: no-test-needed(ruff) — that discovery_handler.py parses and imports
 # sentry: no-test-needed(constant) — the "discovery_scan" log-operation name json_handler records
 
 import pytest
 import tempfile
 from pathlib import Path
 
-from aipass.skills.apps.handlers import discovery_handler
 from aipass.skills.apps.modules import discovery
 from aipass.skills.apps.handlers.discovery_handler import (
     discover_skills_in_path,
@@ -35,9 +34,11 @@ class TestTheListCommand:
         assert "skill(s):" in out
         assert "discovery Module" not in out
 
-    def test_list_help_prints_the_module_map(self, capsys):
+    def test_list_help_prints_the_usage_then_the_module_map(self, capsys):
         assert discovery.handle_command("list", ["--help"]) is True
-        assert "discovery Module" in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert "Skills List - Show every discovered skill" in out
+        assert "discovery Module" in out
 
 
 class TestGetSearchPaths:
@@ -100,124 +101,20 @@ class TestExtractFrontmatter:
         assert result["tags"] == ["dev", "git", "ci"]
 
 
-class TestSimpleFrontmatterParse:
-    """The no-yaml fallback parser, forced by patching `yaml` to None (PyYAML would intercept otherwise)."""
+class TestMalformedFrontmatterIsRefused:
+    """A frontmatter block that is not a YAML mapping refuses loudly, naming the file."""
 
-    @pytest.fixture(autouse=True)
-    def _force_no_yaml(self, monkeypatch):
-        monkeypatch.setattr(discovery_handler, "yaml", None)
-
-    @staticmethod
-    def _parse(tmp_path, frontmatter_text):
+    def test_a_yaml_error_names_the_file(self, tmp_path):
         skill_md = tmp_path / "SKILL.md"
-        skill_md.write_text(f"---\n{frontmatter_text}\n---\n", encoding="utf-8")
-        result = parse_frontmatter(skill_md)
-        assert result is not None
-        return result
+        skill_md.write_text("---\nname: [unclosed\n---\n", encoding="utf-8")
+        with pytest.raises(ValueError, match=f"Malformed YAML frontmatter in {skill_md}"):
+            parse_frontmatter(skill_md)
 
-    def test_flat_key_value(self, tmp_path):
-        result = self._parse(tmp_path, "name: my-skill\ndescription: Does a thing")
-        assert result["name"] == "my-skill"
-        assert result["description"] == "Does a thing"
-
-    def test_inline_list(self, tmp_path):
-        result = self._parse(tmp_path, "tags: [a, b, c]")
-        assert result["tags"] == ["a", "b", "c"]
-
-    def test_empty_list(self, tmp_path):
-        result = self._parse(tmp_path, "tags: []")
-        assert result["tags"] == []
-
-    def test_boolean_true(self, tmp_path):
-        result = self._parse(tmp_path, "has_handler: true")
-        assert result["has_handler"] is True
-
-    def test_boolean_false(self, tmp_path):
-        result = self._parse(tmp_path, "has_handler: false")
-        assert result["has_handler"] is False
-
-    def test_nested_keys(self, tmp_path):
-        result = self._parse(tmp_path, "requires:\n  pip: [praw]\n  bins: [gh]\n  config: [MY_TOKEN]")
-        assert result["requires"]["pip"] == ["praw"]
-        assert result["requires"]["bins"] == ["gh"]
-        assert result["requires"]["config"] == ["MY_TOKEN"]
-
-    def test_nested_block_list(self, tmp_path):
-        # Without this, declared systemd units read as empty on any runner lacking PyYAML.
-        result = self._parse(tmp_path, "switch:\n  systemd_user:\n    - telegram-bot@api\n    - telegram-bot@base")
-        assert result["switch"]["systemd_user"] == ["telegram-bot@api", "telegram-bot@base"]
-
-    def test_top_level_block_list(self, tmp_path):
-        # screen_lock and github declare when_to_use this way.
-        result = self._parse(tmp_path, 'when_to_use:\n  - "lock the screen"\n  - "walking away"')
-        assert result["when_to_use"] == ["lock the screen", "walking away"]
-
-    def test_a_block_list_does_not_leak_into_the_next_key(self, tmp_path):
-        # Needs a NESTED inline list (only it arms the list cursor) and a later "- " item to steal,
-        # or a parser that never closes the cursor still passes.
-        result = self._parse(tmp_path, "requires:\n  pip: [praw]\nwhen_to_use:\n  - stolen-if-broken\nversion: 3")
-
-        assert result["requires"]["pip"] == ["praw"]
-        assert result["when_to_use"] == ["stolen-if-broken"]
-        assert result["version"] == 3
-
-    def test_an_empty_nested_key_swallows_nothing_from_its_siblings(self, tmp_path):
-        result = self._parse(tmp_path, "requires:\n  pip:\n  bins: [gh]\n  config: [TOKEN]")
-
-        assert not result["requires"]["pip"]
-        assert result["requires"]["bins"] == ["gh"]
-        assert result["requires"]["config"] == ["TOKEN"]
-
-    def test_an_empty_nested_key_still_takes_its_own_block_list(self, tmp_path):
-        result = self._parse(tmp_path, "switch:\n  systemd_user:\n    - one\n  other: [x]")
-
-        assert result["switch"]["systemd_user"] == ["one"]
-        assert result["switch"]["other"] == ["x"]
-
-    def test_integer_value(self, tmp_path):
-        result = self._parse(tmp_path, "version: 42")
-        assert result["version"] == 42
-
-    def test_quoted_string(self, tmp_path):
-        result = self._parse(tmp_path, 'description: "A quoted value"')
-        assert result["description"] == "A quoted value"
-
-
-class TestParseSimpleValue:
-    """The no-yaml fallback's value parser, reached through parse_frontmatter() on one keyed line."""
-
-    @pytest.fixture(autouse=True)
-    def _force_no_yaml(self, monkeypatch):
-        monkeypatch.setattr(discovery_handler, "yaml", None)
-
-    @staticmethod
-    def _value_for(tmp_path, raw_value):
+    def test_a_non_mapping_names_the_file(self, tmp_path):
         skill_md = tmp_path / "SKILL.md"
-        skill_md.write_text(f"---\nvalue: {raw_value}\n---\n", encoding="utf-8")
-        result = parse_frontmatter(skill_md)
-        assert result is not None
-        return result["value"]
-
-    def test_empty_list(self, tmp_path):
-        assert self._value_for(tmp_path, "[]") == []
-
-    def test_inline_list(self, tmp_path):
-        assert self._value_for(tmp_path, "[a, b]") == ["a", "b"]
-
-    def test_true(self, tmp_path):
-        assert self._value_for(tmp_path, "true") is True
-
-    def test_false(self, tmp_path):
-        assert self._value_for(tmp_path, "false") is False
-
-    def test_integer(self, tmp_path):
-        assert self._value_for(tmp_path, "42") == 42
-
-    def test_float(self, tmp_path):
-        assert self._value_for(tmp_path, "3.14") == 3.14
-
-    def test_string(self, tmp_path):
-        assert self._value_for(tmp_path, "hello") == "hello"
+        skill_md.write_text("---\n- just\n- a list\n---\n", encoding="utf-8")
+        with pytest.raises(ValueError, match=f"Frontmatter in {skill_md} is a list"):
+            parse_frontmatter(skill_md)
 
 
 class TestDiscoverSkillsInPath:

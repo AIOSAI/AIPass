@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: The Commons test configuration
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """The Commons - Test Configuration"""
@@ -46,6 +46,8 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
     A subdirectory, not tmp_path itself: the sandbox is <seam>/commons/..., which would collide with tests' own dirs.
     """
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
+    # drone always exports it, and get_caller_branch never falls back to the process cwd.
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
     sandbox = json_handler.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
     return sandbox

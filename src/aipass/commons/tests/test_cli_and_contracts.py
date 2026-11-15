@@ -4,7 +4,7 @@
 # Description: main()'s help/introspection/exit-code routing, route_command, and the json shim's contracts
 # Version: 1.3.0
 # Created: 2026-03-28
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -316,8 +316,8 @@ def test_missing_file_load_json_auto_creates(tmp_path, monkeypatch):
     assert result is not None and result["module_name"] == "ghost"
 
 
-def test_empty_file_recovery(tmp_path, monkeypatch):
-    """An empty_file should be detected as corrupt and recreated with defaults."""
+def test_empty_file_raises_and_is_left_untouched(tmp_path, monkeypatch):
+    """An empty_file is corrupt: the service raises InvalidDocument and never overwrites it."""
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "empty_file_test"))
 
     # The path is asked of the handler, not spelled here: a literal would drift with the service's layout.
@@ -325,13 +325,11 @@ def test_empty_file_recovery(tmp_path, monkeypatch):
     empty_path.parent.mkdir(parents=True, exist_ok=True)
     empty_path.write_text("", encoding="utf-8")
 
-    result = jh.ensure_json_exists("emptymod", "config")
-    assert result is True
-
-    loaded = jh.load_json("emptymod", "config")
-    assert loaded is not None
-    assert isinstance(loaded, dict)
-    assert loaded["module_name"] == "emptymod"
+    with pytest.raises(jh.InvalidDocument, match="not overwritten"):
+        jh.ensure_json_exists("emptymod", "config")
+    with pytest.raises(jh.InvalidDocument):
+        jh.load_json("emptymod", "config")
+    assert empty_path.read_text(encoding="utf-8") == ""
 
 
 def test_reimport_after_mock_preserves_function():

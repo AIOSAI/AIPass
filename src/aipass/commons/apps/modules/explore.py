@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: explore.py
 # Description: Exploration Module
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -17,17 +17,8 @@ Handles: explore, secrets commands.
 
 from typing import List
 
-from aipass.prax.apps.modules.logger import system_logger as logger
-
-try:
-    from aipass.cli.apps.modules import console, error, success
-except (ImportError, OSError):
-    logger.warning("[explore] CLI console unavailable, using fallback")
-    from rich.console import Console
-
-    console = Console()
-    error = console.print  # type: ignore[assignment]
-    success = console.print  # type: ignore[assignment]
+from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: F401 - the imports standard requires the prax logger in every module
+from aipass.cli.apps.modules import console, error, success
 
 from rich.panel import Panel
 from rich.table import Table

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: leaderboard.py
 # Description: Leaderboard Module
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -12,16 +12,8 @@ Leaderboard Module
 
 from typing import List
 
-from aipass.prax.apps.modules.logger import system_logger as logger
-
-try:
-    from aipass.cli.apps.modules import console, error
-except (ImportError, OSError):
-    logger.warning("[leaderboard] CLI console unavailable, using fallback")
-    from rich.console import Console
-
-    console = Console()
-    error = console.print  # type: ignore[assignment]
+from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: F401 - the imports standard requires the prax logger in every module
+from aipass.cli.apps.modules import console, error
 
 from rich.table import Table
 

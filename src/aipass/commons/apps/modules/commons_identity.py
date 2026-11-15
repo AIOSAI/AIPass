@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commons_identity.py
 # Description: Branch identity detection module
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -15,16 +15,7 @@ Re-exports identity_ops for the callers that import from here; handles whoami.
 from typing import List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
-
-try:
-    from aipass.cli.apps.modules import console, error, warning
-except (ImportError, OSError):
-    logger.warning("[commons_identity] CLI console unavailable, using fallback")
-    from rich.console import Console
-
-    console = Console()
-    error = console.print  # type: ignore[assignment]
-    warning = console.print  # type: ignore[assignment]
+from aipass.cli.apps.modules import console, error
 
 from aipass.commons.apps.handlers.identity.identity_ops import (
     CallerLookupFailed,

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: space.py
 # Description: Spatial Navigation Module
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -13,16 +13,7 @@ Spatial Navigation Module
 from typing import List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
-
-try:
-    from aipass.cli.apps.modules import console, error, success
-except (ImportError, OSError):
-    logger.warning("[space] CLI console unavailable, using fallback")
-    from rich.console import Console
-
-    console = Console()
-    error = console.print  # type: ignore[assignment]
-    success = console.print  # type: ignore[assignment]
+from aipass.cli.apps.modules import console, error, success
 
 from rich.panel import Panel
 
