@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: m10.py
 # Description: the before/after proof that the real tree was never touched
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-29
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -232,9 +232,8 @@ def stop_carrier_recording() -> Tuple[Dict[str, str], int]:
 
 def _declared_for(path: str) -> Optional[Dict[str, str]]:
     """The DECLARED entry covering this path, or None, matched on a separator boundary."""
-    normal = path.replace(os.sep, "/")
     for entry in DECLARED_CARRIER_WRITES:
-        if normal == entry["path"] or normal.endswith("/" + entry["path"]):
+        if path == entry["path"] or path.endswith("/" + entry["path"]):
             return entry
     return None
 

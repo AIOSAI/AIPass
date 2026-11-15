@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_audit_tests_core.py
 # Description: Core pins for the audit-tests lane (spine, refusal, laws)
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-08-29
 # Modified: 2026-11-14
 # =============================================
@@ -734,7 +734,7 @@ _MODE_BITS_HOLD = os.geteuid() != 0
 
 
 class TestSnapshotTree:
-    @pytest.mark.skipif(not _MODE_BITS_HOLD, reason="a directory cannot be made unlistable on this platform")
+    @pytest.mark.skipif(not _MODE_BITS_HOLD, reason="root lists through the mode bits")
     def test_an_unlistable_subtree_fails_the_fingerprint_instead_of_vanishing_from_it(self, tmp_path):
         locked = tmp_path / "locked"
         locked.mkdir()

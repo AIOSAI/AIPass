@@ -135,7 +135,7 @@ class TestUpdateRun:
         assert "Updated" in printed and "TREE" in printed
         assert "main.py" in (registered / "README.md").read_text(encoding="utf-8")
 
-    @pytest.mark.skipif(not _WRITE_BIT_HOLDS, reason="the write cannot be made to fail on this platform")
+    @pytest.mark.skipif(not _WRITE_BIT_HOLDS, reason="root writes through the write bit")
     def test_a_write_failure_is_reported_on_stderr_and_no_section_is_claimed(self, capsys, registered):
         """A run that errored must not also claim the sections it had already rendered."""
         readme = registered / "README.md"

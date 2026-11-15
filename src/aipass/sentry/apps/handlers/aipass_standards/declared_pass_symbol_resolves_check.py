@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: declared_pass_symbol_resolves_check.py
 # Description: Declared Pass Symbol Resolves Standards Checker Handler
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-09-25
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Declared Pass Symbol Resolves Standards Checker Handler
@@ -78,7 +78,7 @@ DYNAMIC_NAMES = "globals()"
 MODULE_HOOK = "__getattr__"
 
 BUILT_IN = "built-in"
-EXTENSIONS = {".so", ".pyd"}
+EXTENSIONS = {".so"}
 
 FROZEN = "frozen"
 
