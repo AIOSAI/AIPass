@@ -176,9 +176,6 @@ src/aipass/devpulse/tools/*
 projects/*
 !projects/README.md
 
-# CI artifacts
-windows-pytest-results/
-
 # Parked / one-off
 HERALD.md
 backup_data/
