@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: wire_verify.py
-# Version: 1.7.0
+# Version: 1.8.0
 # Description: Wire verification — cross-checks provider settings vs project hook config
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-09
-# Modified: 2026-11-04
+# Modified: 2026-11-14
 # =============================================
 
 """Wire verification — catches silent hook-wiring breaks.
@@ -54,6 +54,8 @@ _SEED_MARKER = "bridges/seed.py"
 SEED_BRIDGE = module_file(__file__).parents[1] / "handlers" / "bridges" / "seed.py"
 #: The events a Seed head fires (its src/hooks/hooks.md); the manifest has no cli.seed section to name them.
 SEED_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostCompact", "Stop")
+#: Seed events Claude is not wired for: its PostCompact output never reaches the model; PostToolUse re-grounds.
+SEED_ONLY_EVENTS = frozenset({"PostCompact"})
 #: One row runs every handler of its event in turn; Seed's 60 s default would break a slow UserPromptSubmit.
 SEED_TIMEOUT = 120
 
@@ -257,7 +259,9 @@ def _check_event_wiring(event_type, hooks_group, pidx, errors, warnings, info, e
         return
 
     if pidx is None:
-        if enabled_hooks:
+        if event_type in SEED_ONLY_EVENTS:
+            info.append(f"{event_type}: {len(enabled_hooks)} enabled handler(s) for Seed only, not wired for Claude")
+        elif enabled_hooks:
             errors.append(
                 f"{event_type}: {len(enabled_hooks)} enabled handler(s) in project config"
                 f" but NO provider event entry — handlers never fire"

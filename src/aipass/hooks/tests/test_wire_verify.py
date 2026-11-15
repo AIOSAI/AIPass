@@ -166,6 +166,12 @@ class TestCheckEventWiring:
             "SessionStart: 1 enabled handler(s) in project config but NO provider event entry — handlers never fire"
         ]
 
+    def test_a_seed_only_event_with_no_claude_row_is_info_not_an_error(self, tmp_path):
+        """Pins the doctor red on every install: PostCompact convicted against Claude settings."""
+        result = _verify(tmp_path, {}, {"PostCompact": {"post_compact_regrounding": _ENABLED}})
+        assert result["errors"] == []
+        assert "PostCompact: 1 enabled handler(s) for Seed only, not wired for Claude" in result["info"]
+
     def test_missing_per_hook_entry(self, tmp_path):
         provider = {"UserPromptSubmit": [_provider_entry("UserPromptSubmit:identity_injector")]}
         project = {"UserPromptSubmit": {"identity_injector": _ENABLED, "presence_gate": _ENABLED}}
