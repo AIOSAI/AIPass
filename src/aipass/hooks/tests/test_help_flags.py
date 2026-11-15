@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_help_flags.py
-# Version: 1.2.1
+# Version: 1.2.2
 # Description: Help-flag safety — a help flag anywhere means explain, never execute
 # Branch: hooks
 # Created: 2026-08-13
-# Modified: 2026-11-09
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py and the modules that route through it."""
@@ -107,11 +107,11 @@ class TestDismissNeverDismissesOnHelp:
             assert alert_dismiss.handle_command("dismiss", ["help"]) is True
         target.assert_not_called()
 
-    def test_bare_word_later_is_content_not_a_question(self):
-        """A trailing bare `help` is an operand — only the dashed forms carry anywhere."""
+    def test_bare_word_later_is_a_stray_operand_not_a_question(self):
+        """A trailing bare `help` is no question; dismiss takes one operand, so the extra word is refused, nothing dismissed."""
         with patch.object(alert_dismiss, "_dismiss_alert") as target:
-            assert alert_dismiss.handle_command("dismiss", ["some-alert-id", "help"]) is True
-        target.assert_called_once_with("some-alert-id")
+            assert alert_dismiss.handle_command("dismiss", ["some-alert-id", "help"]) is False
+        target.assert_not_called()
 
 
 class TestHookTestNeverFiresOnHelp:
