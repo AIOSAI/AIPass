@@ -87,6 +87,50 @@ In the code the word itself appears about 350 times in product Python and 450 in
 
 Caution recorded: making prax's shape check raise would break any live config that fails it today; that list must be made first.
 
+### 8. Process notes (for a possible write-up; the owner wants this as a case study)
+
+Scale: about 299,000 lines of product Python in 1,637 files and about 346,000 lines of tests in 785 files, across 18 branches, plus BAUD (Rust and Python) in its own repo. One owner, one admin seat (devpulse), one host with limited CPU.
+
+How the day ran:
+- The owner spoke in plain dictated speech, often garbled by the speech-to-text, never in tickets. Rulings came mid-work ("WSL stays", "we hate fallbacks", "nothing is deleted, archive it", "done with onboarding") and each became a rule in the next brief within minutes.
+- Three kinds of worker, by cost. Citizens (branch owners with persistent memory): heavy on CPU, max two awake, they own their code and do the edits. Sub-agents (disposable, opus or sonnet): light, up to ten at once, read-only investigators or one-branch builders. The seat: reads reports, decides, briefs, reviews diffs, commits.
+- Every investigator got the same written brief: read-only, map before proposing a removal, do not trust green, "not checked" beats a guess, write a report file, say what you read by eye versus by pattern. Reports land as files, so the seat's context holds conclusions, not file dumps.
+- Sweep 3 in numbers: 10 investigators on bypass rows, skips, the fleet audit, command smoke (514 commands) and the dead-cwd map; then 5 on fallbacks (5,641 sites); 1 to merge 15 reports into 18 per-branch lists; then builders and owners. About 190 background tasks over the session.
+- Budgets were set in conversation: "ten sub-agents", "sentry gets five, you get five".
+- Disagreement between agents was useful: one agent said keep the dead-cwd guard, another proved by importing 1,297 modules from a deleted directory that only half of it matters on Linux. Both were right about different halves.
+- What went wrong, honestly: the seat misread one instruction (told aipass to cut the init stages; the owner meant only the concierge chat) and three briefs said "delete" before the owner said "archive"; corrections were mailed and nothing had been committed. One sub-agent ran a write command against a read-only brief. A few greps touched .archive. An idle sub-agent kept waking on its own timers until stopped. Each was caught because nothing lands without a diff review and a commit by the seat.
+- What made it work: every branch has an owner who knows its code and keeps memory; git and mail go through one door (drone); hooks refuse the dangerous shapes; the seat's own memory files survive context compaction. The chat was compacted several times during the day; continuity came from .trinity, the plan files and the report files, not from the chat window.
+- The owner's estimate: with a machine of 24 cores and 128 GB the same work would finish in about an hour after an hour of planning; on this host it takes several, the limit being CPU for citizens, not coordination.
+- Lesson of the day: a green audit meant "nothing unwaived was seen in the files it looks at". 848 findings sat behind waivers and about 5,600 fallbacks behind no name at all. A purge for one reason (Linux only) exposed a second problem (false green) and a third (silent fallbacks).
+
+### 9. The verification pass (the step that paid for itself)
+
+Before any owner worked a list, five read-only agents checked every item of the other 16 lists against the tree and wrote verified lists (scratchpad sweep3/lists/verified). The merged lists were leads from 15 reports; a meaningful share was wrong or dangerous as written:
+- hooks: removing "unused" legacy names would have turned every hooks test red (conftest patches them in autouse fixtures); failing loud on an unset AIPASS_SESSION_TYPE would have broken every interactive session (unset IS the interactive state); refusing a malformed payload must apply to pre-tool gates only, or the Stop hook keeps an agent running.
+- memory: raising in storage/lane.py would have stopped every vector feature on this host (the repo venv is the interpreter with chromadb); raising at import in repo_root.py would break a wheel install that today fails safe.
+- ai_mail: treating a missing safety_config.json as an empty grant would have taken the seat's own model grant away; only unreadable or wrong-shape may fail closed. paths.py has 10 import-time callers, not 4, and ai_mail.py:131 swallows import errors into "No modules found".
+- drone: a loud lint gate would refuse commits in Seed and feel_good_app (ruff is dev-only and not on PATH there); look beside sys.executable first.
+- dead-cwd: in drone, flow, spawn, daemon, hooks, skills and canary, tests forbid the exact line the fix writes; they move in the same commit. Six files need a pathlib import the recipe assumed.
+- prax: of 2,316 live config, data and log files only two fail the shape check, both prax's own logger files, so the json_service fix is safe; three tests in prax, api and commons pin the overwrite.
+- skills: pyyaml is imported by product code and declared nowhere. The probe-skill in the owner's home was NOT made by the shipped test (the seat had said it was): it predates the test's first commit by 55 minutes.
+- STATUS.local.md reaches 10 spawn template registries, prax docs, a bypass row, four tests; two real files still sit in commons and skills.
+Lesson: "fail loud" needs the distinction between missing (a defined empty state) and corrupt (raise), per file, checked against the live machine first.
+
+Also at this point: @aipass returned with the install rewritten as asked and the onboarding modules archived, but had also cut init_flow.py from 1,283 to about 370 lines (guided stages gone; init <dir>, update, agent kept) against the correction; held uncommitted for the owner's call. devpulse's own list landed in 54aba2ae.
+
+### 10. Power loss at about 00:20 on 11-15, and what it taught
+
+The laptop shut down (charging port) with two citizens (sentry, hooks), three builders (memory, api and ai_mail, drone and spawn) and a Docker build in flight. Lost: every running process, and the whole session scratchpad, because it lives on /tmp, which is tmpfs: all reports, verified lists and briefs. Not lost: 12 branches already committed; sentry's and hooks' uncommitted edits (55 files each, both still compiling and answering); this capture; the fallback corpus copied to sentry's dropbox. Recovery: the reports and lists were rebuilt from the sub-agent transcripts under ~/.claude/projects (the heredocs that wrote them are in the transcripts) and copied to devpulse docs.local/sweep3_2026-11-14, which survives a reboot. The three builders had edited nothing yet and were resumed from the start; the citizens were re-dispatched in continue mode; the watchdog reported the dead dispatch by itself ("monitor gone before the hard timeout: reboot, OOM or kill").
+Lessons: anything another step depends on goes to a durable folder, not the scratchpad; committing each branch as it lands is what made the loss small.
+
+By the power loss, committed on dev (79 ahead, unpushed): devpulse 54aba2ae, prax, cli and canary f73602cf, aipass plus setup.sh and root docs (end of onboarding), backup and daemon 1a10e6c8, commons and skills plus pyyaml c005a7a6, flow and trigger cfd6f9a1. Open: sentry (list done, checker task in flight), hooks, memory, api, ai_mail, drone, spawn; BAUD install.sh (--no-chat is gone; needs a consent pass-through, aipass install has no --yes); the Docker install test; the full suite once, when the machine is quiet.
+
+### 11. After the power loss (11-15, 01:00 to 02:00)
+
+Committed: sentry (fallback standard), hooks (332 to 196 bypass rows; promoted live .live-20261115T082829Z, 3,005 hooks tests green), drone and spawn b4968ac8, api and ai_mail. 17 of 18 branches; the memory builder is still running.
+The Docker install test caught the first fallback that was load-bearing. The bootstrap install runs from the wheel in /opt/aipass, outside any AIPass home. At lock release it fires trigger file_deleted; trigger's setup_handlers imports ai_mail email_send; registry/read.py calls find_repo_root at import, finds no marker above site-packages, and now raises RepoRootNotFound. Before sweep 3 it silently took the cwd (/home/aipass, not the home /home/aipass/AIPass), so the bootstrap's ai_mail was rooted in the wrong place all along. The loud failure is the ruling working. The cure is a design choice, mailed to @aipass: the bootstrap process sets AIPASS_HOME and ai_mail honours it, or the bootstrap stops wiring trigger. Sentry's trigger standard requires trigger.fire on every unlink, so dropping the event is not a one-line fix (tried and reverted, tree clean).
+The owner asked for a lighter load (battery failing): one builder at a time, memory saved more often, nothing durable left only in /tmp.
+
 ### 7. State at capture
 
 dev is ahead of main by 72 commits, unpushed (push and merge only on the owner's word). Per-branch work lists exist for all 18 branches (110 purge items, 56 dead waivers or false greens, 120 fallbacks, 42 owner decisions). Dispatched so far: @aipass (end of onboarding), @sentry (its list), a builder on devpulse's own list. Order after that: prax, cli, ai_mail, hooks part 1, the rest; hooks removes its dead-cwd code last; sentry prunes its helper names after everyone.
