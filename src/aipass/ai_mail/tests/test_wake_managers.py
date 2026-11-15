@@ -3,7 +3,7 @@
 # Description: Tests for the wake's manager lanes, the wake-back opt-out, the Fable grant read and the dashboard refresh
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's manager lanes, wake-back and wake_dashboard.py's refresh."""
@@ -423,7 +423,8 @@ class TestIsManager:
 class TestTheGrantIsReadFromTheUntrackedConfig:
     """fable_allowed() — The owner edits the grant, the repo does not ship it.
 
-    Every fallback fails toward the written default, never toward an empty grant (a silent demotion).
+    A missing config (or one without the key) keeps the written default; an unreadable or
+    wrong-shape one grants nobody, at ERROR (the owner's 2026-11-14 ruling: fail closed, loudly).
     """
 
     def test_a_missing_config_falls_back_to_the_written_default(self, monkeypatch, tmp_path):
@@ -432,12 +433,19 @@ class TestTheGrantIsReadFromTheUntrackedConfig:
         assert wake_mod.fable_allowed() == wake_mod.FABLE_GRANT_DEFAULT
         assert "@devpulse" in wake_mod.fable_allowed()
 
-    def test_an_unparseable_config_falls_back_to_the_default(self, monkeypatch, tmp_path):
+    def test_an_unparseable_config_grants_nobody(self, monkeypatch, tmp_path):
         config = tmp_path / "safety_config.json"
         config.write_text("{not json{{{", encoding="utf-8")
         monkeypatch.setattr(wake_mod, "CONFIG_FILE", config)
 
-        assert wake_mod.fable_allowed() == wake_mod.FABLE_GRANT_DEFAULT
+        assert wake_mod.fable_allowed() == frozenset()
+
+    def test_a_config_that_is_not_an_object_grants_nobody(self, monkeypatch, tmp_path):
+        config = tmp_path / "safety_config.json"
+        config.write_text(json.dumps(["@devpulse"]), encoding="utf-8")
+        monkeypatch.setattr(wake_mod, "CONFIG_FILE", config)
+
+        assert wake_mod.fable_allowed() == frozenset()
 
     def test_a_config_without_the_key_falls_back_to_the_default(self, monkeypatch, tmp_path):
         config = tmp_path / "safety_config.json"
@@ -446,15 +454,14 @@ class TestTheGrantIsReadFromTheUntrackedConfig:
 
         assert wake_mod.fable_allowed() == wake_mod.FABLE_GRANT_DEFAULT
 
-    def test_a_grant_that_is_not_a_list_falls_back_to_the_default(self, monkeypatch, tmp_path):
+    def test_a_grant_that_is_not_a_list_grants_nobody(self, monkeypatch, tmp_path):
         """The typo shape: a bare string instead of a list. Iterating it would
-        grant '@', '@d', '@e' — a frozenset of letters that matches nobody, i.e.
-        a silent revocation dressed as a config."""
+        grant '@', '@d', '@e'; it is refused whole instead, at ERROR."""
         config = tmp_path / "safety_config.json"
         config.write_text(json.dumps({"fable_allowed": "@devpulse"}), encoding="utf-8")
         monkeypatch.setattr(wake_mod, "CONFIG_FILE", config)
 
-        assert wake_mod.fable_allowed() == wake_mod.FABLE_GRANT_DEFAULT
+        assert wake_mod.fable_allowed() == frozenset()
 
     def test_a_written_grant_replaces_the_default_entirely(self, monkeypatch, tmp_path):
         """The owner moving the seat means the default no longer applies — this is

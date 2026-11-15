@@ -3,7 +3,7 @@
 # Description: Tests for the wake's small parts - dispatch status, the grant read, pid lock and branch resolution
 # Version: 1.3.0
 # Created: 2026-10-08
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's helpers and pid_lock.py: status, locks, pids, resolve_branch."""
@@ -134,8 +134,7 @@ def test_dispatch_status_format_output():
 
 
 # Read through fable_allowed(), the public reader of the wake config, not called
-# directly. A missing file and a corrupt one both fall to the
-# default grant; only the corrupt one is warned about.
+# directly. A missing file keeps the default grant; a corrupt one grants nobody, at ERROR.
 
 
 def _grant_from(monkeypatch, config_file):
@@ -160,6 +159,7 @@ def test_read_json_missing_file(tmp_path, monkeypatch):
     grant, log = _grant_from(monkeypatch, tmp_path / "nope.json")
     assert grant == wake_mod.FABLE_GRANT_DEFAULT
     log.warning.assert_not_called()
+    log.error.assert_not_called()
 
 
 def test_read_json_corrupt(tmp_path, monkeypatch):
@@ -167,9 +167,9 @@ def test_read_json_corrupt(tmp_path, monkeypatch):
     f = tmp_path / "bad.json"
     f.write_text("{not valid", encoding="utf-8")
     grant, log = _grant_from(monkeypatch, f)
-    assert grant == wake_mod.FABLE_GRANT_DEFAULT
-    fmt, raised = log.warning.call_args.args
-    assert fmt == "[wake] %s — the Fable grant falls back to the default"
+    assert grant == frozenset()
+    fmt, raised = log.error.call_args.args
+    assert fmt == "[wake] %s — the Fable grant fails closed: nobody holds it"
     assert isinstance(raised, wake_mod.JsonUnreadable)
     assert str(raised).startswith("bad.json could not be read")
 
@@ -983,8 +983,16 @@ def test_systemd_scope_env_file_does_not_outlive_the_launch(tmp_path, monkeypatc
 
     monkeypatch.setattr(wake_mod.subprocess, "run", fake_run)
 
-    ok = wake_mod.spawn_in_systemd_scope(["monitor"], branch_path, {"A": "1"}, "@target", tmp_path / "lock", None, None)
+    status = wake_mod.DispatchStatus()
+    ok = wake_mod.spawn_in_systemd_scope(
+        ["monitor"], branch_path, {"A": "1"}, "@target", tmp_path / "lock", None, status
+    )
 
     assert ok is False
+    assert status.find_step("scope") == (
+        "warn",
+        "scope",
+        "systemd-run failed (rc=1: unit refused); the monitor starts as a plain child",
+    ), "a failed scope is said, never passed off as started"
     assert seen["existed_during_launch"] is True, "systemd-run reads the file at launch"
     assert not env_file.exists(), "the environment copy must not stay on disk"

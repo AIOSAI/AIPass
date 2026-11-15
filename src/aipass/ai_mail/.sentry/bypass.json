@@ -114,7 +114,7 @@
     {
       "file": "tests/test_registry_case_sweep.py",
       "standard": "stdlib_patch",
-      "reason": "Platform simulation (ai_mail, fleet green leg 10, under @devpulse's leg 10 ruling a). stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Lines covered as of leg 10: Path.glob 147 191 220 and Path.exists 190, which make a Linux run answer like a case-insensitive filesystem so the case-exact registry walk is tested where CI cannot fold case. A seam would exist for the test alone."
+      "reason": "Platform simulation (ai_mail, fleet green leg 10, under @devpulse's leg 10 ruling a; re-read 2026-11-14). stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. The file holds one stdlib patch, monkeypatch.setattr(Path, \"glob\", _folded) at :66 (REAL_GLOB kept at :50): a Linux run answers like a case-insensitive filesystem, the case a WSL2 checkout on a Windows drive (drvfs, /mnt/c) really has, so the case-exact registry walk is tested where CI cannot fold case. A seam would exist for the test alone."
     },
     {
       "file": "apps/handlers/dispatch/report.py",
@@ -199,9 +199,9 @@
       "file": "apps/handlers/dispatch/wake.py",
       "standard": "logged_fallback",
       "lines": [
-        381
+        394
       ],
-      "reason": "The value is the true answer (ai_mail, fleet green leg 11; re-lined in legs 13 and 16): is_manager's FileNotFoundError arm answers False because a branch with no passport has declared no class, which is what wake_branch's manager gate also does for a missing passport (pinned: test_missing_passport_continues). A passport that exists but cannot be read is the other arm, and since leg 11 it fails closed (True) under @devpulse's ruling e; since leg 12 an unreadable registry fails closed too."
+      "reason": "The value is the true answer (ai_mail, fleet green leg 11; re-lined in legs 13 and 16): is_manager's FileNotFoundError arm answers False because a branch with no passport has declared no class, which is what wake_branch's manager gate also does for a missing passport (pinned: test_missing_passport_continues). A passport that exists but cannot be read is the other arm, and since leg 11 it fails closed (True) under @devpulse's ruling e; since leg 12 an unreadable registry fails closed too. Line shifted 381 -> 394 by the Linux-only purge (2026-11-14)."
     },
     {
       "file": "apps/handlers/email/create.py",
@@ -215,17 +215,9 @@
       "file": "apps/handlers/registry/read.py",
       "standard": "logged_fallback",
       "lines": [
-        67
+        261
       ],
-      "reason": "Traced, the namesake is not reachable through this [] (ai_mail, fleet green leg 12, the commons-namesake re-read of the leg 11 HELD). get_all_branches answers [] for an unreadable AIPASS_REGISTRY.json. Its one resolver, deliver_email_to_branch, no longer trusts that: before the map widens to the caller's project, the admin sweep or the external tier, delivery asks check_registry_readable and refuses, naming the registry (pinned: test_an_unreadable_aipass_registry_refuses_rather_than_serving_a_hosted_namesake). The other callers list or match names, and every send they make goes through that delivery: email_send 181 (interactive list) and 306 (broadcast targets), email.handle_contacts 432 (display), reply.send_reply 151 (sender lookup), get_branch_by_email 146, delivery 632 (a path argument; a miss refuses). wake reads the registry itself and refuses since leg 12. A raise here would turn those CLI commands into 'not handled' through route_command."
-    },
-    {
-      "file": "apps/handlers/registry/read.py",
-      "standard": "logged_fallback",
-      "lines": [
-        270
-      ],
-      "reason": "Traced, the namesake is not reachable through this {} (ai_mail, fleet green leg 12). _residents_from_registry feeds get_resident_branches only, whose caller is @sentry's fresh_clone_check 13/40 (@all reads the fleet through memory's door instead). An unreadable resident registry drops that project's residents from the list; it adds no address and resolves no name, so no mail can reach another project's citizen through it. The failure is logged at error and names the registry. A raise would stop the whole broadcast to every other project and reach @sentry's check."
+      "reason": "Traced, the namesake is not reachable through this {} (ai_mail, fleet green leg 12). _residents_from_registry feeds get_resident_branches only, whose caller is @sentry's fresh_clone_check 13/40 (@all reads the fleet through memory's door instead). An unreadable resident registry drops that project's residents from the list; it adds no address and resolves no name, so no mail can reach another project's citizen through it. The failure is logged at error and names the registry. A raise would stop the whole broadcast to every other project and reach @sentry's check. Line shifted 270 -> 261 by the Linux-only purge (2026-11-14)."
     },
     {
       "file": "apps/handlers/dispatch/register.py",
@@ -265,9 +257,9 @@
       "file": "apps/ai_mail.py",
       "standard": "logged_fallback",
       "lines": [
-        146
+        143
       ],
-      "reason": "route_command (ai_mail, fleet green leg 9; re-lined DPLAN-0404 leg 3b and 2026-10-11): a BrokenPipeError is stdout closed early by the reader (e.g. piped to head); the command ran and was recognised, so True is the true answer."
+      "reason": "route_command (ai_mail, fleet green leg 9; re-lined DPLAN-0404 leg 3b and 2026-10-11): a BrokenPipeError is stdout closed early by the reader (e.g. piped to head); the command ran and was recognised, so True is the true answer. Line shifted 146 -> 143 when route_command stopped swallowing module crashes (2026-11-14): only the BrokenPipe arm answers here; every other crash propagates to main, which prints it and exits 2."
     },
     {
       "file": "apps/handlers/dispatch/pid_lock.py",
@@ -283,10 +275,10 @@
       "file": "apps/handlers/dispatch/wake.py",
       "standard": "logged_fallback",
       "lines": [
-        306,
-        327
+        313,
+        335
       ],
-      "reason": "The value is the true answer (ai_mail, fleet green leg 12; re-lined in legs 13 and 16). 362 and 386: _spawn_in_systemd_scope documents False as 'fall back to direct Popen', the same as a non-zero systemd-run, and its caller 1166 does exactly that."
+      "reason": "Said out loud, not dressed (ai_mail, fleet green leg 12; rewritten in the Linux-only purge 2026-11-14). 313 and 335: spawn_in_systemd_scope answers False when the env file cannot be written or systemd-run cannot run, the same as a non-zero systemd-run; each arm records a 'scope' warn step naming the failure, and the caller then starts the monitor as a plain child and reports it as one ('Monitor started as a plain child, outside a systemd scope'), so neither reads as a scope start."
     },
     {
       "file": "apps/handlers/dispatch/pid_lock.py",

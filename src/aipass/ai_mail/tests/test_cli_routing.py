@@ -3,7 +3,7 @@
 # Description: Tests for CLI routing and help display
 # Version: 1.1.0
 # Created: 2026-03-27
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/ai_mail.py's CLI routing: print_help, print_introspection, route_command, main."""
@@ -194,6 +194,34 @@ def test_main_unknown_command_returns_error(monkeypatch):
     with patch.object(ai_mail_mod, "discover_modules", return_value=[]):
         result = main()
     assert result == 1
+
+
+def test_main_a_crashing_command_prints_the_error_and_exits_2(monkeypatch):
+    """A module that recognised the command and crashed: its real error, exit 2, never "Unknown command"."""
+    crashing = MagicMock()
+    crashing.__name__ = "aipass.ai_mail.apps.modules.crashing"
+    crashing.handle_command.side_effect = RuntimeError("inbox.json is not JSON")
+    monkeypatch.setattr(sys, "argv", ["ai_mail", "inbox"])
+    with (
+        patch.object(ai_mail_mod, "discover_modules", return_value=[crashing]),
+        patch.object(ai_mail_mod, "_refuse_unresolvable_caller", return_value=""),
+        patch.object(ai_mail_mod, "error") as shown,
+    ):
+        result = main()
+    assert result == 2
+    shown.assert_called_once_with("inbox failed: RuntimeError: inbox.json is not JSON")
+
+
+def test_main_a_module_that_cannot_import_is_named_not_no_modules_found(monkeypatch, tmp_path):
+    """A discovery import error reaches the screen with its reason and exits 1."""
+    # A modules dir naming a module that does not exist: the real import fails, nothing is patched in importlib.
+    (tmp_path / "ghost.py").write_text("", encoding="utf-8")
+    monkeypatch.setattr(ai_mail_mod, "MODULES_DIR", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["ai_mail", "inbox"])
+    with patch.object(ai_mail_mod, "error") as shown:
+        result = main()
+    assert result == 1
+    shown.assert_called_once_with("ModuleNotFoundError: No module named 'aipass.ai_mail.apps.modules.ghost'")
 
 
 def test_main_version_flag(monkeypatch):

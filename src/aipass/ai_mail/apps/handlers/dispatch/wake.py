@@ -143,26 +143,32 @@ def _normalise_address(target: str) -> str:
 def fable_allowed() -> frozenset:
     """Which addresses may run Fable.
 
-    Missing, malformed or unreadable config falls back to the default, never to empty;
-    an EXPLICIT empty list is honoured (it revokes the grant from everyone).
+    A missing config, or one that does not name the key, keeps the coded default; an unreadable or
+    wrong-shape one grants nobody (fails closed, at ERROR). An EXPLICIT empty list revokes it from everyone.
     """
     try:
         config = _read_json(CONFIG_FILE)
     except JsonUnreadable as e:
-        logger.warning("[wake] %s — the Fable grant falls back to the default", e)
+        logger.error("[wake] %s — the Fable grant fails closed: nobody holds it", e)
+        return frozenset()
+    if config is None and not CONFIG_FILE.exists():
         return FABLE_GRANT_DEFAULT
-    if not isinstance(config, dict) or FABLE_GRANT_KEY not in config:
+    if not isinstance(config, dict):
+        logger.error(
+            "[wake] %s is %s, not an object — the Fable grant fails closed", CONFIG_FILE, type(config).__name__
+        )
+        return frozenset()
+    if FABLE_GRANT_KEY not in config:
         return FABLE_GRANT_DEFAULT
     granted = config[FABLE_GRANT_KEY]
     if not isinstance(granted, list):
-        logger.warning(
-            "[wake] %s in %s is %s, not a list — falling back to the default grant %s",
+        logger.error(
+            "[wake] %s in %s is %s, not a list — the Fable grant fails closed",
             FABLE_GRANT_KEY,
             CONFIG_FILE,
             type(granted).__name__,
-            sorted(FABLE_GRANT_DEFAULT),
         )
-        return FABLE_GRANT_DEFAULT
+        return frozenset()
     return frozenset(_normalise_address(str(entry)) for entry in granted)
 
 
@@ -303,6 +309,7 @@ def spawn_in_systemd_scope(monitor_cmd, branch_path, spawn_env, branch_email, lo
         env_file.chmod(0o600)
     except OSError as e:
         logger.warning("[wake] Failed to write env file for systemd-run: %s", e)
+        status.warn("scope", f"systemd-run env file not written ({e}); the monitor starts as a plain child")
         return False
 
     systemd_cmd = [
@@ -324,12 +331,17 @@ def spawn_in_systemd_scope(monitor_cmd, branch_path, spawn_env, branch_email, lo
         result = subprocess.run(systemd_cmd, capture_output=True, text=True, timeout=15)
     except (subprocess.SubprocessError, OSError) as e:
         logger.warning("[wake] systemd-run failed: %s", e)
+        status.warn("scope", f"systemd-run failed ({e}); the monitor starts as a plain child")
         return False
     finally:
         # EnvironmentFile is read at unit start; the environment copy must not outlive the launch.
         env_file.unlink(missing_ok=True)
     if result.returncode != 0:
         logger.warning("[wake] systemd-run failed (rc=%d): %s", result.returncode, result.stderr.strip())
+        status.warn(
+            "scope",
+            f"systemd-run failed (rc={result.returncode}: {result.stderr.strip()}); the monitor starts as a plain child",
+        )
         return False
 
     try:
@@ -350,7 +362,8 @@ def spawn_in_systemd_scope(monitor_cmd, branch_path, spawn_env, branch_email, lo
             with open(lock_file_path, "w", encoding="utf-8") as f:
                 json.dump(lock_data, f, indent=2)
     except (subprocess.SubprocessError, ValueError, OSError) as e:
-        logger.info("[wake] Could not query systemd unit PID: %s", e)
+        logger.warning("[wake] Could not query systemd unit PID: %s", e)
+        status.warn("pid", f"systemd unit PID unknown ({e}); no dispatch lock written")
 
     status.ok("spawn", f"Monitor started via systemd scope ({unit_name})")
     return True
@@ -1017,7 +1030,7 @@ def wake_branch(
             with open(lock_file, "w", encoding="utf-8") as f:
                 json.dump(lock_data, f, indent=2)
 
-            status.ok("spawn", f"Monitor started (PID {monitor_pid})")
+            status.ok("spawn", f"Monitor started as a plain child, outside a systemd scope (PID {monitor_pid})")
 
         except FileNotFoundError as e:
             lock_file = branch_path / ".ai_mail.local" / ".dispatch.lock"

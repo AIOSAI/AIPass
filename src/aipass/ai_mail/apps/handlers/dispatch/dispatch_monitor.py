@@ -924,9 +924,9 @@ def _final_result_json(stdout_log: str, provider: str) -> dict:
     return _parse_result_json(stdout_log)
 
 
-def prepend_to_path(path_value: str, entry: str, sep: str = os.pathsep) -> str:
-    """Return PATH with entry first, joined by the host's separator. sep is a parameter for tests."""
-    return sep.join([entry, path_value]) if path_value else entry
+def prepend_to_path(path_value: str, entry: str) -> str:
+    """Return PATH with entry first, joined by the host's separator."""
+    return os.pathsep.join([entry, path_value]) if path_value else entry
 
 
 def main():

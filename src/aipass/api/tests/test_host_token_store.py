@@ -3,7 +3,7 @@
 # Description: Tests for token provenance, revocation time and live/dormant telemetry
 # Version: 1.2.0
 # Created: 2026-08-14
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/host/tokens.py, the token store's accountability fields and its lock."""
@@ -333,6 +333,20 @@ class TestTheRowsRestInAnOwnerOnlyFile:
 
         with pytest.raises(host_tokens.secrets_store.SecretsUnavailable, match="tokens.json is not JSON"):
             host_tokens.load_tokens()
+
+    @pytest.mark.parametrize("document", [[], {"tokens": {}}, {"version": 2}, {"tokens": ["not a record"]}])
+    def test_a_misshaped_store_refuses_and_no_writer_overwrites_it(self, store: Path, document: Any) -> None:
+        (store / "host_api").mkdir()
+        path = store / "host_api" / "tokens.json"
+        path.write_text(json.dumps(document), encoding="utf-8")
+        before = path.read_bytes()
+
+        for write in (lambda: host_tokens.issue_token("phone"), lambda: host_tokens.revoke_token("abc")):
+            with pytest.raises(host_tokens.secrets_store.SecretsUnavailable, match="not a tokens document"):
+                write()
+        host_tokens.touch_token("abc")  # best effort: it logs and returns
+
+        assert path.read_bytes() == before
 
     def test_the_version_is_bumped_for_the_new_fields(self, store: Path) -> None:
         """A reader must be able to tell which shape it is holding."""

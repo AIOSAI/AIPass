@@ -3,7 +3,7 @@
 # Description: The settings conformance corpus, python side — shared goldens both runtimes must satisfy
 # Version: 1.0.0
 # Created: 2026-08-18
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/host/settings.py's read and write doors against the shared conformance corpus."""
@@ -39,7 +39,7 @@ RUNTIME = "python"
 SUPPORTED = "supported"
 PENDING = "pending"
 
-# Measured on the running machine, never read from sys.platform (root, Windows).
+# Measured on the running machine, never assumed (root reads through mode bits).
 UNREADABLE_FILES = "unreadable_files"
 POSIX_MODE_BITS = "posix_mode_bits"
 PARENT_IS_A_FILE_IS_DISTINGUISHABLE = "parent_is_a_file_is_distinguishable"

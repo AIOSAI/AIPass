@@ -1,9 +1,8 @@
-"""AI Mail handlers package - the fence.
+"""AI Mail handlers package - the fence (first import only; the wall is drone @sentry audit: handlers, encapsulation).
 
 Another branch reaches these handlers only through aipass.ai_mail.apps.modules; this refuses a foreign importer.
 Frames are kin (this branch), transport (importlib, stdlib such as unittest.mock, site-packages) or foreign.
 The first foreign frame is refused unless kin code imported on its behalf and its line does not name the handlers.
-Fires only on a process's first import; the wall is drone @sentry audit (handlers, encapsulation).
 """
 
 import linecache
@@ -18,10 +17,7 @@ _HANDLERS_SPELLINGS = (
 )
 _THIRD_PARTY_DIRS = ("/site-packages/", "/dist-packages/")
 
-try:
-    _THIS_FILE = str(Path(__file__).resolve())
-except OSError:
-    _THIS_FILE = str(__file__)
+_THIS_FILE = str(Path(__file__).resolve())
 # Exact prefixes, never a substring: a directory that merely shares a branch's name is not that branch.
 _BRANCH_ROOT = _THIS_FILE.rsplit("/", 3)[0] + "/"
 _FLEET_ROOT = _THIS_FILE.rsplit("/", 4)[0] + "/"
@@ -91,10 +87,7 @@ def _guard_branch_access() -> None:
     if frame is None or caller_path is None:  # both None together; the second test narrows the type
         return
 
-    try:
-        import_line = linecache.getline(frame.f_code.co_filename, frame.f_lineno).strip()
-    except OSError:
-        import_line = ""
+    import_line = linecache.getline(frame.f_code.co_filename, frame.f_lineno).strip()
 
     names_handlers = any(spelling in import_line for spelling in _HANDLERS_SPELLINGS)
     if kin_seen and not names_handlers:

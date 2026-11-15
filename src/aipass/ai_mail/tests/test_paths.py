@@ -3,7 +3,7 @@
 # Description: Tests for shared path utilities
 # Version: 1.0.1
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/paths.py -- repo root discovery and project root resolution."""
@@ -12,7 +12,6 @@
 # sentry: no-test-needed(shared) — find_project_root(), not driven here: tests/test_registry_case_sweep.py
 
 import pytest
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.paths as mod
@@ -48,9 +47,8 @@ def test_find_repo_root_finds_registry(tmp_path, monkeypatch):
     assert result == repo_dir
 
 
-def test_find_repo_root_returns_cwd_when_no_registry(tmp_path, monkeypatch):
-    """Returns Path.cwd() when no ancestor contains AIPASS_REGISTRY.json."""
-    # Use an isolated directory with no registry file anywhere above
+def test_find_repo_root_raises_when_no_marker(tmp_path, monkeypatch):
+    """No marker above the file raises RepoRootNotFound naming the markers and the start; the cwd is never the root."""
     isolated = tmp_path / "nowhere" / "deep"
     isolated.mkdir(parents=True)
     fake_file = isolated / "paths.py"
@@ -59,8 +57,10 @@ def test_find_repo_root_returns_cwd_when_no_registry(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "__file__", str(fake_file))
     monkeypatch.chdir(tmp_path)
 
-    result = mod.find_repo_root()
-    assert result == Path(str(tmp_path))
+    with pytest.raises(mod.RepoRootNotFound) as caught:
+        mod.find_repo_root()
+    assert "AIPASS_REGISTRY.json, pyproject.toml" in str(caught.value)
+    assert str(isolated) in str(caught.value)
 
 
 def test_find_repo_root_finds_registry_at_immediate_parent(tmp_path, monkeypatch):

@@ -67,22 +67,23 @@ class TokenError(Exception):
 
 
 def load_tokens() -> List[Dict[str, Any]]:
-    """Read every token record from the store."""
+    """Read every token record from the store: a missing store is empty, a misshaped one raises and is left alone.
+
+    mint, revoke and touch write back what this returns, so a store read as [] would be overwritten.
+    """
     stored = host_store.read(TOKEN_SLUG)
 
     if stored is None:
         return []
 
-    if not isinstance(stored, dict):
-        logger.error("[host_api] token store is not a JSON object — treating as empty (all requests will be denied)")
-        return []
+    records = stored.get("tokens") if isinstance(stored, dict) else None
+    if not isinstance(records, list) or not all(isinstance(record, dict) for record in records):
+        raise host_store.StoreUnavailable(
+            f"The host store file {host_store.store_path(TOKEN_SLUG).name} is not a tokens document "
+            "(an object holding a 'tokens' list of records); left untouched"
+        )
 
-    records = stored.get("tokens")
-    if not isinstance(records, list):
-        logger.error("[host_api] token store has no 'tokens' list — treating as empty (all requests will be denied)")
-        return []
-
-    return [record for record in records if isinstance(record, dict)]
+    return records
 
 
 def prepare_receipt_dir(target: Path) -> None:

@@ -11,17 +11,16 @@
 from typing import Dict, Any
 
 import json
+from pathlib import Path
 
 from aipass.prax import logger
-
-from aipass.api.apps.handlers.module_root import module_file
 
 from aipass.api.apps.handlers.json import json_handler
 
 
 MODULE_NAME = "aggregation"
 DATA_FILE = "usage_tracker_data.json"  # Standard 3-file pattern
-API_JSON_DIR = module_file(__file__).parent.parent.parent.parent / "api_json"
+API_JSON_DIR = Path(__file__).resolve().parent.parent.parent.parent / "api_json"
 
 
 def get_overall_stats() -> Dict[str, Any]:

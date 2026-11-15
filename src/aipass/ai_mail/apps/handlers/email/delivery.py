@@ -21,7 +21,7 @@ from typing import Dict, Tuple, List, Optional, Callable
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import REGISTRY_SUFFIX, find_repo_root, find_project_root, registries_in
-from aipass.ai_mail.apps.handlers.registry.read import get_all_branches
+from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable, get_all_branches
 from aipass.ai_mail.apps.handlers.email.inbox_ops import count_new, migrate_inbox_format
 
 
@@ -367,8 +367,14 @@ def deliver_email_to_branch(
     json_handler.log_operation("deliver_email", {"to": to_branch, "subject": email_data.get("subject", "")})
 
     # drone's @ resolution may hand in a path instead of an address.
+    try:
+        all_branches = get_all_branches()
+    except RegistryUnreadable as e:
+        logger.warning("[delivery] AIPass registry unreadable for %s: %s", to_branch, e)
+        return False, f"AIPass registry unreadable, {to_branch} not resolved: {e}"
+
     if to_branch.startswith("/") or Path(to_branch).is_absolute():
-        branches_list = get_all_branches()
+        branches_list = all_branches
         path_to_email = {b["path"]: b["email"] for b in branches_list}
         if to_branch in path_to_email:
             to_branch = path_to_email[to_branch]
@@ -383,19 +389,9 @@ def deliver_email_to_branch(
             if not matched:
                 return False, f"Could not resolve path to email: {to_branch}"
 
-    all_branches = get_all_branches()
     branches = {b["email"]: b["path"] for b in all_branches}
 
     if to_branch not in branches:
-        # get_all_branches answers [] for an unreadable registry too: before the map widens,
-        # an AIPass name must not read as absent and be served to another root's namesake.
-        from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable, check_registry_readable
-
-        try:
-            check_registry_readable(_REPO_ROOT / "AIPASS_REGISTRY.json")
-        except RegistryUnreadable as e:
-            logger.warning("[delivery] AIPass registry unreadable for %s: %s", to_branch, e)
-            return False, f"AIPass registry unreadable, {to_branch} not resolved: {e}"
         caller_cwd = os.environ.get("AIPASS_CALLER_CWD", "")
         if caller_cwd:
             try:
@@ -410,7 +406,7 @@ def deliver_email_to_branch(
         from aipass.ai_mail.apps.handlers.users import verified_caller
 
         if verified_caller.is_verified_admin_caller():
-            from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable, get_project_tree_branches
+            from aipass.ai_mail.apps.handlers.registry.read import get_project_tree_branches
 
             try:
                 branches.update(get_project_tree_branches(_REPO_ROOT))

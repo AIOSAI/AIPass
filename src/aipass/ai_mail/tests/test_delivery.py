@@ -3,7 +3,7 @@
 # Description: Tests for email delivery handler
 # Version: 1.1.0
 # Created: 2026-03-29
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py."""
@@ -21,6 +21,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import aipass.ai_mail.apps.handlers.email.delivery as delivery_mod
+import aipass.ai_mail.apps.handlers.registry.read as registry_read
 import aipass.ai_mail.apps.handlers.notify as notify_mod
 from aipass.memory.apps.modules import fleet
 from aipass.ai_mail.apps.handlers.email.delivery import deliver_email_to_branch
@@ -856,11 +857,10 @@ def test_an_unreadable_hosted_registry_refuses_the_admin_rather_than_serving_a_n
 def test_an_unreadable_aipass_registry_refuses_rather_than_serving_a_hosted_namesake(external_world, monkeypatch):
     """Mail for an AIPass citizen never lands on a hosted project's citizen of the same name.
 
-    AIPASS_REGISTRY.json is not JSON, so get_all_branches answers [] (stood in
-    here: the real one reads this checkout's registry). Before leg 12 the admin
-    sweep then found projects/lab's @target and the verified admin, exempt from
-    the boundary, had the mail delivered there. Now delivery refuses and names
-    the AIPass registry.
+    AIPASS_REGISTRY.json is not JSON, so the real get_all_branches raises RegistryUnreadable. Before
+    leg 12 the admin sweep found projects/lab's @target and the verified admin,
+    exempt from the boundary, had the mail delivered there. Now delivery refuses
+    and names the AIPass registry.
     """
     home = external_world["tmp"] / "AIPass"
     (home / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")
@@ -870,7 +870,9 @@ def test_an_unreadable_aipass_registry_refuses_rather_than_serving_a_hosted_name
         json.dumps({"branches": [{"name": "target", "email": "@target", "path": str(lab_target)}]}),
         encoding="utf-8",
     )
-    monkeypatch.setattr(delivery_mod, "get_all_branches", lambda *a, **kw: [])
+    monkeypatch.setattr(registry_read, "BRANCH_REGISTRY_PATH", home / "AIPASS_REGISTRY.json")
+    # The world fixture stands in get_all_branches; restore the real reader for this file.
+    monkeypatch.setattr(delivery_mod, "get_all_branches", registry_read.get_all_branches)
     # No caller cwd: from the admin seat's cwd the caller-project walk already
     # reaches AIPASS_REGISTRY.json and refuses; this is the lane with no walk.
     monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")

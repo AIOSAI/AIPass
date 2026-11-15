@@ -3,7 +3,7 @@
 # Description: Tests for absolute mailbox_path resolution in user functions
 # Version: 1.0.3
 # Created: 2026-03-17
-# Modified: 2026-11-08
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/users/user.py and apps/handlers/paths.py's find_repo_root()."""
@@ -311,36 +311,20 @@ class TestDetectionFailureDiagnostics:
             get_current_user()
 
 
-class TestRepoRootFallbackIsLoud:
-    """The cwd fallback still happens, but it stops being silent."""
+class TestNoRepoRootIsRefused:
+    """A tree with neither marker raises; mail is never silently rooted at the caller's cwd."""
 
-    def test_the_fallback_names_itself_once(self, monkeypatch, tmp_path, caplog):
-        """Silence here was doing real work — every caller got "wherever I stand".
-
-        A tree with neither marker is broken: the warning must be findable and must not repeat per call.
-        """
-        import logging
-
-        monkeypatch.setattr(paths, "_CWD_FALLBACK_WARNED", False)
+    def test_neither_marker_raises_rather_than_answering_the_cwd(self, monkeypatch, tmp_path):
+        """The old fallback answered "wherever I stand"; now the walk names what it looked for."""
         monkeypatch.setattr(paths, "__file__", str(tmp_path / "nowhere" / "paths.py"))
         monkeypatch.chdir(tmp_path)
 
-        with caplog.at_level(logging.WARNING):
-            first = paths.find_repo_root()
-            paths.find_repo_root()
+        with pytest.raises(paths.RepoRootNotFound, match="none of AIPASS_REGISTRY.json, pyproject.toml"):
             paths.find_repo_root()
 
-        assert first == tmp_path, "anchor: the fallback must actually have fired"
-        warnings = [r for r in caplog.records if "falling back to the current directory" in r.getMessage()]
-        assert len(warnings) == 1, "warned once per process — a line per call is the runaway-log problem"
-
-    def test_it_still_returns_rather_than_raising(self, monkeypatch, tmp_path):
-        """Refusing would make every CI run an import-time failure by construction."""
-        monkeypatch.setattr(paths, "_CWD_FALLBACK_WARNED", False)
-        monkeypatch.setattr(paths, "__file__", str(tmp_path / "nowhere" / "paths.py"))
-        monkeypatch.chdir(tmp_path)
-
-        assert paths.find_repo_root() == tmp_path
+    def test_it_is_not_a_missing_file_error(self):
+        """A dead cwd (FileNotFoundError) and a missing root stay distinguishable."""
+        assert not issubclass(paths.RepoRootNotFound, FileNotFoundError)
 
 
 class TestTheFreshCheckoutFindsTheRightRoot:
@@ -359,7 +343,6 @@ class TestTheFreshCheckoutFindsTheRightRoot:
         elsewhere = tmp_path / "somewhere-else"
         elsewhere.mkdir()
 
-        monkeypatch.setattr(paths, "_CWD_FALLBACK_WARNED", False)
         monkeypatch.setattr(
             paths, "__file__", str(checkout / "src" / "aipass" / "ai_mail" / "apps" / "handlers" / "paths.py")
         )
@@ -379,19 +362,6 @@ class TestTheFreshCheckoutFindsTheRightRoot:
         monkeypatch.setattr(paths, "__file__", str(inner / "paths.py"))
 
         assert paths.find_repo_root() == inner
-
-    def test_neither_marker_anywhere_still_falls_back_loudly(self, monkeypatch, tmp_path, caplog):
-        """The last resort survives — it is just no longer the fresh-checkout path."""
-        import logging
-
-        monkeypatch.setattr(paths, "_CWD_FALLBACK_WARNED", False)
-        monkeypatch.setattr(paths, "__file__", str(tmp_path / "bare" / "paths.py"))
-        monkeypatch.chdir(tmp_path)
-
-        with caplog.at_level(logging.WARNING):
-            assert paths.find_repo_root() == tmp_path
-
-        assert any("falling back to the current directory" in r.getMessage() for r in caplog.records)
 
 
 class TestASenderAtADeclaredRoot:

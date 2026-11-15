@@ -84,14 +84,6 @@
       "reason": "_alive's two handlers ARE its answers, not failures: ProcessLookupError from kill(pid, 0) is the kernel saying the pid is gone (False), PermissionError is the kernel saying it exists under another owner (True). No failure is dressed as an answer (api, fleet green leg 9). Lines moved 343/349 -> 407/413 with DPLAN-0408's server_home above them, 407/413 -> 413/419 when _runtime_dir followed it, 413/419 -> 192/195 in the comment sweep (2026-10-17). Lines shifted by the Linux-only purge (2026-11-14): 192 -> 166, 195 -> 169."
     },
     {
-      "file": "apps/handlers/host/tokens.py",
-      "standard": "logged_fallback",
-      "lines": [
-        349
-      ],
-      "reason": "_is_due answers whether to rewrite a stamp; an unreadable stamp is due by definition (the docstring says so) and is overwritten with a readable one on the same request. True here is the answer, not a stand-in for a failure (api, fleet green leg 9). Re-ruled by devpulse 2026-10-10 (3ef9df96): a stamp nobody can read is not a stamp, the same answer as an absent one, and due is the fail-safe direction; the warning makes a hand-edited store visible once. Line moved 653 -> 656 with cf762733's comment, 656 -> 660 with 727ad04c's (PR #774 r10), 660 -> 696 with DPLAN-0406's shared store_lock and write_private_json above it, 696 -> 349 in the comment sweep (2026-10-17)."
-    },
-    {
       "file": "apps/handlers/host/server.py",
       "standard": "logged_fallback",
       "lines": [
@@ -269,14 +261,6 @@
       "reason": "FILE-WIDE, the checker passes no line. One shutil.which answering nothing on PATH, so the route's missing-binary answer does not depend on whether the runner has baud installed (api, fleet green leg 10)."
     },
     {
-      "file": "tests/support_host_attach.py",
-      "standard": "through_the_command",
-      "lines": [
-        101
-      ],
-      "reason": "The fake PTY's resize validates with the product's own _require_dimension, so the double refuses exactly what the real session refuses; a copied validator would drift, and a public one would be a door for the double alone. HELD since leg 8 (api, fleet green leg 11). Moved with StubSession from test_host_attach.py:1513 in the oversize split (api, 2026-10-08). Line moved 171 -> 101 in the comment sweep (2026-10-17)."
-    },
-    {
       "file": "tests/test_host_perf.py",
       "standard": "through_the_command",
       "lines": [
@@ -294,14 +278,6 @@
         24
       ],
       "reason": "_write_json is imported by name: its parent mkdir and its two failure paths cannot be reached through cleanup_old_data, which only writes a store it has just read and parsed. A public writer would be a door for these tests alone. HELD since leg 9 (api, fleet green leg 11). Line moved 33 -> 22 in the comment sweep (2026-10-17), 22 -> 24 with the os/time imports (2026-11-14)."
-    },
-    {
-      "file": "tests/test_caller_detection.py",
-      "standard": "through_the_command",
-      "lines": [
-        19
-      ],
-      "reason": "The flow and prax detection is pinned through get_caller_info (TestGetCallerInfo). The helpers stay imported by name for their fallback branch, where parts.index raises, which a stack frame's filename (a str turned into a Path) cannot produce; _create_fallback_info is reached only there. HELD since leg 9 (api, fleet green leg 11). Line moved 28 -> 19 in the comment sweep (2026-10-17)."
     },
     {
       "file": "tests/test_host_uploads.py",

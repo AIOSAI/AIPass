@@ -3,7 +3,7 @@
 # Description: Tests for dispatch monitor lifecycle handler
 # Version: 1.5.0
 # Created: 2026-04-02
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's main(): the attempts, the bounce, the completion fire."""
@@ -885,10 +885,10 @@ def test_main_lock_left_for_successor_monitor(monkeypatch, main_argv, tmp_path):
 # --- Environment variable setup tests ---------------------------------
 
 
-def test_spawn_path_is_joined_with_the_separator_handed_in():
-    """The spawn PATH joins with the separator handed in; the string is asserted and nothing is started."""
-    assert mod.prepend_to_path("usr_bin", "venv_bin", sep=":") == "venv_bin:usr_bin"
-    assert mod.prepend_to_path("", "venv_bin", sep=":") == "venv_bin"
+def test_spawn_path_puts_the_entry_first():
+    """The spawn PATH puts the entry first, colon-joined; the string is asserted and nothing is started."""
+    assert mod.prepend_to_path("usr_bin", "venv_bin") == "venv_bin:usr_bin"
+    assert mod.prepend_to_path("", "venv_bin") == "venv_bin"
 
 
 def test_env_vars_set_correctly(monkeypatch, main_argv, tmp_path):

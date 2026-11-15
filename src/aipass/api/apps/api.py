@@ -45,17 +45,14 @@ def discover_modules() -> List[Any]:
 
         module_name = file_path.stem
 
-        try:
-            module = importlib.import_module(f"aipass.api.apps.modules.{module_name}")
+        # A module that cannot import raises: main says which and why, never "No modules found".
+        module = importlib.import_module(f"aipass.api.apps.modules.{module_name}")
 
-            if hasattr(module, "handle_command"):
-                modules.append(module)
-                logger.info(f"  [+] {module_name}")
-            else:
-                logger.warning(f"  [!] {module_name} - missing handle_command()")
-
-        except Exception as e:
-            logger.error(f"  [-] {module_name} - import error: {e}")
+        if hasattr(module, "handle_command"):
+            modules.append(module)
+            logger.info(f"  [+] {module_name}")
+        else:
+            logger.warning(f"  [!] {module_name} - missing handle_command()")
 
     logger.info(f"[{Path(__file__).stem}] Discovered {len(modules)} modules")
     return modules
@@ -200,7 +197,7 @@ def print_help():
     console.print()
 
     console.print(
-        "[dim]Commands: get-key, get-secret, secrets, validate, test, models, status, call,"
+        "[dim]Commands: get-key, get-secret, secrets migrate, validate, test, models, status, call,"
         " list-providers, init, track, stats, session, caller-usage, cleanup,"
         " integrations, host-api[/dim]"
     )
@@ -287,6 +284,7 @@ def main():
 
     except Exception as exc:
         logger.error("[api] Unhandled error in main: %s", exc)
+        error(f"{type(exc).__name__}: {exc}")
         return 1
 
 

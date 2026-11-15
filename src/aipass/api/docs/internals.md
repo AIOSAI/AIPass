@@ -1,42 +1,17 @@
 [<- Back to the README](../README.md)
 
-# Internals — import safety and the conformance corpus
+# Internals — the handlers fence and the conformance corpus
 
-**Branch** api · **Code** `apps/handlers/__init__.py`, `apps/handlers/module_root.py`, `apps/handlers/host/settings.py`
+**Branch** api · **Code** `apps/handlers/__init__.py`, `apps/handlers/host/settings.py`
 
 ---
 
-## No module needs a working directory to be imported
+## The handlers fence walks frames without a working directory
 
-`ntpath.realpath` reads `os.getcwd()` **unconditionally** — not only for relative paths, the way
-`posixpath` does — and `Path.resolve()` routes through it. So on Windows every
-`Path(__file__).resolve()` *reached at import* is an import-time cwd dependency: a process whose
-working directory has been deleted cannot import the module at all. On POSIX the equivalent raise
-happens earlier, inside a `try` that `inspect` already owns, which is why it does not show on
-Linux.
-
-The discriminator is **reached at import**, not written at module scope, so it is measured by
-*running* the imports in a child interpreter, never by grepping for spellings. Two denial worlds
-are needed, because one cannot convict both species: A, realpath reads cwd and then cwd is denied
-(convicts a raw `resolve()`); B, realpath denied directly with abspath left working (convicts
-`inspect.stack`). Every module under `apps/` imports in both.
-
-Two cures:
-
-- `apps/handlers/__init__.py` walks frames with `sys._getframe` instead of `inspect.stack()`,
-  skips pseudo-files and importlib frames *before* any resolve, guards the resolve with a
-  raw-spelling fallback, and reads the import line with `linecache`. It makes one walk, with no
-  second `inspect.stack()` walk in the caller-is-None branch.
-- `apps/handlers/module_root.py` holds `module_file()`, the one guarded spelling. **Two**
-  module-level constants route through it (`usage/aggregation.py`, `usage/tracking.py`). Its
-  diagnostics live inside their own protection: the world that reaches the fallback is the world
-  where prax's logger may be down too, so `sys.stderr` is the last resort rather than a crash.
-
-Pinned in `tests/test_dead_cwd_imports.py`. The behavioural pins cannot see an `inspect.stack()`
-walk in the guard — `apps/__init__` always supplies a real-file frame, so such a walk leaves them
-green — so an **AST ban** convicts any `inspect.stack` call in the guard file. It is an
-AST ban and not a string ban because the guard's own docstring names `inspect.stack` while
-explaining the defect, and a spelling ban would convict the explanation.
+`apps/handlers/__init__.py` walks frames with `sys._getframe`, skips pseudo-files and importlib
+frames *before* any resolve, and guards each frame's resolve with a raw-spelling fallback
+(`_frame_path`): an outer frame's filename can be relative (an `exec`'d source, a relative zip, a
+sourceless `.pyc`), and resolving a relative path reads the cwd, which a process may have lost.
 
 ## The settings conformance corpus
 

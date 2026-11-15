@@ -99,7 +99,7 @@ def get_cached_client(
 
 
 def make_api_request(client: OpenAI, messages: List[Dict], model: str, retries: int = 1, **kwargs) -> Optional[Any]:
-    """Execute API request via OpenRouter with retry logic."""
+    """Execute API request via OpenRouter with retry logic; raises OpenRouterUnavailable with the provider's reason."""
     if not client or not messages or not model:
         logger.warning(
             f"make_api_request() called with missing params — "
@@ -127,7 +127,9 @@ def make_api_request(client: OpenAI, messages: List[Dict], model: str, retries: 
                 time.sleep(delay)
 
     logger.error(f"API request failed for {model} after {1 + retries} attempts: {last_error}")
-    return None
+    raise OpenRouterUnavailable(
+        f"OpenRouter request for {model} failed after {1 + retries} attempts: {last_error}"
+    ) from last_error
 
 
 def extract_response(response: Any) -> Optional[Dict[str, Any]]:

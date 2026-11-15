@@ -23,7 +23,6 @@ import aipass
 
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
-from aipass.api.apps.handlers.module_root import module_file
 from aipass.api.apps.handlers.host import agent_transcript as transcript
 from aipass.api.apps.handlers.host import fleet as host_fleet
 
@@ -74,7 +73,7 @@ def find_agent(project: str, name: str) -> Dict[str, Any]:
 
 def engine_log() -> Path:
     """The hooks engine's event log: one row per hook per Claude Code or Codex event, stamped with the session id."""
-    return module_file(aipass.__file__).parent / "hooks" / "logs" / "engine.jsonl"
+    return Path(aipass.__file__).resolve().parent / "hooks" / "logs" / "engine.jsonl"
 
 
 def engine_rows() -> Optional[List[Dict[str, Any]]]:

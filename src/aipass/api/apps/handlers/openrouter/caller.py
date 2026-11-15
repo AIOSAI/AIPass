@@ -54,77 +54,37 @@ def get_caller_info() -> Optional[Dict[str, Any]]:
         return None
 
 
-def detect_caller_category(caller_path: Path) -> str:
-    """Categorize caller based on file path."""
-    path_parts = caller_path.parts
-
-    if "flow" in path_parts:
-        return "flow"
-    elif "prax" in path_parts:
-        return "prax"
-    else:
-        return "unknown"
-
-
 def _detect_flow_caller(frame_path: Path) -> Dict[str, Any]:
-    """Detect flow module caller from stack frame path."""
-    try:
-        flow_index = frame_path.parts.index("flow")
-        flow_path = Path(*frame_path.parts[: flow_index + 1])
-        json_folder_path = flow_path / "flow_json"
-        caller_name = frame_path.stem
-
-        logger.info(f"[{MODULE_NAME}] Detected flow caller: {caller_name}")
-
-        return {
-            "caller_name": caller_name,
-            "caller_path": frame_path,
-            "json_folder": json_folder_path,
-            "category": "flow",
-            "detection_method": "stack",
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to detect flow caller: {e}")
-        return _create_fallback_info(frame_path)
-
-
-def _detect_prax_caller(frame_path: Path) -> Dict[str, Any]:
-    """Detect prax module caller from stack frame path."""
-    try:
-        prax_index = frame_path.parts.index("prax")
-        prax_path = Path(*frame_path.parts[: prax_index + 1])
-        json_folder_path = prax_path / "prax_json"
-        caller_name = frame_path.stem
-
-        logger.info(f"[{MODULE_NAME}] Detected prax caller: {caller_name}")
-
-        return {
-            "caller_name": caller_name,
-            "caller_path": frame_path,
-            "json_folder": json_folder_path,
-            "category": "prax",
-            "detection_method": "stack",
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to detect prax caller: {e}")
-        return _create_fallback_info(frame_path)
-
-
-def _create_fallback_info(frame_path: Path) -> Dict[str, Any]:
-    """Create fallback caller info when detection fails."""
+    """Detect flow module caller from stack frame path; get_caller_info only calls it when "flow" is a part."""
+    flow_index = frame_path.parts.index("flow")
+    flow_path = Path(*frame_path.parts[: flow_index + 1])
     caller_name = frame_path.stem
-    category = detect_caller_category(frame_path)
 
-    logger.info(f"[{MODULE_NAME}] Using fallback detection for: {caller_name}")
+    logger.info(f"[{MODULE_NAME}] Detected flow caller: {caller_name}")
 
     return {
         "caller_name": caller_name,
         "caller_path": frame_path,
-        "json_folder": None,
-        "category": category,
-        "detection_method": "fallback",
+        "json_folder": flow_path / "flow_json",
+        "category": "flow",
+        "detection_method": "stack",
+    }
+
+
+def _detect_prax_caller(frame_path: Path) -> Dict[str, Any]:
+    """Detect prax module caller from stack frame path; get_caller_info only calls it when "prax" is a part."""
+    prax_index = frame_path.parts.index("prax")
+    prax_path = Path(*frame_path.parts[: prax_index + 1])
+    caller_name = frame_path.stem
+
+    logger.info(f"[{MODULE_NAME}] Detected prax caller: {caller_name}")
+
+    return {
+        "caller_name": caller_name,
+        "caller_path": frame_path,
+        "json_folder": prax_path / "prax_json",
+        "category": "prax",
+        "detection_method": "stack",
     }
 
 

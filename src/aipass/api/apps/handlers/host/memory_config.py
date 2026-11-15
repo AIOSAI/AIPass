@@ -167,7 +167,7 @@ def _route_write(command: str, args: List[str]) -> Any:
 
 def _text_of(result: Any) -> str:
     """The output to read, whichever stream it arrived on."""
-    # The exit code is never consulted: @memory refuses with 0 branch-wide.
+    # The exit code is not consulted: their refusal is read from the document (_refuse_if_they_did).
     stdout = (getattr(result, "stdout", "") or "").strip()
     if stdout:
         return stdout

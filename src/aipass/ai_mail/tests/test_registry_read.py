@@ -3,7 +3,7 @@
 # Description: Tests for registry read handler
 # Version: 1.0.2
 # Created: 2026-03-24
-# Modified: 2026-11-08
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/registry/read.py."""
@@ -11,7 +11,6 @@
 # Branch listing and email derivation.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(stdlib) — get_all_branches()'s broad except Exception fallback on a malformed registry file
 
 import json
 import pytest
@@ -100,6 +99,14 @@ def test_get_all_branches_no_registry(tmp_path, monkeypatch):
     monkeypatch.setattr(read_mod, "BRANCH_REGISTRY_PATH", nonexistent)
     result = get_all_branches()
     assert result == []
+
+
+@pytest.mark.parametrize("text", ["{not json", "[]", '{"branches": "drone"}', '{"branches": ["drone"]}'])
+def test_get_all_branches_unreadable_registry_raises(registry_file, text):
+    """An unreadable or misshaped registry raises RegistryUnreadable: it is not an empty registry."""
+    registry_file.write_text(text, encoding="utf-8")
+    with pytest.raises(read_mod.RegistryUnreadable, match="could not be read"):
+        get_all_branches()
 
 
 def test_get_all_branches_valid(registry_file):

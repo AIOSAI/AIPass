@@ -112,7 +112,7 @@ Depth lives in [docs/](docs/README.md), one file per surface or handler group:
 | [docs/host_autostart.md](docs/host_autostart.md) | The systemd user unit, what it installs, and what it deliberately does not |
 | [docs/git_surface.md](docs/git_surface.md) | The git reads the phone asks for: patch, changes, log, commit |
 | [docs/git_remote.md](docs/git_remote.md) | The remote lane, its two fields, and why credentials never travel |
-| [docs/internals.md](docs/internals.md) | Import safety without a working directory, and the settings conformance corpus |
+| [docs/internals.md](docs/internals.md) | The handlers fence, and the settings conformance corpus |
 | [docs/SECURITY.md](docs/SECURITY.md) | The security posture of the host API and the credential store |
 
 ---

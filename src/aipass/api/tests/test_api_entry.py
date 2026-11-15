@@ -3,7 +3,7 @@
 # Description: Tests for api.py entry point CLI
 # Version: 1.0.2
 # Created: 2026-05-12
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/api.py, the entry point CLI for drone @api."""
@@ -88,8 +88,8 @@ class TestDiscoverModules:
         mock_logger.warning.assert_any_call("  [!] nohandler - missing handle_command()")
 
     @patch(PATCH_LOGGER)
-    def test_handles_import_error(self, mock_logger, tmp_path):
-        """Logs error and skips modules that fail to import."""
+    def test_an_import_error_is_raised_not_skipped(self, mock_logger, tmp_path):
+        """A module that fails to import raises, so main prints why instead of "No modules found"."""
         modules_dir = tmp_path / "modules"
         modules_dir.mkdir()
         (modules_dir / "broken.py").write_text("raise ImportError\n", encoding="utf-8")
@@ -97,11 +97,9 @@ class TestDiscoverModules:
         with (
             patch(PATCH_MODULES_DIR, modules_dir),
             patch("aipass.api.apps.api.importlib.import_module", side_effect=ImportError("bad import")),
+            pytest.raises(ImportError, match="bad import"),
         ):
-            result = discover_modules()
-
-        assert result == []
-        mock_logger.error.assert_called_once()
+            discover_modules()
 
     @patch(PATCH_LOGGER)
     def test_skips_underscore_files(self, mock_logger, tmp_path):
@@ -330,12 +328,13 @@ class TestMain:
     @patch(PATCH_CONSOLE)
     @patch(PATCH_DISCOVER, side_effect=RuntimeError("catastrophic"))
     def test_unhandled_exception(self, mock_discover, mock_console, mock_logger, mock_error, mock_jh):
-        """Unhandled exception returns 1 and logs error."""
+        """Unhandled exception (a module that cannot import, say) returns 1 and prints the real error."""
         with patch("sys.argv", ["api", "get-key"]):
             result = main()
 
         assert result == 1
         mock_logger.error.assert_called_once()
+        mock_error.assert_called_once_with("RuntimeError: catastrophic")
 
 
 class TestRouterNormalisesHelpFlag:

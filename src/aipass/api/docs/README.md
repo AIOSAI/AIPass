@@ -15,7 +15,7 @@ is the face; these are what you open when something breaks.
 | [host_autostart.md](host_autostart.md) | The systemd user unit, what it installs, and what it deliberately does not |
 | [git_surface.md](git_surface.md) | The git reads the phone asks for: patch, changes, log, commit |
 | [git_remote.md](git_remote.md) | The remote lane, its two fields, and why credentials never travel |
-| [internals.md](internals.md) | Import safety without a working directory, and the settings conformance corpus |
+| [internals.md](internals.md) | The handlers fence, and the settings conformance corpus |
 | [SECURITY.md](SECURITY.md) | The security posture of the host API and the credential store |
 
 Work in progress, research and dated one-offs belong in `docs.local/`, not here: this
