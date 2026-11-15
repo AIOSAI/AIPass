@@ -3,7 +3,7 @@
 # Description: Dead-cwd import defect - child pins, live-injection controls, AST ban on inspect.stack
 # Version: 1.3.0
 # Created: 2026-08-31
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/__init__.py and every canary package, imported under a dead cwd."""

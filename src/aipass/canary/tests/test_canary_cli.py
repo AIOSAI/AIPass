@@ -3,7 +3,7 @@
 # Description: Tests for canary's entry point routing, help and introspection
 # Version: 1.1.0
 # Created: 2026-08-22
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/canary.py, the entry point: routing, help and introspection."""

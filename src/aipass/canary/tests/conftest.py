@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for canary - json seam, console width, command state, logger capture
 # Version: 3.3.0
 # Created: 2025-11-08
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 #
 # CHANGELOG (Max 5 entries):
 #   - v3.3.0 (2026-10-10): temp_test_dir and sample_test_data retired - the template's

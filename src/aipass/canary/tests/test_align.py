@@ -3,7 +3,7 @@
 # Description: Tests for the column aligner - drone @canary align, its JSON form and its refusals
 # Version: 1.1.0
 # Created: 2026-09-20
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/align.py and the table aligner it drives."""

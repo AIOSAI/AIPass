@@ -3,7 +3,7 @@
 # Description: Tests for the key/value store - drone @canary kv, its JSON form, its file and its refusals
 # Version: 1.1.0
 # Created: 2026-09-20
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/kv.py and the kv store it drives."""
