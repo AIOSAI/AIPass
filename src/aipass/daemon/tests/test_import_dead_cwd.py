@@ -3,7 +3,7 @@
 # Description: Pins daemon imports against a dead working directory
 # Version: 1.1.2
 # Created: 2026-08-31
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/module_root.py — every daemon module imports without a readable working directory."""

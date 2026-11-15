@@ -3,7 +3,7 @@
 # Description: Tests for the timer_install module (systemd user timer installer)
 # Version: 1.1.1
 # Created: 2026-06-25
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/timer_install.py — install-timer and uninstall-timer, the systemd user timer."""
@@ -98,6 +98,7 @@ if said:
     print(said, file=sys.stderr)
 sys.exit(code)
 """
+
 
 @pytest.fixture
 def systemctl_on_path(tmp_path, monkeypatch):

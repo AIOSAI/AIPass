@@ -4,7 +4,7 @@
 # Description: Shared pytest fixtures for daemon tests - host-state seals, sentinels, console pin
 # Version: 1.4.0
 # Created: 2026-03-07
-# Modified: 2026-11-10
+# Modified: 2026-11-14
 # Category: daemon/tests
 #
 # CHANGELOG (Max 5 entries):

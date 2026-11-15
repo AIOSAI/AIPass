@@ -3,7 +3,7 @@
 # Description: Command jobs - a scheduled drone command run as a subprocess, no wake
 # Version: 1.1.0
 # Created: 2026-09-11
-# Modified: 2026-10-25
+# Modified: 2026-11-14
 # =============================================
 
 """Command jobs (DPLAN-0338): a schedule job that runs a drone command instead of waking an agent.
@@ -41,6 +41,7 @@ TAIL_MAX_CHARS = 400
 #: Between SIGTERM to the group and SIGKILL to whatever ignored it.
 _STOP_GRACE_SECONDS = 2.0
 _STOP_POLL_SECONDS = 0.05
+
 
 @dataclass
 class CommandResult:

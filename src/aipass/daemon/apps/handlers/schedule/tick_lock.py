@@ -3,7 +3,7 @@
 # Description: Single-instance lock for the scheduler tick
 # Version: 1.0.0
 # Created: 2026-09-08
-# Modified: 2026-10-17
+# Modified: 2026-11-14
 # =============================================
 
 """One tick at a time: the advisory lock the scheduler runs under.
