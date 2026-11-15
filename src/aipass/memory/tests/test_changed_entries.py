@@ -3,7 +3,7 @@
 # Description: changed_entries diff helper and the write_memory_file entry-limits wiring (FPLAN-0270 phase 3)
 # Version: 1.0.1
 # Created: 2026-06-13
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/json/entry_limits.py changed_entries and its write_memory_file wiring in memory_files.py."""
@@ -1039,13 +1039,20 @@ class TestTheFileBudgets:
         hits = entry_limits.check_file_budget("passport.json", "{broken" + "x" * 300, self._budgets())
         assert [h["reason"] for h in hits] == ["file_over_budget"]
 
-    def test_the_budgets_come_from_the_one_reader(self):
-        """entry_limits delegates; two readers of one key is the drift load() ended."""
-        mod = entry_limits
-        budgets = mod.load_file_budgets()
-        assert budgets["local.json"]["max_chars"] == 25000
-        assert budgets["observations.json"]["max_chars"] == 15000
-        assert budgets["passport.json"] == {"max_chars": 6000, "max_string_chars": 600}
+    def test_the_budgets_come_from_the_one_reader(self, tmp_path, monkeypatch):
+        """entry_limits delegates; two readers of one key is the drift load() ended.
+
+        Values no default carries, so a copied constant cannot pass; the operator's live budgets stay free to move.
+        """
+        config_path = tmp_path / "memory.config.json"
+        planted = {"local.json": {"max_chars": 31337}, "passport.json": {"max_chars": 4321, "max_string_chars": 77}}
+        config_path.write_text(json.dumps({"entry_limits": {"file_budgets": planted}}), encoding="utf-8")
+        monkeypatch.setattr(entry_limits.config_loader, "_CONFIG_PATH", config_path)
+
+        budgets = entry_limits.load_file_budgets()
+
+        assert budgets["local.json"]["max_chars"] == 31337
+        assert budgets["passport.json"] == {"max_chars": 4321, "max_string_chars": 77}
 
 
 class TestTheRefusalTextTheAgentReads:

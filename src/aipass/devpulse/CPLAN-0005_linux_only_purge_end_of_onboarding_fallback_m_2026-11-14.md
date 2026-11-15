@@ -159,7 +159,10 @@ Full suite 11-15 09:43: 25,428 passed, 65 failed. Cured and committed: sentry 61
 > 5. Tests: only the files you touch, one run at a time, output to a file, no full suite, no coverage. At most two sub-agents.
 > Reply with: files changed, what you disagreed with, what broke when you used it, anything that is another branch's defect (name the branch), anything HELD.
 
-Queue (2 awake at a time): sentry and memory are out now (their own briefs). Then: aipass, hooks, prax, api, ai_mail, drone, spawn, flow, trigger, backup, daemon, cli, commons, skills, canary. devpulse does its own. Done so far: (none)
+Ruling 10:03, corrected 10:05: AIPass only for now, and BAUD is AIPass: it sits inside the repo at projects/baud, so it is in scope and in the queue. External projects live outside the AIPass tree (Vera-Studio, Seed); they follow once AIPass is in good standing, so they have something to update to.
+Ruling 10:05, test suites do not overlap: AIPass's suite tests AIPass, each external project has its own. The Vera-Studio reds came from sentry's fleet json_handler contract discovering handlers in external projects registered on this seat; that reach is the defect. Mailed @sentry: bound discovery to the AIPass repo, and give external projects the contract to run in their own suites.
+
+Queue (2 awake at a time): sentry and memory are out now (their own briefs). Then: aipass, hooks, prax, api, ai_mail, drone, spawn, flow, trigger, backup, daemon, cli, commons, skills, canary, baud. devpulse does its own. Done so far: (none)
 
 ### 7. State at capture
 
