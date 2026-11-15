@@ -3,7 +3,7 @@
 # Description: Symbolic Memory Module
 # Version: 0.1.1
 # Created: 2026-03-17
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -17,18 +17,10 @@ Part of the Fragmented Memory implementation.
 """
 
 import json
-import os
 import sys
 import time
 from pathlib import Path
 from typing import List, Dict, Any
-
-if sys.platform == "win32":
-    os.environ.setdefault("PYTHONUTF8", "1")
-    for _stream in (sys.stdout, sys.stderr):
-        _reconfigure = getattr(_stream, "reconfigure", None)
-        if _reconfigure is not None:
-            _reconfigure(encoding="utf-8", errors="replace")
 
 # Service imports
 from aipass.prax import logger

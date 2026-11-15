@@ -2,7 +2,7 @@
 
 **This is a park, not a demolition.** The owner's ruling: *"comment out and disable the
 fragments code, we may use it later, and comment where compass is and that it is active."*
-Nothing here was deleted; every file is byte-identical to what ran in the tree.
+Nothing here was deleted; every file is the code that ran in the tree, except `modules/symbolic(disabled).py`, which no longer carries the Windows-only UTF-8 block (AIPass is Linux only).
 
 **Moved here 2026-08-18, same bytes.** This park used to live in
 `.archive/parked_symbolic_20260814/`. The owner's archive ruling that night made `.archive/`
