@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: imports_check.py
 # Description: Imports Standards Checker Handler
-# Version: 2.5.1
+# Version: 2.5.2
 # Created: 2026-03-05
 # Modified: 2026-11-15
 # =============================================
@@ -19,6 +19,7 @@ from typing import Dict, List, Optional
 
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.aipass_standards import applicability
+from aipass.sentry.apps.handlers.aipass_standards.logging_allowed import LEGACY_IMPORTS_ROUTER, tail_in
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
 from aipass.sentry.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify
@@ -27,7 +28,6 @@ from aipass.sentry.apps.handlers.aipass_standards.prose_lines import Unparseable
 # logger sub-rule is the one exception and gates itself below.
 APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
-PRAX_ROUTER = ("prax", "apps", "modules", "logger.py")
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
@@ -90,7 +90,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     # A door re-exports and logs nothing, whatever its length.
     is_door = path.name.startswith("door_") and path.parent.name == "modules"
     # The router itself: stdlib logging is what prax routes INTO, so it cannot route through prax.
-    is_router = path.parts[-4:] == PRAX_ROUTER
+    is_router = tail_in(path, LEGACY_IMPORTS_ROUTER)
 
     if not is_init_file:
         checks.append(check_no_aipass_root(import_lines, module_path, bypass_rules))

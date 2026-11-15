@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_handler_check.py
 # Description: Log Handler Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -18,6 +18,7 @@ from typing import AbstractSet, Dict, List
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
+from aipass.sentry.apps.handlers.aipass_standards.logging_allowed import LEGACY_LOG_HANDLER, tail_in
 from aipass.sentry.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify, hash_lines
 
 # APPLIES_TO: a test importing stdlib logging to assert on it is legitimate.
@@ -82,7 +83,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         }
 
     # Exempt prax logging infrastructure (it IS the RotatingFileHandler implementation)
-    if "prax" in module_path and ("logging" in module_path or "setup.py" in module_path or "terminal" in module_path):
+    if tail_in(module_path, LEGACY_LOG_HANDLER):
         return {
             "passed": True,
             "checks": [

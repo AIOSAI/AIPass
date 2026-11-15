@@ -58,6 +58,7 @@ The table below carries every other row.
 | introspection | all_files | production | No-args introspection gate |
 | json_handler | branch_level | production | The canonical json shim by sha256 + bidirectional config/data/log triplet completeness |
 | json_structure | all_files | production | json_handler import + log_operation calls |
+| one_logger *(advisory, production only)* | all_files | production | Prax is the only logger. Convicts, by AST: K0 any stdlib `logging` import; K1 a class with two or more level methods; K2 a file opened for writing whose path resolves to a `.log` name; K3 a write wrapper sending its message to stderr or printing it time-stamped. No bypass row waives it; only `logging_allowed.py` names a file that may, by exact path, with its reason. A file that logs nothing owes no import. |
 | log_handler | all_files | production | Prax logger usage (not stdlib logging) |
 | log_level | all_files | production | Correct log level usage |
 | log_structure | all_files | production | Structured log message format |

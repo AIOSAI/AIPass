@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch8.py
 # Description: Unit tests for handlers, log_handler, log_level, log_structure, meta, naming, permission_flags
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-25
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/handlers_check.py and six sibling checkers (batch 8)."""
@@ -598,16 +598,20 @@ def test_observe_reads_100_when_system_logs_are_present(tmp_path):
     assert record["would_be_score"] == 100
 
 
-def test_observe_excludes_mail_lane_artifacts(tmp_path):
-    """dispatch_*.log is @ai_mail's delivery artifact, not the branch's log."""
+@pytest.mark.parametrize(
+    ("name", "counted"),
+    [("dispatch_wake.log", 0), ("dispatch_stdout.log", 0), ("dispatch_stderr.log", 0), ("dispatch_monitor.log", 1)],
+    ids=["wake", "stdout", "stderr", "own_module_log"],
+)
+def test_observe_excludes_exactly_the_named_mail_lane_transcripts(tmp_path, name, counted):
+    """@ai_mail's own dispatch_monitor.log is a branch log: the old dispatch_ prefix hid it."""
     branch = _branch_with_local_logs(tmp_path, local_logs=0)
-    (branch / "logs" / "dispatch_20260814.log").write_text("delivery", encoding="utf-8")
+    (branch / "logs" / name).write_text("delivery", encoding="utf-8")
 
     observe = getattr(log_structure_check, "check_branch_observe")
     record = observe(str(branch))[0]
 
-    assert record["local_logs"] == 0, "a mail-lane artifact is not a branch log"
-    assert record["would_be_score"] == 100
+    assert (record["local_logs"], record["would_be_score"]) == (counted, 50 if counted else 100)
 
 
 def test_observe_reports_unobservable_branch_without_a_number(tmp_path):

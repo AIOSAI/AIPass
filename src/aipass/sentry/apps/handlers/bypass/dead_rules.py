@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dead_rules.py
 # Description: Bypass rules that match nothing, and inline bypass comments nothing reads
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-09-25
 # Modified: 2026-11-15
 # =============================================
@@ -169,27 +169,33 @@ def bypass_markers(branch_path: Path, files: Iterable[str]) -> List[str]:
     return [f"{rel}:{line}" for rel, line in sorted(found)]
 
 
+def _skip(text: str, pos: int) -> int:
+    """The first index at or after pos that is not JSON whitespace."""
+    while pos < len(text) and text[pos] in " \t\r\n":
+        pos += 1
+    return pos
+
+
 def without_rules(text: str, gone: Set[int]) -> str:
     """The file's text with these indexes cut from its top-level "bypass" array; every other byte kept."""
     decoder = json.JSONDecoder()
-    ws = re.compile(r"\s*")
-    pos = ws.match(text, text.index("{") + 1).end()
+    pos = _skip(text, text.index("{") + 1)
     while text[pos] != "}":
         key, pos = decoder.raw_decode(text, pos)
-        pos = ws.match(text, ws.match(text, pos).end() + 1).end()
+        pos = _skip(text, _skip(text, pos) + 1)
         if key == "bypass":
             break
-        pos = ws.match(text, decoder.raw_decode(text, pos)[1]).end()
-        pos = ws.match(text, pos + 1).end() if text[pos] == "," else pos
+        pos = _skip(text, decoder.raw_decode(text, pos)[1])
+        pos = _skip(text, pos + 1) if text[pos] == "," else pos
     else:
         raise ValueError('no top-level "bypass" array')
     spans: List[Tuple[int, int]] = []
-    item = ws.match(text, pos + 1).end()
+    item = _skip(text, pos + 1)
     while text[item] != "]":
         end = decoder.raw_decode(text, item)[1]
         spans.append((item, end))
-        after = ws.match(text, end).end()
-        item = ws.match(text, after + 1).end() if text[after] == "," else after
+        after = _skip(text, end)
+        item = _skip(text, after + 1) if text[after] == "," else after
     if not spans:
         return text
     sep = text[spans[0][1] : spans[1][0]] if len(spans) > 1 else ""
@@ -228,6 +234,7 @@ def prune(
         return outcome
     gone = {entry["index"] for entry in dead}
     config["bypass"] = [rule for index, rule in enumerate(rules) if index not in gone]
+    new_text = ""
     try:
         new_text = without_rules(text, gone)
         reads_back = json.loads(new_text) == config

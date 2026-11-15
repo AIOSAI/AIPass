@@ -237,7 +237,7 @@
     {
       "file": "tests/test_checkers_batch8.py",
       "standard": "permission_flags",
-      "lines": [1039, 1052, 1066, 1078, 1091, 1097, 1103],
+      "lines": [1043, 1056, 1070, 1082, 1095, 1101, 1107],
       "reason": "Test input (fleet green leg 15; re-pinned 10-08 from 1182/1209/1221, the file grew above them): 'cmd = \"--dangerously-skip-permissions\"' and its sibling are strings written into tmp files as the permission_flags checker's own input; no command is ever built from them. Extended 2026-10-18: 1052 and the prose-lines pins' inputs (1091, 1097, 1103) are line-list fixtures, code once a docstring toggle stopped hiding them."
     },
     {

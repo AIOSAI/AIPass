@@ -1,19 +1,19 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_imports.py
-# Description: imports_check sub-functions and rulings (split from test_checkers_batch7.py)
-# Version: 1.2.0
+# Description: imports_check and one_logger_check rulings (split from test_checkers_batch7.py)
+# Version: 1.3.0
 # Created: 2026-10-08
 # Modified: 2026-11-15
 # =============================================
 
-"""Tests for apps/handlers/aipass_standards/imports_check.py."""
+"""Tests for apps/handlers/aipass_standards/imports_check.py, one_logger_check.py and logging_allowed.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that each checker in handlers/aipass_standards/ parses and imports
 
 import pytest
 
-from aipass.sentry.apps.handlers.aipass_standards import imports_check
+from aipass.sentry.apps.handlers.aipass_standards import imports_check, one_logger_check
 from aipass.sentry.apps.handlers.aipass_standards.imports_check import (
     check_handler_independence,
     check_import_order,
@@ -360,3 +360,133 @@ class TestImportsCheckLineNumbersSurviveDocstringFiltering:
         rows = imports_check.check_module(str(target))["checks"]
         root_rows = [r for r in rows if r["name"] == "No AIPASS_ROOT"]
         assert root_rows and root_rows[0]["passed"], root_rows
+
+
+_K2_CONSTANT = 'import os\nLOG = os.path.join("logs", "bridge.log")\n\n\ndef rec(line):\n    with open(LOG, "a", encoding="utf-8") as h:\n        h.write(line)\n'
+_K3_STAMPED = (
+    "from datetime import datetime\n\n\ndef _log(message):\n"
+    '    stamp = datetime.now().strftime("%H:%M:%S")\n    console.print(f"[{stamp}] {message}")\n'
+)
+
+
+def _judge(tmp_path, source, rel="flow/apps/handlers/mod.py"):
+    target = tmp_path / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(source, encoding="utf-8")
+    return one_logger_check.check_module(str(target))
+
+
+def _keys(answer):
+    return sorted(c["key"] for c in answer["checks"] if not c["passed"])
+
+
+class TestOneLoggerConvictsEveryLoggerButPrax:
+    @pytest.mark.parametrize(
+        ("source", "key"),
+        [
+            ("import logging\nlog = logging.getLogger(__name__)\n", "K0"),
+            ("from logging.handlers import RotatingFileHandler\n", "K0"),
+            (
+                "def append_trail(p, e):\n    pass\n\n\nclass Trail:\n    def _emit(self, m):\n        append_trail(1, m)\n\n"
+                "    def info(self, m):\n        self._emit(m)\n\n    def error(self, m):\n        self._emit(m)\n",
+                "K1",
+            ),
+            (_K2_CONSTANT, "K2"),
+            (
+                'from pathlib import Path\nNAME = "serve.log"\n\n\ndef log_path():\n    return Path("logs") / NAME\n\n\n'
+                'def start():\n    with open(log_path(), "a", encoding="utf-8") as s:\n        s.write("x")\n',
+                "K2",
+            ),
+            (_K3_STAMPED, "K3"),
+            ('import sys\n\n\ndef _stderr(msg):\n    sys.stderr.write(msg + "\\n")\n    sys.stderr.flush()\n', "K3"),
+            (
+                "import sys\n\n\ndef _log(level, message):\n    try:\n        from aipass.prax import logger\n\n"
+                "        getattr(logger, level)(message)\n    except Exception:\n"
+                '        sys.stderr.write(f"{message} (prax unavailable)\\n")\n',
+                "K3",
+            ),
+        ],
+        ids=[
+            "stdlib",
+            "stdlib_handlers",
+            "delegating_class",
+            "log_constant",
+            "log_function",
+            "stamped_print",
+            "stderr_helper",
+            "prax_then_stderr",
+        ],
+    )
+    def test_each_key_convicts_its_logger_and_names_the_prax_door(self, tmp_path, source, key):
+        answer = _judge(tmp_path, source)
+        assert (answer["score"], _keys(answer)) == (0, [key])
+        assert "from aipass.prax import logger" in next(c["message"] for c in answer["checks"] if not c["passed"])
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            '"""Never import logging here."""\n# import logging\nx = "import logging"\n',
+            "class Status:\n    def ok(self, d):\n        pass\n\n    def info(self, d):\n        pass\n\n"
+            "    def warn(self, d):\n        pass\n",
+            'LOG = "watch.log"\n\n\ndef read():\n    with open(LOG, encoding="utf-8") as h:\n        return h.read()\n',
+            'def rec(line):\n    with open("trail.jsonl", "a", encoding="utf-8") as h:\n        h.write(line)\n',
+            'import sys\n\n\ndef _write(line):\n    sys.stdout.write(line + "\\n")\n',
+            'def _title(text):\n    console.print(f"[bold]{text}[/bold]")\n',
+            "import sys\n\n\ndef _ask(prompt):\n    sys.stderr.write(prompt)\n    return input()\n",
+            "from aipass.prax import logger\n\n\ndef run():\n    logger.info('ran')\n",
+        ],
+        ids=[
+            "mentions_only",
+            "one_level_method",
+            "log_reader",
+            "jsonl_record",
+            "stdout_protocol",
+            "unstamped_ui",
+            "stderr_prompt_returns",
+            "prax_door",
+        ],
+    )
+    def test_a_file_with_no_logger_but_prax_passes(self, tmp_path, source):
+        answer = _judge(tmp_path, source)
+        assert (answer["passed"], answer["score"], _keys(answer)) == (True, 100, [])
+
+    def test_a_bypass_row_waives_nothing(self, tmp_path):
+        target = tmp_path / "flow/apps/handlers/mod.py"
+        target.parent.mkdir(parents=True)
+        target.write_text("import logging\n", encoding="utf-8")
+        rules = [{"file": "apps/handlers/mod.py", "standard": "one_logger", "reason": "waive it"}]
+        assert one_logger_check.check_module(str(target), bypass_rules=rules)["score"] == 0
+
+    @pytest.mark.parametrize(
+        ("rel", "source", "passed"),
+        [
+            ("hooks/apps/handlers/bridges/claude.py", _K2_CONSTANT, True),
+            ("hooks/apps/handlers/bridges/claude_copy.py", _K2_CONSTANT, False),
+            ("prax/apps/handlers/logging/jsonl_writer.py", "import logging\n", True),
+            ("prax/apps/handlers/logging/setup.py", "import logging\n", False),
+            ("prax/apps/handlers/logging/jsonl_writer.py", _K3_STAMPED, False),
+        ],
+        ids=["floor_named", "floor_namesake", "writer_named", "writer_sibling", "named_for_another_key"],
+    )
+    def test_only_a_named_file_passes_and_only_for_its_key(self, tmp_path, rel, source, passed):
+        answer = _judge(tmp_path, source, rel)
+        assert answer["passed"] is passed
+        assert any("allowed: " in c["message"] for c in answer["checks"]) is passed
+
+    def test_it_is_advisory_and_production_only(self):
+        assert (one_logger_check.ADVISORY, one_logger_check.CHECKLIST_ADVISES, one_logger_check.APPLIES_TO) == (
+            True,
+            True,
+            "production",
+        )
+
+
+class TestImportsRouterIsOneExactPath:
+    @pytest.mark.parametrize(("branch", "passed"), [("prax", True), ("flow", False)], ids=["router", "namesake"])
+    def test_only_prax_s_own_logger_module_may_use_stdlib_logging(self, tmp_path, branch, passed):
+        target = tmp_path / branch / "apps" / "modules" / "logger.py"
+        target.parent.mkdir(parents=True)
+        body = "".join(f"x{i} = {i}\n" for i in range(25))
+        target.write_text("import logging\n\nlog = logging.getLogger(__name__)\n" + body, encoding="utf-8")
+        checks = imports_check.check_module(str(target))["checks"]
+        assert all(c["passed"] for c in checks if c["name"].startswith("Prax logger")) is passed
