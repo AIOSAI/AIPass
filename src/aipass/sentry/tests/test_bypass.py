@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_bypass.py
 # Description: Unit tests for handlers/bypass/
-# Version: 1.5.2
+# Version: 1.6.0
 # Created: 2026-03-24
 # Modified: 2026-11-15
 # =============================================
@@ -18,7 +18,7 @@ from types import SimpleNamespace
 import pytest
 
 from aipass.sentry.apps.handlers.aipass_standards import skip_dirs, trigger_check
-from aipass.sentry.apps.handlers.bypass import inert
+from aipass.sentry.apps.handlers.bypass import dead_rules, inert
 from aipass.sentry.apps.handlers.bypass import bypass_handler
 from aipass.sentry.apps.handlers.bypass.bypass_handler import load_bypass_rules
 from aipass.sentry.apps.handlers.bypass.ignore_handler import (
@@ -817,14 +817,35 @@ def test_a_dry_run_names_the_dead_rule_and_writes_nothing(prune_branch, capsys):
     assert "would remove [0] apps/gone.py / naming" in _printed(capsys)
 
 
-def test_a_file_json_cannot_reproduce_is_refused_not_rewritten(prune_branch, capsys):
-    """A rewrite would reformat every line the owner wrote, so nothing is written."""
+#: One-line rule objects, which json.dumps never writes: the owner's layout, kept by a prune.
+_GONE_LINE = '{"file": "apps/gone.py", "standard": "naming", "reason": "the file was retired"}'
+_LIVE_LINE = '{"file": "apps/live.py", "standard": "naming", "reason": "a live exception"}'
+
+
+def _owner_layout(*rules):
+    return '{\n    "bypass": [\n        ' + ",\n        ".join(rules) + "\n    ]\n}\n"
+
+
+@pytest.mark.parametrize(
+    "layout", [(_GONE_LINE, _LIVE_LINE), (_LIVE_LINE, _GONE_LINE)], ids=["dead_first", "dead_last"]
+)
+def test_a_file_json_dumps_cannot_reproduce_is_pruned_with_its_own_layout_kept(prune_branch, layout):
+    """10 of 18 fleet bypass files hold inline lists; a round-trip guard refused every one and wrote nothing."""
     bypass_module, bypass_file = prune_branch
-    bypass_file.write_text(json.dumps({"bypass": PRUNE_RULES}, indent=4), encoding="utf-8")
-    before = bypass_file.read_bytes()
+    bypass_file.write_text(_owner_layout(*layout), encoding="utf-8")
     bypass_module.handle_command("bypass", ["prune", "@planted"])
-    assert bypass_file.read_bytes() == before
-    assert "Nothing written: the file does not round-trip" in _printed(capsys)
+    assert bypass_file.read_text(encoding="utf-8") == _owner_layout(_LIVE_LINE)
+
+
+def test_a_rewrite_that_does_not_read_back_as_the_kept_rules_is_refused_with_exit_2(prune_branch, capsys, monkeypatch):
+    """Nothing written must not exit 0 under an EXECUTE banner."""
+    bypass_module, bypass_file = prune_branch
+    monkeypatch.setattr(dead_rules, "without_rules", lambda text, gone: text)
+    before = bypass_file.read_bytes()
+    with pytest.raises(CommandRefused) as refused:
+        bypass_module.handle_command("bypass", ["prune", "@planted"])
+    assert (refused.value.code, bypass_file.read_bytes()) == (2, before)
+    assert "Nothing written: the rewrite did not read back as the kept rules" in _printed(capsys)
 
 
 def test_a_rule_whose_checker_answers_the_same_without_it_is_removed(prune_branch, capsys):
@@ -888,6 +909,54 @@ def test_a_rule_over_a_file_the_audit_never_hands_its_checker_covers_nothing(
     bypass_module.handle_command("bypass", ["prune", "@planted"])
     assert json.loads(bypass_file.read_text(encoding="utf-8"))["bypass"] == ([] if dead else [rule])
     assert (f"removed [0] {rule_file} / cli_flags: covers nothing" in _printed(capsys)) is dead
+
+
+def _passing_with_findings(branch_path, bypass_rules=None):
+    """unused_function's shape: passed, score 99, findings listed in a passing check, unless a rule waives them."""
+    if utils_is_bypassed(f"{branch_path}/apps/live.py", "naming", None, bypass_rules):
+        return {"passed": True, "score": 100, "checks": [{"name": "u", "passed": True, "message": "0 with no caller"}]}
+    return {"passed": True, "score": 99, "checks": [{"name": "u", "passed": True, "message": "2 with no caller"}]}
+
+
+def test_a_rule_that_lifts_a_passing_score_to_100_is_live(prune_branch, capsys, monkeypatch):
+    """@aipass's json_ops and provider_wire unused_function rules were convicted: the bare answer passed at 99."""
+    bypass_module, bypass_file = prune_branch
+    monkeypatch.setattr(
+        bypass_module,
+        "discover_checkers",
+        lambda pack_path=None: {
+            "naming": SimpleNamespace(check_branch=_passing_with_findings, AUDIT_SCOPE="branch_level")
+        },
+    )
+    rule = {"file": "apps/live.py", "standard": "naming", "reason": "a cross-branch caller"}
+    bypass_file.write_text(json.dumps({"bypass": [rule]}, indent=2), encoding="utf-8")
+    bypass_module.handle_command("bypass", ["prune", "@planted"])
+    assert json.loads(bypass_file.read_text(encoding="utf-8"))["bypass"] == [rule]
+    assert "covers nothing" not in _printed(capsys)
+
+
+def _failing_package_marker(path, bypass_rules=None):
+    """A file-lane checker with one finding, on a package marker, that a rule can waive."""
+    finding = path.endswith("__init__.py") and not utils_is_bypassed(path, "naming", None, bypass_rules)
+    return {"passed": not finding, "score": 0 if finding else 100, "checks": [{"name": "n", "passed": not finding}]}
+
+
+def test_a_rule_live_only_in_the_checklist_lane_is_kept(prune_branch, capsys, monkeypatch):
+    """The audit never hands __init__.py; the checklist does. @aipass's readme_map fallback rule was convicted."""
+    bypass_module, bypass_file = prune_branch
+    (bypass_file.parent.parent / "apps" / "__init__.py").write_text("pass\n", encoding="utf-8")
+    monkeypatch.setattr(
+        bypass_module,
+        "discover_checkers",
+        lambda pack_path=None: {
+            "naming": SimpleNamespace(check_module=_failing_package_marker, AUDIT_SCOPE="all_files")
+        },
+    )
+    rule = {"file": "apps/__init__.py", "standard": "naming", "reason": "waived in the checklist lane"}
+    bypass_file.write_text(json.dumps({"bypass": [rule]}, indent=2), encoding="utf-8")
+    bypass_module.handle_command("bypass", ["prune", "@planted"])
+    assert json.loads(bypass_file.read_text(encoding="utf-8"))["bypass"] == [rule]
+    assert "covers nothing" not in _printed(capsys)
 
 
 def test_an_unknown_branch_is_refused_with_exit_3(prune_branch):

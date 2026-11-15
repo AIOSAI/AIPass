@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_test_inventory.py
 # Description: behavioural pins for the test-inventory verb
-# Version: 1.0.8
+# Version: 1.0.9
 # Created: 2026-09-01
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/inventory.py and the handlers under apps/handlers/test_inventory/."""
@@ -537,6 +537,8 @@ class TestTheTwinsSwitch:
     def test_the_fleet_target_walks_the_branch_container_not_the_repo_root(self, tmp_path: Path, monkeypatch) -> None:
         """`inventory._branch_container` descends from the repo root to the branches."""
         repo_root = Path(_src_root()).parent
+        registry = _write(tmp_path, f"registry/{registry_scan.DEFAULT_REGISTRY_NAME}", "{}")
+        monkeypatch.setattr(registry_scan, "find_registry", lambda: registry)
         [container] = _run_twins_verb(tmp_path, monkeypatch, roots.FLEET_ARGUMENT)
 
         assert container != repo_root

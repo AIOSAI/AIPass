@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: bypass.py
 # Description: Bypass Module — prune the bypass rules that can never match
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-09-25
 # Modified: 2026-11-15
 # =============================================
@@ -122,6 +122,8 @@ def _handle_prune(args: List[str]) -> None:
         {"branch": wanted, "dry_run": dry_run, "dead": len(outcome["dead"]), "written": outcome["written"]},
     )
     _print_outcome(wanted, dry_run, outcome)
+    if outcome["refused"]:
+        raise CommandRefused(EXIT_LANE_FAILED, f"@{wanted}")
 
 
 def _print_outcome(branch: str, dry_run: bool, outcome: dict) -> None:
