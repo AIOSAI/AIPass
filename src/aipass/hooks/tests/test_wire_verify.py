@@ -4,7 +4,7 @@
 # Description: Tests for wire_verify module — provider ↔ project hook wiring checker
 # Branch: hooks
 # Created: 2026-07-09
-# Modified: 2026-11-04
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/wire_verify.py."""

@@ -4,7 +4,7 @@
 # Description: Tests for edit_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-11-08
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py and its PreToolUse sibling settings_backup.py."""

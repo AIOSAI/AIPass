@@ -485,9 +485,7 @@ def _interpreter_targets(segment: list[str], raw: str, cwd: Path) -> list[tuple[
     return hits
 
 
-def write_targets_by_segment(
-    command: str, cwd: str
-) -> list[tuple[list[str], list[tuple[Path, str]]]]:
+def write_targets_by_segment(command: str, cwd: str) -> list[tuple[list[str], list[tuple[Path, str]]]]:
     """Same reading as :func:`write_targets`, but grouped by the segment that earned it.
 
     For narrower callers (testwrite_gate drops interpreter targets from runner segments only); a segment

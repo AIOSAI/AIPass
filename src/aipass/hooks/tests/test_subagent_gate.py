@@ -4,7 +4,7 @@
 # Description: Tests for subagent_gate security handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/security/subagent_gate.py."""

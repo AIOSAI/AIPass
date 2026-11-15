@@ -3,7 +3,7 @@
 # Description: edit_gate's .trinity caps on the Write lane: clean, over cap, the cut point, warn, fail-open, legacy
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py: the .trinity character caps on Write."""

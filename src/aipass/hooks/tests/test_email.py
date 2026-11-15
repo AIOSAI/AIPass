@@ -4,7 +4,7 @@
 # Description: Tests for email notification handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/notification/email.py."""

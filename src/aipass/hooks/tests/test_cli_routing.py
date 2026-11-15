@@ -3,7 +3,7 @@
 # Description: Tests for hooks's entry point routing, help and introspection
 # Version: 1.2.4
 # Created: 2026-09-03
-# Modified: 2026-11-13
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/hooks.py, the branch's CLI entry point."""

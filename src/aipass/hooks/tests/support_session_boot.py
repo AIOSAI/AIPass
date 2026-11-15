@@ -3,7 +3,7 @@
 # Description: Helpers shared by the session_boot test files: patch target, env redirects, transcripts, pointers
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Helpers for the session_boot tests (no test_ prefix: never collected)."""

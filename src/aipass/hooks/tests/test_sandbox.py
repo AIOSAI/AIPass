@@ -4,7 +4,7 @@
 # Description: Tests for sandbox wrapper module
 # Branch: hooks
 # Created: 2026-06-09
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/sandbox.py."""
@@ -28,6 +28,7 @@ from aipass.hooks.apps.modules.sandbox import (
     resolve_bwrap_command,
     sandbox_launch,
 )
+
 
 class TestBuildSrtConfig:
     """Config generation from policy dict."""

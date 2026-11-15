@@ -4,7 +4,7 @@
 # Description: Tests for identity prompt handler (cadence-gated 1.1.0, char budget enforced 1.2.0)
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/prompt/identity.py."""

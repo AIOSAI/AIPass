@@ -1421,7 +1421,7 @@
       "file": "apps/modules/bash_writes.py",
       "standard": "logged_fallback",
       "lines": [
-        377
+        369
       ],
       "reason": "Fleet green leg 5: a word Path() cannot construct (a NUL byte) names no file the OS can write; NOT_CAUGHT says so, and the shell itself refuses such a path."
     },
@@ -1438,7 +1438,7 @@
       "file": "apps/modules/engine_closure.py",
       "standard": "logged_fallback",
       "lines": [
-        169
+        168
       ],
       "reason": "Fleet green leg 5, item 2: None is 'ruff could not run' and the success path never returns it (a list, [] when clean); the docstring names it. The edit is allowed and logged because two layers stand behind this one (the promoted copy, the fail-closed engine), and refusing every edit to 119 closure files on a missing linter would lock out the repair too."
     },
@@ -1457,13 +1457,12 @@
       "file": "apps/modules/cc_sessions.py",
       "standard": "logged_fallback",
       "lines": [
-        192,
-        220,
-        226,
-        229,
-        232,
-        255,
-        330
+        150,
+        178,
+        181,
+        184,
+        207,
+        282
       ],
       "reason": "Fleet green leg 5, read for presence_gate (its one gate caller). 203 and 212 answer 'alive' on doubt: the gate keeps refusing the newer seat. 209 is the real answer (ESRCH = dead). 215: os.kill(pid, 0) raises only ESRCH and EPERM on POSIX, both handled; any other errno is read as dead so a stale record cannot hold a branch shut with an unsatisfiable block (ruling a, DPLAN-0310). 170 start ticks and 321 session_start: None is 'cannot rank', never younger. 238: display text."
     },
@@ -1471,13 +1470,13 @@
       "file": "apps/modules/cadence.py",
       "standard": "logged_fallback",
       "lines": [
-        445,
-        450,
-        537,
-        719,
-        804,
-        861,
-        945
+        439,
+        444,
+        531,
+        713,
+        798,
+        855,
+        939
       ],
       "reason": "Fleet green leg 5: cadence decides which turn an injector fires on and guards no write. On doubt each answers its documented empty value ('never fired', not grounded, nothing pending), logged: the worst case is a grounding block early, late or twice, never a write let through."
     },
@@ -1544,9 +1543,9 @@
       "lines": [
         68,
         131,
-        200,
-        214,
-        247
+        197,
+        211,
+        244
       ],
       "reason": "Fleet green leg 5: 68 (the fleet door cannot be read) and 131 are counts for the compact snapshot, None renders as unknown, never zero. 200 (the .trinity lock will not open), 214 and 247: the session stamp is skipped and logged at WARNING; the agent's own memory is untouched."
     },
@@ -1676,10 +1675,10 @@
       "standard": "through_the_command",
       "lines": [
         32,
-        423,
-        424,
-        430,
-        431
+        420,
+        421,
+        427,
+        428
       ],
       "reason": "Fleet green leg 9, ruling (c), hooks' decision: _check_syntax, _check_ruff_lint, _check_ruff_format, _check_line_pattern, _check_patterns, _run_pyright_check, _run_ruff_lint_structured, _run_sentry_checklist, _checklist_marker and _CHECKLIST_MARKER_FALLBACK. Their one public door is handle() on a .py edit, whose far side spawns py_compile, ruff (lint, format, structured), pyright and the sentry checklist as subprocesses and writes the seat's diagnostics state; no seam may bind on a spawn. Contract: each check answers its own violation lines (SYNTAX/LINT/FORMAT/PATTERN/TYPE/SENTRY), a check that cannot run answers nothing or NO ANSWER, the checklist marker is sentry's FINDING_MARKER with a loud fallback. The json path and handle()'s refusal shape are read through handle()."
     },
@@ -1695,11 +1694,11 @@
       "file": "tests/test_session_boot_lookups.py",
       "standard": "stdlib_patch",
       "lines": [
-        199,
-        213,
-        283,
-        294,
-        307
+        194,
+        208,
+        278,
+        289,
+        302
       ],
       "reason": "Fleet green row 0 (leg 8, landed leg 10), ruling (c): real SIGTERM / real exec of tmux; no seam on exec or kill; on 10-05 leg 7 a def-time seam let the string-form patches miss and one run exec'd real tmux. Re-pointed from test_session_boot.py by the 2026-10-08 split; 199 and 213 (patch(f\"{_MOD}.os.execvp\"), judged again once the checker followed the support import) added in the re-pin leg."
     },
@@ -1717,7 +1716,7 @@
       "file": "tests/test_session_boot_lookups.py",
       "standard": "stdlib_patch",
       "lines": [
-        381
+        358
       ],
       "reason": "Fleet green row 0 (leg 8, landed leg 10): Path.home patched to raise (unresolvable home), not an exec; no portable in-process way to make the real Path.home raise. Re-pointed from test_session_boot.py by the 2026-10-08 split."
     },
@@ -1725,7 +1724,7 @@
       "file": "tests/test_edit_gate_bash.py",
       "standard": "stdlib_patch",
       "lines": [
-        994
+        987
       ],
       "reason": "Fleet green row 0 (leg 8, landed leg 10): bash_writes.Path flavour oracle; threading flavour through every path builder is the cost; closes the leg 5 write_targets flavour HELD."
     },
@@ -1771,47 +1770,47 @@
       "lines": [
         42,
         46,
-        63,
-        70,
-        76,
-        80,
-        90,
-        98,
-        102,
+        58,
+        65,
+        71,
+        75,
+        85,
+        93,
+        97,
+        104,
         109,
-        114,
-        118,
+        113,
+        119,
         124,
-        129,
-        132,
-        139,
-        146,
+        127,
+        134,
+        141,
+        145,
         150,
-        155,
-        158,
+        153,
+        156,
         161,
-        166,
-        170,
-        174,
-        178,
-        182,
-        189,
-        201,
-        215,
-        227,
-        231,
-        234,
-        244,
-        248,
-        254,
-        255,
-        265,
-        269,
-        276,
-        285,
-        296,
-        309,
-        388
+        165,
+        169,
+        173,
+        177,
+        184,
+        196,
+        210,
+        222,
+        226,
+        229,
+        239,
+        243,
+        249,
+        250,
+        260,
+        264,
+        271,
+        280,
+        291,
+        304,
+        365
       ],
       "reason": "Moved from test_session_boot.py by the 2026-10-08 split, same ruling: fleet green leg 9, ruling (c) without trial, devpulse's ruling for session_boot (the 10-05 incident). Its only public doors, boot() and main(), end in os.execvp or os.kill after spawning tmux, ps and the claude CLI, and no seam may bind on an exec, kill or spawn. The lookups (_resolve_claude_binary, _find_tmux, _tmux_session_exists, _find_tmux_session_for_pid, _get_ppid, _is_descendant, _make_session_name, _name_flag, _session_label, _exec_in_tmux, _is_session_file_present, _tmux_kill_session, _stop_session, _start_fresh) are pinned at their own contracts with the exec and kill stood in."
     },

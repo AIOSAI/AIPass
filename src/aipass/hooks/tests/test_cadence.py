@@ -4,7 +4,7 @@
 # Description: Tests for cadence module (DPLAN-0200): the fire decision; regroup and counter in test_cadence_regroup.py
 # Branch: hooks
 # Created: 2026-06-08
-# Modified: 2026-11-04
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/cadence.py: the fire decision."""

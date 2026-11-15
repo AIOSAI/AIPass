@@ -4,7 +4,7 @@
 # Description: Tests for git_gate: raw git, gh and the secrets store refused for every seat; protected writes
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-11-03
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/security/git_gate.py."""

@@ -4,7 +4,7 @@
 # Description: Regression tests for _srt_resolve.mjs candidate-list resolution
 # Branch: hooks
 # Created: 2026-08-01
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/_srt_resolve.mjs, the resolver apps/modules/sandbox.py calls (DPLAN-0279)."""

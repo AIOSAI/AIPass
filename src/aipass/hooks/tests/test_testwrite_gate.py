@@ -4,7 +4,7 @@
 # Description: Tests for the test-write gate and its JSON policy switch
 # Branch: hooks
 # Created: 2026-09-01
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/security/testwrite_gate.py and its JSON policy switch."""
@@ -530,6 +530,9 @@ class TestNamingAPathIsNotWritingIt:
             pytest.param("popen-gw0", "", id="popen-gw0"),
             pytest.param("spawn", "", id="spawn"),
             pytest.param("spawn", ", '{base}/aipass/spawn'", id="word-last"),
+            pytest.param("spawn", ", '{doubled}'", id="backslash-doubled"),
+            pytest.param("spawn", ", '{doubled_last}'", id="backslash-doubled-word-last"),
+            pytest.param("spawn", ", r'{single}'", id="backslash-raw-string"),
             pytest.param("spawn", ", '~/spawn/notes.md'", id="home-and-the-word-first"),
             pytest.param("system", ", 'docs/system.md'", id="file-named-after-a-word"),
             pytest.param("exec", ", '--exec-path'", id="git-flag"),
@@ -546,7 +549,10 @@ class TestNamingAPathIsNotWritingIt:
         _policy(project)
         # Each side of the word boundary has a spelling of its own to stand down on.
         names = [Path(project["new_test"]).as_posix(), (tmp_path / parent).as_posix(), f"{parent}/x"]
-        extra = form.format(base=tmp_path.as_posix())
+        single = (tmp_path / "aipass" / "spawn" / "tests").as_posix().replace("/", "\\")
+        doubled_last = (tmp_path / "aipass" / "spawn").as_posix().replace("/", "\\\\")
+        doubled = single.replace("\\", "\\\\")
+        extra = form.format(base=tmp_path.as_posix(), single=single, doubled=doubled, doubled_last=doubled_last)
         body = "pri" + "nt(" + ", ".join(f"'{name}'" for name in names) + extra + ")"
         assert not _blocked(_run(project["seat"], command=f"python3 - <<'EOF'\n{body}\nEOF"))
 

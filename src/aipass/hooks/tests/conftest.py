@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-11-09
+# Modified: 2026-11-14
 # =============================================
 
 """Shared pytest fixtures for hooks tests.

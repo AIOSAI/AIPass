@@ -3,7 +3,7 @@
 # Description: The hook engine's safeguards: trust, timeouts, one document, the ledger, fail-closed gates, promote
 # Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-11-10
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/engine.py: trust, timeouts, the ledger and the fail-closed gates."""

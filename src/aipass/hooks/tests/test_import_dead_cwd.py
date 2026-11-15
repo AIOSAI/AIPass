@@ -3,7 +3,7 @@
 # Description: Pins hooks imports against a dead working directory
 # Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/__init__.py's guard: every hooks module imports without a readable cwd."""
@@ -147,6 +147,7 @@ class TestEveryModuleImportsWithoutACwd:
         root.mkdir(parents=True)
         (root / "live.py").write_text("", encoding="utf-8")
         assert _module_names(root, tmp_path) == ["dropbox.apps.live"]
+
 
 class TestTheCureCannotBeSilentlyReverted:
     """``inspect.stack()`` in the guard is the defect, not a style preference.

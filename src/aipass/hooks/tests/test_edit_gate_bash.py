@@ -4,7 +4,7 @@
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-11-07
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's scripted lane and apps/modules/bash_writes.py."""
@@ -988,6 +988,11 @@ class TestBothSpellingsAreRead:
 
         assert all(any(c.isalnum() for c in t.name) for t, _ in hits), f"separator-only target: {hits}"
 
+    def test_the_cross_os_root_limit_is_published(self):
+        """A drive letter names nothing on Linux — said as data, not discovered."""
+        assert any("operating system" in gap for gap in bash_writes.NOT_CAUGHT), (
+            "the cross-OS root residual is not in NOT_CAUGHT"
+        )
 
 
 class TestTargetSpellingIsNotPartOfTheContract:

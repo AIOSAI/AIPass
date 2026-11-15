@@ -4,7 +4,7 @@
 # Description: Tests for post_compact_regrounding lifecycle handler (DPLAN-0276)
 # Branch: hooks
 # Created: 2026-08-01
-# Modified: 2026-11-10
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/lifecycle/post_compact_regrounding.py."""

@@ -4,7 +4,7 @@
 # Description: Tests for auto_fix lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-10
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/lifecycle/auto_fix.py."""

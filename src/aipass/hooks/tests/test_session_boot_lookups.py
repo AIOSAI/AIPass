@@ -4,7 +4,7 @@
 # Description: Tests for session boot's lookups: claude binary, tmux, process tree, labels, home resolution
 # Branch: hooks
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_boot.py: the lookups the menu stands on."""

@@ -4,7 +4,7 @@
 # Description: Tests for tier0_kernel prompt handler
 # Branch: hooks
 # Created: 2026-06-18
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/prompt/tier0_kernel.py."""

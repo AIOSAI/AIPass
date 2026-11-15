@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-10
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/hook_test.py and the parity and smoke handlers it drives."""

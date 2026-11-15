@@ -4,7 +4,7 @@
 # Description: Tests for shared context_window module (live status-line window since 1.8.0)
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-11-10
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/context_window.py."""
