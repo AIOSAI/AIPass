@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.15.0
+# Version: 2.16.0
 # Created: 2026-03-02
-# Modified: 2026-11-03
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -90,6 +90,14 @@ OPENCODE_STREAM_FAILED = -6
 # The providers whose stdout streams live: startup is the first stdout byte, not a JSONL transcript.
 STREAMING_PROVIDERS = (CODEX, OPENCODE)
 WAKE_RESULT_DECLINED = "declined"
+# Transcripts, not logs: never a .log name, or trigger's watcher reads agent text as prax lines.
+# Published through door_wake; readers outside ai_mail take the names from there.
+TRANSCRIPT_NAMES = {
+    "stdout": "dispatch_stdout.out",
+    "stderr": "dispatch_stderr.out",
+    "attempt": "dispatch_stdout.attempt-{n}.out",
+    "rotated": ".out.1",
+}
 
 
 def wake_sender(
@@ -97,10 +105,10 @@ def wake_sender(
 ) -> str:
     """Wake the dispatcher back after target completion.
 
-    A door: main() calls it, and its tags are read in dispatch_wake.log and by managers.
+    A door: main() calls it; its tag is the completion report's wake_result.
 
     Managers are never woken; they are MAILED instead, here (wake_branch's manager gate sends nothing).
-    Returns a dispatch_wake.log tag; never called under --no-wake-back.
+    Returns the wake_result tag; never called under --no-wake-back.
     """
     if not sender or not sender.strip():
         logger.info("[monitor] Wake-back skipped — no sender")
@@ -233,29 +241,6 @@ def _mail_wake_back(
     except (OSError, subprocess.SubprocessError) as e:
         logger.warning("[monitor] Wake-back mail to manager %s failed: %s", sender, e)
         return False
-
-
-def log_wake_result(branch_email: str, sender: str, exit_code: int, result: str, lock_file: str):
-    """Append a wake-back result line to dispatch_wake.log under target's logs/.
-
-    A door: main() calls it, and its line is read in dispatch_wake.log by managers and the register.
-    """
-    lock_path = Path(lock_file).resolve()
-    logs_dir = lock_path.parent.parent / "logs"
-    log_file = logs_dir / "dispatch_wake.log"
-    try:
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        line = (
-            f"{time.strftime('%Y-%m-%dT%H:%M:%S')}"
-            f" target={branch_email}"
-            f" sender={sender}"
-            f" exit_code={exit_code}"
-            f" wake_result={result}\n"
-        )
-        with open(log_file, "a", encoding="utf-8") as f:
-            f.write(line)
-    except OSError as e:
-        logger.info("[monitor] Failed to write dispatch_wake.log: %s", e)
 
 
 def _send_bounce(branch_email: str, reason: str, sender: str, lock_file: str, stderr_log: str) -> bool:
@@ -670,14 +655,14 @@ def stamp_run(branch_path: Path, cmd: list, provider: str, opencode_config: str 
 
 
 def _rotate_attempt_stdout(stdout_log: str, attempt: int) -> None:
-    """Preserve a failed attempt's stdout as dispatch_stdout.attempt-N.log.
+    """Preserve a failed attempt's stdout as the attempt transcript (TRANSCRIPT_NAMES["attempt"]).
 
     The next attempt truncates stdout, and its result JSON is the only record of the cause.
     """
     try:
         src = Path(stdout_log)
         if src.exists() and src.stat().st_size > 0:
-            src.replace(src.parent / f"dispatch_stdout.attempt-{attempt}.log")
+            src.replace(src.parent / TRANSCRIPT_NAMES["attempt"].format(n=attempt))
     except OSError as e:
         logger.warning("[monitor] Failed to preserve attempt %d stdout: %s", attempt, e)
 
@@ -987,7 +972,7 @@ def main():
     try:
         stderr_path = Path(stderr_log)
         if stderr_path.exists() and stderr_path.stat().st_size > 512_000:
-            rotated = stderr_path.with_suffix(".log.1")
+            rotated = stderr_path.with_suffix(TRANSCRIPT_NAMES["rotated"])
             stderr_path.replace(rotated)
         stderr_fh = open(stderr_log, "a", encoding="utf-8")
         stderr_fh.write(
@@ -1036,14 +1021,14 @@ def main():
 
     logs_dir = branch_path / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
-    stdout_log = str(logs_dir / "dispatch_stdout.log")
+    stdout_log = str(logs_dir / TRANSCRIPT_NAMES["stdout"])
     try:
         stdout_path = Path(stdout_log)
         if stdout_path.exists() and stdout_path.stat().st_size > 512_000:
-            rotated = stdout_path.with_suffix(".log.1")
+            rotated = stdout_path.with_suffix(TRANSCRIPT_NAMES["rotated"])
             stdout_path.replace(rotated)
-        for stale in logs_dir.glob("dispatch_stdout.attempt-*.log"):
-            stale.replace(stale.with_suffix(".log.1"))
+        for stale in logs_dir.glob(TRANSCRIPT_NAMES["attempt"].format(n="*")):
+            stale.replace(stale.with_suffix(TRANSCRIPT_NAMES["rotated"]))
     except OSError as e:
         logger.warning("[monitor] Failed to rotate stdout log: %s", e)
 
@@ -1279,7 +1264,6 @@ def main():
             sender,
         )
         wake_result = WAKE_RESULT_DECLINED
-    log_wake_result(branch_email, sender, exit_code, wake_result, lock_file)
 
     # The report is written BEFORE the lock is released: a death in between then leaves a
     # visible, recoverable HELD LOCK instead of a released lock and no report.

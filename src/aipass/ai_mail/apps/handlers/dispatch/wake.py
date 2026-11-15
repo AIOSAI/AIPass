@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.12.0
+# Version: 3.12.1
 # Created: 2026-03-02
-# Modified: 2026-11-03
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -905,7 +905,9 @@ def wake_branch(
 
     log_dir = branch_path / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    stderr_log = str(log_dir / "dispatch_stderr.log")
+    from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import TRANSCRIPT_NAMES
+
+    stderr_log = str(log_dir / TRANSCRIPT_NAMES["stderr"])
     lock_file_path = str(branch_path / ".ai_mail.local" / ".dispatch.lock")
 
     # wake_back rides argv, never spawn_env, which becomes the agent's own environment.

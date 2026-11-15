@@ -1,11 +1,12 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for ai_mail tests - sandbox redirects, console pin, state reset
-# Version: 1.9.0
+# Version: 1.9.1
 # Created: 2026-03-05
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # Category: ai_mail/tests
 # CHANGELOG (Max 5 entries):
+#   - v1.9.1 (2026-11-15): main_argv stderr is dispatch_stderr.out; monitor_wake_stubbed drops log_wake_result
 #   - v1.9.0 (2026-10-23): sandboxed_central answers get_all_branches from the sandbox registry; daemon_* fixtures go
 #   - v1.7.2 (2026-10-10): temp_test_dir, sample_test_data removed - spawn template leftovers no live test requests
 #   - v1.7.1 (2026-10-08): monitor_wake_stubbed patches the public doors wake_sender, log_wake_result
@@ -107,7 +108,6 @@ def monitor_logger_silenced(monkeypatch):
 def monitor_wake_stubbed(monkeypatch):
     """Prevent wake_sender from importing/calling real wake_branch in unrelated tests."""
     monkeypatch.setattr(monitor_mod, "wake_sender", MagicMock(return_value="skipped_sender"))
-    monkeypatch.setattr(monitor_mod, "log_wake_result", MagicMock())
 
 
 @pytest.fixture
@@ -122,7 +122,7 @@ def main_argv(tmp_path):
     lock_file = ai_mail_dir / ".dispatch.lock"
     lock_file.write_text("{}", encoding="utf-8")
 
-    stderr_log = tmp_path / "stderr.log"
+    stderr_log = tmp_path / "dispatch_stderr.out"
     stderr_log.write_text("", encoding="utf-8")
 
     argv = [

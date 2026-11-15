@@ -16,7 +16,7 @@
 # sentry: no-test-needed(constant) — POLL_INTERVAL and RATE_LIMIT_DELAY: real values, overridden by every test
 # sentry: no-test-needed(shared) — the startup check, kill, logs, lock, JSONL: tests/test_dispatch_monitor_helpers.py
 # sentry: no-test-needed(shared) — the sandbox gate and the broker handshake: tests/test_dispatch_monitor_sandbox.py
-# sentry: no-test-needed(shared) — wake_sender, log_wake_result and the decline: tests/test_dispatch_monitor_wake.py
+# sentry: no-test-needed(shared) — wake_sender, the decline and the reported wake result: tests/test_dispatch_monitor_wake.py
 # sentry: no-test-needed(shared) — what each attempt leaves behind: tests/test_dispatch_monitor_artifacts.py
 # sentry: no-test-needed(shared) — the session-pointer retry loop: tests/test_dispatch_monitor_pointer.py
 
@@ -48,7 +48,7 @@ pytestmark = pytest.mark.usefixtures("monitor_json_silenced", "monitor_logger_si
 @pytest.fixture
 def stderr_log(tmp_path):
     """Create a stderr log file and return its path string."""
-    log_file = tmp_path / "stderr.log"
+    log_file = tmp_path / "dispatch_stderr.out"
     log_file.write_text("", encoding="utf-8")
     return str(log_file)
 
@@ -325,7 +325,7 @@ def test_a_bounce_that_cannot_be_sent_is_written_beside_the_lock(monkeypatch, ma
 
 def test_a_bounce_with_no_stderr_log_says_none_was_captured(monkeypatch, main_argv, tmp_path):
     argv, _, _ = main_argv
-    argv = argv[:4] + [str(tmp_path / "absent" / "stderr.log")] + argv[5:]
+    argv = argv[:4] + [str(tmp_path / "absent" / "dispatch_stderr.out")] + argv[5:]
     sends = MagicMock(return_value=MagicMock(returncode=0))
     monkeypatch.setattr(mod.subprocess, "run", sends)
 
@@ -497,7 +497,7 @@ def test_max_turns_changes_notification_status(monkeypatch, main_argv, tmp_path,
     argv, lock_file, stderr_log = main_argv
 
     # Write max_turns to stdout log
-    stdout_log = Path(str(lock_file)).parent.parent / "logs" / "dispatch_stdout.log"
+    stdout_log = Path(str(lock_file)).parent.parent / "logs" / "dispatch_stdout.out"
     stdout_log.parent.mkdir(parents=True, exist_ok=True)
 
     def fake_run(cmd, stdout_log_path, stderr_fh, cwd, env, branch, **kwargs):
@@ -539,8 +539,8 @@ def test_max_turns_changes_notification_status(monkeypatch, main_argv, tmp_path,
 
 
 def test_stderr_rotation_on_large_file(tmp_path, monkeypatch):
-    """stderr > 512KB triggers rotation to .log.1 before opening."""
-    stderr_log = tmp_path / "stderr.log"
+    """stderr > 512KB triggers rotation to .out.1 before opening."""
+    stderr_log = tmp_path / "dispatch_stderr.out"
     # Write > 512KB to trigger rotation
     stderr_log.write_text("x" * 520_000, encoding="utf-8")
 
@@ -576,14 +576,14 @@ def test_stderr_rotation_on_large_file(tmp_path, monkeypatch):
         main()
 
     # Rotated file should exist
-    rotated = tmp_path / "stderr.log.1"
+    rotated = tmp_path / "dispatch_stderr.out.1"
     assert rotated.exists()
     assert rotated.stat().st_size >= 520_000
     bounce.assert_not_called()
 
 
 def test_stdout_rotation_on_large_file(tmp_path, monkeypatch):
-    """stdout > 512KB triggers rotation to .log.1 before first attempt."""
+    """stdout > 512KB triggers rotation to .out.1 before first attempt."""
     branch_dir = tmp_path / "branch"
     ai_mail_dir = branch_dir / ".ai_mail.local"
     ai_mail_dir.mkdir(parents=True)
@@ -592,11 +592,11 @@ def test_stdout_rotation_on_large_file(tmp_path, monkeypatch):
 
     lock = ai_mail_dir / ".dispatch.lock"
     lock.write_text("{}", encoding="utf-8")
-    stderr_log = tmp_path / "stderr.log"
+    stderr_log = tmp_path / "dispatch_stderr.out"
     stderr_log.write_text("", encoding="utf-8")
 
     # Write large stdout log
-    stdout_log = logs_dir / "dispatch_stdout.log"
+    stdout_log = logs_dir / "dispatch_stdout.out"
     stdout_log.write_text("x" * 520_000, encoding="utf-8")
 
     argv = [
@@ -622,7 +622,7 @@ def test_stdout_rotation_on_large_file(tmp_path, monkeypatch):
     with pytest.raises(SystemExit):
         main()
 
-    rotated = logs_dir / "dispatch_stdout.log.1"
+    rotated = logs_dir / "dispatch_stdout.out.1"
     assert rotated.exists()
     bounce.assert_not_called()
 
@@ -737,10 +737,10 @@ def test_main_failed_attempt_stdout_preserved(monkeypatch, main_argv, tmp_path):
     with pytest.raises(SystemExit):
         main()
 
-    preserved = logs_dir / "dispatch_stdout.attempt-1.log"
+    preserved = logs_dir / "dispatch_stdout.attempt-1.out"
     assert preserved.exists()
     assert '"attempt": 1' in preserved.read_text(encoding="utf-8")
-    assert '"attempt": 2' in (logs_dir / "dispatch_stdout.log").read_text(encoding="utf-8")
+    assert '"attempt": 2' in (logs_dir / "dispatch_stdout.out").read_text(encoding="utf-8")
     bounce.assert_not_called()
 
 
@@ -748,7 +748,7 @@ def test_main_stale_attempt_files_shifted(monkeypatch, main_argv, tmp_path):
     """A previous run's attempt-N stdout files are shifted aside at startup."""
     argv, lock_file, stderr_log = main_argv
     logs_dir = tmp_path / "branch" / "logs"
-    stale = logs_dir / "dispatch_stdout.attempt-2.log"
+    stale = logs_dir / "dispatch_stdout.attempt-2.out"
     stale.write_text("previous run", encoding="utf-8")
 
     bounce = MagicMock()
@@ -765,7 +765,7 @@ def test_main_stale_attempt_files_shifted(monkeypatch, main_argv, tmp_path):
         main()
 
     assert not stale.exists()
-    assert (logs_dir / "dispatch_stdout.attempt-2.log.1").read_text(encoding="utf-8") == "previous run"
+    assert (logs_dir / "dispatch_stdout.attempt-2.out.1").read_text(encoding="utf-8") == "previous run"
     bounce.assert_not_called()
 
 
@@ -800,8 +800,8 @@ def test_main_bounce_includes_result_json(monkeypatch, main_argv, tmp_path):
     assert "api_error_status=529" in reason
     assert "API Error: overloaded" in reason
     # attempt-3 stdout stays in place; attempts 1-2 preserved for forensics
-    assert (logs_dir / "dispatch_stdout.attempt-1.log").exists()
-    assert (logs_dir / "dispatch_stdout.attempt-2.log").exists()
+    assert (logs_dir / "dispatch_stdout.attempt-1.out").exists()
+    assert (logs_dir / "dispatch_stdout.attempt-2.out").exists()
 
 
 def test_main_bg_orphaned_treated_as_incomplete(monkeypatch, main_argv, tmp_path):
@@ -996,7 +996,7 @@ def test_main_max_turns_detected(monkeypatch, main_argv, tmp_path):
 
     # Determine where main() will write its stdout log
     branch_dir = lock_file.parent.parent
-    stdout_log = branch_dir / "logs" / "dispatch_stdout.log"
+    stdout_log = branch_dir / "logs" / "dispatch_stdout.out"
     stdout_log.parent.mkdir(parents=True, exist_ok=True)
 
     def fake_run(cmd, stdout_log_path, stderr_fh, cwd, env, branch, **kwargs):
@@ -1034,8 +1034,8 @@ def test_main_max_turns_detected(monkeypatch, main_argv, tmp_path):
 
 
 def test_stderr_rotation(tmp_path, monkeypatch):
-    """stderr log > 512KB triggers rotation to .log.1."""
-    stderr_log = tmp_path / "stderr.log"
+    """stderr log > 512KB triggers rotation to .out.1."""
+    stderr_log = tmp_path / "dispatch_stderr.out"
     stderr_log.write_text("x" * 520_000, encoding="utf-8")
 
     branch_dir = tmp_path / "branch"
@@ -1070,7 +1070,7 @@ def test_stderr_rotation(tmp_path, monkeypatch):
     with pytest.raises(SystemExit):
         main()
 
-    rotated = tmp_path / "stderr.log.1"
+    rotated = tmp_path / "dispatch_stderr.out.1"
     assert rotated.exists()
     assert rotated.stat().st_size >= 520_000
     bounce.assert_not_called()

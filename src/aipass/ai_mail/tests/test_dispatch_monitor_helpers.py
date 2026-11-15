@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_helpers.py
 # Description: Tests for the dispatch monitor's units - rate limit, fresh cmd, startup check, kill, logs, lock, JSONL
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-08
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's units: startup check, kill, result logs, own lock, JSONL."""
@@ -255,7 +255,7 @@ def test_an_ordinary_failure_waits_only_the_short_pause(monkeypatch, main_argv, 
 
 def test_a_stderr_log_that_cannot_be_opened_reads_as_no_rate_limit(monkeypatch, main_argv, tmp_path):
     argv, _, _ = main_argv
-    argv = argv[:4] + [str(tmp_path / "absent" / "stderr.log")] + argv[5:]
+    argv = argv[:4] + [str(tmp_path / "absent" / "dispatch_stderr.out")] + argv[5:]
     bounce = MagicMock()
     monkeypatch.setattr(mod, "_send_bounce", bounce)
 
@@ -282,8 +282,8 @@ def test_an_empty_attempt_stdout_is_left_in_place_not_preserved(monkeypatch, mai
     code, _ = _run_main(monkeypatch, argv, tmp_path, [writes_nothing, lambda s: 0])
 
     assert code == 0
-    assert (logs_dir / "dispatch_stdout.log").exists()
-    assert not (logs_dir / "dispatch_stdout.attempt-1.log").exists()
+    assert (logs_dir / "dispatch_stdout.out").exists()
+    assert not (logs_dir / "dispatch_stdout.attempt-1.out").exists()
     bounce.assert_not_called()
 
 

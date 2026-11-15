@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_wake_managers.py
 # Description: Tests for the wake's manager lanes, the wake-back opt-out, the Fable grant read and the dashboard refresh
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-10-08
 # Modified: 2026-11-15
 # =============================================
@@ -23,6 +23,7 @@ from unittest.mock import MagicMock
 import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
 import aipass.ai_mail.apps.handlers.dispatch.wake_dashboard as wake_dashboard_mod
 import aipass.prax.apps.modules.dashboard as prax_dashboard_mod
+from aipass.ai_mail.apps.modules.door_wake import TRANSCRIPT_NAMES
 from aipass.ai_mail.apps.handlers.dispatch import register as register_mod
 from aipass.ai_mail.apps.handlers.dispatch.wake_dashboard import refresh_recipient_dashboard
 from aipass.ai_mail.apps.handlers.dispatch.wake import (
@@ -339,7 +340,7 @@ class TestWakeBackOptOut:
             "@testbranch",
             str(branch_path / ".ai_mail.local" / ".dispatch.lock"),
             "@devpulse",
-            str(branch_path / "logs" / "dispatch_stderr.log"),
+            str(branch_path / "logs" / "dispatch_stderr.out"),
             "--",
         ]
         assert "--no-wake-back" not in cmd
@@ -493,6 +494,18 @@ class TestTheGrantIsReadFromTheUntrackedConfig:
     def test_the_grant_lives_where_the_repo_does_not_ship_it(self):
         """The config path is inside .ai_mail.local/, which is gitignored."""
         assert wake_mod.CONFIG_FILE.parent.name == ".ai_mail.local"
+
+
+class TestTranscriptNamesAreACrossBranchContract:
+    """Sentry's log_structure check and devpulse's usage tool read the names through door_wake."""
+
+    def test_the_door_publishes_names_that_never_end_in_log(self):
+        assert TRANSCRIPT_NAMES == {
+            "stdout": "dispatch_stdout.out",
+            "stderr": "dispatch_stderr.out",
+            "attempt": "dispatch_stdout.attempt-{n}.out",
+            "rotated": ".out.1",
+        }
 
 
 class TestDispatchStatusLabelsAreACrossBranchContract:
