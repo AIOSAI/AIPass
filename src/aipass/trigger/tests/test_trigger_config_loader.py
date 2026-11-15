@@ -3,7 +3,7 @@
 # Description: Tests for the trigger operator config loader
 # Version: 1.0.0
 # Created: 2026-08-08
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for handlers/json/config_loader.py — regenerate when missing, never clobber what the operator wrote."""
@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 import pytest
-from aipass.trigger.apps.config import trail_logger
+from aipass.prax import trail
 from aipass.trigger.apps.handlers.json import config_loader
 
 
@@ -27,7 +27,7 @@ def loader(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     Real disk: a mocked filesystem would test nothing.
     """
     monkeypatch.setattr(config_loader, "CONFIG_PATH", tmp_path / "custom_config" / "trigger.config.json")
-    monkeypatch.setattr(config_loader, "logger", trail_logger(tmp_path / "config_loader.jsonl"))
+    monkeypatch.setattr(config_loader, "logger", trail(tmp_path / "logs" / "config_loader.jsonl"))
     return config_loader
 
 

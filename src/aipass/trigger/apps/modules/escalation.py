@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: escalation.py
 # Description: Escalation digest CLI — inspect repeat warning/error signatures
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-08
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -109,11 +109,6 @@ def _handle_status(console) -> None:
         )
     if not stats["email_wired"]:
         console.print("  [dim]Email callback not wired in this process (wired when events fire).[/dim]")
-    if stats.get("trail_writes_dropped"):
-        console.print(
-            f"  [yellow]Trail lines lost  : {stats['trail_writes_dropped']}[/yellow] "
-            f"[dim](the escalation.jsonl sidecar could not be written — counting is unaffected)[/dim]"
-        )
     console.print()
     console.print(f"  [dim]state : {stats['state_file']}[/dim]")
     console.print(f"  [dim]config: {stats['config_file']}[/dim]")

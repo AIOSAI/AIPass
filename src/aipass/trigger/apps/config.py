@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: config.py
-# Description: Trigger package paths, atomic JSON writes, recursion-safe trail logger
-# Version: 1.8.0
+# Description: Trigger package paths and atomic JSON writes
+# Version: 1.9.0
 # Created: 2026-03-09
 # Modified: 2026-11-15
 # =============================================
@@ -15,64 +15,11 @@ import json
 import os
 import tempfile
 from contextlib import contextmanager
-from datetime import datetime
 from pathlib import Path
-from typing import Any
 
-from aipass.prax import append_jsonl as _append_jsonl
+from aipass.prax import logger
 
 TRIGGER_ROOT = Path(__file__).resolve().parents[1]
-
-_CONFIG_LOG = TRIGGER_ROOT / "logs" / "config.jsonl"
-
-
-def append_trail(path: Path, entry: dict) -> bool:
-    """Append one JSONL line to a sidecar file, reporting whether it landed."""
-    # Never raises. Use a `.jsonl` path: the log watcher reads only `*.log` and would feed it back.
-    try:
-        _append_jsonl(path, entry)
-        return True
-    except Exception:
-        # A failure to log cannot be logged; callers surface the return value.
-        return False
-
-
-class TrailLogger:
-    """A logger that writes JSONL to a sidecar file instead of through prax."""
-
-    # Code on the watched event path would re-enter itself through prax; watchers skip `.jsonl`.
-
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        self.dropped = 0
-
-    def _emit(self, level: str, message: str, fields: dict) -> None:
-        """Append one line to the sidecar, counting the write if it is lost."""
-        entry: dict[str, Any] = {"ts": datetime.now().isoformat(), "level": level, "msg": message}
-        entry.update(fields)
-        if not append_trail(self.path, entry):
-            self.dropped += 1
-
-    def info(self, message: str, **fields: Any) -> None:
-        """Record an INFO line on the trail."""
-        self._emit("INFO", message, fields)
-
-    def warning(self, message: str, **fields: Any) -> None:
-        """Record a WARNING line on the trail."""
-        self._emit("WARNING", message, fields)
-
-    def error(self, message: str, **fields: Any) -> None:
-        """Record an ERROR line on the trail."""
-        self._emit("ERROR", message, fields)
-
-
-def trail_logger(path: Path) -> TrailLogger:
-    """Build a recursion-safe logger writing to *path*."""
-    return TrailLogger(path)
-
-
-logger = TrailLogger(_CONFIG_LOG)
-
 
 AIPASS_PKG_ROOT = TRIGGER_ROOT.parent
 

@@ -3,7 +3,7 @@
 # Description: Tests for the ci_red event handler and medic's dispatch gates it runs
 # Version: 1.1.2
 # Created: 2026-10-23
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/events/ci_red.py and the dispatch gates it runs."""
@@ -143,4 +143,4 @@ class TestHandFire:
     def test_a_handler_failure_never_reaches_the_caller(self, ci_lane):
         (ci_lane.root / "ci_ledger.json").write_text("{torn", encoding="utf-8")
         assert _fire()["failed"] == 0
-        assert "handle_ci_red failed" in (ci_lane.root / "ci_lane.jsonl").read_text(encoding="utf-8")
+        assert any("handle_ci_red failed" in call.args[0] for call in ci_lane.log.warning.call_args_list)

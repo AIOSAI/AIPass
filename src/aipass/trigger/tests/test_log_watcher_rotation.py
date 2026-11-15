@@ -21,6 +21,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import aipass.trigger.apps.handlers.log_watcher as lw
+from aipass.trigger.apps.handlers import medic_state
 
 pytestmark = pytest.mark.usefixtures("log_watcher_infrastructure")
 
@@ -401,8 +402,9 @@ class TestInodeRotationDetection:
         warnings = [str(call.args) for call in mock_logger.warning.call_args_list]
         assert any("not replayed" in warning and ".log.2" in warning for warning in warnings)
 
-    def test_tracked_inode_beyond_chain_reads_new_file_from_zero(self, tmp_path):
+    def test_tracked_inode_beyond_chain_reads_new_file_from_zero(self, tmp_path, monkeypatch):
         """Inode matching nothing within the chain: nothing drained, new file read whole."""
+        monkeypatch.setattr(lw, "log_backup_count", lambda: 3)
         watcher = lw.BranchLogWatcher()
 
         log_file = tmp_path / "core.log"
@@ -430,8 +432,9 @@ class TestInodeRotationDetection:
         assert lines == fresh
         assert watcher.log_positions[file_path] == log_file.stat().st_size
 
-    def test_a_tail_rotated_past_the_chain_is_named_as_lost(self, tmp_path):
+    def test_a_tail_rotated_past_the_chain_is_named_as_lost(self, tmp_path, monkeypatch):
         """Pins the silent return: an inode past the last backup dropped its unread tail without a word."""
+        monkeypatch.setattr(lw, "log_backup_count", lambda: 3)
         watcher = lw.BranchLogWatcher()
         log_file = tmp_path / "core.log"
         log_file.write_text("header\n", encoding="utf-8")
@@ -449,6 +452,43 @@ class TestInodeRotationDetection:
 
         warnings = [call.args[0] % call.args[1:] for call in mock_logger.warning.call_args_list]
         assert any(file_path in w and "lost unread" in w for w in warnings), warnings
+
+    def test_the_chain_depth_is_prax_backup_count_read_now(self, tmp_path, monkeypatch):
+        """Pins the hardcoded depth of 3: prax keeping 5 backups left a tail at '.log.4' unread."""
+        monkeypatch.setattr(lw, "log_backup_count", lambda: 5)
+        watcher = lw.BranchLogWatcher()
+        log_file = tmp_path / "core.log"
+        log_file.write_text("header\n", encoding="utf-8")
+        file_path = str(log_file)
+        watcher._record_position(file_path, log_file.stat().st_size)
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(_error_line("tail four rotations back"))
+        for _ in range(4):
+            _rotate_chain(log_file, backup_count=5)
+        log_file.write_text(_error_line("fresh"), encoding="utf-8")
+
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
+
+        assert any("tail four rotations back" in line for line in _processed_lines(mock_proc))
+
+    def test_a_drain_failure_is_reported_loudly(self, tmp_path):
+        """Pins the warning-only catch: an unreadable rotated tail was one more watched WARNING, nobody told."""
+        watcher = lw.BranchLogWatcher()
+        log_file = tmp_path / "core.log"
+        log_file.write_text("header\n", encoding="utf-8")
+        file_path = str(log_file)
+        watcher._record_position(file_path, log_file.stat().st_size)
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(_error_line("unread tail"))
+        _rotate_log(log_file).chmod(0)
+
+        watcher._drain_rotated_tail(file_path, 7)
+
+        rows = medic_state.get_failing_handlers()
+        assert [(r["handler"], r["branch"]) for r in rows] == [("log_watcher.drain", file_path)]
+        assert "Permission denied" in rows[0]["error"]
+        lw.logger.warning.assert_not_called()
 
     def test_in_place_truncation_with_backup_chain_no_drain(self, tmp_path):
         """No-overreach guard: same inode plus a full backup chain never drains.
@@ -539,14 +579,14 @@ class TestOnModified:
         watcher.on_modified(event)
         watcher._read_new_lines.assert_not_called()
 
-    def test_skips_excluded_files(self):
+    def test_skips_files_it_should_not_process(self):
         """Files that fail _should_process are not read."""
         watcher = lw.BranchLogWatcher()
         watcher._should_process = MagicMock(return_value=False)
         watcher._read_new_lines = MagicMock()
         event = MagicMock()
         event.is_directory = False
-        event.src_path = "/some/excluded.log"
+        event.src_path = "/some/notes.txt"
         watcher.on_modified(event)
         watcher._read_new_lines.assert_not_called()
 

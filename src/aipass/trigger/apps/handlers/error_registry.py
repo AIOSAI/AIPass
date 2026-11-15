@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_registry.py
 # Description: Structured error tracking and registry for Medic v2
-# Version: 2.6.0
+# Version: 2.8.0
 # Created: 2026-02-13
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -21,11 +21,10 @@ from datetime import datetime, timedelta
 from typing import Dict, Iterator, Optional, Tuple
 
 
-from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.prax import logger
 from aipass.trigger.apps.config import TRIGGER_ROOT, atomic_write_json, json_file_lock
 from aipass.trigger.apps.handlers.json import json_handler
 
-logger = get_direct_logger()
 REGISTRY_FILE = TRIGGER_ROOT / "trigger_json" / "error_registry.json"
 CB_STATE_FILE = TRIGGER_ROOT / "trigger_json" / "trigger_cb_state.json"
 
@@ -270,13 +269,9 @@ def is_suppressed(fingerprint: str) -> bool:
 
     'resolved' deliberately does not silence: a recurring resolved error means the fix did not hold.
     """
-    try:
-        entry = get_entry(fingerprint)
-        return bool(entry) and entry.get("status") == "suppressed"
-    except Exception as exc:
-        # Fail open: a registry read problem must not silence real errors.
-        logger.warning("is_suppressed check failed for '%s': %s", fingerprint, exc)
-        return False
+    # Unreadable raises: an answer either way is a guess, and the guess may silence or flood.
+    entry = _find_entry(_load_registry(), fingerprint)
+    return bool(entry) and entry.get("status") == "suppressed"
 
 
 def should_dispatch(fingerprint: str, now: Optional[float] = None) -> bool:
@@ -341,22 +336,17 @@ def compute_fingerprint(error_type: str, normalized_msg: str, component: str) ->
 
 
 def _load_registry() -> dict:
-    """Load the error registry from disk.
+    """Load the error registry from disk; absent or empty is a new one, unreadable raises.
 
-    Callers write the blank fallback straight back, so an unreadable file
-    returns blank and loses the registry.
+    Callers write what this returns, so a blank answer for an unreadable file would erase the registry.
     """
-    try:
-        if REGISTRY_FILE.exists():
-            raw = REGISTRY_FILE.read_text(encoding="utf-8").strip()
-            if not raw:
-                return {"errors": {}, "metadata": {"version": "1.0.0", "last_updated": datetime.now().isoformat()}}
-            data = json.loads(raw)
-            if isinstance(data, dict) and "errors" in data:
-                return data
-    except Exception as exc:
-        logger.warning("Failed to load error registry: %s", exc)
-    return {"errors": {}, "metadata": {"version": "1.0.0", "last_updated": datetime.now().isoformat()}}
+    raw = REGISTRY_FILE.read_text(encoding="utf-8").strip() if REGISTRY_FILE.exists() else ""
+    if not raw:
+        return {"errors": {}, "metadata": {"version": "1.0.0", "last_updated": datetime.now().isoformat()}}
+    data = json.loads(raw)
+    if not isinstance(data, dict) or "errors" not in data:
+        raise ValueError(f"{REGISTRY_FILE.name} has no errors map: not a registry")
+    return data
 
 
 def _save_registry(data: dict) -> bool:
@@ -371,73 +361,59 @@ def _save_registry(data: dict) -> bool:
 
 
 def report(error_type: str, message: str, component: str, log_path: str = "", severity: str = "medium") -> dict:
-    """Report an error to the registry; the returned entry carries an 'is_new' flag."""
-    try:
-        if severity not in VALID_SEVERITIES:
-            severity = "medium"
+    """Report an error to the registry; the returned entry carries an 'is_new' flag. Unreadable raises."""
+    if severity not in VALID_SEVERITIES:
+        severity = "medium"
 
-        normalized = normalize_message(message)
-        fingerprint = compute_fingerprint(error_type, normalized, component)
+    normalized = normalize_message(message)
+    fingerprint = compute_fingerprint(error_type, normalized, component)
 
-        is_user_error = bool(_USER_ERROR_PATTERNS.search(message))
+    is_user_error = bool(_USER_ERROR_PATTERNS.search(message))
 
-        with json_file_lock(REGISTRY_FILE):
-            registry = _load_registry()
-            now = datetime.now().isoformat()
+    with json_file_lock(REGISTRY_FILE):
+        registry = _load_registry()
+        now = datetime.now().isoformat()
 
-            if fingerprint in registry["errors"]:
-                entry = registry["errors"][fingerprint]
-                entry["count"] = entry.get("count", 1) + 1
-                entry["last_seen"] = now
-                if log_path:
-                    entry["log_path"] = log_path
-                if is_user_error and entry.get("status") != "suppressed":
-                    entry["status"] = "suppressed"
-                    entry["suppress_reason"] = "user_error"
-                _save_registry(registry)
-                result = dict(entry)
-                result["is_new"] = False
-                json_handler.log_operation(
-                    "error_registered", {"fingerprint": fingerprint[:12], "count": entry["count"]}
-                )
-                return result
-            else:
-                initial_status = "suppressed" if is_user_error else "new"
-                initial_suppress_reason = "user_error" if is_user_error else ""
+        if fingerprint in registry["errors"]:
+            entry = registry["errors"][fingerprint]
+            entry["count"] = entry.get("count", 1) + 1
+            entry["last_seen"] = now
+            if log_path:
+                entry["log_path"] = log_path
+            if is_user_error and entry.get("status") != "suppressed":
+                entry["status"] = "suppressed"
+                entry["suppress_reason"] = "user_error"
+            _save_registry(registry)
+            result = dict(entry)
+            result["is_new"] = False
+            json_handler.log_operation("error_registered", {"fingerprint": fingerprint[:12], "count": entry["count"]})
+            return result
+        else:
+            initial_status = "suppressed" if is_user_error else "new"
+            initial_suppress_reason = "user_error" if is_user_error else ""
 
-                event = ErrorEvent(
-                    fingerprint=fingerprint,
-                    error_type=error_type,
-                    message=message,
-                    normalized_message=normalized,
-                    component=component,
-                    severity=severity,
-                    count=1,
-                    status=initial_status,
-                    first_seen=now,
-                    last_seen=now,
-                    log_path=log_path,
-                    suppress_reason=initial_suppress_reason,
-                    source_fix_status="none",
-                )
-                entry_dict = asdict(event)
-                registry["errors"][fingerprint] = entry_dict
-                _save_registry(registry)
-                result = dict(entry_dict)
-                result["is_new"] = True
-                json_handler.log_operation("error_registered", {"fingerprint": fingerprint[:12], "count": 1})
-                return result
-
-    except Exception as exc:
-        logger.warning("Failed to report error for component '%s': %s", component, exc)
-        return {
-            "error_type": error_type,
-            "message": message,
-            "component": component,
-            "is_new": True,
-            "status": "new",
-            "count": 1,
-        }
+            event = ErrorEvent(
+                fingerprint=fingerprint,
+                error_type=error_type,
+                message=message,
+                normalized_message=normalized,
+                component=component,
+                severity=severity,
+                count=1,
+                status=initial_status,
+                first_seen=now,
+                last_seen=now,
+                log_path=log_path,
+                suppress_reason=initial_suppress_reason,
+                source_fix_status="none",
+            )
+            entry_dict = asdict(event)
+            registry["errors"][fingerprint] = entry_dict
+            _save_registry(registry)
+            result = dict(entry_dict)
+            result["is_new"] = True
+            json_handler.log_operation("error_registered", {"fingerprint": fingerprint[:12], "count": 1})
+            return result
 
 
 def query(

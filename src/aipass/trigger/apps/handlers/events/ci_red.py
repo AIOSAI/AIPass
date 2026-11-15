@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ci_red.py
 # Description: ci_red event handler - wakes the owner of a red CI run through medic's dispatch gates
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-10-22
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -15,14 +15,11 @@ handler triages the run itself, so a hand fire of a bare run id walks the whole 
 
 from typing import Any, Dict, List
 
-from aipass.trigger.apps.config import TRIGGER_ROOT, trail_logger
+from aipass.prax import logger
 from aipass.trigger.apps.handlers import error_registry, escalation
 from aipass.trigger.apps.handlers.ci import git_door, ledger, outbound, replies, triage
 from aipass.trigger.apps.handlers.events import error_detected as medic
 from aipass.trigger.apps.handlers.json import json_handler
-
-# Not prax: this runs on the watched event path, so a prax line would fire straight back at it.
-logger = trail_logger(TRIGGER_ROOT / "logs" / "ci_lane.jsonl")
 
 PAYLOAD_KEYS = ("run_id", "workflow", "step", "owner", "lines", "url", "fingerprint")
 # Cures still waiting on a gate or the cap: every poll fires them again until one dispatches.
@@ -174,7 +171,7 @@ def handle_ci_red(
     **kwargs: Any,
 ) -> None:
     """Handle ci_red - dispatch the run's owner, or mail @devpulse when it has none."""
-    # Silent by contract: never raises, never prints, never logs through prax.
+    # Silent by contract: never raises, never prints.
     try:
         if not run_id:
             return

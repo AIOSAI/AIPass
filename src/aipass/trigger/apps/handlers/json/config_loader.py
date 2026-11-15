@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config_loader.py
 # Description: Operator config loader for trigger.config.json
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-08
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -14,12 +14,13 @@ import json
 import os
 from typing import Any
 
-from aipass.trigger.apps.config import TRIGGER_JSON_DIR, TRIGGER_ROOT, trail_logger
+from aipass.prax import trail
+from aipass.trigger.apps.config import TRIGGER_JSON_DIR, TRIGGER_ROOT
 
 CONFIG_PATH = TRIGGER_JSON_DIR / "custom_config" / "trigger.config.json"
 
-# A .jsonl sidecar, not prax: this loader runs on the log watchers' event path.
-logger = trail_logger(TRIGGER_ROOT / "logs" / "config_loader.jsonl")
+# Trail: a warning on the watched log would re-enter the handler that loaded this config.
+logger = trail(TRIGGER_ROOT / "logs" / "config_loader.jsonl")
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "_meta": {

@@ -3,7 +3,7 @@
 # Description: Tests for the escalation lane's signature, counting, windows, gates and state file
 # Version: 1.3.0
 # Created: 2026-08-08
-# Modified: 2026-11-08
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/escalation.py — the repeat signature, counting, windows, gates and state file."""
@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, Generator
 
 import pytest
-from aipass.trigger.apps.config import trail_logger
+from aipass.prax import trail
 from aipass.trigger.apps.handlers import escalation
 from aipass.trigger.apps.handlers.json import config_loader
 from aipass.trigger.tests.support_escalation import (
@@ -695,7 +695,7 @@ class TestConfigReadThrough:
         """Point the real loader at an operator config file under tmp_path."""
         path = tmp_path / "custom_config" / "trigger.config.json"
         monkeypatch.setattr(config_loader, "CONFIG_PATH", path)
-        monkeypatch.setattr(config_loader, "logger", trail_logger(tmp_path / "config_loader.jsonl"))
+        monkeypatch.setattr(config_loader, "logger", trail(tmp_path / "logs" / "config_loader.jsonl"))
         monkeypatch.setattr(escalation, "STATE_FILE", tmp_path / "escalation_state.json")
         escalation._config_cache = (0.0, None)
         yield path

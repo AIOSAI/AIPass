@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: medic_state.py
 # Description: Medic state persistence and status collection handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-02-12
 # Modified: 2026-11-15
 # =============================================
@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.prax import logger
 from aipass.trigger.apps.config import (
     TRIGGER_JSON_DIR,
     TRIGGER_ROOT,
@@ -30,7 +30,6 @@ from aipass.trigger.apps.config import (
 )
 from aipass.trigger.apps.handlers.json import json_handler
 
-logger = get_direct_logger()
 
 MEDIC_STATE_FILE = TRIGGER_JSON_DIR / "medic_state.json"
 LEGACY_MEDIC_STATE_FILE = TRIGGER_JSON_DIR / "trigger_config.json"

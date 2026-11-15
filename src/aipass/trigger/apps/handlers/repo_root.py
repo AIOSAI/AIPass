@@ -1,31 +1,22 @@
 # =================== AIPass ====================
 # Name: repo_root.py
 # Description: One guarded answer to "where is my file" and "where is the repo root" — never the process cwd
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-31
 # Modified: 2026-11-15
 # =============================================
 
 """Module-file and repo-root resolution, defined once for trigger.
 
-Never the cwd; no prax (watched path, circular)."""
+Never the cwd."""
 
 import os
 from collections.abc import Callable
 from pathlib import Path
 
-from aipass.trigger.apps.config import TRIGGER_ROOT, trail_logger
+from aipass.prax import logger
 
 MODULE_NAME = "repo_root"
-
-# Tests redirect the trail to a temp dir, or their pins write into the live tree.
-_test_log_dir = os.environ.get("AIPASS_TEST_LOG_DIR")
-if _test_log_dir:
-    _LOG_FILE = Path(_test_log_dir) / "trigger" / "repo_root.jsonl"
-else:
-    _LOG_FILE = TRIGGER_ROOT / "logs" / "repo_root.jsonl"
-
-logger = trail_logger(_LOG_FILE)
 
 # Filled when the fallback logger itself fails; see _record_fallback.
 RECORD_FAILURES: list[str] = []

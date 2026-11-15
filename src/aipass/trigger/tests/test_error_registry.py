@@ -3,7 +3,7 @@
 # Description: Unit tests for the error_registry handler
 # Version: 1.3.2
 # Created: 2026-03-24
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/error_registry.py: the dedup engine, circuit breaker and backoff."""
@@ -549,18 +549,17 @@ def test_is_suppressed_true_only_for_suppressed_status(tmp_path: Path) -> None:
     assert er.is_suppressed("never_seen_fingerprint") is False
 
 
-def test_is_suppressed_fails_open_on_registry_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A registry read failure must not silence a real error."""
-    _seed_registry(tmp_path)
+def test_is_suppressed_raises_on_an_unreadable_registry(tmp_path: Path) -> None:
+    """Pins the fail-open default: an unreadable registry answered 'not suppressed' and nobody was told."""
+    registry_file = tmp_path / "trigger_json" / "error_registry.json"
+    registry_file.parent.mkdir(parents=True, exist_ok=True)
+    registry_file.write_text("{invalid json", encoding="utf-8")
     er = _import_registry()
 
-    def _boom(_fingerprint: str) -> dict:
-        raise OSError("registry unreadable")
-
-    monkeypatch.setattr(er, "get_entry", _boom)
-
-    assert er.is_suppressed("any_fingerprint") is False
-    assert er.should_dispatch("any_fingerprint") is True
+    with pytest.raises(json.JSONDecodeError):
+        er.is_suppressed("any_fingerprint")
+    with pytest.raises(json.JSONDecodeError):
+        er.should_dispatch("any_fingerprint")
 
 
 def test_query_returns_all_entries(tmp_path: Path) -> None:
@@ -914,19 +913,21 @@ class TestEmptyJsonResilience:
         saved = json.loads(registry_file.read_text(encoding="utf-8"))
         assert list(saved["errors"]) == [result["fingerprint"]]
 
-    def test_load_registry_corrupt_json(self, tmp_path: Path) -> None:
-        """A corrupt registry reads as the empty default, and the report writes a valid one in its place."""
+    @pytest.mark.parametrize("content", ["{invalid json", '{"no_errors_key": 1}', "[]"])
+    def test_an_unreadable_registry_raises_from_report_and_is_left_untouched(
+        self, tmp_path: Path, content: str
+    ) -> None:
+        """Pins the silent reset: an unreadable registry read as empty, and report wrote the empty one over it."""
         registry_dir = tmp_path / "trigger_json"
         registry_dir.mkdir(parents=True, exist_ok=True)
         registry_file = registry_dir / "error_registry.json"
-        registry_file.write_text("{invalid json", encoding="utf-8")
+        registry_file.write_text(content, encoding="utf-8")
 
         er = _import_registry()
-        result = er.report(error_type="TestError", message="onto a corrupt file", component="TRIGGER")
+        with pytest.raises(ValueError):
+            er.report(error_type="TestError", message="onto a corrupt file", component="TRIGGER")
 
-        assert "fingerprint" in result, "report fell to its failure dict"
-        saved = json.loads(registry_file.read_text(encoding="utf-8"))
-        assert list(saved["errors"]) == [result["fingerprint"]]
+        assert registry_file.read_text(encoding="utf-8") == content
 
     def test_load_circuit_breaker_empty_config(self, tmp_path: Path) -> None:
         """An empty breaker state file reads as a closed breaker with no backoff."""

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: error_detected.py
 # Description: Error detected event handler with Medic v2 dispatch gating
-# Version: 2.12.0
+# Version: 2.14.0
 # Created: 2026-02-10
 # Modified: 2026-11-15
 # =============================================
@@ -14,14 +14,12 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
-from aipass.trigger.apps.config import TRIGGER_ROOT, append_trail, trail_logger
+from aipass.prax import append_jsonl, logger
+from aipass.trigger.apps.config import TRIGGER_ROOT
 from aipass.trigger.apps.handlers.repo_root import find_repo_root
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers import escalation, medic_state
 from aipass.memory.apps.modules.door_registry_scope import fleet_branches
-
-# Not prax: this runs on the watched event path, so a prax line would fire straight back at it.
-logger = trail_logger(TRIGGER_ROOT / "logs" / "error_detected_handler.jsonl")
 
 
 _REPO_ROOT = find_repo_root(caller="error_detected")
@@ -58,11 +56,12 @@ def _is_medic_enabled() -> bool:
 
 def _is_branch_muted(branch_name: str) -> bool:
     """Check if a specific branch is muted for medic dispatch."""
+    # Unreadable raises, never answers unmuted: it may hold a person's mute.
     try:
-        return branch_name.lstrip("@").lower() in medic_state.get_muted_branches()
+        muted = medic_state.get_muted_branches()
     except Exception as exc:
-        logger.warning(f"_is_branch_muted config read failed: {exc}")
-        return False
+        raise RuntimeError(f"mute list unreadable ({medic_state.MEDIC_STATE_FILE.name}): {exc}") from exc
+    return branch_name.lstrip("@").lower() in muted
 
 
 def set_send_email_callback(callback: Callable[..., bool]) -> None:
@@ -118,12 +117,18 @@ def _tell_registry_owner(reason: str) -> None:
     if not sent:
         raise RuntimeError(f"could not tell {REGISTRY_OWNER} that {reason}")
     _census_alerted = reason
-    try:
-        from aipass.ai_mail.apps.modules.door_wake import wake_branch
+    _wake(REGISTRY_OWNER, "registry unreadable")
 
-        wake_branch(REGISTRY_OWNER, fresh=False, sender="@trigger")
+
+def _wake(recipient: str, about: str) -> None:
+    """Wake the branch a delivered mail is for; a failure raises, since the mail then sits unread."""
+    # Through ai_mail's published door, never its handlers.
+    from aipass.ai_mail.apps.modules.door_wake import wake_branch
+
+    try:
+        wake_branch(recipient, fresh=False, sender="@trigger")
     except Exception as exc:
-        logger.warning(f"wake failed for {REGISTRY_OWNER} (registry unreadable): {exc}")
+        raise RuntimeError(f"mail delivered to {recipient} but wake failed ({about}): {exc}") from exc
 
 
 def _is_rate_limited(branch_email: str) -> bool:
@@ -147,26 +152,21 @@ def _record_dispatch(branch_email: str) -> None:
 
 
 def _read_log_context(log_path: str, error_message: str, context_lines: int = 2) -> str:
-    """Read context lines around an error in the log file."""
-    try:
-        path = Path(log_path)
-        if not path.exists():
-            return ""
-        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
-        target_idx = -1
-        for i in range(len(lines) - 1, -1, -1):
-            if error_message in lines[i]:
-                target_idx = i
-                break
-        if target_idx < 0:
-            return ""
-        start = max(0, target_idx - context_lines)
-        end = min(len(lines), target_idx + context_lines + 1)
-        context = lines[start:end]
-        return "\n".join(context)
-    except Exception as exc:
-        logger.warning(f"_read_log_context failed for {log_path}: {exc}")
+    """Read context lines around an error in the log file; an unreadable file raises."""
+    path = Path(log_path)
+    if not path.exists():
         return ""
+    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    target_idx = -1
+    for i in range(len(lines) - 1, -1, -1):
+        if error_message in lines[i]:
+            target_idx = i
+            break
+    if target_idx < 0:
+        return ""
+    start = max(0, target_idx - context_lines)
+    end = min(len(lines), target_idx + context_lines + 1)
+    return "\n".join(lines[start:end])
 
 
 def _build_notification_message(
@@ -260,15 +260,13 @@ def _write_suppression_log(reason: str, branch: str, module: str, message: str) 
         "module": module,
         "msg": message[:100],
     }
-    if not append_trail(TRIGGER_ROOT / "logs" / "medic_suppressed.jsonl", entry):
-        logger.warning(f"suppression log write failed ({reason})")
+    append_jsonl(TRIGGER_ROOT / "logs" / "medic_suppressed.jsonl", entry)
 
 
 def _write_rate_log(reason: str, detail: str) -> None:
     """Write a line to the rate-limited log."""
     entry = {"ts": datetime.now().isoformat(), "reason": reason, "detail": detail}
-    if not append_trail(TRIGGER_ROOT / "logs" / "rate_limited.jsonl", entry):
-        logger.warning(f"rate log write failed ({reason})")
+    append_jsonl(TRIGGER_ROOT / "logs" / "rate_limited.jsonl", entry)
 
 
 def handle_error_detected(
@@ -287,7 +285,7 @@ def handle_error_detected(
 ) -> None:
     """Handle error_detected event - deliver notification to affected branch."""
     global _census_alerted
-    # Never prints, never logs through prax; a failure raises to the bus, which reports it at a bounded rate.
+    # Never prints; a failure raises to the bus, which reports it at a bounded rate.
     if not branch or not module or not message or not error_hash:
         return
 
@@ -329,8 +327,8 @@ def handle_error_detected(
     try:
         registered_emails = _get_registered_emails()
     except RuntimeError as exc:
-        _tell_registry_owner(str(exc))
         _write_suppression_log(f"Held, {exc} - no dispatch for", branch, module, message)
+        _tell_registry_owner(str(exc))
         return
     _census_alerted = None
     if recipient not in registered_emails:
@@ -365,7 +363,12 @@ def handle_error_detected(
 
     effective_log_path = log_path if log_path else "unknown"
 
-    error_log_context = _read_log_context(effective_log_path, message)
+    try:
+        error_log_context = _read_log_context(effective_log_path, message)
+    except OSError as exc:
+        # Carried into the mail, so the recipient learns why the context is missing; the dispatch still goes.
+        logger.warning(f"log context unreadable for {effective_log_path}: {exc}")
+        error_log_context = f"(context unavailable: {exc})"
 
     email_subject = f"[ERROR] {module} - detected in logs"
 
@@ -396,15 +399,6 @@ def handle_error_detected(
     if not sent:
         raise RuntimeError(f"Email delivery failed for {recipient} (fingerprint={fingerprint})")
 
-    try:
-        # Through ai_mail's published door, never its handlers.
-        from aipass.ai_mail.apps.modules.door_wake import wake_branch
-
-        wake_branch(recipient, fresh=False, sender="@trigger")
-    except Exception as exc:
-        # Not fatal: the email waits in the inbox. Recorded so the missed wake is visible.
-        logger.warning(f"wake failed for {recipient} (fingerprint={fingerprint}): {exc}")
-
     json_handler.log_operation("dispatch_sent", {"recipient": recipient})
 
     if fingerprint:
@@ -412,3 +406,6 @@ def handle_error_detected(
         circuit_breaker_probe_succeeded()
     else:
         _record_dispatch(recipient)
+
+    # Last: the delivered mail is recorded before a wake failure raises to the bus.
+    _wake(recipient, f"fingerprint={fingerprint}")

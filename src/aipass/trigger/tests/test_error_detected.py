@@ -27,7 +27,7 @@ import aipass.trigger.apps.handlers as handlers_pkg
 import aipass.trigger.apps.handlers.error_registry as error_registry
 import aipass.trigger.apps.handlers.events.error_detected as error_detected
 from aipass.ai_mail.apps.modules import door_wake as wake
-from aipass.trigger.apps.config import trail_logger
+from aipass.prax import trail
 from aipass.trigger.apps.handlers import escalation, medic_state
 
 
@@ -58,7 +58,7 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     monkeypatch.setattr(medic_state, "logger", MagicMock())
     monkeypatch.setattr(error_detected, "BRANCH_REGISTRY_FILE", tmp_path / "AIPASS_REGISTRY.json")
     monkeypatch.setattr(error_detected, "TRIGGER_ROOT", tmp_path)
-    monkeypatch.setattr(error_detected, "logger", trail_logger(tmp_path / "error_detected_handler.jsonl"))
+    monkeypatch.setattr(error_detected, "logger", MagicMock())
     monkeypatch.setattr(error_detected, "_dispatch_timestamps", {})
     # Tests assign over these directly; setattr them first so teardown undoes it.
     for name in (
@@ -262,6 +262,61 @@ class TestHandleErrorDetectedGates:
             error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
 
         send.assert_not_called()
+
+    def test_an_unreadable_mute_list_raises_never_answers_unmuted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Pins the default: an unreadable mute list read as 'unmuted' and woke a branch a person had muted."""
+        mod = _import_module()
+        real_is_branch_muted = mod._is_branch_muted
+        send = _setup_happy_path(mod)
+        mod._is_branch_muted = real_is_branch_muted  # type: ignore[attr-defined]
+        monkeypatch.setattr(medic_state, "get_muted_branches", MagicMock(side_effect=OSError("disk gone")))
+
+        with pytest.raises(RuntimeError, match="mute list unreadable.*disk gone"):
+            mod.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
+
+        send.assert_not_called()
+
+    def test_a_wake_failure_after_delivery_raises_once_the_dispatch_is_recorded(self) -> None:
+        """Pins the warning-only wake: a delivered mail that never woke its branch reached only a log line."""
+        mod = _import_module()
+        send = _setup_happy_path(mod)
+        wake.wake_branch.side_effect = RuntimeError("no session")
+
+        with pytest.raises(RuntimeError, match="mail delivered to @flow but wake failed.*no session"):
+            mod.handle_error_detected(
+                branch="flow", module="cfg", message="err", error_hash="h1", count=2, fingerprint="fp1"
+            )
+
+        send.assert_called_once()
+        mod.registry_record_dispatch.assert_called_once_with("fp1")
+
+    def test_a_registry_owner_wake_failure_raises_after_the_hold_is_recorded(self, tmp_path: Path) -> None:
+        """Pins the warning-only wake on the census alert: spawn's mail sat unread and nobody knew."""
+        send = MagicMock(return_value=True)
+        error_detected.set_send_email_callback(send)
+        wake.wake_branch.side_effect = RuntimeError("no session")
+
+        with pytest.raises(RuntimeError, match="mail delivered to @spawn but wake failed.*no session"):
+            error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
+
+        assert "registry unreadable" in (tmp_path / "logs" / "medic_suppressed.jsonl").read_text(encoding="utf-8")
+        wake.wake_branch.side_effect = None
+        error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
+        assert [c.kwargs["to_branch"] for c in send.call_args_list] == ["@spawn"], "the alert was not marked sent"
+
+    def test_an_unreadable_log_context_is_named_in_the_mail(self, tmp_path: Path) -> None:
+        """Pins the empty default: an unreadable log sent the mail with no context and no word why."""
+        mod = _import_module()
+        send = _setup_happy_path(mod)
+        unreadable = tmp_path / "flow.log"
+        unreadable.mkdir()
+
+        mod.handle_error_detected(
+            branch="flow", module="cfg", message="err", error_hash="h1", count=2, log_path=str(unreadable)
+        )
+
+        assert "context unavailable" in send.call_args.kwargs["message"]
+        assert "Is a directory" in send.call_args.kwargs["message"]
 
     def test_an_absent_branch_registry_is_told_to_its_owner_not_read_as_empty(self, tmp_path: Path) -> None:
         """Pins the silent default census: no file answered the empty set and every branch was skipped as unknown."""
@@ -821,7 +876,7 @@ def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
         return True
 
     monkeypatch.setattr(escalation, "STATE_FILE", tmp_path / "escalation_state.json")
-    monkeypatch.setattr(escalation, "logger", trail_logger(tmp_path / "escalation.jsonl"))
+    monkeypatch.setattr(escalation, "logger", trail(tmp_path / "logs" / "escalation.jsonl"))
     monkeypatch.setattr(escalation, "get_config", lambda: config)
     monkeypatch.setattr(escalation, "_send_email", _send)
 

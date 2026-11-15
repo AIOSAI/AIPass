@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Centralized log file watcher for system_logs directory
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-01-31
 # Modified: 2026-11-15
 # =============================================
@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from aipass.prax import logger
+from aipass.prax.apps.modules.logger import log_backup_count
 from aipass.trigger.apps.config import TRIGGER_ROOT
 from aipass.trigger.apps.handlers.json import json_handler
 
@@ -26,9 +27,6 @@ SYSTEM_LOGS_DIR = TRIGGER_ROOT.parent.parent.parent / "system_logs"
 
 # Sole owner of system_logs; see start_log_watcher() for why this module does not watch it.
 SYSTEM_LOGS_OWNER = "branch_log_events"
-
-# Must match prax RotatingFileHandler backup_count.
-MAX_BACKUP_CHAIN_DEPTH = 3
 
 from watchdog.events import FileSystemEventHandler as WatchdogFileSystemEventHandler
 
@@ -137,7 +135,7 @@ class LogFileWatcher(WatchdogFileSystemEventHandler):
         try:
             rotated: Optional[Path] = None
             skipped = 0
-            for index in range(1, MAX_BACKUP_CHAIN_DEPTH + 1):
+            for index in range(1, log_backup_count() + 1):
                 backup = Path(f"{file_path}.{index}")
                 if not backup.exists():
                     break

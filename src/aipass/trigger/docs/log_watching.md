@@ -56,6 +56,19 @@ has no watch, so its `system_logs` copy is the one read until the next restart. 
 test-fixture logs) keep being watched — that is the only reason the directory is still
 read at all.
 
+**The suffix is the whole rule.** Every `*.log` in a watched dir is read, trigger's own
+logs included; a `.jsonl` trail never is. No file name and no phrase is skipped: a line
+that loops is written to a trail at its source instead. A rotated tail is looked for
+across `log_backup_count()` backups, prax's configured depth read at the time of the
+rotation.
+
+**A failure the watcher survives is reported, not swallowed.** A raise out of a watchdog
+callback would end the observer thread, so a failing warning line, error line, rotated
+drain or state flush goes to `handlers/failure_report.py`: a `logs/failures.jsonl` line,
+a `Failing handlers` row in `medic status` and one mail to @devpulse; the next success
+clears the row. Unreadable `trigger_data.json` raises at start instead of resetting
+every position to EOF.
+
 **Branch attribution comes from the live tree, not a list.** `_known_branch_names()`
 reads the branch directories (60s TTL) instead of trusting a hardcoded roster, so a new
 branch is attributed the moment its directory exists. A static list survives as a floor

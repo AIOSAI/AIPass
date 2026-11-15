@@ -40,10 +40,10 @@ from unittest.mock import MagicMock
 # Imported while the real config is in place, so the suite shares one escalation module, not a mock-configured copy.
 from aipass.trigger.apps.handlers import escalation as _escalation
 from aipass.trigger.apps.handlers.json import config_loader as _config_loader
-from aipass.trigger.apps.config import trail_logger
+from aipass.prax import trail
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers.events import startup as _startup
-from aipass.trigger.apps.handlers import error_registry, escalation, medic_state
+from aipass.trigger.apps.handlers import error_registry, escalation, failure_report, medic_state
 from aipass.trigger.apps.handlers.events import error_detected
 import aipass.trigger.apps.handlers.json.config_loader as config_loader
 import aipass.trigger.apps.handlers.log_watcher as lw
@@ -72,10 +72,10 @@ def isolate_escalation_state(monkeypatch: pytest.MonkeyPatch, escalation_sandbox
     state_file = escalation_sandbox / "escalation_state.json"
     state_file.unlink(missing_ok=True)
     monkeypatch.setattr(_escalation, "STATE_FILE", state_file)
-    monkeypatch.setattr(_escalation, "logger", trail_logger(escalation_sandbox / "escalation.jsonl"))
+    monkeypatch.setattr(_escalation, "logger", trail(escalation_sandbox / "logs" / "escalation.jsonl"))
     monkeypatch.setattr(_escalation, "_send_email", None)
     monkeypatch.setattr(_config_loader, "CONFIG_PATH", escalation_sandbox / "custom_config" / "trigger.config.json")
-    monkeypatch.setattr(_config_loader, "logger", trail_logger(escalation_sandbox / "config_loader.jsonl"))
+    monkeypatch.setattr(_config_loader, "logger", trail(escalation_sandbox / "logs" / "config_loader.jsonl"))
     _escalation._config_cache = (0.0, None)
     yield
     _escalation._config_cache = (0.0, None)
@@ -94,7 +94,7 @@ def isolate_catchup_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
     monkeypatch.setattr(mod, "CATCHUP_STATE_FILE", sandbox / "error_catchup.json")
     monkeypatch.setattr(mod, "LEGACY_CATCHUP_STATE_FILE", sandbox / "trigger_data.json")
     monkeypatch.setattr(mod, "SUPPRESSED_LOG", sandbox / "medic_suppressed.jsonl")
-    monkeypatch.setattr(mod, "logger", trail_logger(sandbox / "startup_handler.jsonl"))
+    monkeypatch.setattr(mod, "logger", MagicMock())
 
 
 @pytest.fixture(autouse=True)
@@ -185,7 +185,7 @@ def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cfg: Dict[str, Any]):
 
     Real lock and writes on purpose: a mocked lock once hid a self-deadlock."""
     monkeypatch.setattr(escalation, "STATE_FILE", tmp_path / "escalation_state.json")
-    monkeypatch.setattr(escalation, "logger", trail_logger(tmp_path / "escalation.jsonl"))
+    monkeypatch.setattr(escalation, "logger", trail(tmp_path / "logs" / "escalation.jsonl"))
     monkeypatch.setattr(escalation, "get_config", lambda: cfg)
     monkeypatch.setattr(escalation, "_send_email", None)
     # Left real, the aged lane writes rows into the live error registry.
@@ -286,10 +286,13 @@ def _fresh_census_caches(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def bus_alerts_off_the_live_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> List[Dict[str, Any]]:
-    """A failing handler writes medic_state.json and mails the manager: both land in tmp_path, the mail in a list."""
+    """A reported failure writes medic_state.json, its trail and a mail: all land in tmp_path, the mail in a list."""
     monkeypatch.setattr(medic_state, "MEDIC_STATE_FILE", tmp_path / "medic_state.json")
     monkeypatch.setattr(medic_state, "LEGACY_MEDIC_STATE_FILE", tmp_path / "trigger_config.json")
-    monkeypatch.setattr(outbound, "logger", trail_logger(tmp_path / "ci_lane.jsonl"))
+    monkeypatch.setattr(outbound, "logger", MagicMock())
+    monkeypatch.setattr(failure_report, "logger", trail(tmp_path / "logs" / "failures.jsonl"))
+    monkeypatch.setattr(failure_report, "_counts", {})
+    monkeypatch.setattr(failure_report, "_logged_at", {})
     mails: List[Dict[str, Any]] = []
     monkeypatch.setattr(outbound, "_send_email", lambda **kwargs: mails.append(kwargs) or True)
     return mails
@@ -395,9 +398,10 @@ def ci_lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
     monkeypatch.setattr(error_registry, "REGISTRY_FILE", tmp_path / "error_registry.json")
     monkeypatch.setattr(error_registry, "CB_STATE_FILE", tmp_path / "trigger_cb_state.json")
     monkeypatch.setattr(ci_ledger, "LEDGER_FILE", tmp_path / "ci_ledger.json")
-    monkeypatch.setattr(ci_red, "logger", trail_logger(tmp_path / "ci_lane.jsonl"))
-    monkeypatch.setattr(outbound, "logger", trail_logger(tmp_path / "ci_lane.jsonl"))
-    monkeypatch.setattr(ci_ledger, "logger", trail_logger(tmp_path / "ci_lane.jsonl"))
+    lane.log = MagicMock()
+    monkeypatch.setattr(ci_red, "logger", lane.log)
+    monkeypatch.setattr(outbound, "logger", lane.log)
+    monkeypatch.setattr(ci_ledger, "logger", lane.log)
     monkeypatch.setattr(outbound, "_send_email", fake_mail)
     monkeypatch.setattr(git_door, "run_drone", fake_drone)
     monkeypatch.setattr(door_wake, "wake_branch", fake_wake)
@@ -407,8 +411,6 @@ def ci_lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
     # The bus already wired: a first live fire would run setup_handlers and the real mail adapter.
     monkeypatch.setattr(core.Trigger, "_initialized", True)
     monkeypatch.setattr(core.Trigger, "_handlers", {"ci_red": [ci_red.handle_ci_red]})
-    monkeypatch.setattr(core.Trigger, "_handler_failures", {})
-    monkeypatch.setattr(core.Trigger, "_failure_logged_at", {})
     lane.add_run = add_run
     lane.root = tmp_path
     lane.ledger = lambda: json.loads((tmp_path / "ci_ledger.json").read_text(encoding="utf-8"))

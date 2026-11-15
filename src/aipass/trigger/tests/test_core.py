@@ -11,13 +11,13 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(behaviour) — handlers wired by registry.setup_handlers; each has its own test file
 
+import json
 import sys
 
 import pytest
 from unittest.mock import MagicMock, call
 
-from aipass.trigger.apps.config import trail_logger
-from aipass.trigger.apps.handlers import medic_state
+from aipass.trigger.apps.handlers import failure_report, medic_state
 from aipass.trigger.apps.handlers.events import error_detected, registry, runaway_handler
 from aipass.trigger.apps.modules import core
 
@@ -52,8 +52,6 @@ def trigger_cls(monkeypatch):
     monkeypatch.setattr(Trigger, "_deferred_queue", [])
     monkeypatch.setattr(Trigger, "_draining_deferred", False)
     monkeypatch.setattr(Trigger, "_log_watcher_started", False)
-    monkeypatch.setattr(Trigger, "_handler_failures", {})
-    monkeypatch.setattr(Trigger, "_failure_logged_at", {})
     monkeypatch.setattr(Trigger, "_alias_warned", set())
     return Trigger
 
@@ -305,7 +303,6 @@ def test_a_header_event_reaches_no_handler_on_the_real_wiring(trigger_cls, monke
         assert sys.modules[handler_module.__name__] is handler_module, "not the module setup_handlers imports"
     monkeypatch.setattr(error_detected, "_send_email", None)
     monkeypatch.setattr(runaway_handler, "_send_email", None)
-    monkeypatch.setattr(registry, "logger", trail_logger(tmp_path / "registry_handler.jsonl"))
     wire_the_real_handlers()
 
     result = trigger_cls.fire("cli_header_displayed", title="probe")
@@ -504,21 +501,33 @@ def test_a_failing_handler_is_never_disabled_and_runs_on_every_event(trigger_cls
     assert fail_handler.call_count == 7
 
 
-def test_a_failing_handler_logs_once_per_interval_not_once_per_failure(trigger_cls, monkeypatch):
-    """core.log is watched: one ERROR per failure would feed the watcher its own line on every event."""
+def _failure_lines(tmp_path):
+    """The ERROR lines the failure route wrote to its trail."""
+    trail_file = tmp_path / "logs" / "failures.jsonl"
+    return (
+        [json.loads(line) for line in trail_file.read_text(encoding="utf-8").splitlines()]
+        if trail_file.exists()
+        else []
+    )
+
+
+def test_a_failing_handler_logs_to_the_trail_once_per_interval(trigger_cls, monkeypatch, tmp_path):
+    """The bus failure line is a loop on a watched log: it goes to the failures trail, never door one."""
     clock = [1000.0]
-    monkeypatch.setattr(core, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(failure_report, "monotonic", lambda: clock[0])
     trigger_cls.on("error_detected", MagicMock(side_effect=RuntimeError("boom"), __name__="fail_handler"))
 
     for _ in range(4):
         trigger_cls.fire("error_detected", branch="DRONE")
-    assert core.logger.error.call_count == 1
+    assert len(_failure_lines(tmp_path)) == 1
 
-    clock[0] += trigger_cls.FAILURE_LOG_INTERVAL_SECONDS
+    clock[0] += failure_report.LOG_INTERVAL_SECONDS
     trigger_cls.fire("error_detected", branch="DRONE")
 
-    assert core.logger.error.call_count == 2
-    assert "5 in a row" in core.logger.error.call_args.args[0]
+    lines = _failure_lines(tmp_path)
+    assert [line["level"] for line in lines] == ["ERROR", "ERROR"]
+    assert "5 in a row" in lines[-1]["msg"]
+    assert core.logger.error.call_count == 0
 
 
 def test_a_failing_handler_shows_in_medic_state_and_the_manager_is_told_once(
@@ -549,41 +558,47 @@ def test_a_failing_handler_shows_in_medic_state_and_the_manager_is_told_once(
     assert medic_state.get_failing_handlers() == []
 
 
-def test_handler_failure_count_resets_on_success(trigger_cls):
+def _counts_in_a_row(tmp_path):
+    """(handler, branch, count) of every failure line; set the interval to zero so each failure writes one."""
+    lines = _failure_lines(tmp_path)
+    return [(line["handler"], line["branch"], line["count"]) for line in lines if line["level"] == "ERROR"]
+
+
+def test_handler_failure_count_resets_on_success(trigger_cls, monkeypatch, tmp_path):
     """A successful call resets the failure counter for that (handler, branch)."""
+    monkeypatch.setattr(failure_report, "LOG_INTERVAL_SECONDS", 0.0)
     attempt = 0
 
     def sometimes_fails(**kwargs):
-        """Raise on the first 3 attempts, succeed on the 4th."""
+        """Raise on attempts 1-3 and 5, succeed on the 4th."""
         nonlocal attempt
         attempt += 1
-        if attempt <= 3:
+        if attempt != 4:
             raise RuntimeError("transient")
 
     trigger_cls.on("check", sometimes_fails)
 
-    for _ in range(3):
+    for _ in range(5):
         trigger_cls.fire("check", branch="API")
 
-    assert trigger_cls._handler_failures.get((sometimes_fails, "API")) == 3
-
-    trigger_cls.fire("check", branch="API")
-    assert (sometimes_fails, "API") not in trigger_cls._handler_failures
+    counts = [count for _, _, count in _counts_in_a_row(tmp_path)]
+    assert counts == [1, 2, 3, 1]
 
 
 def test_handler_failure_uses_global_when_no_branch(trigger_cls):
     """When no branch is in data, the key uses '__global__' as the branch."""
-    fail_handler = MagicMock(side_effect=RuntimeError("boom"))
+    fail_handler = MagicMock(side_effect=RuntimeError("boom"), __name__="fail_handler")
     trigger_cls.on("some_event", fail_handler)
 
     trigger_cls.fire("some_event")
 
-    assert (fail_handler, "__global__") in trigger_cls._handler_failures
+    assert [row["branch"] for row in medic_state.get_failing_handlers()] == ["__global__"]
 
 
-def test_different_branches_have_independent_failure_counts(trigger_cls):
+def test_different_branches_have_independent_failure_counts(trigger_cls, monkeypatch, tmp_path):
     """Failure counts are tracked independently per branch."""
-    fail_handler = MagicMock(side_effect=RuntimeError("boom"))
+    monkeypatch.setattr(failure_report, "LOG_INTERVAL_SECONDS", 0.0)
+    fail_handler = MagicMock(side_effect=RuntimeError("boom"), __name__="fail_handler")
     trigger_cls.on("error_detected", fail_handler)
 
     for _ in range(3):
@@ -592,8 +607,9 @@ def test_different_branches_have_independent_failure_counts(trigger_cls):
     for _ in range(2):
         trigger_cls.fire("error_detected", branch="MEMORY")
 
-    assert trigger_cls._handler_failures[(fail_handler, "DRONE")] == 3
-    assert trigger_cls._handler_failures[(fail_handler, "MEMORY")] == 2
+    lines = _counts_in_a_row(tmp_path)
+    assert max(c for _, b, c in lines if b == "DRONE") == 3
+    assert max(c for _, b, c in lines if b == "MEMORY") == 2
 
 
 def _fire_value(trigger_cls, monkeypatch, token):

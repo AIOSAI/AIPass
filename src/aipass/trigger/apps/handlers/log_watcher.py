@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Branch log watcher event producer for error detection
-# Version: 2.11.0
+# Version: 2.13.0
 # Created: 2026-02-02
 # Modified: 2026-11-15
 # =============================================
@@ -11,7 +11,6 @@ Branch Log Watcher Event Producer
 """
 
 import json
-import re
 import sys
 import hashlib
 import time
@@ -24,9 +23,10 @@ from aipass.memory.apps.modules.door_registry_scope import fleet_branches
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers.error_registry import report as registry_report
 
-from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.prax import logger
+from aipass.prax.apps.modules.logger import log_backup_count
+from aipass.trigger.apps.handlers import failure_report
 
-logger = get_direct_logger()
 
 TRIGGER_DATA_FILE = TRIGGER_ROOT / "trigger_data.json"
 
@@ -35,31 +35,6 @@ STALE_ENTRY_THRESHOLD_SECONDS = 300
 # Warnings feed only the escalation digest lane, never medic dispatch.
 ERROR_LEVELS = ("ERROR", "CRITICAL")
 WARNING_LEVELS = ("WARNING", "WARN")
-
-# Must match prax RotatingFileHandler backup_count.
-MAX_BACKUP_CHAIN_DEPTH = 3
-
-# Self-referential / dispatch logs: watching them would feed the watcher its own output.
-EXCLUDED_LOG_FILES: Set[str] = {
-    "medic_suppressed.jsonl",
-    "rate_limited.jsonl",
-    "error_monitor.log",
-    "log_watcher.log",
-    "log_watcher.log.1",
-    "trigger_log_watcher.log",
-    "trigger_error_registry.log",
-}
-
-_EXCLUDED_LOG_FILES_LOWER: Set[str] = {f.lower() for f in EXCLUDED_LOG_FILES}
-
-# A line ABOUT an error (a handler reporting one it processed) is not a new error.
-_SEMANTIC_EXCLUSION_PATTERNS: re.Pattern = re.compile(
-    r"error_hash|fingerprint|registry_id|Error ID:|"
-    r"\[ERROR\]|Processed error|Processing error|"
-    r"dispatch.*error|error.*dispatch|"
-    r"suppress.*error|error.*suppress",
-    re.IGNORECASE,
-)
 
 from watchdog.observers import Observer as WatchdogObserver
 from watchdog.events import FileSystemEventHandler as WatchdogFileSystemEventHandler
@@ -139,44 +114,40 @@ def _warning_capture_enabled() -> bool:
     return value
 
 
+def _read_trigger_data() -> Dict[str, Any]:
+    """The persisted watcher state; absent is none, unreadable raises (a reset would skip every unread line)."""
+    if not TRIGGER_DATA_FILE.exists():
+        return {}
+    data = json.loads(TRIGGER_DATA_FILE.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"{TRIGGER_DATA_FILE} holds {type(data).__name__}, not an object")
+    return data
+
+
 def _load_seen_hashes() -> None:
     """Load persisted dedup hashes from trigger_data.json on startup."""
     global _seen_error_hashes
-    try:
-        if TRIGGER_DATA_FILE.exists():
-            data = json.loads(TRIGGER_DATA_FILE.read_text(encoding="utf-8"))
-            stored = data.get("seen_error_hashes", [])
-            _seen_error_hashes = set(stored)
-    except Exception as exc:
-        logger.warning("Failed to load seen hashes: %s", exc)
-        _seen_error_hashes = set()
+    if TRIGGER_DATA_FILE.exists():
+        _seen_error_hashes = set(_read_trigger_data().get("seen_error_hashes", []))
+
+
+def _load_int_map(key: str) -> Dict[str, int]:
+    """One persisted {path: int} map from trigger_data.json; misshapen raises."""
+    stored = _read_trigger_data().get(key, {})
+    if not isinstance(stored, dict):
+        raise ValueError(f"{TRIGGER_DATA_FILE} {key} is {type(stored).__name__}, not an object")
+    return {k: int(v) for k, v in stored.items()}
 
 
 def _load_log_positions() -> Dict[str, int]:
     """Load persisted log positions from trigger_data.json."""
-    try:
-        if TRIGGER_DATA_FILE.exists():
-            data = json.loads(TRIGGER_DATA_FILE.read_text(encoding="utf-8"))
-            stored = data.get("log_positions", {})
-            if isinstance(stored, dict):
-                return {k: int(v) for k, v in stored.items()}
-    except Exception as e:
-        logger.warning("Failed to load log positions: %s", e)
-    return {}
+    return _load_int_map("log_positions")
 
 
 def _load_log_inodes() -> Dict[str, int]:
     """Load persisted log inodes from trigger_data.json."""
     # A separate key so the on-disk log_positions shape never changes.
-    try:
-        if TRIGGER_DATA_FILE.exists():
-            data = json.loads(TRIGGER_DATA_FILE.read_text(encoding="utf-8"))
-            stored = data.get("log_inodes", {})
-            if isinstance(stored, dict):
-                return {k: int(v) for k, v in stored.items()}
-    except Exception as e:
-        logger.warning("Failed to load log inodes: %s", e)
-    return {}
+    return _load_int_map("log_inodes")
 
 
 def _mark_data_dirty() -> None:
@@ -208,7 +179,9 @@ def _flush_trigger_data(force: bool = False) -> None:
             _data_dirty = False
             _last_flush_time = time.monotonic()
         except Exception as exc:
-            logger.warning("Failed to flush trigger_data.json: %s", exc)
+            failure_report.report_failure("log_watcher.flush", str(TRIGGER_DATA_FILE), "flush", exc)
+            return
+        failure_report.report_recovery("log_watcher.flush", str(TRIGGER_DATA_FILE))
 
 
 def is_stale_entry(timestamp_str: str) -> bool:
@@ -418,7 +391,8 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler):
         try:
             rotated: Optional[Path] = None
             skipped = 0
-            for index in range(1, MAX_BACKUP_CHAIN_DEPTH + 1):
+            depth = log_backup_count()
+            for index in range(1, depth + 1):
                 backup = Path(f"{file_path}.{index}")
                 if not backup.exists():
                     break
@@ -430,7 +404,7 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler):
                 logger.warning(
                     "Rotated tail of '%s' not found in its %d backups: its lines after offset %d were lost unread",
                     file_path,
-                    MAX_BACKUP_CHAIN_DEPTH,
+                    depth,
                     last_pos,
                 )
                 return
@@ -446,8 +420,9 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler):
                 f.seek(last_pos)
                 tail = f.read()
         except OSError as exc:
-            logger.warning("Failed to drain rotated log for '%s': %s", file_path, exc)
+            failure_report.report_failure("log_watcher.drain", file_path, "rotation", exc)
             return
+        failure_report.report_recovery("log_watcher.drain", file_path)
 
         if not tail.strip():
             return
@@ -459,9 +434,6 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler):
     def _should_process(self, file_path: str) -> bool:
         """Check if a log file should be processed."""
         if not file_path.endswith(".log"):
-            return False
-        filename = Path(file_path).name
-        if filename.lower() in _EXCLUDED_LOG_FILES_LOWER:
             return False
         if Path(file_path).parent in self.watched_dirs:
             return True
@@ -534,8 +506,6 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler):
             if not parsed:
                 return
 
-            if _SEMANTIC_EXCLUSION_PATTERNS.search(parsed["message"]):
-                return
             if is_stale_entry(parsed["timestamp"]):
                 return
 
@@ -554,7 +524,10 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler):
                 raw_line=log_line,
             )
         except Exception as exc:
-            logger.warning("Failed to process warning line from '%s': %s", log_path, exc)
+            # Caught, not raised: a raise here would end the watchdog observer thread.
+            failure_report.report_failure("log_watcher.warning_line", log_path, "warning_logged", exc)
+            return
+        failure_report.report_recovery("log_watcher.warning_line", log_path)
 
     def _process_log_line(self, log_line: str, log_path: str) -> None:
         """Process a log line and fire error_detected if ERROR found."""
@@ -562,9 +535,6 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler):
             parsed = parse_prax_log_line(log_line)
             if not parsed:
                 self._process_warning_line(log_line, log_path)
-                return
-
-            if _SEMANTIC_EXCLUSION_PATTERNS.search(parsed["message"]):
                 return
 
             if is_stale_entry(parsed["timestamp"]):
@@ -608,8 +578,10 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler):
             json_handler.log_operation("error_detected_in_log", {"branch": branch, "log_path": log_path})
 
         except Exception as exc:
-            logger.warning("Failed to process log line from '%s': %s", log_path, exc)
+            # Caught, not raised: a raise here would end the watchdog observer thread.
+            failure_report.report_failure("log_watcher.error_line", log_path, "error_detected", exc)
             return
+        failure_report.report_recovery("log_watcher.error_line", log_path)
 
     def join_new_dirs(self) -> None:
         """Schedule any logs/ dir the fleet census gained since start; its files start at EOF."""
@@ -736,7 +708,6 @@ def get_watcher_status() -> Dict[str, Any]:
         "seen_hashes_count": len(_seen_error_hashes),
         "tracked_log_files": tracked_files,
         "pending_flush": _data_dirty,
-        "excluded_files": list(EXCLUDED_LOG_FILES),
         "stale_threshold_seconds": STALE_ENTRY_THRESHOLD_SECONDS,
         "aipass_root": str(AIPASS_PKG_ROOT),
         "watched_logs": sorted((name, str(logs_dir)) for logs_dir, name in fleet_logs_dirs().items()),

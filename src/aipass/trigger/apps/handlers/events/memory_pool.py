@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: memory_pool.py
 # Description: Memory pool auto-process event handler — observability for pool processing
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-06-06
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -14,12 +14,9 @@ branch must be a registered citizen, never "__global__": error_detected's gate d
 
 from typing import Any
 
-from aipass.trigger.apps.config import TRIGGER_ROOT, trail_logger
+from aipass.prax import logger
 from aipass.trigger.apps.handlers.error_reporter import report_error
 from aipass.trigger.apps.handlers.json import json_handler
-
-# Not prax: watchers read *.log and would fire this line back here; the .jsonl sidecar is skipped.
-logger = trail_logger(TRIGGER_ROOT / "logs" / "memory_pool_handler.jsonl")
 
 
 def handle_memory_pool_auto_processed(

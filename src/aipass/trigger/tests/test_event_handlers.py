@@ -3,7 +3,7 @@
 # Description: Tests for simple event handler functions and the warning escalation lane
 # Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/events/memory_template_updated.py and warning_logged.py."""
@@ -18,7 +18,7 @@ from typing import Any, Dict, List
 from unittest.mock import MagicMock
 
 import pytest
-from aipass.trigger.apps.config import trail_logger
+from aipass.prax import trail
 from aipass.trigger.apps.handlers import escalation
 from aipass.trigger.apps.handlers.events import memory_template_updated, warning_logged
 
@@ -169,7 +169,7 @@ def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
         return True
 
     monkeypatch.setattr(escalation, "STATE_FILE", tmp_path / "escalation_state.json")
-    monkeypatch.setattr(escalation, "logger", trail_logger(tmp_path / "escalation.jsonl"))
+    monkeypatch.setattr(escalation, "logger", trail(tmp_path / "logs" / "escalation.jsonl"))
     monkeypatch.setattr(escalation, "get_config", lambda: config)
     monkeypatch.setattr(escalation, "_send_email", _send)
     escalation._config_cache = (0.0, None)

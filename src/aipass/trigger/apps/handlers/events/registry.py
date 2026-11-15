@@ -1,18 +1,15 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: Event handler registry for startup registration
-# Version: 0.5.0
+# Version: 0.6.0
 # Created: 2025-12-04
-# Modified: 2026-10-22
+# Modified: 2026-11-15
 # =============================================
 
 """Event Handler Registry - Setup all event handlers on startup"""
 
 from aipass.trigger.apps.handlers.json import json_handler
-from aipass.trigger.apps.config import TRIGGER_ROOT, trail_logger
-
-# Not prax: a prax line would be watched and fired back here; watchers skip `.jsonl`.
-logger = trail_logger(TRIGGER_ROOT / "logs" / "registry_handler.jsonl")
+from aipass.prax import logger
 
 
 def setup_handlers():

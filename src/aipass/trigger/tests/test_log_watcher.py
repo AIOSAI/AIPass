@@ -14,6 +14,7 @@
 # sentry: no-test-needed(covered_elsewhere) — the centralized system_logs watcher, in test_watchers_log_watcher.py
 
 import hashlib
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
@@ -25,6 +26,7 @@ import pytest
 import aipass.trigger.apps.handlers.error_registry as error_registry
 import aipass.trigger.apps.handlers.json.config_loader as config_loader
 import aipass.trigger.apps.handlers.log_watcher as lw
+from aipass.trigger.apps.handlers import medic_state
 from aipass.trigger.tests.support_log_watcher import _BRANCH_LOG_PATH, _SYNTHETIC_HOME
 from aipass.memory.apps.modules.door_registry_scope import fleet_branches as door_fleet_branches
 
@@ -195,13 +197,12 @@ class TestShouldProcess:
         watcher = lw.BranchLogWatcher()
         assert watcher._should_process(str(_SYNTHETIC_HOME / "src" / "aipass" / "flow" / "logs" / "notes.txt")) is False
 
-    def test_excluded_file_rejected(self):
-        """Excluded log files (e.g. error_monitor.log) are rejected."""
+    def test_every_log_in_a_logs_dir_is_read_no_name_list(self):
+        """Pins the name list: the watcher's own logs were skipped by name; the .log suffix is the whole rule."""
         watcher = lw.BranchLogWatcher()
-        assert (
-            watcher._should_process(str(_SYNTHETIC_HOME / "src" / "aipass" / "flow" / "logs" / "error_monitor.log"))
-            is False
-        )
+        logs = _SYNTHETIC_HOME / "src" / "aipass" / "trigger" / "logs"
+        for name in ("log_watcher.log", "error_monitor.log", "trigger_log_watcher.log", "trigger_error_registry.log"):
+            assert watcher._should_process(str(logs / name)) is True, name
 
     def test_ai_mail_dispatch_log_is_read(self):
         """Pins the hidden dispatch errors: dispatch.log was excluded, and its system twin dropped with it."""
@@ -239,8 +240,8 @@ class TestProcessLogLine:
         assert call_args[0][0] == "error_detected"
         assert call_args[1]["message"] == "Database connection failed"
 
-    def test_skips_semantic_exclusion_patterns(self):
-        """Lines matching semantic exclusion patterns are skipped."""
+    def test_a_line_about_an_error_is_still_an_error(self):
+        """Pins the phrase list: an ERROR line naming an error_hash was dropped unread."""
         fire = MagicMock()
         lw.set_event_callback(fire)
         watcher = lw.BranchLogWatcher()
@@ -249,7 +250,8 @@ class TestProcessLogLine:
         line = f"{now} | handler | ERROR | Processed error error_hash=abc123"
         watcher._process_log_line(line, str(_SYNTHETIC_HOME / "src" / "aipass" / "flow" / "logs" / "flow.log"))
 
-        fire.assert_not_called()
+        fire.assert_called_once()
+        assert fire.call_args.kwargs["message"] == "Processed error error_hash=abc123"
 
     def test_skips_stale_entries(self):
         """Lines with stale timestamps are skipped."""
@@ -387,8 +389,8 @@ class TestParsePraxLogLineEdgeCases:
 class TestShouldProcessEdgeCases:
     """Additional edge cases for BranchLogWatcher._should_process."""
 
-    def test_excluded_file_case_insensitive(self):
-        """Exclusion matching is case-insensitive."""
+    def test_uppercase_log_suffix_is_not_read(self):
+        """The suffix rule is exact: .LOG is not .log."""
         watcher = lw.BranchLogWatcher()
         path = str(Path(_SYNTHETIC_HOME) / "src" / "aipass" / "flow" / "logs" / "DISPATCH.LOG")
         assert watcher._should_process(path) is False
@@ -399,14 +401,8 @@ class TestShouldProcessEdgeCases:
         path = str(Path(_SYNTHETIC_HOME) / "src" / "aipass" / "flow" / "logs" / "handler.py")
         assert watcher._should_process(path) is False
 
-    def test_excluded_trigger_log_watcher(self):
-        """trigger_log_watcher.log is excluded (self-referential)."""
-        watcher = lw.BranchLogWatcher()
-        path = str(Path(_SYNTHETIC_HOME) / "src" / "aipass" / "trigger" / "logs" / "trigger_log_watcher.log")
-        assert watcher._should_process(path) is False
-
-    def test_excluded_medic_suppressed(self):
-        """medic_suppressed.jsonl is excluded."""
+    def test_a_jsonl_trail_in_logs_is_never_read(self):
+        """A .jsonl trail beside the logs is rejected by its suffix alone."""
         watcher = lw.BranchLogWatcher()
         path = str(Path(_SYNTHETIC_HOME) / "src" / "aipass" / "flow" / "logs" / "medic_suppressed.jsonl")
         assert watcher._should_process(path) is False
@@ -420,23 +416,37 @@ class TestProcessLogLineDeeper:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
         return f"{now} | test_mod | ERROR | {message}"
 
-    def test_semantic_exclusion_fingerprint(self):
-        """Line containing 'fingerprint' in message is skipped."""
+    def test_an_error_naming_a_fingerprint_fires(self):
+        """Pins the phrase list: 'fingerprint' in an ERROR line hid the error."""
         fire = MagicMock()
         lw.set_event_callback(fire)
         watcher = lw.BranchLogWatcher()
-        line = self._make_error_line("Error with fingerprint=xyz789")
-        watcher._process_log_line(line, _BRANCH_LOG_PATH)
-        fire.assert_not_called()
+        watcher._process_log_line(self._make_error_line("Error with fingerprint=xyz789"), _BRANCH_LOG_PATH)
+        assert fire.call_args.args[0] == "error_detected"
+        assert fire.call_args.kwargs["message"] == "Error with fingerprint=xyz789"
 
-    def test_semantic_exclusion_registry_id(self):
-        """Line containing 'registry_id' in message is skipped."""
+    def test_an_error_naming_a_registry_id_fires(self):
+        """Pins the phrase list: 'registry_id' in an ERROR line hid the error."""
         fire = MagicMock()
         lw.set_event_callback(fire)
         watcher = lw.BranchLogWatcher()
-        line = self._make_error_line("Logged with registry_id=r001")
-        watcher._process_log_line(line, _BRANCH_LOG_PATH)
-        fire.assert_not_called()
+        watcher._process_log_line(self._make_error_line("Logged with registry_id=r001"), _BRANCH_LOG_PATH)
+        assert fire.call_args.args[0] == "error_detected"
+        assert fire.call_args.kwargs["message"] == "Logged with registry_id=r001"
+
+    def test_an_error_path_failure_is_reported_and_the_watcher_survives(self, tmp_path):
+        """Pins the warning-only catch: a failing error path was one more watched line, and nobody was told."""
+        lw.set_event_callback(MagicMock())
+        lw.registry_report.side_effect = RuntimeError("registry gone")
+        watcher = lw.BranchLogWatcher()
+
+        watcher._process_log_line(self._make_error_line("Disk full"), _BRANCH_LOG_PATH)
+
+        rows = medic_state.get_failing_handlers()
+        assert [(r["handler"], r["branch"]) for r in rows] == [("log_watcher.error_line", _BRANCH_LOG_PATH)]
+        assert "registry gone" in rows[0]["error"]
+        assert "registry gone" in _failure_trail(tmp_path)[0]["msg"]
+        lw.logger.warning.assert_not_called()
 
     def test_registry_path_fires_event_with_registry_data(self, monkeypatch):
         """Registry available: fires event with registry metadata."""
@@ -493,6 +503,12 @@ class TestProcessLogLineDeeper:
             watcher._process_log_line("any line", str(_SYNTHETIC_ELSEWHERE / "any" / "path.log"))
 
         fire.assert_not_called()
+
+
+def _failure_trail(tmp_path: Path) -> list:
+    """The lines the failure route wrote to its trail in this test."""
+    trail_file = tmp_path / "logs" / "failures.jsonl"
+    return [json.loads(line) for line in trail_file.read_text(encoding="utf-8").splitlines()]
 
 
 def _set_warning_capture(lw, enabled: bool, monkeypatch) -> MagicMock:
@@ -624,8 +640,8 @@ class TestProcessWarningLine:
 
         fire.assert_not_called()
 
-    def test_semantic_exclusion_fires_nothing(self, monkeypatch):
-        """A line ABOUT an error artifact is not new signal."""
+    def test_a_warning_naming_an_error_hash_is_counted(self, monkeypatch):
+        """Pins the phrase list: a WARNING naming an error_hash never reached the escalation lane."""
         _set_warning_capture(lw, True, monkeypatch)
         fire = MagicMock()
         lw.set_event_callback(fire)
@@ -633,7 +649,27 @@ class TestProcessWarningLine:
 
         watcher._process_warning_line(_warning_line("Retrying error_hash=abc123"), _BRANCH_LOG_PATH)
 
-        fire.assert_not_called()
+        assert fire.call_args.args[0] == "warning_logged"
+
+    def test_a_warning_path_failure_is_reported_loudly_then_cleared(
+        self, monkeypatch, tmp_path, bus_alerts_off_the_live_state
+    ):
+        """Pins the warning-only catch: the warning path's own failure re-entered it, and nobody was told."""
+        _set_warning_capture(lw, True, monkeypatch)
+        lw.set_event_callback(MagicMock(side_effect=RuntimeError("bus down")))
+        watcher = lw.BranchLogWatcher()
+
+        watcher._process_warning_line(_warning_line(), _BRANCH_LOG_PATH)
+
+        rows = medic_state.get_failing_handlers()
+        assert [(r["handler"], r["branch"]) for r in rows] == [("log_watcher.warning_line", _BRANCH_LOG_PATH)]
+        assert [m["to_branch"] for m in bus_alerts_off_the_live_state] == ["@devpulse"]
+        assert "bus down" in _failure_trail(tmp_path)[0]["msg"]
+        lw.logger.warning.assert_not_called()
+
+        lw.set_event_callback(MagicMock())
+        watcher._process_warning_line(_warning_line("Queue depth at 92%"), _BRANCH_LOG_PATH)
+        assert medic_state.get_failing_handlers() == []
 
     def test_capture_disabled_by_config_fires_nothing(self, monkeypatch):
         """An operator can switch branch-log warning reading off entirely."""

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: core.py
 # Description: Trigger event bus for AIPass system-wide event handling
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-02-03
 # Modified: 2026-11-15
 # =============================================
@@ -9,12 +9,10 @@
 """
 Core Trigger class - Event bus for AIPass"""
 
-from time import monotonic
 from typing import Callable
 
 from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.trigger.apps.handlers import medic_state
-from aipass.trigger.apps.handlers.ci import outbound
+from aipass.trigger.apps.handlers import failure_report
 from aipass.trigger.apps.handlers.json import json_handler
 
 
@@ -56,10 +54,6 @@ class Trigger:
     _deferred_queue = []  # Queue for events fired during handling
     _draining_deferred = False  # Prevents nested deferred processing
     _log_watcher_started = False  # Lazy-start flag for log watcher
-    _handler_failures = {}  # (handler, branch) -> consecutive failure count
-    _failure_logged_at = {}  # (handler, branch) -> monotonic time of its last ERROR line
-    # Never a disable: that is a deaf medic. core.log is watched, so the ERROR repeats at most once per interval.
-    FAILURE_LOG_INTERVAL_SECONDS = 600.0
 
     @classmethod
     def _ensure_initialized(cls):
@@ -125,58 +119,17 @@ class Trigger:
         branch = data.get("branch", "__global__")
         ran = failed = 0
         for handler in handlers:
-            key = (handler, branch)
+            name = getattr(handler, "__name__", repr(handler))
             try:
                 handler(**data)
                 ran += 1
             except Exception as e:
                 failed += 1
-                count = cls._handler_failures.get(key, 0) + 1
-                cls._handler_failures[key] = count
-                cls._report_failure(key, event, e, count)
+                failure_report.report_failure(name, branch, event, e)
                 continue
-            if cls._handler_failures.pop(key, None) is not None:
-                cls._report_recovery(key)
+            failure_report.report_recovery(name, branch)
 
         return {"event": event, "handlers": len(handlers), "ran": ran, "failed": failed}
-
-    @classmethod
-    def _report_failure(cls, key: tuple, event: str, exc: Exception, count: int) -> None:
-        """Log a failing handler at a bounded rate; its first failure is recorded for medic status and mailed once."""
-        handler, branch = key
-        name = getattr(handler, "__name__", repr(handler))
-        now = monotonic()
-        last = cls._failure_logged_at.get(key)
-        if last is None or now - last >= cls.FAILURE_LOG_INTERVAL_SECONDS:
-            cls._failure_logged_at[key] = now
-            logger.error(f"[TRIGGER] Handler {name} failed for {event} (branch '{branch}', {count} in a row): {exc}")
-        if count != 1:
-            return
-        try:
-            if medic_state.record_handler_failure(name, branch, event, str(exc)):
-                subject = f"[TRIGGER] handler {name} failing"
-                body = (
-                    f"The trigger bus handler {name} raised on {event} for branch '{branch}': {exc}\n\n"
-                    "It keeps running on every event and logs at most once per "
-                    f"{int(cls.FAILURE_LOG_INTERVAL_SECONDS)}s. Every failing branch: drone @trigger medic status."
-                )
-                if not outbound.mail(outbound.MANAGER, subject, body):
-                    logger.error(f"[TRIGGER] Could not mail {outbound.MANAGER} that handler {name} is failing")
-        except Exception as report_exc:
-            logger.error(f"[TRIGGER] Could not record that handler {name} is failing: {report_exc}")
-
-    @classmethod
-    def _report_recovery(cls, key: tuple) -> None:
-        """Clear a recovered handler from medic status."""
-        handler, branch = key
-        name = getattr(handler, "__name__", repr(handler))
-        cls._failure_logged_at.pop(key, None)
-        try:
-            medic_state.clear_handler_failure(name, branch)
-        except Exception as exc:
-            logger.error(f"[TRIGGER] Could not clear recovered handler {name} from medic status: {exc}")
-            return
-        logger.info(f"[TRIGGER] Handler {name} recovered for branch '{branch}'")
 
     @classmethod
     def _drain_deferred(cls) -> None:

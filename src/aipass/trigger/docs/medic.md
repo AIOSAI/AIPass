@@ -42,7 +42,7 @@ On successful dispatch: sends email via `deliver_email_to_branch()` then calls `
 - `errors stats` prints a **Silenced** count so the silent set is never invisible.
 - Only `suppressed` gates. `resolved` deliberately does **not** — a resolved error that recurs means the fix did not hold, which is genuine signal.
 - Wrong-suppress risk is handled by fingerprint precision, not by periodic re-wake machinery.
-- The status read fails open: a registry read error allows dispatch rather than silencing a real error.
+- An unreadable registry raises from the status read and from `report()`, and the file is left as found: a guess either way would silence or flood, and a blank answer written back would erase the registry.
 
 **Two mute classes, deliberately independent:**
 

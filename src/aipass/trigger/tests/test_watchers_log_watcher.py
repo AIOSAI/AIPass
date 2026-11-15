@@ -550,8 +550,28 @@ class TestLogFileWatcherInodeRotation:
         warnings = [str(call.args) for call in mock_logger.warning.call_args_list]
         assert any("not replayed" in warning and ".log.2" in warning for warning in warnings)
 
-    def test_tracked_inode_beyond_chain_reads_new_file_from_zero(self, tmp_path):
+    def test_the_chain_depth_is_prax_backup_count_read_now(self, tmp_path, monkeypatch):
+        """Pins the hardcoded depth of 3: prax keeping 5 backups left a tail at '.log.4' unread."""
+        monkeypatch.setattr(wlw, "log_backup_count", lambda: 5)
+        watcher = wlw.LogFileWatcher()
+        log_file = tmp_path / "prax_core.log"
+        log_file.write_text("header\n", encoding="utf-8")
+        file_path = str(log_file)
+        watcher._record_position(file_path, log_file.stat().st_size)
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write("2026-08-04 | mod | ERROR | tail four rotations back\n")
+        for _ in range(4):
+            _rotate_chain(log_file, backup_count=5)
+        log_file.write_text("\n".join(_fresh_lines(2)) + "\n", encoding="utf-8")
+
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
+
+        assert any("tail four rotations back" in line for line in _processed_lines(mock_proc))
+
+    def test_tracked_inode_beyond_chain_reads_new_file_from_zero(self, tmp_path, monkeypatch):
         """Inode matching nothing within the chain: nothing drained, new file read whole."""
+        monkeypatch.setattr(wlw, "log_backup_count", lambda: 3)
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"

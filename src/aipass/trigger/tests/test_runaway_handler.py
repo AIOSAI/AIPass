@@ -3,7 +3,7 @@
 # Description: Tests for the runaway_log_detected event handler
 # Version: 1.0.2
 # Created: 2026-08-09
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/events/runaway_handler.py."""
@@ -21,7 +21,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.ai_mail.apps.modules import door_wake as ai_mail_wake
-from aipass.trigger.apps import config as trigger_config
 from aipass.trigger.apps.handlers import medic_state
 from aipass.trigger.apps.handlers.events import runaway_handler as mod
 
@@ -29,8 +28,9 @@ from aipass.trigger.apps.handlers.events import runaway_handler as mod
 RUNAWAY_LOG = str(Path(tempfile.gettempdir()) / "test.log")
 
 
-# Both sidecar writers funnel through config's one prax hook: patching it captures the trail.
+# The decision records and the handler's log lines, each captured by one recorder.
 _trail = MagicMock()
+_log = MagicMock()
 
 
 @pytest.fixture(autouse=True)
@@ -44,7 +44,9 @@ def _reset_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # type: igno
     monkeypatch.setattr(medic_state, "logger", MagicMock())
     monkeypatch.setattr(mod, "ALERTS_FILE", tmp_path / "alerts.json")
     _trail.reset_mock()
-    monkeypatch.setattr(trigger_config, "_append_jsonl", _trail)
+    monkeypatch.setattr(mod, "append_jsonl", _trail)
+    _log.reset_mock()
+    monkeypatch.setattr(mod, "logger", _log)
 
     monkeypatch.setattr(ai_mail_wake, "wake_branch", MagicMock())
 
@@ -320,7 +322,7 @@ class TestNoEmailCallback:
     Only the CRITICAL path needs a callback; observe-only WARNINGs never reach this guard."""
 
     def test_logs_warning_no_dispatch(self) -> None:
-        """Logs a WARNING to the sidecar trail when no callback set."""
+        """Logs a WARNING when no callback set."""
         mod.handle_runaway_log_detected(
             file_path=RUNAWAY_LOG,
             branch="flow",
@@ -329,10 +331,9 @@ class TestNoEmailCallback:
             severity="critical",
         )
 
-        calls = _trail.call_args_list
-        warning_calls = [c for c in calls if isinstance(c[0][1], dict) and c[0][1].get("level") == "WARNING"]
+        warning_calls = _log.warning.call_args_list
         assert len(warning_calls) >= 1
-        assert "No email callback" in warning_calls[0][0][1]["msg"]
+        assert "No email callback" in warning_calls[0].args[0]
 
 
 class TestSuccessfulDispatch:
@@ -906,9 +907,7 @@ class TestCriticalUnchanged:
         assert not _decision_entries("observe_only")
         assert not _gated_by_cooldown(file_path), "a failed dispatch booked a cooldown"
 
-        calls = _trail.call_args_list
-        warnings = [c[0][1] for c in calls if isinstance(c[0][1], dict) and c[0][1].get("level") == "WARNING"]
-        assert any("Email delivery failed" in w["msg"] for w in warnings)
+        assert any("Email delivery failed" in c.args[0] for c in _log.warning.call_args_list)
 
     def test_critical_unknown_branch_still_wakes_prax(self) -> None:
         """NO-OVERREACH: the @prax fallback recipient still gets woken."""

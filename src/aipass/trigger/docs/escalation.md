@@ -62,7 +62,7 @@ The placeholder is `<id>` on purpose — the same token the registry normalizer 
 | `watch_branch_log_warnings` | `true` | Parse WARNING lines out of branch logs |
 | `ignore_branches` | `[]` | Branches never escalated (deliberate, like a volume mute) |
 
-State lives at `trigger_json/escalation_state.json` — deliberately **not** a trio name (see [state_and_durability.md](state_and_durability.md)). The decision trail is `logs/escalation.jsonl` — `.jsonl`, not `.log`, so the branch watcher (which reads only `*.log`) cannot feed the lane its own output. It is written through `TrailLogger` (`apps/config.py`), the shared recursion-safe sink every trigger handler on the error path logs through; a write it cannot complete is counted on `.dropped` and surfaced as `Trail lines lost` in `escalation status` rather than discarded.
+State lives at `trigger_json/escalation_state.json` — deliberately **not** a trio name (see [state_and_durability.md](state_and_durability.md)). The decision trail is `logs/escalation.jsonl` — `.jsonl`, not `.log`, so the branch watcher (which reads only `*.log`) cannot feed the lane its own output. It is written through prax's `trail()`, because a warning about the lane on a watched log would re-enter the lane; a write it cannot complete raises.
 
 
 ---

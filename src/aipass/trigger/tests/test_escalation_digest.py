@@ -11,20 +11,18 @@
 # Split from test_escalation.py (oversize_test_file, 2026-10-08): that file keeps
 # the signature, the counting and the windows; this one holds what the lane does
 # once a signature is due: the send and its failures, the digest mail, what an
-# operator sees through get_signatures, get_stats and the CLI, and the trail
-# logger the lane writes through.
+# operator sees through get_signatures, get_stats and the CLI, and a failed
+# trail write raising.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(covered_elsewhere) — the upsert key the digest carries to ai_mail: test_escalation_upsert.py
 # sentry: no-test-needed(external) — ai_mail delivery of the digest; AIPass tests only its own files
 
-import json
 from types import SimpleNamespace
 from typing import Any, Dict, List
 from unittest.mock import MagicMock
 
 import pytest
-from aipass.trigger.apps.config import trail_logger
 from aipass.trigger.apps.modules import escalation as escalation_cli
 from aipass.trigger.tests.support_escalation import (
     WARNING_EVENT,
@@ -667,51 +665,15 @@ class TestDigestBody:
         assert f"and {25 - lane.MAX_ROSTER_LINES} more" in body
 
 
-class TestTrailLogger:
-    """The recursion-safe sidecar every trigger handler logs through."""
+class TestTrailWriteFailure:
+    """The lane's trail has no drop counter: a lost line is an error the caller sees."""
 
-    def test_writes_level_message_and_fields(self, tmp_path) -> None:
-        """A trail line carries the structured fields the caller passed."""
-        path = tmp_path / "trail.jsonl"
+    def test_a_failed_trail_write_raises_through_the_lane(self, lane) -> None:
+        (lane.STATE_FILE.parent / "logs").write_text("a file where the logs/ directory should be", encoding="utf-8")
+        lane.STATE_FILE.write_text("{torn", encoding="utf-8")
 
-        trail_logger(path).warning("state unreadable", signature="abc123", branch="BACKUP")
-
-        line = json.loads(path.read_text(encoding="utf-8").strip())
-        assert line["level"] == "WARNING"
-        assert line["msg"] == "state unreadable"
-        assert line["signature"] == "abc123"
-        assert line["branch"] == "BACKUP"
-
-    def test_a_broken_sink_is_counted_never_raised(self, tmp_path, monkeypatch) -> None:
-        """A dead trail must not take the error path down with it — it is counted."""
-        trail = trail_logger(tmp_path / "trail.jsonl")
-        monkeypatch.setattr(
-            "aipass.trigger.apps.config._append_jsonl",
-            MagicMock(side_effect=OSError("read-only filesystem")),
-        )
-
-        trail.error("digest send raised")
-
-        assert trail.dropped == 1
-
-    def test_absent_prax_is_counted_too(self, tmp_path, monkeypatch) -> None:
-        """No prax means no sidecar — the loss is still visible as a count."""
-        trail = trail_logger(tmp_path / "trail.jsonl")
-        monkeypatch.setattr("aipass.trigger.apps.config._append_jsonl", None)
-
-        trail.info("digest sent")
-
-        assert trail.dropped == 1
-
-    def test_dropped_trail_lines_reach_the_operator_in_stats(self, lane, monkeypatch) -> None:
-        """A silent sink would be invisible; get_stats() is where it surfaces."""
-        monkeypatch.setattr(
-            "aipass.trigger.apps.config._append_jsonl",
-            MagicMock(side_effect=OSError("disk full")),
-        )
-        lane.logger.warning("something the trail could not keep")
-
-        assert lane.get_stats()["trail_writes_dropped"] >= 1
+        with pytest.raises(OSError):
+            lane.get_stats()
 
 
 # ---------------------------------------------------------------------------

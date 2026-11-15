@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: escalation.py
 # Description: Repeat-signature escalation digest — repeat warns/errors email the operator
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-08-08
-# Modified: 2026-11-08
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -26,12 +26,12 @@ import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from aipass.prax import trail
 from aipass.trigger.apps.config import (
     TRIGGER_JSON_DIR,
     TRIGGER_ROOT,
     atomic_write_json,
     json_file_lock,
-    trail_logger,
 )
 from aipass.trigger.apps.handlers.repo_root import find_repo_root
 from aipass.trigger.apps.handlers.json import config_loader
@@ -40,7 +40,6 @@ from aipass.memory.apps.modules.door_registry_scope import fleet_branches
 
 STATE_FILE = TRIGGER_JSON_DIR / "escalation_state.json"
 
-# .jsonl, not .log: the branch watcher reads *.log, so this cannot feed the lane.
 ESCALATION_LOG = TRIGGER_ROOT / "logs" / "escalation.jsonl"
 
 MAX_MESSAGE_CHARS = 400
@@ -60,8 +59,8 @@ CONFIG_TTL_SECONDS = 30.0
 _config_cache: tuple = (0.0, None)
 
 
-# Not prax: a prax line here is watched, fired back as an error event and recorded again.
-logger = trail_logger(ESCALATION_LOG)
+# Trail: a warning on the watched log would re-enter this handler.
+logger = trail(ESCALATION_LOG)
 
 
 def set_send_email_callback(callback: Callable[..., bool]) -> None:
@@ -878,6 +877,4 @@ def get_stats() -> Dict[str, Any]:
         "state_file": str(STATE_FILE),
         "config_file": str(config_loader.CONFIG_PATH),
         "email_wired": _send_email is not None,
-        # The trail cannot log its own write failures, so they are counted here.
-        "trail_writes_dropped": logger.dropped,
     }

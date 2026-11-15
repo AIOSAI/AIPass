@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: ledger.py
 # Description: CI red lane ledger - run verdicts and cure states in trigger_json/ci_ledger.json
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-10-22
 # Modified: 2026-11-15
 # =============================================
@@ -17,10 +17,9 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterator
 
-from aipass.trigger.apps.config import TRIGGER_JSON_DIR, TRIGGER_ROOT, atomic_write_json, json_file_lock, trail_logger
+from aipass.prax import logger
+from aipass.trigger.apps.config import TRIGGER_JSON_DIR, atomic_write_json, json_file_lock
 from aipass.trigger.apps.handlers.json import json_handler
-
-logger = trail_logger(TRIGGER_ROOT / "logs" / "ci_lane.jsonl")
 
 LEDGER_FILE = TRIGGER_JSON_DIR / "ci_ledger.json"
 

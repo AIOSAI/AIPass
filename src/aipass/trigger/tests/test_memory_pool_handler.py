@@ -3,7 +3,7 @@
 # Description: Tests for memory_pool_auto_processed event handler
 # Version: 1.1.0
 # Created: 2026-06-06
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/events/memory_pool.py."""
@@ -18,7 +18,6 @@ from unittest.mock import MagicMock
 from pathlib import Path
 
 from aipass.ai_mail.apps.modules import email_send
-from aipass.trigger.apps.config import trail_logger
 from aipass.trigger.apps.handlers import error_registry, error_reporter
 from aipass.trigger.apps.handlers.events import error_detected, memory_pool, registry
 from aipass.trigger.apps.handlers.json import json_handler
@@ -27,11 +26,8 @@ from aipass.trigger.apps.modules import core
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Point the real handler's two outward writes away from live state.
-
-    A real trail_logger on tmp_path: test_writes_handler_log_on_failure reads its sidecar back.
-    """
-    monkeypatch.setattr(memory_pool, "logger", trail_logger(tmp_path / "logs" / "memory_pool_handler.jsonl"))
+    """Point the real handler's outward writes away from live state."""
+    monkeypatch.setattr(memory_pool, "logger", MagicMock())
     mock_json_handler = MagicMock()
     mock_json_handler.log_operation = MagicMock(return_value=True)
     monkeypatch.setattr(memory_pool, "json_handler", mock_json_handler)
@@ -232,8 +228,8 @@ class TestHandleMemoryPoolAutoProcessedFailure:
             {"success": False, "error": "something broke"},
         )
 
-    def test_writes_handler_log_on_failure(self, tmp_path: Path) -> None:
-        """Writes to handler log file on failure."""
+    def test_writes_handler_log_on_failure(self) -> None:
+        """Logs a warning on failure."""
         mod = _import_module()
 
         mod.handle_memory_pool_auto_processed(
@@ -241,10 +237,7 @@ class TestHandleMemoryPoolAutoProcessedFailure:
             error="pool write failed",
         )
 
-        log_file = tmp_path / "logs" / "memory_pool_handler.jsonl"
-        assert log_file.exists()
-        content = log_file.read_text(encoding="utf-8")
-        assert "pool write failed" in content
+        assert any("pool write failed" in call.args[0] for call in mod.logger.warning.call_args_list)
 
 
 class TestEventRegistration:

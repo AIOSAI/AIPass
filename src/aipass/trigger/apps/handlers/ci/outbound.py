@@ -1,23 +1,19 @@
 # =================== AIPass ====================
 # Name: outbound.py
 # Description: CI red lane's doors out - mail, dispatch (mail plus wake), the notification feed, the awake count
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-22
 # Modified: 2026-11-15
 # =============================================
 
 """
 CI Outbound Handler - every message the lane sends leaves through here
-
-Silent by contract: it runs on the event path, so it logs to a `.jsonl` trail, never through prax.
 """
 
 from typing import Any, Callable, Dict, Optional
 
-from aipass.trigger.apps.config import TRIGGER_ROOT, trail_logger
+from aipass.prax import logger
 from aipass.trigger.apps.handlers.json import json_handler
-
-logger = trail_logger(TRIGGER_ROOT / "logs" / "ci_lane.jsonl")
 
 MANAGER = "@devpulse"
 REVIEWER = "@sentry"

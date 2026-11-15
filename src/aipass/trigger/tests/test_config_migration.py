@@ -3,7 +3,7 @@
 # Description: Tests for migrate_json_file - moving live state off trio-owned paths
 # Version: 1.0.0
 # Created: 2026-08-07
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/config.py: migrate_json_file and _archive_legacy_file."""
@@ -14,10 +14,7 @@
 import json
 from pathlib import Path
 
-import pytest
-
-from aipass.trigger.apps import config as config_module
-from aipass.trigger.apps.config import ARCHIVE_DIR_NAME, TrailLogger, migrate_json_file
+from aipass.trigger.apps.config import ARCHIVE_DIR_NAME, migrate_json_file
 
 LIVE_STATE = {
     "config": {"medic_enabled": True, "muted_branches": [{"name": "flow", "expires_at": None}]},
@@ -95,9 +92,8 @@ class TestMigrateJsonFile:
         assert json.loads(legacy.read_text(encoding="utf-8")) == blank_template
         assert not (tmp_path / ARCHIVE_DIR_NAME).exists()
 
-    def test_unreadable_legacy_is_left_in_place(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_unreadable_legacy_is_left_in_place(self, tmp_path: Path) -> None:
         """Corrupt legacy file is not archived and not guessed at — a human decides."""
-        monkeypatch.setattr(config_module, "logger", TrailLogger(tmp_path / "logs" / "config.jsonl"))
         legacy = tmp_path / "trigger_config.json"
         new = tmp_path / "medic_state.json"
         legacy.parent.mkdir(parents=True, exist_ok=True)

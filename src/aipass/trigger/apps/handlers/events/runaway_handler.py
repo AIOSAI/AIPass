@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runaway_handler.py
 # Description: Runaway log event handler with per-file cooldown gating
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-07-14
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -21,16 +21,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from aipass.trigger.apps.config import TRIGGER_ROOT, append_trail, atomic_write_json, json_file_lock, trail_logger
+from aipass.prax import append_jsonl, logger
+from aipass.trigger.apps.config import TRIGGER_ROOT, atomic_write_json, json_file_lock
 from aipass.trigger.apps.handlers.repo_root import find_repo_root
 from aipass.trigger.apps.handlers import medic_state
 from aipass.trigger.apps.handlers.json import json_handler
 
 DECISION_LOG = TRIGGER_ROOT / "logs" / "runaway_suppressed.jsonl"
-
-
-# Not prax: the watchers would read its line and fire it back; they skip `.jsonl`.
-logger = trail_logger(TRIGGER_ROOT / "logs" / "runaway_handler.jsonl")
 
 
 _REPO_ROOT = find_repo_root(caller="runaway_handler")
@@ -78,8 +75,7 @@ def _write_decision_log(outcome: str, reason: str, file_path: str, branch: str) 
         "file": file_path,
         "branch": branch,
     }
-    if not append_trail(DECISION_LOG, entry):
-        logger.warning(f"decision log write failed ({outcome}/{reason})")
+    append_jsonl(DECISION_LOG, entry)
 
 
 def _write_alert(

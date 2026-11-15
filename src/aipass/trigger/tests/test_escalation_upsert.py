@@ -3,7 +3,7 @@
 # Description: Tests that escalation digests upsert in place instead of stacking
 # Version: 1.0.1
 # Created: 2026-08-10
-# Modified: 2026-11-08
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/escalation.py digest upsert keys and the send adapter in handlers/events/registry.py."""
@@ -23,7 +23,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from aipass.ai_mail.apps.modules import email_send
-from aipass.trigger.apps.config import trail_logger
+from aipass.prax import trail
 from aipass.trigger.apps.handlers import escalation
 from aipass.trigger.apps.handlers.events import error_detected, runaway_handler
 from aipass.trigger.apps.handlers.events.registry import setup_handlers
@@ -52,7 +52,7 @@ def cfg() -> Dict[str, Any]:
 def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cfg: Dict[str, Any]):
     """The escalation module pointed at tmp state and a tmp trail."""
     monkeypatch.setattr(escalation, "STATE_FILE", tmp_path / "escalation_state.json")
-    monkeypatch.setattr(escalation, "logger", trail_logger(tmp_path / "escalation.jsonl"))
+    monkeypatch.setattr(escalation, "logger", trail(tmp_path / "logs" / "escalation.jsonl"))
     monkeypatch.setattr(escalation, "get_config", lambda: cfg)
     monkeypatch.setattr(escalation, "_send_email", None)
     # The aged lane opens a registry row; never let it reach the live registry.
