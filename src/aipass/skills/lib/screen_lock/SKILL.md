@@ -135,8 +135,8 @@ envelope with `detail (reason=<code>)` when it cannot tell.
 
 ## Notes
 
-- Stdlib + the Prax logger only — importing this skill pulls in no Telegram
-  stack, no bot, no network client. A test asserts that in a clean interpreter.
+- Stdlib + the Prax logger only — importing this skill pulls in no third-party
+  module, no network client. A test asserts that in a clean interpreter.
 - `resolve_graphical_session()` is public: callers can ask which session is ours
   without locking anything.
 - `loginctl` is the declared requirement; `gdbus` is the fallback and is not

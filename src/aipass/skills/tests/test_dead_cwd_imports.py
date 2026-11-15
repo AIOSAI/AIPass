@@ -9,7 +9,7 @@
 # CHANGELOG (Max 5 entries):
 #   - v1.2.0 (2026-11-14): Linux only - the faked-Windows worlds A/B and the accessor emulation go;
 #     every pin runs under the getcwd-denied world, child logs stay in the test seam
-#   - v1.1.1 (2026-10-22): Telethon import probe cut (Telegram left skills); walk skips '(disabled)' files
+#   - v1.1.1 (2026-10-22): walk skips '(disabled)' files
 #   - v1.1.0 (2026-10-08): The old guard's caller-is-None case, read through
 #     private names, becomes two dead-cwd pins on the v2 fence (DPLAN-0404)
 #   - v1.0.0 (2026-08-31): Windows round 4 - every skills module must import

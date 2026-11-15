@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_screen_lock.py
 # Description: Tests for the screen_lock skill — lock paths, the lock-state read, honest failure, doctrine
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-14
-# Modified: 2026-10-10
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -647,26 +647,25 @@ class TestSkillContract:
 
 
 class TestSelfContained:
-    def test_importing_the_skill_does_not_drag_in_the_telegram_stack(self):
-        """
-        The whole point of the extraction: the host API's verb lane can invoke
-        lock without importing the Telegram bot. A source-level grep would pass
-        on a lazy import, so import it for real in a clean interpreter and look
-        at what landed in sys.modules.
-        """
+    def test_importing_the_skill_pulls_in_no_third_party_module(self):
+        """Imported for real in a clean interpreter: a source grep would pass on a lazy import."""
         src_root = Path(__file__).resolve().parents[5]
         code = (
             "import sys\n"
+            "before = set(sys.modules)\n"
             "from aipass.skills.lib.screen_lock import handler\n"
             "handler.get_actions()\n"
-            "print(','.join(m for m in sys.modules if 'telegram' in m))\n"
+            "tops = {m.split('.')[0] for m in set(sys.modules) - before}\n"
+            "print(','.join(sorted(t for t in tops if t not in sys.stdlib_module_names and t != 'aipass')))\n"
         )
         env = {**os.environ, "PYTHONPATH": str(src_root)}
 
-        proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, cwd=str(src_root))
+        proc = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, encoding="utf-8", env=env, cwd=str(src_root)
+        )
 
         assert proc.returncode == 0, proc.stderr
-        assert proc.stdout.strip() == "", f"telegram modules imported: {proc.stdout.strip()}"
+        assert proc.stdout.strip() == "", f"third-party modules imported: {proc.stdout.strip()}"
 
     def test_discoverable_through_the_skills_framework(self):
         """Listing actions goes through discovery + load and fires no lock."""
