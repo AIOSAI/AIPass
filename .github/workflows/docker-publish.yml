@@ -27,6 +27,9 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The image's install clones from this checkout; a shallow one cannot be cloned from.
+          fetch-depth: 0
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
@@ -51,6 +54,7 @@ jobs:
           # The default builder cannot export a registry cache; a container builder can.
           docker buildx create --use
           docker buildx build --push "${tags[@]}" \
+            --build-context repo=.git \
             --cache-from "type=registry,ref=$image:buildcache" \
             --cache-to "type=registry,ref=$image:buildcache,mode=max" \
             --label "org.opencontainers.image.source=https://github.com/$REPOSITORY" \
