@@ -457,7 +457,7 @@ def _sha(data: bytes) -> str:
 
 
 def _is_root() -> bool:
-    return getattr(os, "geteuid", lambda: -1)() == 0
+    return os.geteuid() == 0
 
 
 class TestSettingsBackup:
