@@ -145,6 +145,22 @@ Through BAUD (its sandbox image, a bare Ubuntu; both sign-ins skipped, no creden
 Three install bugs in one morning, each hidden until a failure was made loud: the bootstrap's wrong ai_mail root, the doctor judging the wrong directory, the wire verify error nobody saw because install exited 0 anyway.
 Open after this: devpulse greeting from install_report.json (user_name is empty on a non-interactive install, the wake line still says "greet me by name"); the Tailscale-down warning says "Install it" when it is installed; the full suite, once; push on the owner's word.
 
+### 14. Hand-back to the owners (the owner's ruling, 11-15 10:00)
+
+His words: the brunt work was done with devpulse's sub-agents; from here the managers take over their own branches. Budget: 2 citizens awake, 2 sub-agents each. No more devpulse sub-agents on branch work. "We'll fix it as it breaks": the citizens using their own systems is how the cracks show. No Docker until the reds are gone. If it takes all day, it takes all day.
+Full suite 11-15 09:43: 25,428 passed, 65 failed. Cured and committed: sentry 61 (contract flipped to fail loud), api 1 (+ a WebSocket gap @api found reading its own commit). Open: memory 3 (dispatched), Vera-Studio 12 (another project, the owner's call). Hooks' edit-time fallback warning committed; promote 2 running.
+
+**The hand-back brief (one FPLAN per branch, its Goal section; dispatched two at a time, next on each wake-back):**
+> Sweep 3 (FPLAN-0923, 2026-11-14/15) changed your branch, mostly through devpulse sub-agents, on the owner's rulings: AIPass is Linux only (WSL2 stays); no silent fallbacks (a missing file is a defined empty state, a corrupt or wrong-shape file raises and is left untouched, a check that cannot run never reads as passed); nothing is deleted, it moves to .archive. You may not have had a say. It is your branch: take it back.
+> 1. Read what landed: drone @git log 15 on your branch path, then the diffs. Say what you agree with and what you would have done differently; cure what is wrong.
+> 2. Use your own system. Run your verbs the way your callers do, the unhappy paths too. Whatever breaks loudly now is the point: cure the root, never restore a fallback.
+> 3. Stragglers: any Windows or macOS residue in your code, tests, docs, prompts, scripts (win32, darwin, os.name, platform.system, msvcrt, PowerShell, cross-platform wording). Archive, do not delete.
+> 4. drone @sentry audit aipass @you. The fallback standard is advisory: for each site it lists, cure it or waive that one site in .sentry/bypass.json with a reason that says who finds out when it fires. A whole-file row waives nothing. Run the prune dry-run and drop rows that cover nothing.
+> 5. Tests: only the files you touch, one run at a time, output to a file, no full suite, no coverage. At most two sub-agents.
+> Reply with: files changed, what you disagreed with, what broke when you used it, anything that is another branch's defect (name the branch), anything HELD.
+
+Queue (2 awake at a time): sentry and memory are out now (their own briefs). Then: aipass, hooks, prax, api, ai_mail, drone, spawn, flow, trigger, backup, daemon, cli, commons, skills, canary. devpulse does its own. Done so far: (none)
+
 ### 7. State at capture
 
 dev is ahead of main by 72 commits, unpushed (push and merge only on the owner's word). Per-branch work lists exist for all 18 branches (110 purge items, 56 dead waivers or false greens, 120 fallbacks, 42 owner decisions). Dispatched so far: @aipass (end of onboarding), @sentry (its list), a builder on devpulse's own list. Order after that: prax, cli, ai_mail, hooks part 1, the rest; hooks removes its dead-cwd code last; sentry prunes its helper names after everyone.
