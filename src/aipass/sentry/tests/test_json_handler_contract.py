@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_json_handler_contract.py
 # Description: Fleet-wide contract suite over every branch json_handler: read, write, address, floor
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-09-01
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for every branch's apps/handlers/json/json_handler.py, one contract over the fleet."""
@@ -35,7 +35,7 @@ from aipass.sentry.tests.support_json_handler_contract import (
     TORN_DOCUMENT_OBSERVED,
     WRITER_HAS_NO_BOUNDED_RETRY,
     _installed_roster,
-    assert_warned_of_corrupt_bytes,
+    assert_refuses_and_keeps,
     expose,
     handler_path,
     implementation,
@@ -139,25 +139,16 @@ def test_load_json_materialises_the_document_it_was_asked_to_read(
 
 
 @pytest.mark.parametrize("branch", parametrized())
-def test_load_json_survives_a_corrupt_document(branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Unparseable bytes on disk do not become an exception in the caller."""
+def test_load_json_refuses_a_corrupt_document_and_leaves_it(
+    branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Unparseable bytes raise InvalidDocument; the file is never read as empty or regenerated over."""
     module = implementation(branch)
-    if required_positionals(module.load_json) == 2:
-        module, documents = prepared(branch, tmp_path, monkeypatch)
-        (documents / "corrupt_config.json").write_text("{not json at all", encoding="utf-8")
-        answer = module.load_json("corrupt", "config")
-        # WHAT it regenerates, not merely its type: a blank template addressed to the document asked for, so
-        # a handler handing back another document's contents, or {}, fails here.
-        assert answer["module_name"] == "corrupt", (
-            f"{branch}: corrupt bytes did not regenerate a template for the document asked for — {answer!r}"
-        )
-        assert answer["version"] == "1.0.0", f"{branch}: regenerated template carries {answer!r}"
-        assert_warned_of_corrupt_bytes(module, branch)
-    else:
-        corrupt = tmp_path / "corrupt.json"
-        corrupt.write_text("{not json at all", encoding="utf-8")
-        answer = module.load_json(str(corrupt))
-    assert isinstance(answer, (dict, list)), f"{branch}: load_json answered {type(answer).__name__} for corrupt bytes"
+    require_document_addressing(module, branch)
+    module, documents = prepared(branch, tmp_path, monkeypatch)
+    corrupt = documents / "corrupt_config.json"
+    corrupt.write_text("{not json at all", encoding="utf-8")
+    assert_refuses_and_keeps(lambda: module.load_json("corrupt", "config"), corrupt, module, branch)
 
 
 @pytest.mark.parametrize("branch", parametrized())

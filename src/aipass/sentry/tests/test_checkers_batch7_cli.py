@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_cli.py
 # Description: cli_check rulings: relays, the pre-console window, the stream ruling (split from test_checkers_batch7.py)
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/cli_check.py and cli_content.py."""
@@ -192,7 +192,7 @@ class TestHandlerSeparationJudgesTheStreamNotTheSpelling:
 
         aipass_root = Path(__file__).resolve().parents[2]
         assert aipass_root.name == "aipass", aipass_root
-        stream_write = aipass_root / "skills" / "apps" / "handlers" / "module_paths.py"
+        stream_write = aipass_root / "drone" / "apps" / "handlers" / "router_handler.py"
         stream_print = aipass_root / "flow" / "apps" / "handlers" / "__init__.py"
         assert stream_write.exists() and stream_print.exists()
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_json_handler_contract_lineage.py
 # Description: json_handler contract, template lineage clause: defaults, ensure, log_operation, save
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for every branch's apps/handlers/json/json_handler.py defaults, ensure, log_operation and save."""
@@ -26,7 +26,7 @@ from aipass.sentry.tests.support_json_handler_contract import (
     ENSURE_ALL_RETURNS_NOTHING,
     ENSURE_RETURNS_NOTHING,
     LOG_PAYLOAD,
-    assert_warned_of_corrupt_bytes,
+    assert_refuses_and_keeps,
     expose,
     implementation,
     parametrized,
@@ -114,40 +114,31 @@ def test_ensure_json_exists_preserves_a_valid_existing_document(
 
 
 @pytest.mark.parametrize("branch", parametrized())
-def test_ensure_json_exists_regenerates_an_unreadable_document(
+def test_ensure_json_exists_refuses_an_unreadable_document_and_leaves_it(
     branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """Unparseable bytes are replaced with something loadable."""
+    """Unparseable bytes raise InvalidDocument; nothing is regenerated over them."""
     module = implementation(branch)
     require_document_addressing(module, branch)
     ensure = expose(module, branch, "ensure_json_exists")
     module, _ = prepared(branch, tmp_path, monkeypatch)
     document = Path(str(module.get_json_path("corrupt", "config")))
     document.write_text("{not json at all", encoding="utf-8")
-
-    ensure("corrupt", "config")
-
-    assert json.loads(document.read_text(encoding="utf-8")), f"{branch}: corrupt document was not regenerated"
-    assert_warned_of_corrupt_bytes(module, branch)
+    assert_refuses_and_keeps(lambda: ensure("corrupt", "config"), document, module, branch)
 
 
 @pytest.mark.parametrize("branch", parametrized())
-def test_ensure_json_exists_regenerates_a_structurally_invalid_document(
+def test_ensure_json_exists_refuses_a_structurally_invalid_document_and_leaves_it(
     branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """Parseable but wrong is still wrong."""
+    """Parseable but misshaped is refused the same way: another writer may own those keys."""
     module = implementation(branch)
     require_document_addressing(module, branch)
     ensure = expose(module, branch, "ensure_json_exists")
-    validate = expose(module, branch, "validate_json_structure")
     module, _ = prepared(branch, tmp_path, monkeypatch)
     document = Path(str(module.get_json_path("wrong", "config")))
     document.write_text(json.dumps({"wrong": "structure"}), encoding="utf-8")
-
-    ensure("wrong", "config")
-
-    healed = json.loads(document.read_text(encoding="utf-8"))
-    assert validate(healed, "config") is True, f"{branch}: invalid structure survived ensure_json_exists"
+    assert_refuses_and_keeps(lambda: ensure("wrong", "config"), document, module, branch)
 
 
 @pytest.mark.parametrize("branch", parametrized())

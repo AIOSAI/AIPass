@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: support_json_handler_contract.py
 # Description: Shared discovery, payloads and redirection for the json_handler contract files (split 2026-10-08)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Shared helpers for the tests of every branch's apps/handlers/json/json_handler.py (not test_: never collected)."""
@@ -13,7 +13,6 @@
 
 import importlib.util
 import inspect
-import json
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -246,16 +245,14 @@ def silence_own_logger(module: Any, monkeypatch: pytest.MonkeyPatch) -> LogRecor
     return recorder
 
 
-def assert_warned_of_corrupt_bytes(module: Any, branch: str) -> None:
-    """A handler with its own logger warned once, naming the corrupt document."""
-    recorder = vars(module).get("logger")
-    if not isinstance(recorder, LogRecorder):
-        return
-    heads = [(level, args[:2]) for level, args in recorder.records]
-    assert heads == [("warning", ("[json_handler] Corrupt JSON %s: %s", "corrupt_config.json"))], (
-        f"{branch}: the corrupt document was not warned of once — {recorder.records!r}"
-    )
-    assert isinstance(recorder.records[0][1][2], json.JSONDecodeError)
+def assert_refuses_and_keeps(call: Any, document: Path, module: Any, branch: str) -> None:
+    """``call()`` raises the handler's InvalidDocument and leaves ``document`` byte-identical."""
+    refusal = getattr(module, "InvalidDocument", None)
+    assert refusal is not None, f"{branch}: the handler exports no InvalidDocument to refuse a bad document with"
+    before = document.read_bytes()
+    with pytest.raises(refusal):
+        call()
+    assert document.read_bytes() == before, f"{branch}: the refused document was rewritten"
 
 
 def redirected(branch: str, target: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
