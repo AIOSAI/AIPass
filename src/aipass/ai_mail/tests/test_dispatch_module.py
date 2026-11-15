@@ -3,7 +3,7 @@
 # Description: Tests for dispatch.py orchestrator functions
 # Version: 1.3.1
 # Created: 2026-04-26
-# Modified: 2026-11-03
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/dispatch.py."""
@@ -1366,9 +1366,7 @@ def running_dispatch(tmp_path, monkeypatch):
             assert time.monotonic() < deadline, f"the stand-in PID {proc.pid} never became visible to ps"
             with suppress(subprocess.TimeoutExpired):
                 proc.wait(timeout=0.05)
-            assert proc.returncode is None, (
-                f"the stand-in monitor exited before the stop: returncode {proc.returncode}"
-            )
+            assert proc.returncode is None, f"the stand-in monitor exited before the stop: returncode {proc.returncode}"
         (branch / ".ai_mail.local" / ".dispatch.lock").write_text(json.dumps({"pid": proc.pid}), encoding="utf-8")
         return proc
 

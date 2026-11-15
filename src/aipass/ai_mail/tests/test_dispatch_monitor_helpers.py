@@ -3,7 +3,7 @@
 # Description: Tests for the dispatch monitor's units - rate limit, fresh cmd, startup check, kill, logs, lock, JSONL
 # Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's units: startup check, kill, result logs, own lock, JSONL."""

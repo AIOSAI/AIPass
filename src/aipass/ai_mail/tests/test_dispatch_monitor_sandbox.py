@@ -3,7 +3,7 @@
 # Description: Tests for the dispatch monitor's sandbox gate and its broker-fd handshake
 # Version: 1.0.2
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's sandbox gate and broker handshake (FPLAN-0250)."""

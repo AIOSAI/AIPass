@@ -3,7 +3,7 @@
 # Description: Tests for the wake's small parts - dispatch status, the grant read, pid lock and branch resolution
 # Version: 1.3.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's helpers and pid_lock.py: status, locks, pids, resolve_branch."""
@@ -957,6 +957,17 @@ class TestIsBranchOccupied:
 
         monkeypatch.setattr(os, "readlink", _fail_readlink)
         assert branch_occupant(tmp_path) is None
+
+
+def test_prepend_path_puts_the_directory_first_once(tmp_path):
+    """A second wake must not stack the venv twice on PATH."""
+    venv_bin = str(tmp_path / ".venv" / "bin")
+    env = {"PATH": "usr_bin"}
+
+    wake_mod.prepend_path(env, venv_bin)
+    wake_mod.prepend_path(env, venv_bin)
+
+    assert env["PATH"] == f"{venv_bin}:usr_bin", "prepended once, joined with ':'"
 
 
 def test_systemd_scope_env_file_does_not_outlive_the_launch(tmp_path, monkeypatch):

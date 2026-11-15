@@ -3,7 +3,7 @@
 # Description: Tests for dispatch monitor lifecycle handler
 # Version: 1.5.0
 # Created: 2026-04-02
-# Modified: 2026-11-03
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's main(): the attempts, the bounce, the completion fire."""

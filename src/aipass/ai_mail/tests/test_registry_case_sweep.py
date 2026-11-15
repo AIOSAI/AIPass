@@ -3,7 +3,7 @@
 # Description: Registry globs must not widen on a case-insensitive filesystem
 # Version: 1.0.3
 # Created: 2026-08-31
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/paths.py's registry glob readers on a case-insensitive filesystem."""
@@ -11,6 +11,8 @@
 # A glob matcher that folds case lets ``*_REGISTRY.json`` also match lowercase
 # ``*_registry.json`` counter files; these sites are identity-bearing. The fixture below emulates
 # a folding matcher, with positive and negative controls.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import ast
 import json

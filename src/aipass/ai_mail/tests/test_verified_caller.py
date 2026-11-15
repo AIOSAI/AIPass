@@ -3,13 +3,15 @@
 # Description: Tests for the verified-caller rail (FPLAN-0401 Phase 1)
 # Version: 1.0.2
 # Created: 2026-08-12
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/users/verified_caller.py."""
 
 # ``--from`` / ``--sender`` are unauthenticated strings; identity that gates a privilege
 # may only come from the env drone stamps from real process ancestry.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import re
 from pathlib import Path

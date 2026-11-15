@@ -3,7 +3,7 @@
 # Description: Dispatch Register
 # Version: 1.6.0
 # Created: 2026-08-22
-# Modified: 2026-11-04
+# Modified: 2026-11-14
 # =============================================
 
 """The dispatch register — what was promised, written before anything spawns.
@@ -42,6 +42,7 @@ STATUS_REPLIED = "completed (replied)"
 # Absent on old rows and on the systemd-scope path; monitor_alive reads that as None, not dead.
 MONITOR_PID_KEY = "monitor_pid"
 GRANT_KEY = "grant"
+
 
 def monitor_alive(pid: Optional[int]) -> Optional[bool]:
     """Whether the monitor process *pid* still exists. None when it cannot be told.

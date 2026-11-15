@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for ai_mail tests - sandbox redirects, console pin, state reset
 # Version: 1.9.0
 # Created: 2026-03-05
-# Modified: 2026-11-08
+# Modified: 2026-11-14
 # Category: ai_mail/tests
 # CHANGELOG (Max 5 entries):
 #   - v1.9.0 (2026-10-23): sandboxed_central answers get_all_branches from the sandbox registry; daemon_* fixtures go

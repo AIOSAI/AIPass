@@ -3,7 +3,7 @@
 # Description: Tests for the durable per-branch session pointer
 # Version: 1.2.0
 # Created: 2026-08-20
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/dispatch/session_pointer.py -- encoding, round trip, atomicity, resume."""

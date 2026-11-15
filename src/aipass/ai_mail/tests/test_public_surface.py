@@ -3,13 +3,15 @@
 # Description: Tests for ai_mail's package-level public surface (the feed, register, outstanding and inbox doors)
 # Version: 1.2.0
 # Created: 2026-08-16
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for aipass/ai_mail/__init__.py's public surface: feed_path(), register_path(), outstanding_dispatches()."""
 
 # notify.py imports prax's logger, so the door is a function and FEED_PATH resolves lazily
 # through PEP 562 __getattr__; feed_path() is the one construction site for the path.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import json
 import subprocess

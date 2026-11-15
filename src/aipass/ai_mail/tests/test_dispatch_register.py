@@ -3,12 +3,14 @@
 # Description: Tests for the dispatch register append-only log
 # Version: 1.2.0
 # Created: 2026-08-22
-# Modified: 2026-11-04
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/dispatch/register.py: the append-only dispatch register, and the grant its rows carry."""
 
 # An entry past expected_by with no completion is a fact about a file; these pin append-only and honest parsing.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import json
 import os
