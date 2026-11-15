@@ -3,7 +3,7 @@
 # Description: Identity operations handler
 # Version: 1.6.1
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-11-14
 # =============================================
 
 """

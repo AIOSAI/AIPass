@@ -3,7 +3,7 @@
 # Description: Pins the guarded __file__ resolver
 # Version: 1.2.0
 # Created: 2026-08-31
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/module_root.py: module_file() returns the RIGHT file when resolve() cannot be asked."""

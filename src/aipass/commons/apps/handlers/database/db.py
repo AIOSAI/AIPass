@@ -3,7 +3,7 @@
 # Description: The Commons SQLite connection manager
 # Version: 1.3.0
 # Created: 2026-03-07
-# Modified: 2026-11-09
+# Modified: 2026-11-14
 # =============================================
 
 """The Commons - SQLite Connection Manager"""
