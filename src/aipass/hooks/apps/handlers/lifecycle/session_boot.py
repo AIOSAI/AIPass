@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-06-30
-# Modified: 2026-10-25
+# Modified: 2026-11-14
 # =============================================
 
 """Boot wrapper for Claude Code sessions.
@@ -39,7 +39,7 @@ def _execvp(file: str, args: list[str]) -> None:
 
 
 def _kill(pid: int, sig: int) -> None:
-    """Signal seam, late-bound like _execvp. OSError (WinError 87, dead PID) goes to the caller's handler."""
+    """Signal seam, late-bound like _execvp. OSError (ESRCH, a dead PID) goes to the caller's handler."""
     try:
         os.kill(pid, sig)
     except OSError:
