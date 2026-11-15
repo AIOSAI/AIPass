@@ -184,7 +184,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreToolUse"
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreToolUse; c=$?; [ $c -eq 0 ] || [ $c -eq 2 ] || { echo \"HOOKS BROKEN: claude.py exited $c without an answer; nothing runs until it is fixed (src/aipass/hooks/logs/bridge.log)\" >&2; exit 2; }; exit $c"
         }
       ]
     }
