@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: support_json_handler_contract.py
 # Description: Shared discovery, payloads and redirection for the json_handler contract files (split 2026-10-08)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-08
 # Modified: 2026-11-15
 # =============================================
@@ -33,6 +33,10 @@ PACKAGE_ROOT = Path(aipass.__file__).resolve().parent
 
 HANDLER_RELPATH = Path("apps") / "handlers" / "json" / "json_handler.py"
 
+#: The AIPass repo (src/aipass and projects inside it, such as projects/baud). An external project registered
+#: on this seat runs this contract in its own suite: AIPass's suite gives the same answer here as in CI.
+REPO_ROOT = PACKAGE_ROOT.parents[1]
+
 
 def _installed_roster() -> dict[str, Path]:
     """The citizens inside the installed package, found by file glob."""
@@ -40,7 +44,7 @@ def _installed_roster() -> dict[str, Path]:
 
 
 def _fleet_roster() -> dict[str, Path]:
-    """Every citizen the registry knows, core and resident and external."""
+    """Every citizen the registry knows whose root lies inside the AIPass repo."""
     # @memory's `fleet_branches()`, the roster @daemon's sweep uses; without @memory the installed glob answers alone.
     roster = _installed_roster()
     if fleet_branches is None:
@@ -53,7 +57,8 @@ def _fleet_roster() -> dict[str, Path]:
     for row in rows:
         root = Path(str(row.get("path", "")))
         name = str(row.get("name", ""))
-        if name and name not in roster and (root / HANDLER_RELPATH).is_file():
+        inside = root.resolve().is_relative_to(REPO_ROOT)
+        if name and name not in roster and inside and (root / HANDLER_RELPATH).is_file():
             roster[name] = root
     return roster
 

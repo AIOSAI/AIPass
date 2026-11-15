@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_json_handler_contract.py
 # Description: Fleet-wide contract suite over every branch json_handler: read, write, address, floor
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-09-01
 # Modified: 2026-11-15
 # =============================================
@@ -32,6 +32,7 @@ from aipass.sentry.tests.support_json_handler_contract import (
     ENSURE_RETURNS_NOTHING,
     LOG_PAYLOAD,
     PACKAGE_ROOT,
+    REPO_ROOT,
     TORN_DOCUMENT_OBSERVED,
     WRITER_HAS_NO_BOUNDED_RETRY,
     _installed_roster,
@@ -264,6 +265,7 @@ def test_discovery_finds_every_shipped_handler_and_names_no_branch_itself():
     assert set(_installed_roster()) <= set(BRANCHES), "widening discovery must never lose an installed citizen"
     for branch in BRANCHES:
         assert handler_path(branch).is_file()
+        assert handler_path(branch).resolve().is_relative_to(REPO_ROOT), f"{branch}: an external project in the suite"
 
 
 def test_one_branch_is_one_module_however_many_times_it_is_asked_for():
