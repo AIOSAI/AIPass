@@ -3,7 +3,7 @@
 # Description: Tests for the Stage 0 host API's commands — routing, tokens, serve/status/stop, config, the door
 # Version: 1.3.2
 # Created: 2026-08-14
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for the host-api commands in apps/modules/host_api.py, host_serve.py and host_config_cli.py."""
@@ -47,7 +47,7 @@ from aipass.cli.apps.modules import display
 
 
 # Never opened; under the platform temp dir, not /tmp.
-STANDIN_LOG = Path(tempfile.gettempdir()) / "host_api_serve.log"
+STANDIN_LOG = Path(tempfile.gettempdir()) / "host_api_serve.out"
 
 
 PATCH_CONFIG_LOGGER = "aipass.api.apps.handlers.host.config.logger"
@@ -527,7 +527,7 @@ class TestDetachStatusAndStop:
 
         printed = _printed(quiet_module["console"].print)
 
-        assert "host_api_serve.log" in printed
+        assert "host_api_serve.out" in printed
         quiet_module["error"].assert_not_called()
 
     def test_status_reports_a_running_server(self, store: Path, quiet_module: dict, detachable) -> None:

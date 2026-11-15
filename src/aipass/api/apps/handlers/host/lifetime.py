@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lifetime.py
 # Description: Host API Lifetime Handler — a serve that outlives the shell that started it
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-08-19
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -30,7 +30,7 @@ from aipass.api.apps.handlers.host import autostart
 
 # logs/ is gitignored, which the unit needs: it carries this machine's absolute paths.
 RUNTIME_DIRNAME = "logs"
-LOG_NAME = "host_api_serve.log"
+LOG_NAME = "host_api_serve.out"
 RECORD_NAME = "host_api_serve.json"
 
 UNIT_FILE_NAME = "aipass-host-api.service"
@@ -156,7 +156,7 @@ def _alive(pid: int) -> bool:
     try:
         # Reap our own exited child first: os.kill(pid, 0) says yes to a zombie.
         os.waitpid(pid, os.WNOHANG)
-    except (ChildProcessError, OSError) as e:
+    except ChildProcessError as e:
         logger.debug("[host_api] nothing to reap for pid %s: %s", pid, e)
 
     try:

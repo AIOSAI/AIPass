@@ -12,11 +12,6 @@
       "reason": "api_call_with_retry() depth 5 — standard retry-with-backoff pattern, nesting is inherent to retry loops"
     },
     {
-      "file": "apps/handlers/auth/keys.py",
-      "standard": "deep_nesting",
-      "reason": "_read_key_from_secrets() depth 5 — file read with validation guards"
-    },
-    {
       "file": "apps/modules/google_client.py",
       "standard": "unused_function",
       "reason": "Public API exports for cross-branch consumption (get_drive_service, authenticate_google, validate_google, reauth_google). Tested in test_google_client.py. Backup migration pending."
@@ -50,16 +45,6 @@
       "file": "apps/modules/secrets.py",
       "standard": "introspection",
       "reason": "Utility module — owns no drone commands (handle_command always returns False). The no-args gate assumes the module owns the command it is handed; here it fired for EVERY no-arg command in the branch, prepending this module's banner to other modules' output. Removed 2026-08-13 (APLAN-0013), proven live. Introspection stays reachable via __main__."
-    },
-    {
-      "file": "apps/modules/bridge.py",
-      "standard": "cli",
-      "reason": "Utility module — owns no drone commands, so there is no --help of its own to answer. Intercepting --help here answered help probes aimed at other modules' commands. See the introspection bypass for the same file (APLAN-0013)."
-    },
-    {
-      "file": "apps/modules/registry.py",
-      "standard": "cli",
-      "reason": "Utility module — owns no drone commands, so there is no --help of its own to answer. Intercepting --help here answered help probes aimed at other modules' commands. See the introspection bypass for the same file (APLAN-0013)."
     },
     {
       "file": "apps/handlers/host/settings.py",

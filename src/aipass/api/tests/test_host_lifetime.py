@@ -3,7 +3,7 @@
 # Description: Tests for a serve that outlives the shell that started it
 # Version: 1.1.2
 # Created: 2026-08-20
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/host/lifetime.py, a detached serve, its record and its log."""
@@ -185,6 +185,10 @@ class TestTheLogSurvivesARestart:
 
         assert record["log"] == str(host_lifetime.log_path())
 
+    def test_the_transcript_is_never_named_for_the_log_watcher(self, runtime: Path) -> None:
+        """Trigger's watcher reads every .log in logs/; a transcript carries any text."""
+        assert host_lifetime.log_path().name == "host_api_serve.out"
+
 
 class TestAServerThatDiedOnStartIsNotReportedAsRunning:
     """A launcher that reports success for a corpse is worse than no launcher."""
@@ -290,6 +294,14 @@ class TestADeadChildIsDead:
             assert host_lifetime.running() is None, "a zombie was reported as a running server"
         finally:
             child.wait()
+
+    def test_a_reap_that_fails_for_another_reason_is_raised(self, runtime: Path) -> None:
+        """Only ChildProcessError means "not ours"; any other OSError is a fault, not a no."""
+        host_lifetime.record_path().write_text(json.dumps({"pid": os.getpid()}), encoding="utf-8")
+
+        with patch.object(os, "waitpid", side_effect=OSError(5, "Input/output error")):
+            with pytest.raises(OSError):
+                host_lifetime.running()
 
 
 class TestStopping:

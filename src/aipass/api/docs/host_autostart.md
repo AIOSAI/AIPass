@@ -61,7 +61,7 @@ process *being gone* are two facts.
 **The unit's own details are each a silent failure avoided.** `StandardOutput=`
 and `StandardError=` are `append:`, not `file:` — `file:` truncates on every
 start, so the first restart after an outage would destroy the evidence of the
-outage; both append to the same `host_api_serve.log`. `Restart=on-failure`, never
+outage; both append to the same `host_api_serve.out` (not `.log`: trigger's watcher reads every `.log` in `logs/`). `Restart=on-failure`, never
 `always`. `StartLimitIntervalSec`/`Burst` sit under `[Unit]`: systemd moved them
 there in v230 and **ignores** the old `[Service]` spelling rather than erroring, so
 a rate limit in the wrong section is an absence wearing a config's clothes. The
