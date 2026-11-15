@@ -743,6 +743,19 @@ def _imports_stdlib_logging(path: Path) -> bool:
     return False
 
 
+_LEVEL_METHODS = {"debug", "info", "warning", "error", "critical"}
+
+
+def _defines_level_shaped_class(path: Path) -> bool:
+    """True when the file defines a class with two or more level methods, sentry's K1 shape."""
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.ClassDef):
+            methods = {n.name for n in node.body if isinstance(n, ast.FunctionDef)}
+            if len(methods & _LEVEL_METHODS) >= 2:
+                return True
+    return False
+
+
 class TestPublishedLoggingFacts:
     """What prax publishes through its modules door for other branches to read."""
 
@@ -758,6 +771,20 @@ class TestPublishedLoggingFacts:
 
     def test_every_allowed_file_says_why_in_one_line(self):
         for path, why in logger_module.LOGGING_ALLOWED:
+            assert why.strip() and "\n" not in why, path
+
+    def test_logger_doors_is_exactly_the_files_that_define_a_level_shaped_class(self):
+        production = [*_PRAX_ROOT.glob("*.py"), *(_PRAX_ROOT / "apps").rglob("*.py")]
+        holders = {
+            "prax/" + p.relative_to(_PRAX_ROOT).as_posix()
+            for p in production
+            if not _SKIP_PARTS & set(p.relative_to(_PRAX_ROOT).parts) and _defines_level_shaped_class(p)
+        }
+
+        assert {path for path, _why in logger_module.LOGGER_DOORS} == holders
+
+    def test_every_door_file_says_why_in_one_line(self):
+        for path, why in logger_module.LOGGER_DOORS:
             assert why.strip() and "\n" not in why, path
 
     def test_log_backup_count_is_the_deepest_configured_tier(self, monkeypatch):

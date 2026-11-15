@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_imports.py
 # Description: imports_check and one_logger_check rulings (split from test_checkers_batch7.py)
-# Version: 1.4.1
+# Version: 1.5.0
 # Created: 2026-10-08
 # Modified: 2026-11-15
 # =============================================
@@ -378,13 +378,16 @@ _K3_STAMPED = (
 )
 
 
+_PUBLISHED_ALLOWED = 'LOGGING_ALLOWED = (("prax/apps/handlers/logging/setup.py", "builds door one"),)\n'
+_PUBLISHED_DOORS = 'LOGGER_DOORS = (("prax/apps/handlers/logging/trail.py", "door two"),)\n'
+_LEVEL_CLASS = "class Door:\n    def info(self, m):\n        pass\n\n    def error(self, m):\n        pass\n"
+
+
 @pytest.fixture
 def published(tmp_path, monkeypatch):
-    """Prax's published list, as prax writes it, naming setup.py only."""
+    """Prax's published lists, as prax writes them: setup.py for stdlib, trail.py for a door class."""
     source = tmp_path / "published_logger.py"
-    source.write_text(
-        'LOGGING_ALLOWED = (("prax/apps/handlers/logging/setup.py", "builds door one"),)\n', encoding="utf-8"
-    )
+    source.write_text(_PUBLISHED_ALLOWED + _PUBLISHED_DOORS, encoding="utf-8")
     monkeypatch.setattr(logging_allowed, "PRAX_LOGGER", source)
     return source
 
@@ -487,23 +490,41 @@ class TestOneLoggerConvictsEveryLoggerButPrax:
             ("prax/apps/handlers/logging/setup.py", "import logging\n", True),
             ("prax/apps/handlers/logging/jsonl_writer.py", "import logging\n", False),
             ("prax/apps/handlers/logging/setup.py", _K3_STAMPED, False),
+            ("prax/apps/handlers/logging/trail.py", _LEVEL_CLASS, True),
+            ("prax/apps/modules/logger.py", _LEVEL_CLASS, False),
         ],
-        ids=["floor_named", "floor_namesake", "prax_published", "prax_unpublished", "published_for_another_key"],
+        ids=[
+            "floor_named",
+            "floor_namesake",
+            "prax_published",
+            "prax_unpublished",
+            "published_for_another_key",
+            "door_published",
+            "door_unpublished",
+        ],
     )
     def test_only_a_named_file_passes_and_only_for_its_key(self, tmp_path, published, rel, source, passed):
         answer = _judge(tmp_path, source, rel)
         assert answer["passed"] is passed
         assert any("allowed: " in c["message"] for c in answer["checks"]) is passed
 
-    @pytest.mark.parametrize("published_source", [None, "OTHER = ()\n"], ids=["file_gone", "name_gone"])
-    def test_an_unreadable_published_list_refuses_every_file(self, tmp_path, monkeypatch, published_source):
+    @pytest.mark.parametrize(
+        ("published_source", "missing"),
+        [
+            (None, "LOGGING_ALLOWED"),
+            (_PUBLISHED_DOORS, "LOGGING_ALLOWED"),
+            (_PUBLISHED_ALLOWED, "LOGGER_DOORS"),
+        ],
+        ids=["file_gone", "allowed_gone", "doors_gone"],
+    )
+    def test_an_unreadable_published_list_refuses_every_file(self, tmp_path, monkeypatch, published_source, missing):
         source = tmp_path / "published_logger.py"
         if published_source is not None:
             source.write_text(published_source, encoding="utf-8")
         monkeypatch.setattr(logging_allowed, "PRAX_LOGGER", source)
         answer = _judge(tmp_path, "x = 1\n")
         assert answer["score"] == 0
-        assert "LOGGING_ALLOWED" in answer["checks"][0]["message"]
+        assert missing in answer["checks"][0]["message"]
 
     def test_it_is_advisory_and_production_only(self):
         assert (one_logger_check.ADVISORY, one_logger_check.CHECKLIST_ADVISES, one_logger_check.APPLIES_TO) == (

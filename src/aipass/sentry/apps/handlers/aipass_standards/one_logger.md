@@ -32,12 +32,12 @@ A bypass row waives nothing here. A file passes a key only when a list names it 
 | Key | List | Files |
 |-----|------|-------|
 | K0 | prax's `LOGGING_ALLOWED`, in `prax/apps/modules/logger.py` | the files prax names as building door one on stdlib logging |
-| K1 | `logging_allowed.py`, temporary until prax publishes its door classes | `prax/apps/modules/logger.py` (door one), `prax/apps/handlers/logging/direct.py` (door one's direct form), `prax/apps/handlers/logging/trail.py` (door two) |
+| K1 | prax's `LOGGER_DOORS`, in `prax/apps/modules/logger.py` | the files whose classes prax names as its doors |
 | K2 | `logging_allowed.py` | `hooks/apps/handlers/bridges/{claude,codex,opencode,seed}.py`: the crash record |
 
-The checker reads `LOGGING_ALLOWED` with `ast`, never by importing prax: a broken prax import chain is when prax most needs judging. A missing or unreadable list refuses every file (score 0, the reason named); it never falls back to an empty list.
+The checker reads both prax lists with `ast`, never by importing prax: a broken prax import chain is when prax most needs judging. A missing or unreadable list, either one, refuses every file (score 0, the reason named); it never falls back to an empty list.
 
-A crash record is a plain append of the break, outside the logger, allowed only where the logger itself can be what broke. The hooks bridges run every provider hook through prax; when prax is what failed, the record of that failure cannot go through prax. That is the only thing `logging_allowed.py` owns that prax cannot.
+A crash record is a plain append of the break, outside the logger, allowed only where the logger itself can be what broke. The hooks bridges run every provider hook through prax; when prax is what failed, the record of that failure cannot go through prax. The crash record is the only thing `logging_allowed.py` names: what prax cannot own.
 
 ## What the keys cannot see
 

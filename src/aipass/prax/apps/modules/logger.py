@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: logger.py
 # Description: PRAX Public API
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2025-11-15
 # Modified: 2026-11-15
 # =============================================
@@ -27,6 +27,7 @@ __all__ = [
     "append_jsonl",
     "log_backup_count",
     "LOGGING_ALLOWED",
+    "LOGGER_DOORS",
 ]
 
 from typing import Dict, Any, Tuple
@@ -62,6 +63,14 @@ LOGGING_ALLOWED: Tuple[Tuple[str, str], ...] = (
         "prax/apps/handlers/logging/direct.py",
         "builds door one's direct loggers on stdlib Logger, Formatter and handlers",
     ),
+)
+
+#: The prax files whose classes are prax's logging doors, by path under src/aipass, each with why. No other
+#: file in the fleet may define a level-shaped logger class.
+LOGGER_DOORS: Tuple[Tuple[str, str], ...] = (
+    ("prax/apps/modules/logger.py", "SystemLogger: door one, from aipass.prax import logger"),
+    ("prax/apps/handlers/logging/direct.py", "DirectLogger: door one bound at creation, for prax's own handlers"),
+    ("prax/apps/handlers/logging/trail.py", "TrailLogger and PraxTrail: door two, from aipass.prax import trail"),
 )
 
 

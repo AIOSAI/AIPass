@@ -143,7 +143,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 - Every service — the dashboard write-through API, so each owns its own section and no
   writer deletes another's keys.
 - The system — log rotation and audit, the module registry the fleet reads, and the published
-  `log_backup_count()` and `LOGGING_ALLOWED` (see [docs/logging_api.md](docs/logging_api.md)).
+  `log_backup_count()`, `LOGGING_ALLOWED` and `LOGGER_DOORS` (see [docs/logging_api.md](docs/logging_api.md)).
 
 ---
 

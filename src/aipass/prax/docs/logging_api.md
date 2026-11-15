@@ -160,6 +160,8 @@ that list.
 |---|---|
 | `log_backup_count()` | backups the `.log` tiers keep, the deeper of `system_logs` and `local_logs`, read from the config at call time; a reader of rotated `.log.N` files walks this many |
 | `LOGGING_ALLOWED` | `(path under src/aipass, reason)` pairs: the only prax files allowed to import stdlib `logging` — `setup.py` and `direct.py`, which build door one on stdlib `Logger` and handlers |
+| `LOGGER_DOORS` | `(path under src/aipass, reason)` pairs: the only files whose classes are logging doors — `SystemLogger` (`logger.py`), `DirectLogger` (`direct.py`), `TrailLogger` and `PraxTrail` (`trail.py`); sentry's one_logger reads it for its level-shaped-class key |
 
 `test_logger_module.py::TestPublishedLoggingFacts` pins `LOGGING_ALLOWED` to the
-files that actually import `logging`, so the list cannot drift.
+files that actually import `logging`, and `LOGGER_DOORS` to the files that define a class with two or
+more level methods, so neither list can drift.
