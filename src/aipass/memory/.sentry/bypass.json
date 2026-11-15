@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "created": "2026-03-07T23:23:54.979418",
     "description": "Standards bypass configuration for this branch",
-    "last_updated": "2026-10-23"
+    "last_updated": "2026-11-15"
   },
   "bypass": [
     {
@@ -110,16 +110,6 @@
       "file": "apps/handlers/tracking/tab_renderer.py",
       "standard": "handlers",
       "reason": "Architectural: imports json.memory_files, json.config_loader, and monitor.detector for config-driven tab rendering across all branches."
-    },
-    {
-      "file": "apps/handlers/monitor/memory_watcher.py",
-      "standard": "error_handling",
-      "reason": "stdlib logging.getLogger() used at import-time before prax is available. Immediately replaced by get_system_logger() 3 lines below."
-    },
-    {
-      "file": "apps/handlers/schema/normalize.py",
-      "standard": "dead_code",
-      "reason": "Utility handler for v1-to-v2 schema migration. Called on-demand, not wired to main pipeline."
     },
     {
       "file": "apps/modules/symbolic.py",
@@ -247,11 +237,6 @@
       "reason": "704 lines — watcher coordinates file monitoring, rollover triggers, and health checks. Near 700 threshold but cohesive."
     },
     {
-      "file": "apps/handlers/schema/normalize.py",
-      "standard": "architecture",
-      "reason": "Utility for v1-to-v2 schema migration — invoked on-demand."
-    },
-    {
       "file": "apps/handlers/intake/pool_processor.py",
       "standard": "unused_function",
       "reason": "find_source_file is part of public pool processing API, called by external consumers."
@@ -375,18 +360,18 @@
     {
       "file": "tests/test_auto_process_background.py",
       "standard": "import_site",
-      "lines": [190],
+      "lines": [202],
       "reason": "The import route is the subject: the helper returns the trigger object through the same import the product makes, because on 3.10 a split worker held two objects and a patch on the other one let a real completion fire (CI run 34088947108). A top-of-file binding is the route that failed. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "tests/test_repo_root.py",
       "standard": "stdlib_patch",
-      "reason": "File-wide because stdlib_patch passes no line (the checklist calls a lines rule inert); it covers one patch, rr.os.scandir at 659. The only way to make a real directory unlistable for one call without root or platform ACLs. A scandir parameter on exists_exactly would be a door for the test alone (no caller passes it), so the patch stays: monkeypatch scopes it to this test and restores it, and the test asserts the denied listing was the parent. Leg 8 of DPLAN-0354, @devpulse's landing ruling; made file-wide in leg 10."
+      "reason": "File-wide because stdlib_patch passes no line (the checklist calls a lines rule inert); it covers one patch, rr.os.scandir at 450. The only way to make a real directory unlistable for one call without root or platform ACLs. A scandir parameter on exists_exactly would be a door for the test alone (no caller passes it), so the patch stays: monkeypatch scopes it to this test and restores it, and the test asserts the denied listing was the parent. Leg 8 of DPLAN-0354, @devpulse's landing ruling; made file-wide in leg 10."
     },
     {
       "file": "tests/conftest.py",
       "standard": "stdlib_patch",
-      "reason": "File-wide because stdlib_patch passes no line; it covers two opt-in fixtures, case_insensitive_filesystem (Path.glob, 414) and case_insensitive_exists (Path.exists, 443). They emulate a case-insensitive filesystem so the case-fold pins go red on a case-sensitive disk. Every walk must see the emulation the way it sees the platform, so a product seam per walk would be a door for the tests alone, and Linux cannot show the effect on disk. monkeypatch restores both after each test that asks for them. Leg 10 of DPLAN-0354, @memory's decision."
+      "reason": "File-wide because stdlib_patch passes no line; it covers two opt-in fixtures, case_insensitive_filesystem (Path.glob, 208) and case_insensitive_exists (Path.exists, 228). They emulate a case-insensitive filesystem so the case-fold pins go red on a case-sensitive disk. Every walk must see the emulation the way it sees the platform, so a product seam per walk would be a door for the tests alone, and Linux cannot show the effect on disk. monkeypatch restores both after each test that asks for them. Leg 10 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "tests/test_symbolic_parked.py",
@@ -403,7 +388,7 @@
     {
       "file": "tests/test_marker7_memory_lane.py",
       "standard": "import_site",
-      "lines": [730],
+      "lines": [727],
       "reason": "The trigger bus package is stood in through sys.modules because the test pins the event _announce_bump fires through its own `from aipass.trigger.apps.modules.core import trigger`; the next line asserts that import reaches the stand-in. It is the only edge between @memory and @trigger's bus that keeps a real event from firing. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
@@ -415,19 +400,19 @@
     {
       "file": "apps/handlers/intake/auto_process.py",
       "standard": "logged_fallback",
-      "lines": [88],
+      "lines": [95],
       "reason": "_reclaim_stale_lock answers 'is the lane free now'. False after a failed unlink means the lane is NOT free, which is true; the caller's decision (do not run) is the same as for a live lock, and the failure is logged at error. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "apps/handlers/intake/plans_processor.py",
       "standard": "logged_fallback",
-      "lines": [184],
+      "lines": [183],
       "reason": "_is_stale answers 'process this plan again?'. True when the mtime cannot be compared is the decision, not a failure value: re-vectorizing is the safe answer when the manifest cannot vouch for the file. Logged at warning. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "apps/handlers/monitor/memory_watcher.py",
       "standard": "logged_fallback",
-      "lines": [74],
+      "lines": [62],
       "reason": "_check_vector_deps answers 'are chromadb and numpy confirmed importable'. A check that could not run has not confirmed them, so False is the true answer; the self-report reads it as degraded either way. Logged at warning. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
@@ -451,25 +436,25 @@
     {
       "file": "apps/handlers/templates/receipt.py",
       "standard": "logged_fallback",
-      "lines": [90],
+      "lines": [89],
       "reason": "_write answers 'written'. False on every path that did not write (fence refusal, failed write); the success path returns True only. The checker reads the fence refusal as success. Logged at error. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "apps/handlers/templates/spawn_pusher.py",
       "standard": "logged_fallback",
-      "lines": [85],
+      "lines": [84],
       "reason": "_write_json answers 'written'. False on every path that did not write (fence refusal, failed write); the success path returns True only. The checker reads the fence refusal as success. Logged at warning. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "apps/handlers/templates/template_bump.py",
       "standard": "logged_fallback",
-      "lines": [51],
+      "lines": [50],
       "reason": "_read_ledger merges absent and unreadable on purpose: bump_pending counts both as PENDING ('a missing record of a push is not a record of a push') and its reason names both ('never pushed, or lost'). The unreadable case is logged at error. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "apps/modules/rollover_config.py",
       "standard": "logged_fallback",
-      "lines": [111, 161],
+      "lines": [117, 167],
       "reason": "_resolve_branch and _validate_count return None only after _refuse(ctx, ...) has recorded the refusal and its reason; every None is a refusal and no success returns None. The checker reads the other refusals as success. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
@@ -493,7 +478,7 @@
     {
       "file": "tests/test_config_loader.py",
       "standard": "import_site",
-      "lines": [47],
+      "lines": [48],
       "reason": "The stub is the cure (ruling (a)). _get_module re-imports config_loader after the fixture evicted the json package, so it binds conftest's json_handler stand-in; with the real one bound, load/save write memory_json operation logs. Leg 11 of DPLAN-0354."
     },
     {
@@ -568,12 +553,6 @@
       "reason": "File-wide by devpulse's leg 12 ruling, kept on the original for what stayed in it: the display tests fetch the real config_content and rollover_config modules from the cache under conftest's per-test prax/json stand-ins; a top-of-file import would bind the real json shim and logger at collection, and those write operation logs. The fixture's re-imports moved to tests/support_config_verbs.py and the todo fetches to tests/test_config_verbs_todo.py, each with its own copy of this row, by the four-rows split (2026-10-08). Leg 12 of DPLAN-0354."
     },
     {
-      "file": "tests/support_config_verbs.py",
-      "standard": "through_the_command",
-      "lines": [76],
-      "reason": "Ruling (c): reads config_loader._CONFIG_PATH once, BEFORE the fixture repoints it at tmp, so TestOperatorConfigIsolation can prove the operator file is untouched. The contract: every config verb writes the file at _CONFIG_PATH. The far side is memory_json/custom_config/memory.config.json, the live operator config. No public name carries the path, and no door was added for the test. Leg 12 of DPLAN-0354; moved here from tests/test_config_verbs.py 171 with the fixture by the four-rows split (2026-10-08)."
-    },
-    {
       "file": "tests/test_rollover.py",
       "standard": "import_site",
       "lines": [32, 33, 60, 61, 62, 130, 170, 187, 207],
@@ -588,7 +567,7 @@
     {
       "file": "tests/test_marker7_memory_lane.py",
       "standard": "through_the_command",
-      "lines": [94, 135, 156, 167, 274, 736],
+      "lines": [94, 135, 156, 167, 271, 733],
       "reason": "Contracts pinned, each with no public caller that leaves the disk alone. 149/284: detector._read_registry is the rollover WRITE scope (it stops at the repo edge); its public readers walk files and return counts, never rows, and read_scope adds the externals. 228/262: rollover._normalize_rolled never reaches another repository and names a branch whose frame could not be written; its public caller runs a real rollover first. 409: spawn_pusher._write_json refuses a path outside the root; its public caller pushes the spawn templates. 1015: templates._announce_bump fires on the bus; its public caller stamps the receipts. Leg 11 of DPLAN-0354."
     },
     {
@@ -612,7 +591,7 @@
     {
       "file": "tests/test_declared_roots.py",
       "standard": "no_product_call",
-      "reason": "File-wide because no_product_call passes no line (the checklist calls a lines rule inert); it covers TestWhatTheHostCanActuallyHold, lines 660 and 675. Host probes @devpulse asked for. They measure what the running file system holds (case-only names fold or not; a differing stem is always a second file), the premise every case-glob pin in this file is written on. No product code answers that question. Leg 11 of DPLAN-0354."
+      "reason": "File-wide because no_product_call passes no line (the checklist calls a lines rule inert); it covers TestWhatTheHostCanActuallyHold, lines 455 and 468. Host probes @devpulse asked for. They measure what the running file system holds (case-only names fold or not; a differing stem is always a second file), the premise every case-glob pin in this file is written on. No product code answers that question. Leg 11 of DPLAN-0354."
     },
     {
       "file": "apps/handlers/templates/push_store.py",

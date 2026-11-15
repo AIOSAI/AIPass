@@ -11,6 +11,7 @@ Search Orchestration Module
 """
 
 import sys
+from pathlib import Path
 from typing import List
 
 from rich.panel import Panel
@@ -25,7 +26,6 @@ from aipass.memory.apps.handlers.cli.help_flags import wants_help
 from aipass.memory.apps.handlers.search.query_executor import (
     execute_search as _handler_execute_search,
 )
-from aipass.memory.apps.handlers.repo_root import module_file
 
 
 def handle_command(command: str, args: List[str]) -> bool:
@@ -150,6 +150,8 @@ def show_search_results(
     filtered_results = result.get("results", [])
 
     success(f"Found {total_results} results in {collections_searched} collections")
+    for failed in result.get("collections_failed", []):
+        warning(f"Collection {failed['collection']} could not be searched", details=failed["error"])
     console.print()
 
     if not filtered_results and total_results == 0:
@@ -216,7 +218,7 @@ def show_search_results(
 
 def _discover_handlers() -> dict[str, list[str]]:
     """Map each handlers/ subdirectory to its .py files, __init__.py excluded."""
-    handlers_dir = module_file(__file__).parent.parent / "handlers"
+    handlers_dir = Path(__file__).resolve().parent.parent / "handlers"
     result: dict[str, list[str]] = {}
     if not handlers_dir.exists():
         return result

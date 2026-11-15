@@ -16,14 +16,14 @@ Reference: docs/trinity_standard.md
 
 import copy
 import json
+from pathlib import Path
 from typing import Any
 
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
-from aipass.memory.apps.handlers.repo_root import module_file
 
-_MEMORY_ROOT = module_file(__file__).parents[3]
+_MEMORY_ROOT = Path(__file__).resolve().parents[3]
 
 
 # How close to the cap earns a line: a ratio so it scales across caps an order of magnitude apart.
@@ -132,13 +132,10 @@ def load_entry_limits(branch: str) -> dict[str, Any]:
     cfg = config_loader.load()
     section = cfg.get("entry_limits")
     if not isinstance(section, dict):
-        logger.warning("[entry_limits] No valid 'entry_limits' section in config, returning safe defaults")
-        json_handler.log_operation(
-            "load_entry_limits",
-            {"branch": branch_key, "fallback": "missing_section"},
-            module_name="entry_limits",
+        # The merge fills an absent section, so only a wrong-shape value in the file lands here.
+        raise config_loader.ConfigUnreadable(
+            f"entry_limits in memory.config.json is {type(section).__name__}, expected an object"
         )
-        section = config_loader.DEFAULT_CONFIG["entry_limits"]
 
     enabled = section.get("enabled", True)
     enforce = section.get("enforce", False)

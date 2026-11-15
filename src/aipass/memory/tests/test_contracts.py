@@ -3,7 +3,7 @@
 # Description: Contract tests for the memory entry point and its data handling
 # Version: 1.1.1
 # Created: 2026-03-28
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # Category: memory/tests
 # =============================================
 
@@ -16,6 +16,8 @@
 
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from aipass.memory.apps import memory as memory_entry
 
@@ -96,6 +98,33 @@ class TestUnknownArgumentExitsNonZero:
         """`todo` is routed by the auto-discovered todo module; an unknown sub-verb is refused, 2."""
         assert self._run_main(["todo", "not_a_real_subverb_xyz"]) == 2
         assert self._run_main(["todo", "--help"]) == 0
+
+    def test_a_module_that_cannot_import_raises_rather_than_vanishing(self, tmp_path, monkeypatch) -> None:
+        """A modules/ file that fails to import is a broken install, never a verb that reads as unknown."""
+        (tmp_path / "no_such_module_xyz.py").write_text("", encoding="utf-8")
+        monkeypatch.setattr(memory_entry, "MODULES_DIR", tmp_path)
+
+        with pytest.raises(ModuleNotFoundError, match="no_such_module_xyz"):
+            memory_entry.discover_modules()
+
+    def test_a_module_that_crashes_mid_command_names_its_error_not_unknown(self, capsys) -> None:
+        """A routed command that raises is that command failing (2), never 'Unknown command' (1)."""
+
+        class _Crashing:
+            __name__ = "crashing"
+
+            @staticmethod
+            def handle_command(command, args):
+                raise RuntimeError("disk on fire")
+
+        with patch.object(memory_entry, "discover_modules", return_value=[_Crashing()]):
+            code = self._run_main(["anything"])
+
+        out = capsys.readouterr()
+        text = out.out + out.err
+        assert code == 2
+        assert "disk on fire" in text
+        assert "Unknown command" not in text
 
 
 class TestWatchRunnerImportContract:

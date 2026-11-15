@@ -207,13 +207,9 @@ def _get_memory_file_path(branch: Dict, memory_type: str) -> Path | None:
 
 
 def _count_file_lines(file_path: Path) -> int:
-    """Count physical lines in memory file"""
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            return len(f.readlines())
-    except Exception as e:
-        logger.warning(f"[detector] Failed to count lines in {file_path}: {e}")
-        return 0
+    """Count physical lines in memory file; an unreadable file raises, never reads as 0 lines."""
+    with open(file_path, "r", encoding="utf-8") as f:
+        return len(f.readlines())
 
 
 def file_limits(cfg: Dict[str, Any], file_path: Path) -> tuple[str, str, Dict[str, Any]]:

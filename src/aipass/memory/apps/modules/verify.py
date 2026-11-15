@@ -11,13 +11,13 @@ Plan Verification Module
 """
 
 import sys
+from pathlib import Path
 from typing import List
 
 from aipass.cli.apps.modules import console, error, warning
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
-from aipass.memory.apps.handlers.repo_root import module_file
 from aipass.memory.apps.handlers.storage.lane import CHROMA_SUBPROCESS_SCRIPT, run_json
 
 
@@ -89,7 +89,7 @@ def _verify_plan(plan_label: str) -> None:
 
 def _discover_handlers() -> dict[str, list[str]]:
     """Map each handler directory to its .py files (excluding __init__.py)."""
-    handlers_dir = module_file(__file__).parent.parent / "handlers"
+    handlers_dir = Path(__file__).resolve().parent.parent / "handlers"
     result: dict[str, list[str]] = {}
     if not handlers_dir.exists():
         return result

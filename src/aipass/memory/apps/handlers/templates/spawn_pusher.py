@@ -17,9 +17,8 @@ from typing import Any, Dict, List
 from aipass.memory.apps.handlers import repo_root, write_fence
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
-from aipass.memory.apps.handlers.repo_root import module_file
 
-MEMORY_ROOT = module_file(__file__).parent.parent.parent.parent
+MEMORY_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 TEMPLATES_DIR = MEMORY_ROOT / "templates"
 LOCAL_TEMPLATE_PATH = TEMPLATES_DIR / "LOCAL.template.json"

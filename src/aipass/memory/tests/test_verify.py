@@ -3,7 +3,7 @@
 # Description: Tests for verify module (plan vectorization check)
 # Version: 1.0.1
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/verify.py."""
@@ -86,6 +86,22 @@ class TestGetMemoryPython:
         monkeypatch.setattr(lane, "_MEMORY_VENV_PYTHON", tmp_path / "nonexistent" / ".venv" / "bin" / "python")
         result = _python_used(monkeypatch)
         assert result == sys.executable
+
+    def test_the_interpreter_choice_is_logged_once(self, monkeypatch, tmp_path):
+        """Which python carries the ML lane is said out loud, once per choice, never per call."""
+        monkeypatch.delenv("AIPASS_MEMORY_PYTHON", raising=False)
+        missing = tmp_path / "nonexistent" / ".venv" / "bin" / "python"
+        monkeypatch.setattr(lane, "_MEMORY_VENV_PYTHON", missing)
+        monkeypatch.setattr(lane, "_ANNOUNCED", set())
+        said = MagicMock()
+        monkeypatch.setattr(lane, "logger", said)
+
+        lane.memory_python()
+        lane.memory_python()
+
+        said.info.assert_called_once_with(
+            f"[lane] ML interpreter {sys.executable} (this process: no {missing}, no AIPASS_MEMORY_PYTHON)"
+        )
 
 
 class TestCheckPlanSubprocess:

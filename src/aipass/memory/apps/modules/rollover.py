@@ -11,6 +11,7 @@ Rollover Orchestration Module
 """
 
 import sys
+from pathlib import Path
 from typing import List
 
 from rich.panel import Panel
@@ -27,7 +28,6 @@ from aipass.memory.apps.handlers.cli.branch_flag import read_branch_flag
 from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.rollover.orchestrator import execute_rollover as _handler_execute_rollover
 from aipass.memory.apps.handlers.rollover import todo_report
-from aipass.memory.apps.handlers.repo_root import module_file
 
 # Re-exported unchanged: the CLI and the tests reach these as `rollover.<name>`. Neither module imports this one.
 from aipass.memory.apps.modules.rollover_config import (
@@ -591,7 +591,7 @@ def _check_fleet_triggers() -> None:
 
 def _discover_handlers() -> dict[str, list[str]]:
     """Map each handlers/ subdirectory to its .py files, __init__.py excluded."""
-    handlers_dir = module_file(__file__).parent.parent / "handlers"
+    handlers_dir = Path(__file__).resolve().parent.parent / "handlers"
     result: dict[str, list[str]] = {}
     if not handlers_dir.exists():
         return result

@@ -24,7 +24,6 @@ from aipass.memory.apps.handlers.monitor.registry_scope import (
     find_repo_root,
     overlaps_home,
 )
-from aipass.memory.apps.handlers.repo_root import module_file
 
 # Imported from the reader, never re-spelled: the write side refuses exactly what it refuses.
 ROOTS_FILE = DECLARED_ROOTS
@@ -33,7 +32,7 @@ ROOTS_SCHEMA_VERSION = "1.0.0"
 TEMPLATE_NAME = "AIPASS_ROOTS.template.json"
 CORRUPT_SUFFIX_NAME = f"{DECLARED_ROOTS}.corrupt"
 
-_BRANCH_ROOT = module_file(__file__).parent.parent.parent.parent
+_BRANCH_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 # Salvage is for a human to read; nothing it finds is ever written back as a declaration.
 _SALVAGE = re.compile(r'"path"\s*:\s*"([^"]+)"')

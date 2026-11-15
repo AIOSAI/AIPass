@@ -3,7 +3,7 @@
 # Description: memory watcher handler — lifecycle, status, on_modified callback, branch-path walk
 # Version: 1.1.1
 # Created: 2026-04-25
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # Category: memory/tests
 # =============================================
 
@@ -16,7 +16,6 @@
 # sentry: no-test-needed(external) — execute_rollover itself; the orchestrator is mocked, only the call is pinned
 
 import json
-import logging
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -51,7 +50,6 @@ def _prepare_watcher_mocks(monkeypatch):
     mock_observer_instance.is_alive.return_value = True
     mock_observer_cls = MagicMock(return_value=mock_observer_instance)
     monkeypatch.setattr(memory_watcher, "Observer", mock_observer_cls)
-    monkeypatch.setattr(memory_watcher, "WATCHDOG_AVAILABLE", True)
 
     monkeypatch.setattr(memory_watcher, "json_handler", MagicMock())
     monkeypatch.setattr(memory_watcher, "logger", MagicMock())
@@ -514,18 +512,11 @@ class TestTheWatcherOwnsOnlyTheMemoryFilesOfItsRoots:
         mocks["check_single_file"].assert_called_once_with(own)
 
     def test_a_root_reached_through_a_symlink_is_heard_at_its_real_path(self, monkeypatch, tmp_path):
-        """An observer may report the real path behind a symlinked root .
-
-        A platform that cannot make a symlink uses the real directory as the root.
-        """
+        """An observer may report the real path behind a symlinked root ."""
         real = tmp_path / "real_branch"
         real.mkdir()
         branch = tmp_path / "linked_branch"
-        try:
-            branch.symlink_to(real, target_is_directory=True)
-        except OSError as exc:
-            logging.getLogger(__name__).info("No symlink on this platform (%s): the root is the real directory", exc)
-            branch = real
+        branch.symlink_to(real, target_is_directory=True)
         handler, mocks = self._scheduled_watcher(monkeypatch, branch)
         reported = real / ".trinity" / "local.json"
 

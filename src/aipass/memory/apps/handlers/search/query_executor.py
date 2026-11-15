@@ -184,6 +184,7 @@ def execute_search(
         "memory_type": memory_type,
         "results": filtered_results,
         "collections_searched": collections_searched,
+        "collections_failed": search_result.get("collections_failed", []),
         "total_results": total_results,
         "filtered_count": len(filtered_results),
     }

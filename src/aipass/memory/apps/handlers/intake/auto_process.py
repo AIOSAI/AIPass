@@ -26,9 +26,8 @@ from typing import Any, Dict
 
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler, config_loader
-from aipass.memory.apps.handlers.repo_root import module_file
 
-_MEMORY_ROOT = module_file(__file__).parent.parent.parent.parent
+_MEMORY_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 # Single-flight: two concurrent rollovers would write the same .trinity files.
 # Staleness is time-based, so a crashed child frees the lane.
@@ -38,7 +37,7 @@ _CHILD_LOG = Path(tempfile.gettempdir()) / "aipass-memory-auto-process.log"
 
 
 def _lock_is_stale(data: Dict[str, Any] | None) -> bool:
-    """A missing, unreadable, or old lock is stale. Guard the read, not just the parse."""
+    """A missing, shapeless or old lock is stale (an unparsable one arrives aged by its mtime)."""
     if not isinstance(data, dict):
         return True
     started = data.get("started")
@@ -48,14 +47,22 @@ def _lock_is_stale(data: Dict[str, Any] | None) -> bool:
 
 
 def _read_lock() -> Dict[str, Any] | None:
-    """Read the lock file, or None if it is missing or cannot be read at all."""
+    """Read the lock file, or None if it is missing.
+
+    The holder writes its JSON after O_EXCL, so an unparsable lock may be a live holder mid-write:
+    it is aged by its mtime, never called stale on sight.
+    """
     try:
         return json.loads(_LOCK_PATH.read_text(encoding="utf-8"))
     except FileNotFoundError:
         logger.debug("[auto_process] No lock file present")
         return None
-    except Exception as e:
-        logger.warning(f"[auto_process] Lock unreadable, treating as stale: {e}")
+    except (OSError, ValueError) as e:
+        logger.warning(f"[auto_process] Lock unparsable ({e}), aging it by its mtime")
+    try:
+        return {"started": _LOCK_PATH.stat().st_mtime}
+    except FileNotFoundError:
+        logger.warning("[auto_process] Lock vanished while being read: the lane is free")
         return None
 
 
@@ -138,7 +145,7 @@ def spawn_background() -> Dict[str, Any]:
     }
 
     try:
-        child = subprocess.Popen([sys.executable, str(module_file(__file__))], **kwargs)
+        child = subprocess.Popen([sys.executable, str(Path(__file__).resolve())], **kwargs)
     except Exception as e:
         logger.error(f"[auto_process] Spawn failed: {e}")
         json_handler.log_operation("spawn_background", {"success": False, "error": str(e)})

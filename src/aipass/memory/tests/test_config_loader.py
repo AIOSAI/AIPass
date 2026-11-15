@@ -3,7 +3,7 @@
 # Description: Tests for config_loader handler (FPLAN-0271 Phase 1)
 # Version: 1.3.0
 # Created: 2026-06-13
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/json/config_loader.py and the budget arithmetic it seeds."""
@@ -19,6 +19,7 @@
 import copy
 import importlib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -183,11 +184,11 @@ class TestMalformedJson:
     """A file that EXISTS but will not parse is the operator's problem to fix,
     not the loader's to heal (DPLAN-0206 red flag, sentry-consulted).  It may
     be one stray comma from correct and carry hand-tuned per_branch limits.
-    load() logs an ERROR, serves defaults in memory, and leaves the bytes on
-    disk untouched.
+    load() logs an ERROR, raises ConfigUnreadable naming the file, and leaves
+    the bytes on disk untouched (no fallback to defaults).
     """
 
-    def test_returns_defaults(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_raises_naming_the_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         config_dir = tmp_path / "custom_config"
         config_dir.mkdir(parents=True, exist_ok=True)
         bad_config = config_dir / "memory.config.json"
@@ -196,9 +197,8 @@ class TestMalformedJson:
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", bad_config)
 
-        result = mod.load()
-
-        assert result == mod.DEFAULT_CONFIG
+        with pytest.raises(mod.ConfigUnreadable, match=re.escape(str(bad_config))):
+            mod.load()
 
     def test_original_bytes_are_left_untouched(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Healing a typo must never cost the operator their tuning."""
@@ -211,7 +211,8 @@ class TestMalformedJson:
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", bad_config)
 
-        mod.load()
+        with pytest.raises(mod.ConfigUnreadable):
+            mod.load()
 
         assert bad_config.read_text(encoding="utf-8") == garbage
 
@@ -225,7 +226,8 @@ class TestMalformedJson:
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", bad_config)
 
-        mod.load()
+        with pytest.raises(mod.ConfigUnreadable):
+            mod.load()
 
         assert sorted(p.name for p in config_dir.iterdir()) == ["memory.config.json"]
 
@@ -244,9 +246,9 @@ class TestMalformedJson:
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", bad_config)
 
-        result = mod.load()
+        with pytest.raises(mod.ConfigUnreadable, match="expected object"):
+            mod.load()
 
-        assert result == mod.DEFAULT_CONFIG
         assert bad_config.read_text(encoding="utf-8") == original
 
     def test_repeated_loads_never_wear_the_file_down(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -263,12 +265,13 @@ class TestMalformedJson:
         monkeypatch.setattr(mod, "_CONFIG_PATH", bad_config)
 
         for _ in range(3):
-            assert mod.load() == mod.DEFAULT_CONFIG
+            with pytest.raises(mod.ConfigUnreadable):
+                mod.load()
 
         assert bad_config.read_text(encoding="utf-8") == original
 
     def test_fixing_the_file_takes_effect_immediately(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Serving defaults must not latch -- the moment the operator fixes
+        """Refusing must not latch -- the moment the operator fixes
         their typo, their values are live again.
         """
         config_dir = tmp_path / "custom_config"
@@ -279,7 +282,8 @@ class TestMalformedJson:
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", bad_config)
 
-        assert mod.load()["entry_limits"]["enforce"] is True  # the default, not their value
+        with pytest.raises(mod.ConfigUnreadable):
+            mod.load()
 
         bad_config.write_text('{"entry_limits": {"enforce": false}}', encoding="utf-8")
 
@@ -296,7 +300,8 @@ class TestMalformedJson:
         monkeypatch.setattr(mod, "_CONFIG_PATH", bad_config)
 
         mock_logger = mod.logger
-        mod.load()
+        with pytest.raises(mod.ConfigUnreadable):
+            mod.load()
 
         mock_logger.error.assert_called_once()
         assert mock_logger.error.call_args[0][0].startswith(f"[config_loader] Malformed JSON in {bad_config}: ")
@@ -305,8 +310,8 @@ class TestMalformedJson:
 class TestUnreadableFile:
     """json_structure v3.0.0: unreadable for ANY reason takes the malformed
     path.  A file with bad bytes or the wrong permissions is exactly as
-    unreadable as one with a stray comma, and neither may reach the caller
-    as a raw exception -- callers asked for a config, not for a traceback.
+    unreadable as one with a stray comma: both raise ConfigUnreadable naming
+    the file, never a silent copy of the defaults.
     """
 
     def _bad_bytes_config(self, tmp_path: Path) -> Path:
@@ -317,16 +322,13 @@ class TestUnreadableFile:
         bad_config.write_bytes(b'{"entry_limits": \x80\x81\xfe}')
         return bad_config
 
-    def test_bad_bytes_returns_defaults_instead_of_raising(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_bad_bytes_raises_naming_the_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         bad_config = self._bad_bytes_config(tmp_path)
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", bad_config)
 
-        result = mod.load()
-
-        assert result == mod.DEFAULT_CONFIG
+        with pytest.raises(mod.ConfigUnreadable, match=re.escape(str(mod._CONFIG_PATH))):
+            mod.load()
 
     def test_bad_bytes_leaves_the_file_untouched(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         bad_config = self._bad_bytes_config(tmp_path)
@@ -334,7 +336,8 @@ class TestUnreadableFile:
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", bad_config)
 
-        mod.load()
+        with pytest.raises(mod.ConfigUnreadable):
+            mod.load()
 
         assert bad_config.read_bytes() == original
 
@@ -344,16 +347,15 @@ class TestUnreadableFile:
         monkeypatch.setattr(mod, "_CONFIG_PATH", bad_config)
 
         mock_logger = mod.logger
-        mod.load()
+        with pytest.raises(mod.ConfigUnreadable):
+            mod.load()
 
         # Mutant: the exception type dropped from the "Cannot read" message in load() — killed.
         mock_logger.error.assert_called_once()
         expected = f"[config_loader] Cannot read {bad_config}: UnicodeDecodeError: "
         assert mock_logger.error.call_args[0][0].startswith(expected)
 
-    def test_unopenable_file_returns_defaults_instead_of_raising(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_unopenable_file_raises_naming_the_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """PermissionError and friends: simulated via read_text, because a
         real chmod 000 is a no-op for root.
         """
@@ -370,9 +372,8 @@ class TestUnreadableFile:
 
         monkeypatch.setattr(type(config_path), "read_text", _denied)
 
-        result = mod.load()
-
-        assert result == mod.DEFAULT_CONFIG
+        with pytest.raises(mod.ConfigUnreadable, match=re.escape(str(mod._CONFIG_PATH))):
+            mod.load()
 
     def test_push_refuses_on_bad_bytes_rather_than_crashing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

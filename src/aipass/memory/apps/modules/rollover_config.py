@@ -56,6 +56,9 @@ _VERB_CONFIG_SET = "config set"
 _VERB_CONFIG_SET_DEFAULT = "config set-default"
 
 
+_CONFIG_VERBS = {"get": _VERB_CONFIG_GET, "set": _VERB_CONFIG_SET, "set-default": _VERB_CONFIG_SET_DEFAULT}
+
+
 def _handle_config(args: List[str]) -> bool:
     """Route the `config` verb. Always returns True — this module owns the word."""
     if not args:
@@ -75,17 +78,20 @@ def _handle_config(args: List[str]) -> bool:
         return True
 
     sub = args[0]
+    if sub in _CONFIG_VERBS:
+        from aipass.memory.apps.handlers.json import config_loader
 
-    if sub == "get":
-        handle_config_get(args[1:], _Json(_VERB_CONFIG_GET, json_mode))
-        return True
-
-    if sub == "set":
-        handle_config_set(args[1:], _Json(_VERB_CONFIG_SET, json_mode))
-        return True
-
-    if sub == "set-default":
-        handle_config_set_default(args[1:], _Json(_VERB_CONFIG_SET_DEFAULT, json_mode))
+        ctx = _Json(_CONFIG_VERBS[sub], json_mode)
+        try:
+            if sub == "get":
+                handle_config_get(args[1:], ctx)
+            elif sub == "set":
+                handle_config_set(args[1:], ctx)
+            else:
+                handle_config_set_default(args[1:], ctx)
+        except config_loader.ConfigUnreadable as exc:
+            # A corrupt operator file is refused by name; the bytes stay theirs to fix.
+            _refuse(ctx, str(exc))
         return True
 
     _refuse(

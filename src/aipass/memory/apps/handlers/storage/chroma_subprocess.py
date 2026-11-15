@@ -19,15 +19,14 @@ import logging
 import hashlib
 from pathlib import Path
 from typing import TextIO
-from aipass.memory.apps.handlers.repo_root import module_file
 
 logger = logging.getLogger(__name__)
 
-_MEMORY_ROOT = module_file(__file__).parents[3]
+_MEMORY_ROOT = Path(__file__).resolve().parents[3]
 _DEFAULT_DB_PATH = _MEMORY_ROOT / ".chroma"
 
 # The store owns the model choice: two models in one collection give silently wrong neighbours.
-_EMBED_SCRIPT = module_file(__file__).parent.parent / "vector" / "embed_subprocess.py"
+_EMBED_SCRIPT = Path(__file__).resolve().parent.parent / "vector" / "embed_subprocess.py"
 
 _clients = {}
 
@@ -208,10 +207,12 @@ def _check_plan(plan_label, db_path=None):
     """Check if a plan has been vectorized in ChromaDB."""
     client = _get_client(db_path)
 
+    from chromadb.errors import NotFoundError
+
     collection_name = "flow_plans"
     try:
         collection = client.get_collection(collection_name, embedding_function=None)
-    except Exception as e:
+    except NotFoundError as e:
         logger.warning(f"[chroma_subprocess] Collection '{collection_name}' not found during plan check: {e}")
         return {
             "success": True,
@@ -351,6 +352,7 @@ def _search_vectors(query_embedding, branch=None, memory_type=None, n_results=5,
         return {"success": True, "results": [], "message": "No matching collections"}
 
     all_results = []
+    failed = []
     for cname in collection_names:
         try:
             collection = client.get_collection(cname, embedding_function=None)
@@ -367,15 +369,21 @@ def _search_vectors(query_embedding, branch=None, memory_type=None, n_results=5,
                         }
                     )
         except Exception as e:
-            logger.warning(f"[chroma_subprocess] Skipping collection '{cname}' during search: {e}")
-            continue
+            logger.warning(f"[chroma_subprocess] Collection '{cname}' failed during search: {e}")
+            failed.append({"collection": cname, "error": f"{type(e).__name__}: {e}"})
+
+    # A collection that raised was not searched; if none could be, the search did not run.
+    if len(failed) == len(collection_names):
+        names = ", ".join(f["collection"] for f in failed)
+        return {"success": False, "error": f"Every collection failed: {names}", "collections_failed": failed}
 
     all_results.sort(key=lambda x: x["distance"] if x["distance"] is not None else float("inf"))
 
     return {
         "success": True,
         "results": all_results,
-        "collections_searched": len(collection_names),
+        "collections_searched": len(collection_names) - len(failed),
+        "collections_failed": failed,
         "total_results": len(all_results),
     }
 

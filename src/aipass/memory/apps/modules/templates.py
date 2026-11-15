@@ -195,15 +195,11 @@ def _show_status() -> None:
 def _announce_bump(outcome: dict) -> None:
     """Announce a bump on @trigger's bus. Best effort — the bus never gates a heal.
 
-    ImportError (trigger absent) and any other raise (our bug) log differently on purpose.
+    @trigger ships in the same package, so a failed import is a broken install: logged as the failure it is.
     """
     try:
         from aipass.trigger.apps.modules.core import trigger
-    except ImportError as exc:
-        logger.info(f"[templates] Event bus unavailable, bump not announced: {exc}")
-        return
 
-    try:
         trigger.fire(
             template_bump.BUMP_EVENT,
             pending=outcome.get("pending", False),

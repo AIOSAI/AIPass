@@ -3,7 +3,7 @@
 # Description: Tests for source_file matching in the ChromaDB subprocess handler
 # Version: 1.1.2
 # Created: 2026-08-23
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/storage/chroma_subprocess.py."""
@@ -336,3 +336,35 @@ class TestSearchBranchScope:
         run("search_vectors", query_embedding=[0.1], branch="memory")
 
         assert store.queried == ["memory_pool_docs"]
+
+
+class _BrokenCollection(_SearchCollection):
+    def query(self, query_embeddings=None, n_results=5):
+        raise RuntimeError("segment unreadable")
+
+
+class TestAFailedCollectionIsNotASearchedOne:
+    """A collection that raised was not searched: it is named as failed, never counted."""
+
+    def _install(self, monkeypatch, broken):
+        client = _SearchClient(["flow_local", "flow_plans"])
+        client._collections = [_BrokenCollection(c.name) if c.name in broken else c for c in client._collections]
+        monkeypatch.setattr(chroma_subprocess, "_get_client", lambda db_path=None: client)
+
+    def test_one_broken_collection_is_named_not_counted(self, monkeypatch, run):
+        self._install(monkeypatch, {"flow_plans"})
+
+        result = run("search_vectors", query_embedding=[0.1], branch="flow")
+
+        assert result["success"] is True
+        assert result["collections_searched"] == 1
+        assert [f["collection"] for f in result["collections_failed"]] == ["flow_plans"]
+        assert "segment unreadable" in result["collections_failed"][0]["error"]
+
+    def test_every_collection_broken_is_a_failed_search(self, monkeypatch, run):
+        self._install(monkeypatch, {"flow_local", "flow_plans"})
+
+        result = run("search_vectors", query_embedding=[0.1], branch="flow")
+
+        assert result["success"] is False
+        assert "flow_local" in result["error"] and "flow_plans" in result["error"]

@@ -25,7 +25,6 @@ from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.monitor import registry_scope
-from aipass.memory.apps.handlers.repo_root import module_file
 from aipass.memory.apps.handlers.storage.lane import CHROMA_SUBPROCESS_SCRIPT, EMBED_SUBPROCESS_SCRIPT, run_json
 
 
@@ -37,7 +36,7 @@ def _find_repo_root() -> Path:
     return repo_root.find_repo_root(caller="plans_processor")
 
 
-_MEMORY_ROOT = module_file(__file__).parents[3]
+_MEMORY_ROOT = Path(__file__).resolve().parents[3]
 _PROCESSED_MANIFEST = _MEMORY_ROOT / "memory_json" / ".plans_processed.json"
 
 MAX_CHUNK_CHARS = 1500  # ~375 tokens, fits well with all-MiniLM-L6-v2

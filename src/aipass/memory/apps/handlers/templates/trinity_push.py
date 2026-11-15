@@ -28,10 +28,9 @@ from aipass.memory.apps.handlers.json.memory_files import read_memory_file_data,
 from aipass.memory.apps.handlers.templates import receipt
 from aipass.memory.apps.handlers.rollover import todo_roll
 from aipass.memory.apps.handlers.tracking import tab_renderer
-from aipass.memory.apps.handlers.repo_root import module_file
 
 
-_MEMORY_ROOT = module_file(__file__).parents[3]
+_MEMORY_ROOT = Path(__file__).resolve().parents[3]
 _TEMPLATES_DIR = _MEMORY_ROOT / "templates"
 
 

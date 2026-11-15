@@ -3,7 +3,7 @@
 # Description: Tests for auto_process background spawn, single-flight lock and run_once
 # Version: 1.1.1
 # Created: 2026-08-14
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # Category: memory/tests
 # =============================================
 
@@ -118,9 +118,21 @@ class TestSingleFlight:
         popen.assert_called_once()
         assert result["success"] is True
 
-    def test_unreadable_lock_is_treated_as_stale(self, isolated_lock):
-        """Guard the read, not just the parse — a corrupt lock is not a wedge."""
+    def test_a_half_written_lock_is_held_not_stale(self, isolated_lock):
+        """The holder writes its JSON after O_EXCL: a fresh unparsable lock is a live holder mid-write."""
         isolated_lock.write_text("{not json", encoding="utf-8")
+
+        with patch("subprocess.Popen") as popen:
+            result = ap.spawn_background()
+
+        popen.assert_not_called()
+        assert result["skipped"] is True
+
+    def test_an_old_unparsable_lock_is_stale_by_its_mtime(self, isolated_lock):
+        """A corrupt lock is not a wedge: once its mtime ages past the threshold the lane is free."""
+        isolated_lock.write_text("{not json", encoding="utf-8")
+        old = time.time() - 30 * 24 * 3600
+        os.utime(isolated_lock, (old, old))
 
         with patch("subprocess.Popen") as popen:
             popen.return_value = MagicMock(pid=8)

@@ -3,7 +3,7 @@
 # Description: Red-first pins for marker 7 — self-healing triggers and the aftercare rulings
 # Version: 1.2.2
 # Created: 2026-08-27
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/rollover.py, apps/modules/templates.py and the handlers they drive."""
@@ -230,10 +230,7 @@ class TestOneFleetOneDefinition:
         before = foreign.read_bytes()
         door = home / "src" / "door"
         door.parent.mkdir(parents=True)
-        try:
-            door.symlink_to(foreign.parent.parent, target_is_directory=True)
-        except OSError as exc:
-            pytest.skip(f"this filesystem cannot make a symlink ({exc}) -- nothing to pin")
+        door.symlink_to(foreign.parent.parent, target_is_directory=True)
 
         result = memory_files.write_memory_file(door / ".trinity" / "local.json", {"sessions": []})
 

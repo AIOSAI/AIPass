@@ -315,7 +315,7 @@ def execute_rollover() -> Dict[str, Any]:
             )
             logger.info("[rollover] Fired rollover_complete event")
         except Exception as e:
-            logger.warning(f"[orchestrator] Failed to fire rollover_complete event: {e}")
+            logger.error(f"[orchestrator] Failed to fire rollover_complete event: {e}")
 
         try:
             from aipass.memory.apps.handlers.central_writer import update_central
@@ -335,7 +335,7 @@ def execute_rollover() -> Dict[str, Any]:
             if pool_result and pool_result.get("files_processed", 0) > 0:
                 logger.info(f"[rollover] Memory pool: {pool_result['files_processed']} files processed")
         except Exception as e:
-            logger.info(f"[rollover] Memory pool check: {e}")
+            logger.error(f"[rollover] Memory pool check failed: {e}")
 
     # An all-skipped run is not a fault, and a mixed run still succeeds (its failures
     # are reported by name).

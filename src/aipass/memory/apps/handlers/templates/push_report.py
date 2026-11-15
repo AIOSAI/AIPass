@@ -13,14 +13,14 @@ Reference: docs/trinity_push.md
 """
 
 from datetime import datetime
+from pathlib import Path
 from typing import List
 
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
-from aipass.memory.apps.handlers.repo_root import module_file
 from aipass.memory.apps.handlers.templates.trinity_push import DEFECT_ORDER
 
-_MEMORY_ROOT = module_file(__file__).parents[3]
+_MEMORY_ROOT = Path(__file__).resolve().parents[3]
 REPORTS_DIR = _MEMORY_ROOT / "artifacts" / "push_reports"
 
 # The remainder past the cap is COUNTED: a silent truncation reads as completeness.
