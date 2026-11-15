@@ -3,7 +3,7 @@
 # Description: Unit tests for skills runner
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-11-09
+# Modified: 2026-11-14
 # Category: skills/tests
 # =============================================
 
@@ -260,9 +260,9 @@ def status_handler():
     return handler
 
 
-class TestSystemStatusMemory:
-    def test_memory_prints_buffers_and_cached_where_the_platform_has_them(self, monkeypatch, status_handler):
-        """A Linux-shaped virtual_memory."""
+class TestSystemStatusReadsPsutil:
+    def test_memory_prints_what_psutil_reports(self, monkeypatch, status_handler):
+        """A Linux-shaped virtual_memory, numbers this host lacks."""
         virtual = _VirtualLinux(
             total=8 * GIB,
             available=2 * GIB,
@@ -278,8 +278,21 @@ class TestSystemStatusMemory:
         )
         monkeypatch.setattr(status_handler, "psutil", _PsutilStandIn(virtual, _swap(), [1], time.time()))
         output = status_handler.run("memory")["output"]
+        assert "Total:     8.0 GB" in output
+        # used is total - available, not psutil's own `used` field (5 GB here)
+        assert "Used:      6.0 GB (75.0%)" in output
+        assert "Available: 2.0 GB" in output
         assert "Buffers:   1.0 GB" in output
         assert "Cached:    3.0 GB" in output
+
+    def test_uptime_is_now_minus_boot_time(self, monkeypatch, status_handler):
+        # 1d 1h 1m 1s ago, read at test time
+        monkeypatch.setattr(status_handler, "psutil", _PsutilStandIn(None, _swap(), [1], time.time() - 90061))
+        result = status_handler.run("uptime")
+        assert result["success"] is True
+        assert result["output"].startswith("Uptime: 1d 1h 1m")
+        seconds = float(result["output"].split("(")[1].split()[0])
+        assert 90061 <= seconds < 90071
 
 
 class TestSummaryIsHonestAboutAFailedSection:

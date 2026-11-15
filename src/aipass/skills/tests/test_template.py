@@ -3,7 +3,7 @@
 # Description: Tests for skill template management
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/template.py: resolution, placeholder replacement, copy."""

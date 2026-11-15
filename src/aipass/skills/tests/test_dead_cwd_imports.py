@@ -3,7 +3,7 @@
 # Description: Dead-cwd import pins
 # Version: 1.1.1
 # Created: 2026-08-31
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -20,7 +20,7 @@
 """Tests that every skills module, and the guard in apps/handlers/__init__.py, survive a dead cwd."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(stdlib) — posixpath realpath() itself; only whether a world reaches it
+# sentry: no-test-needed(stdlib) — Path.resolve() and os.path.abspath() themselves; only whether a world reaches them
 
 import ast
 import os

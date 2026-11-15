@@ -3,7 +3,7 @@
 # Description: System Status skill handler - disk, memory, uptime, processes, battery, machine_vitals(), machine_processes()
 # Version: 2.6.0
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -120,13 +120,9 @@ def _memory_info():
         f"  Available: {_format_bytes(virtual.available)}",
     ]
 
-    # buffers/cached exist on Linux and BSD only; elsewhere a zero would read as a measurement.
-    for label, field in (("Buffers", "buffers"), ("Cached", "cached")):
-        value = getattr(virtual, field, None)
-        if value is not None:
-            lines.append(f"  {label + ':':<11}{_format_bytes(value)}")
-
     lines += [
+        f"  Buffers:   {_format_bytes(virtual.buffers)}",
+        f"  Cached:    {_format_bytes(virtual.cached)}",
         "Swap",
         f"  Total:     {_format_bytes(swap.total)}",
         f"  Used:      {_format_bytes(swap.used)} ({swap_percent:.1f}%)",

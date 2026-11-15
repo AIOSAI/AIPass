@@ -3,7 +3,7 @@
 # Description: The machine_vitals() contract
 # Version: 1.4.0
 # Created: 2026-09-12
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # Category: skills/tests
 # =============================================
 
@@ -34,7 +34,7 @@ _NetIO = namedtuple(
     "snetio",
     ["bytes_sent", "bytes_recv", "packets_sent", "packets_recv", "errin", "errout", "dropin", "dropout"],
 )
-_Virtual = namedtuple("svmem", ["total", "available", "percent", "used", "free"])
+_Virtual = namedtuple("svmem", ["total", "available", "percent", "used", "free", "buffers", "cached"])
 _Swap = namedtuple("sswap", ["total", "used", "free", "percent", "sin", "sout"])
 _Temp = namedtuple("shwtemp", ["label", "current", "high", "critical"])
 _Fan = namedtuple("sfan", ["label", "current"])
@@ -164,7 +164,7 @@ class _Clock:
 
 
 class _Machine:
-    """psutil as a Mac has it: every portable call, and of sensors_* only the battery.
+    """psutil with every common call, and of sensors_* only the battery.
 
     Four logical CPUs, each busy until its CORE_BUSY_UNTIL second and idle after,
     so a window over [0, 2] reads 75, 100, 0 and 25 per core and 50% in total, and
@@ -253,7 +253,9 @@ class _Machine:
         return (0.52, 1.0, 2.37)
 
     def virtual_memory(self):
-        return _Virtual(total=8 * GIB, available=2 * GIB, percent=75.0, used=5 * GIB, free=1 * GIB)
+        return _Virtual(
+            total=8 * GIB, available=2 * GIB, percent=75.0, used=5 * GIB, free=1 * GIB, buffers=1 * GIB, cached=3 * GIB
+        )
 
     def swap_memory(self):
         return _Swap(total=4 * GIB, used=1 * GIB, free=3 * GIB, percent=25.0, sin=0, sout=0)
