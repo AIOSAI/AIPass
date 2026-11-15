@@ -3,7 +3,7 @@
 # Description: Tests for flow.py CLI entry point
 # Version: 1.1.1
 # Created: 2026-05-12
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/flow.py."""
@@ -394,9 +394,6 @@ class TestMain:
         assert result == 1
 
 
-_NO_SIGPIPE = "this platform has no SIGPIPE, and flow.py sets nothing where it is missing"
-
-
 def _child(code: str, tmp_path: Path) -> subprocess.CompletedProcess[str]:
     """Run ``code`` in a fresh interpreter, the only one whose import of flow.py is still to come."""
     return subprocess.run(
@@ -410,7 +407,6 @@ def _child(code: str, tmp_path: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-@pytest.mark.skipif(not hasattr(signal, "SIGPIPE"), reason=_NO_SIGPIPE)
 class TestSigpipeDisposition:
     """Importing flow.py leaves SIGPIPE alone; the started program sets the kernel default (CI 38132534544)."""
 

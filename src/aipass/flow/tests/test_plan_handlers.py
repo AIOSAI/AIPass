@@ -3,7 +3,7 @@
 # Description: Tests for apps/handlers/plan/create_ops.py and sibling plan handlers
 # Version: 1.3.0
 # Created: 2026-04-05
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/plan/create_ops.py and sibling plan handlers."""
@@ -11,7 +11,6 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that the module parses and imports
 
-import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -168,7 +167,7 @@ class TestCalculateRelativeLocation:
         target.mkdir(parents=True)
 
         result = calculate_relative_location(target, root)
-        assert result.replace(os.sep, "/") == "src/flow"
+        assert result == "src/flow"
 
     def test_same_directory_returns_root(self, tmp_path: Path):
         result = calculate_relative_location(tmp_path, tmp_path)
@@ -189,7 +188,7 @@ class TestCalculateRelativeLocation:
         target.mkdir(parents=True)
 
         result = calculate_relative_location(target, root)
-        assert result.replace(os.sep, "/") == "a/b/c/d"
+        assert result == "a/b/c/d"
 
 
 class TestResolvePlanLocation:
