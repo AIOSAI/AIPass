@@ -4,7 +4,7 @@
 # Description: Tests for git_gate: raw git, gh and the secrets store refused for every seat; protected writes
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/security/git_gate.py."""
@@ -22,6 +22,7 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.hooks.apps.modules import protected_paths
 from aipass.hooks.apps.handlers.security.git_gate import handle
 
 # Derived, never spelled: the fixtures are only meaningful as paths INSIDE this checkout.
@@ -497,6 +498,13 @@ class TestGitGateEditProtection:
     def test_a_windows_path_that_only_resembles_one_stays_allowed(self):
         for path in (r"D:\work\.claude\settings.json.bak", r"D:\a\repo\.claude\agents\helper.md"):
             _assert_allowed(handle({"tool_name": "Write", "tool_input": {"file_path": path}, "cwd": CWD}))
+
+    def test_a_second_name_the_anchor_scan_cannot_list_is_refused_never_allowed(self, tmp_path):
+        target = tmp_path / "plain.txt"
+        target.write_text("x", encoding="utf-8")
+        os.link(target, tmp_path / "second_name.txt")
+        with patch.object(protected_paths, "_files", side_effect=OSError("unlistable")):
+            _assert_blocked(_edit(str(target), CWD, grant=False))
 
 
 class TestGitGateMisc:

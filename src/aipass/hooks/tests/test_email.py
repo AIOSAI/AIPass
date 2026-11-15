@@ -4,7 +4,7 @@
 # Description: Tests for email notification handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/notification/email.py."""
@@ -230,13 +230,14 @@ class TestCountNewEmails:
     def test_returns_zero_when_no_inbox(self, tmp_path):
         assert _new_count(tmp_path) == 0
 
-    def test_returns_zero_on_corrupt_json(self, tmp_path):
+    def test_a_corrupt_inbox_raises_to_the_engine_never_reads_as_no_mail(self, tmp_path):
         inbox_dir = tmp_path / ".ai_mail.local"
         inbox_dir.mkdir()
         inbox_file = inbox_dir / "inbox.json"
         inbox_file.write_text("not valid json{{{", encoding="utf-8")
 
-        assert _new_count(tmp_path) == 0
+        with pytest.raises(json.JSONDecodeError):
+            _new_count(tmp_path)
 
 
 class TestFindBranchRoot:

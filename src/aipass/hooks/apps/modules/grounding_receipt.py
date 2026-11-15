@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: grounding_receipt.py
-# Version: 1.0.2
+# Version: 1.0.3
 # Description: The grounding receipt, .ai_mail.local/grounding.json: did the five grounding entries reach the model
 # Branch: hooks
 # Layer: apps/modules
@@ -200,6 +200,8 @@ def handle_command(command: str, args: list) -> bool:
         console.print("[bold cyan]receipt[/bold cyan] — the grounding receipt of the branch you stand in")
         console.print("  drone @hooks receipt     status, generation, boundary, missing and stale keys")
         return True
+    if args:
+        return False
     branch_dir = context_window.find_branch_dir(os.environ.get("AIPASS_CALLER_CWD") or os.getcwd())
     doc = json_handler.read_json(branch_dir / RECEIPT) if branch_dir else None
     current = doc.get("current") if isinstance(doc, dict) else None

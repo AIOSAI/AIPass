@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: post_compact_regrounding.py
-# Version: 2.2.1
+# Version: 2.2.2
 # Description: Mid-turn grounding backstop after compaction, budgeted per fire (PostToolUse, DPLAN-0276, #752)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
@@ -80,7 +80,7 @@ def _load_sections(hook_data: dict) -> list[tuple[str, str]]:
         release_notice = importlib.import_module("aipass.hooks.apps.modules.release_notice")
         notice = release_notice.build_notice(hook_data)
     except Exception as exc:
-        logger.info("[HOOKS] post_compact_regrounding: release notice failed: %s", exc)
+        logger.warning("[HOOKS] post_compact_regrounding: release notice failed: %s", exc)
         notice = ""
     if notice:
         if sections[0][0] == "branch":
@@ -186,18 +186,15 @@ def _pack_once(sections: list[tuple[str, str]], instruction: str, budget: int, t
 
 def handle(hook_data: dict) -> dict:
     """Inject the next budgeted part of the post-compact re-ground, if one is due."""
-    try:
-        cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
-        part = cadence.pop_regroup_part(hook_data)
-        if part is None:
-            if not cadence.consume_regroup_pending(hook_data):
-                return _SILENT
-            index = 1
-        else:
-            index = part[0]
-    except Exception as exc:
-        logger.info("[HOOKS] post_compact_regrounding: cadence check failed: %s", exc)
-        return _SILENT
+    # Uncaught: a cadence that cannot answer is the engine's ERROR and engine.jsonl row, never a quiet skip.
+    cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
+    part = cadence.pop_regroup_part(hook_data)
+    if part is None:
+        if not cadence.consume_regroup_pending(hook_data):
+            return _SILENT
+        index = 1
+    else:
+        index = part[0]
 
     try:
         grounding_content = importlib.import_module("aipass.hooks.apps.modules.grounding_content")

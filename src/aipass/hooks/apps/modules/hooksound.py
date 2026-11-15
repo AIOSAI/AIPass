@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: hooksound.py
-# Version: 1.3.0
+# Version: 1.3.1
 # Description: Hook sound control — mute/unmute all hook audio
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-22
-# Modified: 2026-11-01
+# Modified: 2026-11-15
 # =============================================
 
 """Hook sound control — mute and unmute all hook audio via drone @hooks hooksound."""
@@ -51,6 +51,9 @@ def handle_command(command: str, args: list) -> bool:
             CONSOLE.print("  drone @hooks hooksound off    Mute all hook sounds")
             CONSOLE.print('  drone @hooks hooksound --json Print {"active": bool} on stdout')
             return True
+
+        if len(args) != 1:
+            return False
 
         if sub == "--json":
             # stdout: @api's host lane parses it; CONSOLE is stderr.

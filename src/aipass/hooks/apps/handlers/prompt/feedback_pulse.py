@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: feedback_pulse.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: Periodic feedback ask — one ignorable line every ~10 turns
 # Branch: hooks
 # Layer: apps/handlers/prompt
@@ -48,7 +48,7 @@ def _load_and_increment(path: Path) -> int:
         path.write_text(json.dumps({"turn": turn}), encoding="utf-8")
         return turn
     except (json.JSONDecodeError, OSError) as exc:
-        logger.info("[HOOKS] feedback_pulse: state access failed: %s", exc)
+        logger.warning("[HOOKS] feedback_pulse: state access failed: %s", exc)
         return 0
 
 

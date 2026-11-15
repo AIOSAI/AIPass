@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: email.py
-# Version: 1.2.2
+# Version: 1.2.3
 # Description: Checks inbox for unread emails on UserPromptSubmit
 # Branch: hooks
 # Layer: apps/handlers/notification
 # Created: 2026-05-21
-# Modified: 2026-11-01
+# Modified: 2026-11-15
 # =============================================
 
 """Checks branch inbox for unread emails and returns notification text."""
@@ -55,8 +55,8 @@ def _find_repo_root() -> Path | None:
     return None
 
 
-def _count_new_emails(branch_root: Path) -> int | None:
-    """Count unread emails in the branch's inbox: 0 with no inbox, None when the inbox cannot be read."""
+def _count_new_emails(branch_root: Path) -> int:
+    """Count unread emails in the branch's inbox: 0 with no inbox; an unreadable inbox raises, left as found."""
     inbox_path = branch_root / ".ai_mail.local" / "inbox.json"
     if not inbox_path.exists():
         inbox_path = branch_root / "ai_mail.local" / "inbox.json"
@@ -64,19 +64,15 @@ def _count_new_emails(branch_root: Path) -> int | None:
     if not inbox_path.exists():
         return 0
 
-    try:
-        data = json.loads(inbox_path.read_text(encoding="utf-8"))
-        messages = data if isinstance(data, list) else data.get("messages", [])
-        count = 0
-        for msg in messages:
-            if msg.get("status") == "new":
-                count += 1
-            elif msg.get("status") is None and not msg.get("read", False):
-                count += 1
-        return count
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.info("[HOOKS] email: inbox read error: %s", exc)
-        return None
+    data = json.loads(inbox_path.read_text(encoding="utf-8"))
+    messages = data if isinstance(data, list) else data.get("messages", [])
+    count = 0
+    for msg in messages:
+        if msg.get("status") == "new":
+            count += 1
+        elif msg.get("status") is None and not msg.get("read", False):
+            count += 1
+    return count
 
 
 def _cadence_allows(new_count: int, hook_data: dict) -> bool:
@@ -90,7 +86,7 @@ def _cadence_allows(new_count: int, hook_data: dict) -> bool:
         cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
         return cadence.should_fire_mail(new_count, hook_data)
     except Exception as exc:
-        logger.info("[HOOKS] email: cadence check failed, announcing anyway: %s", exc)
+        logger.warning("[HOOKS] email: cadence check failed, announcing anyway: %s", exc)
         return new_count > 0
 
 
@@ -102,7 +98,7 @@ def handle(hook_data: dict) -> dict:
         return {"stdout": "", "exit_code": 0}
 
     new_count = _count_new_emails(branch_root)
-    if new_count is None or not _cadence_allows(new_count, hook_data):
+    if not _cadence_allows(new_count, hook_data):
         return {"stdout": "", "exit_code": 0}
 
     plural = "s" if new_count != 1 else ""

@@ -4,7 +4,7 @@
 # Description: Tests for compass recall prompt handler
 # Branch: hooks
 # Created: 2026-07-16
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/prompt/compass_recall.py."""
@@ -308,6 +308,13 @@ class TestCompassRecallHandler:
 
             assert result["exit_code"] == 0
             assert result["stdout"] == ""
+
+    def test_a_corrupt_state_file_is_left_untouched_never_overwritten(self, tmp_path):
+        state_file = tmp_path / "aipass-compass-recall-corrupt.json"
+        state_file.write_text("{not json", encoding="utf-8")
+        result = _recall(tmp_path, "corrupt", [_candidate(1)], None)
+        assert result == {"stdout": "", "exit_code": 0}
+        assert state_file.read_text(encoding="utf-8") == "{not json"
 
     def test_persists_governance_state(self, tmp_path):
         updated_state = {

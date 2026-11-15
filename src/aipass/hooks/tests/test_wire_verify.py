@@ -362,12 +362,13 @@ class TestReadProviderHooks:
         result = wire_verify.verify_wiring(provider_path=settings, project_config={"hooks_enabled": True})
         assert "Stop: provider entry exists but hooks array is EMPTY — nothing fires" in result["errors"]
 
-    def test_malformed_json_returns_empty(self, tmp_path):
+    def test_malformed_json_is_an_error_naming_the_file(self, tmp_path):
         settings = tmp_path / "settings.json"
         settings.write_text("not json{{{", encoding="utf-8")
         result = wire_verify.verify_wiring(provider_path=settings, project_config=GOOD_PROJECT)
+        (unreadable,) = [e for e in result["errors"] if e.startswith(f"Cannot read {settings}")]
         assert result == {
-            "errors": ["No provider hooks found in ~/.claude/settings.json"],
+            "errors": [unreadable, "No provider hooks found in ~/.claude/settings.json"],
             "warnings": [],
             "info": [],
             "ok": False,
@@ -454,6 +455,12 @@ class TestOpenCodePlugin:
         plugin.write_text("// edited\n", encoding="utf-8")
         result = self._verify(tmp_path, plugin, _manifest(tmp_path, "SessionStart:culture"))
         assert [e for e in result["errors"] if e.startswith("OpenCode plugin stale") and str(plugin) in e]
+
+    def test_an_unreadable_manifest_is_an_error_naming_it(self, tmp_path):
+        manifest = tmp_path / "provider_manifest.json"
+        manifest.write_text("not json{{{", encoding="utf-8")
+        result = self._verify(tmp_path, self._installed(tmp_path), manifest)
+        assert [e for e in result["errors"] if e.startswith(f"Cannot read the provider manifest {manifest}")]
 
     def test_no_opencode_rows_is_an_error(self, tmp_path):
         manifest = tmp_path / "provider_manifest.json"

@@ -313,6 +313,30 @@ class TestAutoFixSubprocessChecks:
         assert "FORMAT" in errors[0]
         assert mock_run.call_args[0][0][:3] == [sys.executable, "-m", "ruff"]
 
+    @patch("subprocess.run", side_effect=OSError("no interpreter"))
+    def test_check_that_cannot_run_never_reads_as_clean(self, mock_run, tmp_path):
+        target = str(tmp_path / "x.py")
+        for check in (_check_syntax, _check_ruff_lint, _check_ruff_format, _check_patterns):
+            errors = check(target)
+            assert len(errors) == 1 and errors[0].startswith("UNCHECKED:"), (check.__name__, errors)
+
+    @patch("subprocess.run")
+    def test_ruff_bad_exit_is_unchecked(self, mock_run, tmp_path):
+        mock_run.return_value = MagicMock(returncode=2, stdout="", stderr="ruff: boom")
+        assert _check_ruff_lint(str(tmp_path / "x.py"))[0].startswith("UNCHECKED:")
+        assert _check_ruff_format(str(tmp_path / "x.py"))[0].startswith("UNCHECKED:")
+
+    def test_a_check_that_could_not_run_is_no_answer_not_an_error_to_fix(self, tmp_path):
+        with (
+            patch.object(auto_fix, "_run_python_checks", return_value=["UNCHECKED: lint, ruff exit 2: boom"]),
+            patch.object(auto_fix, "_run_sentry_checklist", return_value=[]),
+            patch.object(auto_fix, "_run_pyright_check", return_value=[]),
+            patch.object(auto_fix, "_run_ruff_lint_structured", return_value=[]),
+        ):
+            result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "x.py")}})
+        context = json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"]
+        assert context == "[diagnostics] NO ANSWER from lint, ruff exit 2: boom: this edit cleared no recorded error"
+
     @patch("subprocess.run")
     def test_run_ruff_lint_structured_returns_dicts(self, mock_run, tmp_path):
         mock_run.return_value = MagicMock(

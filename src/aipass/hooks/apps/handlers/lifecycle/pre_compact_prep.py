@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: pre_compact_prep.py
-# Version: 1.6.1
+# Version: 1.6.2
 # Description: Stamps a mechanical AUTO-COMPACT SNAPSHOT into the compacting branch's memory (PreCompact)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
@@ -64,7 +64,7 @@ def _count_active_dispatch_locks(repo_root: Path | None) -> int | None:
     try:
         rows = fleet_rows(repo_root)
     except Exception as exc:
-        logger.info("[HOOKS] pre_compact_prep: registry read failed: %s", exc)
+        logger.warning("[HOOKS] pre_compact_prep: registry read failed: %s", exc)
         return None
     return sum(1 for row in rows if (Path(row["path"]) / ".ai_mail.local" / ".dispatch.lock").is_file())
 
@@ -76,7 +76,7 @@ def _count_open_plans(branch_dir: Path) -> int | None:
         target = str(branch_dir.resolve())
         return sum(1 for _num, info in get_open_plans() if info.get("location") == target)
     except Exception as exc:
-        logger.info("[HOOKS] pre_compact_prep: open plans read failed: %s", exc)
+        logger.warning("[HOOKS] pre_compact_prep: open plans read failed: %s", exc)
         return None
 
 
@@ -104,7 +104,7 @@ def _git_snapshot(branch_dir: Path) -> str | None:
             cwd=str(branch_dir),
         )
     except Exception as exc:
-        logger.info("[HOOKS] pre_compact_prep: git snapshot failed: %s", exc)
+        logger.warning("[HOOKS] pre_compact_prep: git snapshot failed: %s", exc)
         return None
 
     bits: list[str] = []
@@ -127,7 +127,7 @@ def _inbox_unread(branch_dir: Path) -> int | None:
         unread = data.get("unread_count")
         return unread if isinstance(unread, int) else None
     except (OSError, json.JSONDecodeError) as exc:
-        logger.info("[HOOKS] pre_compact_prep: inbox read failed: %s", exc)
+        logger.warning("[HOOKS] pre_compact_prep: inbox read failed: %s", exc)
         return None
 
 
@@ -150,7 +150,7 @@ def _summary_cap(branch: str) -> int:
         if isinstance(cap, int) and cap > 0:
             return cap
     except (ImportError, KeyError, TypeError) as exc:
-        logger.info("[HOOKS] pre_compact_prep: entry_limits read failed, using default: %s", exc)
+        logger.warning("[HOOKS] pre_compact_prep: entry_limits read failed, using default: %s", exc)
     return _DEFAULT_SUMMARY_CAP
 
 

@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.12.3
+# Version: 2.12.4
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
@@ -133,7 +133,7 @@ def _get_turn_token(hook_data: dict) -> int:
         logger.debug("[HOOKS] cadence: no transcript yet (turn 0): %s", tp)
         return -1
     except OSError as exc:
-        logger.info("[HOOKS] cadence: transcript stat failed: %s", exc)
+        logger.warning("[HOOKS] cadence: transcript stat failed: %s", exc)
         return -1
 
 
@@ -169,7 +169,7 @@ def _close_fd(fd) -> None:
         _unlock(fd)
         fd.close()
     except OSError as exc:
-        logger.info("[HOOKS] cadence: fd cleanup failed: %s", exc)
+        logger.warning("[HOOKS] cadence: fd cleanup failed: %s", exc)
 
 
 def _mtime_age(fd) -> float:
@@ -177,7 +177,7 @@ def _mtime_age(fd) -> float:
     try:
         return time.time() - os.fstat(fd.fileno()).st_mtime
     except OSError as exc:
-        logger.info("[HOOKS] cadence: fstat failed, assuming stale: %s", exc)
+        logger.warning("[HOOKS] cadence: fstat failed, assuming stale: %s", exc)
         return _DEBOUNCE_S + 1
 
 
@@ -437,12 +437,12 @@ def _read_last_mail_turn(path: Path) -> int | None:
     try:
         content = path.read_text(encoding="utf-8")
     except OSError as exc:
-        logger.info("[HOOKS] cadence: mail state read failed, treating as never fired: %s", exc)
+        logger.warning("[HOOKS] cadence: mail state read failed, treating as never fired: %s", exc)
         return None
     try:
         value = json.loads(content).get("last_fired_turn") if content.strip() else None
     except json.JSONDecodeError as exc:
-        logger.info("[HOOKS] cadence: mail state unreadable, treating as never fired: %s", exc)
+        logger.warning("[HOOKS] cadence: mail state unreadable, treating as never fired: %s", exc)
         return None
     return value if isinstance(value, int) else None
 
@@ -455,7 +455,7 @@ def _write_last_mail_turn(path: Path, turn: int | None) -> None:
         else:
             path.write_text(json.dumps({"last_fired_turn": turn}), encoding="utf-8")
     except OSError as exc:
-        logger.info("[HOOKS] cadence: mail state write failed: %s", exc)
+        logger.warning("[HOOKS] cadence: mail state write failed: %s", exc)
 
 
 def should_fire_mail(new_count: int, hook_data: dict | None = None) -> bool:
@@ -584,7 +584,7 @@ def should_fire_advisory(name: str, period: int = ADVISORY_PERIOD) -> bool:
             path.write_text(json.dumps({"turn": turn, "at": now}), encoding="utf-8")
         except OSError as exc:
             # Fire anyway — losing the advisory is worse than repeating it.
-            logger.info("[HOOKS] cadence: advisory state write failed: %s", exc)
+            logger.warning("[HOOKS] cadence: advisory state write failed: %s", exc)
     return fire
 
 
@@ -673,7 +673,7 @@ def reset_counter(hook_data: dict | None = None, caller: str = "unknown") -> Non
                 old_turn,
             )
     except OSError as exc:
-        logger.info(
+        logger.warning(
             "[HOOKS] cadence: reset write FAILED caller=%s pid=%d session=%s: %s", caller, pid, session_short, exc
         )
         if fd is not None:
@@ -693,7 +693,9 @@ def _stamp_window(session_id: str, opened_at: float, caller: str) -> None:
     try:
         _window_path(session_id).write_text(json.dumps({"opened_at": opened_at, "caller": caller}), encoding="utf-8")
     except OSError as exc:
-        logger.info("[HOOKS] cadence: window stamp write FAILED caller=%s session=%s: %s", caller, session_id[:8], exc)
+        logger.warning(
+            "[HOOKS] cadence: window stamp write FAILED caller=%s session=%s: %s", caller, session_id[:8], exc
+        )
 
 
 def window_opened_at(hook_data: dict | None = None) -> float | None:
@@ -711,7 +713,7 @@ def window_opened_at(hook_data: dict | None = None) -> float | None:
     try:
         opened_at = json.loads(path.read_text(encoding="utf-8") or "{}").get("opened_at")
     except (OSError, json.JSONDecodeError, AttributeError) as exc:
-        logger.info("[HOOKS] cadence: window stamp unreadable: %s", exc)
+        logger.warning("[HOOKS] cadence: window stamp unreadable: %s", exc)
         return None
     if isinstance(opened_at, bool) or not isinstance(opened_at, (int, float)):
         return None
@@ -743,7 +745,7 @@ def stamp_regroup_complete(hook_data: dict | None = None) -> None:
         stamp = {"window": window, "token": transcript_mark, "used_token": None}
         _regroup_done_path(session_id).write_text(json.dumps(stamp), encoding="utf-8")
     except OSError as exc:
-        logger.info("[HOOKS] cadence: regroup completion stamp write FAILED session=%s: %s", session_id[:8], exc)
+        logger.warning("[HOOKS] cadence: regroup completion stamp write FAILED session=%s: %s", session_id[:8], exc)
         return
     logger.info("[HOOKS] cadence: regroup complete, stamped token=%d session=%s", transcript_mark, session_id[:8])
 
@@ -898,7 +900,7 @@ def queue_regroup_parts(total: int, hook_data: dict | None = None) -> None:
         fd = None
         logger.info("[HOOKS] cadence: regroup queued %d more part(s) session=%s", total - 1, session_short)
     except (OSError, json.JSONDecodeError) as exc:
-        logger.info("[HOOKS] cadence: queue_regroup_parts failed session=%s: %s", session_short, exc)
+        logger.warning("[HOOKS] cadence: queue_regroup_parts failed session=%s: %s", session_short, exc)
         if fd is not None:
             _close_fd(fd)
 
@@ -935,7 +937,7 @@ def pop_regroup_part(hook_data: dict | None = None) -> tuple[int, int] | None:
         fd = None
         return part
     except (OSError, json.JSONDecodeError) as exc:
-        logger.info("[HOOKS] cadence: pop_regroup_part failed session=%s: %s", session_short, exc)
+        logger.warning("[HOOKS] cadence: pop_regroup_part failed session=%s: %s", session_short, exc)
         if fd is not None:
             _close_fd(fd)
         return None

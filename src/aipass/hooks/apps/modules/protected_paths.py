@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: protected_paths.py
-# Version: 2.3.1
+# Version: 2.3.2
 # Description: The files that switch the gates themselves — written by the admin seat alone (git_gate)
 # Branch: hooks
 # Layer: apps/modules
@@ -99,11 +99,8 @@ def _by_name(spelled: str) -> str | None:
 
 
 def _files(root: Path, pattern: str) -> list[Path]:
-    try:
-        return [found for found in root.glob(pattern) if found.is_file()]
-    except OSError as exc:  # an unreadable tree names no anchor in it; the name lane still holds
-        logger.info("[HOOKS] protected_paths: cannot list %s/%s: %s", root, pattern, exc)
-        return []
+    # Uncaught: an unlistable tree could hide an anchor, so the gate's fail-closed handler refuses.
+    return [found for found in root.glob(pattern) if found.is_file()]
 
 
 def anchors() -> list[Path]:

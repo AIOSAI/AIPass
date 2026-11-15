@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_engine.py
-# Version: 2.4.0
+# Version: 2.4.1
 # Description: Tests for hook engine dispatch logic: the dispatcher core; contracts and safeguards in two siblings
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/engine.py: the dispatcher core and the hook dispatch it drives."""
@@ -654,10 +654,10 @@ class TestFindProjectConfig:
 
     def test_finds_config_in_cwd(self, hooks_config_file, temp_test_dir, mock_logger):
         reg_path = temp_test_dir / "registry.json"
-        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+        with patch.dict("os.environ", {"AIPASS_TRUST_REGISTRY": str(reg_path)}):
             enroll(str(temp_test_dir))
         with (
-            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
+            patch.dict("os.environ", {"AIPASS_TRUST_REGISTRY": str(reg_path)}),
             patch(
                 "aipass.hooks.apps.handlers.config.loader._search_bounds",
                 return_value=(temp_test_dir, temp_test_dir.parent),
@@ -684,10 +684,10 @@ class TestFindProjectConfig:
         }
         (config_dir / "hooks.json").write_text(json.dumps(config), encoding="utf-8")
         reg_path = temp_test_dir / "registry.json"
-        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+        with patch.dict("os.environ", {"AIPASS_TRUST_REGISTRY": str(reg_path)}):
             enroll(str(temp_test_dir))
         with (
-            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
+            patch.dict("os.environ", {"AIPASS_TRUST_REGISTRY": str(reg_path)}),
             patch(
                 "aipass.hooks.apps.handlers.config.loader._search_bounds",
                 return_value=(temp_test_dir, temp_test_dir.parent),

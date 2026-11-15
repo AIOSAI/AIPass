@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: engine_closure.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: The hook engine's import closure, and the edit check that keeps a NameError out of it
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-04
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """Which files the hook engine imports, and a refusal for an edit that would crash one of them.
@@ -211,9 +211,8 @@ def handle_command(command: str, args: list) -> bool:
         CONSOLE.print()
         CONSOLE.print("Prints every file the engine imports, computed now from this install, and the count.")
         return True
-    if args[0] != "list":
-        print_introspection()
-        return True
+    if args != ["list"]:
+        return False
     home = aipass_home()
     if home is None:
         CONSOLE.print("[red]No AIPass install found (AIPASS_HOME unset, none above this file).[/red]")

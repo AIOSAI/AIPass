@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: auto_process.py
-# Version: 1.3.1
+# Version: 1.3.2
 # Description: Kicks @memory's auto-process once per session and on pre-compact (TDPLAN-0005)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-06-06
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Kicks @memory's auto_process in a detached child; the work leaves the prompt lane.
@@ -41,7 +41,7 @@ def _mark_session_ran() -> None:
         try:
             guard.touch()
         except OSError as exc:
-            logger.info("[HOOKS] auto_process: guard write failed: %s", exc)
+            logger.warning("[HOOKS] auto_process: guard write failed: %s", exc)
 
 
 def handle(hook_data: dict) -> dict:

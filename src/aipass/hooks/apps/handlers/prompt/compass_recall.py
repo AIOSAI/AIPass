@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: compass_recall.py
-# Version: 1.2.1
+# Version: 1.2.2
 # Description: Ambient compass recall — surfaces rated decisions on relevant prompts
 # Branch: hooks
 # Layer: apps/handlers/prompt
@@ -50,21 +50,14 @@ def _load_state(hook_data: dict | None = None) -> dict:
     path = _state_path(hook_data)
     if path is None or not path.exists():
         return _fresh_state()
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.info("[HOOKS] compass_recall: state read failed: %s", exc)
-        return _fresh_state()
+    # A corrupt state raises and is left as found: read as fresh, the save below would overwrite it.
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _fresh_state() -> dict:
-    try:
-        from aipass.memory.apps.modules.governance import new_state
+    from aipass.memory.apps.modules.governance import new_state
 
-        return new_state()
-    except Exception as exc:
-        logger.info("[HOOKS] compass_recall: governance import failed: %s", exc)
-        return {"surfaces_count": 0, "messages_since_last": 0, "last_surface_time": 0.0, "surfaced_ids": []}
+    return new_state()
 
 
 def _save_state(state: dict, hook_data: dict | None = None) -> None:
@@ -74,7 +67,7 @@ def _save_state(state: dict, hook_data: dict | None = None) -> None:
     try:
         path.write_text(json.dumps(state), encoding="utf-8")
     except OSError as exc:
-        logger.info("[HOOKS] compass_recall: state write failed: %s", exc)
+        logger.warning("[HOOKS] compass_recall: state write failed: %s", exc)
 
 
 def _governance_config() -> dict:

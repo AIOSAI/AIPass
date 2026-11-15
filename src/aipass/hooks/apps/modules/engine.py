@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: engine.py
-# Version: 2.6.1
+# Version: 2.6.3
 # Description: Hook engine — unified dispatcher; gates fail closed, injectors skip on error
 # Branch: hooks
 # Layer: apps/modules
@@ -206,7 +206,7 @@ def _load_budget_state(session_id: str = "") -> dict:
     try:
         state = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:  # an unreadable budget starts every count afresh
-        logger.info("[HOOKS] budget: state read failed: %s", exc)
+        logger.warning("[HOOKS] budget: state read failed: %s", exc)
     return state
 
 
@@ -217,7 +217,7 @@ def _save_budget_state(state: dict, session_id: str = "") -> None:
     try:
         path.write_text(json.dumps(state), encoding="utf-8")
     except OSError as exc:
-        logger.info("[HOOKS] budget: state write failed: %s", exc)
+        logger.warning("[HOOKS] budget: state write failed: %s", exc)
 
 
 def _open_budget_window(hook_name: str, hs: dict, hook_data: dict) -> None:
@@ -648,15 +648,18 @@ def handle_command(command: str, args: list) -> bool:
     if command in ("--help", "-h", "help") or (command == "engine" and wants_help(args)):
         CONSOLE.print("[bold cyan]engine[/bold cyan] — Hook dispatch engine")
         CONSOLE.print()
+        CONSOLE.print("  drone @hooks engine    The handler map: every handler the engine dispatches, by category")
         CONSOLE.print("  drone @hooks log       Tail recent hook activity")
         return True
 
     if command == "log":
         if wants_help(args):
-            CONSOLE.print("[bold cyan]engine[/bold cyan] — Hook dispatch engine")
+            CONSOLE.print("[bold cyan]log[/bold cyan] — the engine log's last 20 entries")
             CONSOLE.print()
-            CONSOLE.print("  drone @hooks log       Tail recent hook activity")
+            CONSOLE.print("  drone @hooks log       Tail recent hook activity (logs/engine.jsonl)")
             return True
+        if args:
+            return False
 
         lines = tail_log(20)
         if not lines:

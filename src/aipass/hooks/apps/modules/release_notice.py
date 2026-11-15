@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: release_notice.py
-# Version: 1.1.1
+# Version: 1.1.2
 # Description: Manager-only "AIPass release available" notice builder (DPLAN-0335 leg 2)
 # Branch: hooks
 # Layer: apps/modules
@@ -139,7 +139,7 @@ def _read_manifest(root: Path) -> dict | None:
     except FileNotFoundError:
         return None
     except (OSError, ValueError) as exc:
-        logger.info("[HOOKS] release_notice: manifest unreadable at %s: %s", path, exc)
+        logger.warning("[HOOKS] release_notice: manifest unreadable at %s: %s", path, exc)
         return None
     return data if isinstance(data, dict) else None
 

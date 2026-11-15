@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: session_boot.py
-# Version: 4.6.2
+# Version: 4.6.3
 # Description: Boot wrapper — attach-first menu, resumes by pointer (0448), steps aside while dispatched (0449)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
@@ -213,7 +213,8 @@ def _read_choice(prompt: str = "> ") -> str:
         tty.close()
         return choice
     except OSError as exc:
-        logger.info("[SESSION_BOOT] /dev/tty not available: %s", exc)
+        logger.warning("[SESSION_BOOT] /dev/tty not available: %s", exc)
+        sys.stderr.write(f"\n  No terminal to read a choice from ({exc}): taking the default.\n")
         return ""
 
 
@@ -325,6 +326,7 @@ def _pinned_cli_version() -> str:
         return str(data.get("cli", {}).get("claude", {}).get("pinned_version", ""))
     except (OSError, json.JSONDecodeError, AttributeError, TypeError) as exc:
         logger.info("[SESSION_BOOT] cannot read pinned version: %s", exc)
+        sys.stderr.write(f"  !! CLI version pin unreadable ({manifest}: {exc}): version drift unchecked\n")
         return ""
 
 
@@ -338,7 +340,8 @@ def _running_cli_version(claude_bin: str) -> str:
             timeout=10,
         )
     except (OSError, subprocess.SubprocessError) as exc:
-        logger.info("[SESSION_BOOT] cannot read running version: %s", exc)
+        logger.warning("[SESSION_BOOT] cannot read running version: %s", exc)
+        sys.stderr.write(f"  !! {claude_bin} --version failed ({exc}): version drift unchecked\n")
         return ""
     return (result.stdout or "").strip().split(" ")[0]
 
@@ -859,6 +862,7 @@ def _dispatch_lock(cwd: str) -> dict | None:
         data = json.loads(lock_file.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
         logger.info("[SESSION_BOOT] Unreadable dispatch lock %s: %s", lock_file, exc)
+        sys.stderr.write(f"  !! Dispatch lock unreadable ({lock_file}: {exc}): cannot tell if an agent works here.\n")
         return None
     pid = data.get("pid")
     if not pid:

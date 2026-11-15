@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: sandbox.py
-# Version: 1.0.4
+# Version: 1.0.5
 # Description: Sandbox wrapper — launches commands inside srt (kernel FS boundary)
 # Branch: hooks
 # Layer: apps/modules
@@ -81,11 +81,9 @@ def _is_devpulse(branch_path: Path) -> bool:
     """Check if a branch is devpulse (the only committer) via passport."""
     passport = branch_path / ".trinity" / "passport.json"
     if passport.is_file():
-        try:
-            data = json.loads(passport.read_text(encoding="utf-8"))
-            return data.get("branch_info", {}).get("branch_name") == "devpulse"
-        except (json.JSONDecodeError, OSError) as exc:
-            logger.info("sandbox: failed to read passport for %s: %s", branch_path.name, exc)
+        # Uncaught: a corrupt passport must not be judged by the directory name, which grants .git.
+        data = json.loads(passport.read_text(encoding="utf-8"))
+        return data.get("branch_info", {}).get("branch_name") == "devpulse"
     return branch_path.name == "devpulse"
 
 

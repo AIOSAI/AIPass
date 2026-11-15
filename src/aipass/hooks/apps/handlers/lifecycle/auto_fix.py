@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: auto_fix.py
-# Version: 1.8.0
+# Version: 1.8.1
 # Description: Post-edit diagnostics — syntax, lint, type, pattern, sentry checks (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
@@ -83,7 +83,8 @@ def _check_syntax(file_path: str) -> list[str]:
         if result.returncode != 0:
             return [f"SYNTAX: {result.stderr.strip()}"]
     except Exception as exc:
-        logger.info("[HOOKS] auto_fix: py_compile failed: %s", exc)
+        logger.warning("[HOOKS] auto_fix: py_compile failed: %s", exc)
+        return [f"UNCHECKED: syntax, py_compile could not run ({type(exc).__name__}: {exc})"]
     return []
 
 
@@ -96,14 +97,15 @@ def _check_ruff_lint(file_path: str) -> list[str]:
             timeout=10,
         )
         if result.returncode not in (0, 1):
-            logger.info("[HOOKS] auto_fix: ruff lint error: %s", result.stderr.strip())
-            return []
+            logger.warning("[HOOKS] auto_fix: ruff lint error: %s", result.stderr.strip())
+            return [f"UNCHECKED: lint, ruff exit {result.returncode}: {result.stderr.strip()[:100]}"]
         if result.stdout.strip():
             lines = result.stdout.strip().split("\n")
             violations = [line for line in lines if ".py:" in line]
             return [f"LINT: {line}" for line in violations[:5]]
     except Exception as exc:
-        logger.info("[HOOKS] auto_fix: ruff lint failed: %s", exc)
+        logger.warning("[HOOKS] auto_fix: ruff lint failed: %s", exc)
+        return [f"UNCHECKED: lint, ruff could not run ({type(exc).__name__}: {exc})"]
     return []
 
 
@@ -119,9 +121,11 @@ def _check_ruff_format(file_path: str) -> list[str]:
             name = Path(file_path).name
             return [f"FORMAT: {name} needs ruff format (run: ruff format {name})"]
         if result.returncode not in (0, 1):
-            logger.info("[HOOKS] auto_fix: ruff format error: %s", result.stderr.strip())
+            logger.warning("[HOOKS] auto_fix: ruff format error: %s", result.stderr.strip())
+            return [f"UNCHECKED: format, ruff exit {result.returncode}: {result.stderr.strip()[:100]}"]
     except Exception as exc:
-        logger.info("[HOOKS] auto_fix: ruff format check failed: %s", exc)
+        logger.warning("[HOOKS] auto_fix: ruff format check failed: %s", exc)
+        return [f"UNCHECKED: format, ruff could not run ({type(exc).__name__}: {exc})"]
     return []
 
 
@@ -161,7 +165,8 @@ def _check_patterns(file_path: str) -> list[str]:
                     errors.append(f"PATTERN: {message}")
                     break
     except Exception as exc:
-        logger.info("[HOOKS] auto_fix: pattern check failed: %s", exc)
+        logger.warning("[HOOKS] auto_fix: pattern check failed: %s", exc)
+        errors.append(f"UNCHECKED: patterns ({type(exc).__name__}: {exc})")
     return errors
 
 
@@ -542,6 +547,9 @@ def handle(hook_data: dict) -> dict:
 
         if file_path.endswith(".py"):
             errors = _run_python_checks(file_path)
+            # A check that could not run is NO ANSWER, never an error in the file the agent is told to fix.
+            unanswered += [e.removeprefix("UNCHECKED: ") for e in errors if e.startswith("UNCHECKED: ")]
+            errors = [e for e in errors if not e.startswith("UNCHECKED: ")]
 
             try:
                 added = _added_lines(file_path, tool_input)

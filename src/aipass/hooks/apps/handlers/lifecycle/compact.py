@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: compact.py
-# Version: 1.1.1
+# Version: 1.1.2
 # Description: Injects live state for post-compact recovery (PreCompact)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
@@ -41,7 +41,7 @@ def _read_last_session(branch_dir: Path) -> str | None:
                 result.append(f"Key learnings available: {', '.join(keys)}")
         return "\n".join(result) if result else None
     except Exception as exc:
-        logger.info("[HOOKS] compact: read session failed: %s", exc)
+        logger.warning("[HOOKS] compact: read session failed: %s", exc)
         return None
 
 
@@ -67,7 +67,7 @@ def _get_git_info() -> str | None:
             result.append(f"Uncommitted changes: {len(lines)} files")
         return "\n".join(result) if result else None
     except Exception as exc:
-        logger.info("[HOOKS] compact: git info failed: %s", exc)
+        logger.warning("[HOOKS] compact: git info failed: %s", exc)
         return None
 
 
@@ -77,7 +77,7 @@ def handle(hook_data: dict) -> dict:
         cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
         cadence.reset_counter(hook_data=hook_data, caller="compact")
     except Exception as exc:
-        logger.info("[HOOKS] compact: cadence reset failed: %s", exc)
+        logger.warning("[HOOKS] compact: cadence reset failed: %s", exc)
 
     try:
         importlib.import_module("aipass.hooks.apps.modules.grounding_receipt").mark_pending(hook_data)

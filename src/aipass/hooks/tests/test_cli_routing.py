@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for hooks's entry point routing, help and introspection
-# Version: 1.2.5
+# Version: 1.2.6
 # Created: 2026-09-03
 # Modified: 2026-11-15
 # =============================================
@@ -289,3 +289,40 @@ class TestDiscoverySkipsRetiredModules:
         self._stand_in(monkeypatch, "presence(disabled)_v2", _StubModule())
 
         assert branch_entry.discover_modules() == []
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["closure", "bogus"],
+        ["closure", "list", "extra"],
+        ["seed", "bogus"],
+        ["receipt", "bogus"],
+        ["testwrite", "bogus"],
+        ["test", "bogus"],
+        ["log", "extra"],
+        ["ledger", "bogus"],
+        ["dismiss", "an-id", "extra"],
+        ["hooksound", "--json", "extra"],
+    ],
+    ids=lambda argv: "-".join(argv),
+)
+def test_a_stray_argument_is_refused_never_ignored(monkeypatch, capsys, argv):
+    """Through the real modules: an ignored argument ran the verb anyway and exited 0."""
+    assert _run(monkeypatch, argv) == 1
+    assert "Unknown command" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("count", ["0", "-1"])
+def test_ledger_last_takes_a_count_above_zero(monkeypatch, capsys, count):
+    """--last 0 and --last -1 each printed one row as if asked for."""
+    with pytest.raises(SystemExit) as refused:
+        _run(monkeypatch, ["ledger", "--last", count])
+    assert refused.value.code == 2
+    assert "above zero" in capsys.readouterr().err
+
+
+def test_engine_help_names_the_engine_verb(monkeypatch, capsys):
+    """engine --help listed only `log`."""
+    assert _run(monkeypatch, ["engine", "--help"]) == 0
+    assert "drone @hooks engine" in capsys.readouterr().err

@@ -4,7 +4,7 @@
 # Description: Tests for sandbox wrapper module
 # Branch: hooks
 # Created: 2026-06-09
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/sandbox.py."""
@@ -409,6 +409,12 @@ class TestBuildPolicy:
         repo = tmp_path / "repo"
         policy = build_policy(branch)
         assert str(repo / ".git") in policy["allow_write"]
+
+    def test_a_corrupt_passport_raises_never_read_by_the_directory_name(self, tmp_path):
+        branch = self._make_branch(tmp_path, "devpulse", is_devpulse=True)
+        (branch / ".trinity" / "passport.json").write_text("{not json", encoding="utf-8")
+        with pytest.raises(ValueError):
+            build_policy(branch)
 
     def test_sibling_mail_writable(self, tmp_path):
         branch = self._make_branch(tmp_path, "sentry")

@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.22.1
+# Version: 1.22.2
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
@@ -815,7 +815,7 @@ def _seat_trinity(cwd: str) -> Path | None:
     try:
         start = Path(cwd).resolve()
     except (OSError, ValueError) as exc:
-        logger.info("[HOOKS] edit_gate tripwire: cwd unresolvable %r: %s", cwd, exc)
+        logger.warning("[HOOKS] edit_gate tripwire: cwd unresolvable %r: %s", cwd, exc)
         return None
     for candidate in (start, *start.parents):
         if (candidate / ".trinity").is_dir():
@@ -840,7 +840,7 @@ def _watched_trinity_dirs(cwd: str) -> list[Path]:
                 if found.is_dir() and found not in dirs:
                     dirs.append(found)
     except OSError as exc:
-        logger.info("[HOOKS] edit_gate tripwire: .trinity scan under %s failed: %s", root, exc)
+        logger.warning("[HOOKS] edit_gate tripwire: .trinity scan under %s failed: %s", root, exc)
     return dirs
 
 
@@ -871,7 +871,7 @@ def _read_pending(path: Path) -> dict:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        logger.info("[HOOKS] edit_gate tripwire: unreadable snapshot file %s, starting fresh: %s", path, exc)
+        logger.warning("[HOOKS] edit_gate tripwire: unreadable snapshot file %s, starting fresh: %s", path, exc)
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -1014,12 +1014,8 @@ def handle(hook_data: dict) -> dict:
         if not errors:
             return {"stdout": "", "exit_code": 0}
 
-        try:
-            current = str(Path(file_path).resolve())
-            errored = str(Path(errored_file).resolve())
-        except (OSError, ValueError) as exc:
-            logger.info("[HOOKS] edit_gate: path resolution failed: %s", exc)
-            return {"stdout": "", "exit_code": 0}
+        current = str(Path(file_path).resolve())
+        errored = str(Path(errored_file).resolve())
 
         if current == errored:
             return {"stdout": "", "exit_code": 0}

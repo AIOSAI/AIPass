@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: write_ownership.py
-# Version: 2.7.0
+# Version: 2.7.1
 # Description: Who may write whose files: project roots and branch owners read from the registries
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-18
-# Modified: 2026-11-04
+# Modified: 2026-11-15
 # =============================================
 
 """Answers, for the edit gate's two lanes, whose file a write lands in and whether this seat may make it.
@@ -86,7 +86,7 @@ def _resolved(path: Path) -> Path | None:
     try:
         return path.resolve()
     except (OSError, RuntimeError) as exc:
-        logger.info("[HOOKS] write_ownership: unresolvable path %s: %s", path, exc)
+        logger.warning("[HOOKS] write_ownership: unresolvable path %s: %s", path, exc)
         return None
 
 
@@ -94,7 +94,7 @@ def _read(marker: Path) -> object:
     try:
         return json.loads(marker.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        logger.info("[HOOKS] write_ownership: registry unreadable, still a boundary: %s: %s", marker, exc)
+        logger.warning("[HOOKS] write_ownership: registry unreadable, still a boundary: %s: %s", marker, exc)
         return None
 
 

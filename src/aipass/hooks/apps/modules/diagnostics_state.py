@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: diagnostics_state.py
-# Version: 2.3.1
+# Version: 2.3.2
 # Description: Post-edit diagnostics state per seat — location, meaning, and live re-validation
 # Branch: hooks
 # Layer: apps/modules
@@ -82,7 +82,7 @@ def _read_seat_file(path: Path) -> dict | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError, ValueError) as exc:
-        logger.info("[HOOKS] diagnostics_state: seat file unreadable: %s", exc)
+        logger.warning("[HOOKS] diagnostics_state: seat file unreadable: %s", exc)
         return None
     if not isinstance(data, dict) or data.get("version") != 2:
         return {}
@@ -108,7 +108,7 @@ def save_seat(seat: str, file_path: str, errors: list[dict]) -> None:
         temp_name = ""
         _prune()
     except (OSError, ValueError) as exc:
-        logger.info("[HOOKS] diagnostics_state: seat state write failed: %s", exc)
+        logger.warning("[HOOKS] diagnostics_state: seat state write failed: %s", exc)
         if temp_name:
             Path(temp_name).unlink(missing_ok=True)
 
@@ -118,7 +118,7 @@ def clear_seat(seat: str) -> None:
     try:
         _seat_file(seat).unlink(missing_ok=True)
     except OSError as exc:
-        logger.info("[HOOKS] diagnostics_state: could not clear seat state: %s", exc)
+        logger.warning("[HOOKS] diagnostics_state: could not clear seat state: %s", exc)
 
 
 def _prune() -> None:
@@ -129,7 +129,7 @@ def _prune() -> None:
             if path.stat().st_mtime < cutoff:
                 path.unlink(missing_ok=True)
         except OSError as exc:
-            logger.info("[HOOKS] diagnostics_state: could not prune %s: %s", path.name, exc)
+            logger.warning("[HOOKS] diagnostics_state: could not prune %s: %s", path.name, exc)
 
 
 def is_cross_file_error(error: dict) -> bool:
@@ -200,16 +200,16 @@ def revalidate(file_path: str) -> list[dict] | None:
         )
         data = json.loads(result.stdout)
     except FileNotFoundError:
-        logger.info("[HOOKS] diagnostics_state: pyright not installed — cannot re-validate")
+        logger.warning("[HOOKS] diagnostics_state: pyright not installed — cannot re-validate")
         return None
     except subprocess.TimeoutExpired:
-        logger.info("[HOOKS] diagnostics_state: pyright timed out re-validating %s", file_path)
+        logger.warning("[HOOKS] diagnostics_state: pyright timed out re-validating %s", file_path)
         return None
     except (json.JSONDecodeError, ValueError) as exc:
-        logger.info("[HOOKS] diagnostics_state: pyright output unparseable: %s", exc)
+        logger.warning("[HOOKS] diagnostics_state: pyright output unparseable: %s", exc)
         return None
     except Exception as exc:
-        logger.info("[HOOKS] diagnostics_state: re-validation failed: %s", exc)
+        logger.warning("[HOOKS] diagnostics_state: re-validation failed: %s", exc)
         return None
 
     errors: list[dict] = []

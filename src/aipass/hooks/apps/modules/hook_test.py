@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: hook_test.py
-# Version: 1.5.1
+# Version: 1.5.2
 # Description: Portable hook test runner — every hook with mock data; provider parity and smoke with real sessions
 # Branch: hooks
 # Layer: apps/modules
@@ -40,7 +40,7 @@ from aipass.cli.apps.modules import console, err_console
 CONSOLE = err_console
 
 HELP_COMMANDS = [
-    ("test [--verbose]", "Fire every hook with mock data and report results"),
+    ("test run [--verbose]", "Fire every hook with mock data and report results"),
     ("parity [--branch @x] [--lane A,..] [--json]", "Same prompts headless on Claude and Codex, hook by hook"),
     ("smoke [--provider ..] [--branch @x] [--json]", "One live turn per provider: pass, fail or skip, and why"),
 ]
@@ -446,6 +446,8 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
+    if any(arg not in ("run", "--verbose", "-v") for arg in args):
+        return False
     verbose = "--verbose" in args or "-v" in args
 
     CONSOLE.print("[bold cyan]HOOKS Test Runner[/bold cyan]")

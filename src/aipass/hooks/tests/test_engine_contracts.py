@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_engine_contracts.py
 # Description: The hook engine's contracts and resilience: bad config, log writes, fixtures, CLI routing, paths
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-10-08
 # Modified: 2026-11-15
 # =============================================
@@ -14,6 +14,7 @@
 import importlib
 import json
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -94,6 +95,15 @@ class TestErrorResilience:
         monkeypatch.setenv("AIPASS_HOME", str(install))
         output, _code = dispatch("UserPromptSubmit", "{}", {"UserPromptSubmit": {}})
         assert "CONFIG UNREADABLE" not in output
+
+    def test_a_child_process_reads_the_sandboxed_registry_too(self):
+        """The owner's ruling: the suite tests AIPass, never the live machine; a spawned hook inherits the env."""
+        probe = "from aipass.hooks.apps.handlers.config import trust_registry as t; print(t.registry_path())"
+        child = subprocess.run(
+            [sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8", timeout=60, check=True
+        )
+        assert Path(child.stdout.strip()) == trust_registry.REGISTRY_PATH
+        assert Path(child.stdout.strip()) != Path.home() / ".aipass" / "trusted_projects.json"
 
     def test_a_registry_bootstrap_lands_in_the_sandbox(self, temp_test_dir, tmp_path, monkeypatch, mock_logger):
         """sentry's runtime probe, 2026-09-14: this class created ~/.aipass/trusted_projects.json.
@@ -215,10 +225,10 @@ class TestInitProvisioning:
         sub_dir = temp_test_dir / "deep" / "nested" / "path"
         sub_dir.mkdir(parents=True)
         reg_path = temp_test_dir / "registry.json"
-        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+        with patch.dict("os.environ", {"AIPASS_TRUST_REGISTRY": str(reg_path)}):
             enroll(str(temp_test_dir))
         with (
-            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
+            patch.dict("os.environ", {"AIPASS_TRUST_REGISTRY": str(reg_path)}),
             patch(
                 "aipass.hooks.apps.handlers.config.loader._search_bounds",
                 return_value=(sub_dir, temp_test_dir.parent),

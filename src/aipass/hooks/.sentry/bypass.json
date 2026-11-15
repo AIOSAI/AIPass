@@ -123,16 +123,6 @@
       "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
     },
     {
-      "file": "tests/test_registry_gate.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_registry_gate.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
       "file": "apps/handlers/lifecycle/auto_fix.py",
       "standard": "json_structure",
       "reason": "Diagnostics handler uses stdlib json for hook protocol responses and state file — no JSON file ops needing json_handler."
@@ -238,224 +228,14 @@
       "reason": "Cadence reads its per-session turn, fire and window state and hooks_json/custom_config/cadence_config.json with stdlib json: ephemeral session state and tunable knobs, not persistent branch data for json_handler."
     },
     {
-      "file": "apps/sound.py",
-      "standard": "cli_flags",
-      "reason": "Shared utility module imported by handlers — not a CLI entry point. Has print_introspection() for drone discovery but no handle_command() or user-facing CLI."
-    },
-    {
-      "file": "tests/conftest.py",
-      "standard": "architecture",
-      "reason": "Test fixtures live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_engine.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_engine.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_engine.py",
-      "standard": "help_text",
-      "reason": "Test data contains command references as part of test fixtures, not user-facing help."
-    },
-    {
-      "file": "tests/test_tool_sound.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_tool_sound.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_stop_sound.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_stop_sound.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_announce.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_announce.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_email.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_email.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_subagent_gate.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_subagent_gate.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_auto_fix.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_auto_fix.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
       "file": "tests/test_auto_fix.py",
       "standard": "commented_logger",
       "reason": "Test data contains '# logger.debug(msg)' as input to pattern checker under test — not a commented-out call."
     },
     {
-      "file": "tests/test_identity.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_identity.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_branch_loader.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_branch_loader.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_compact.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_compact.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_rollover.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_rollover.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_hookstatus.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_hooksound.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_hooksound.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_edit_gate.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_edit_gate.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
       "file": "tests/test_edit_gate.py",
       "standard": "encapsulation",
       "reason": "test_edit_gate.py imports handlers directly to test implementation details, and (:32) the ai_mail dispatch grant handler as dispatch_grant_handler, the grant edit_gate reads."
-    },
-    {
-      "file": "tests/test_edit_gate_trinity.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_edit_gate_trinity.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_git_gate.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_git_gate.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_rm_gate.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_rm_gate.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_sound.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_sound.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_auto_process.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_auto_process.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_cadence.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_cadence.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
     },
     {
       "file": "apps/modules/sandbox.py",
@@ -493,16 +273,6 @@
       "reason": "Demo run instructions reference python3 as the invocation command — this is a standalone script, not a drone-routed module."
     },
     {
-      "file": "tests/test_sandbox.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ per hooks convention — not a module or handler."
-    },
-    {
-      "file": "tests/test_sandbox.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names — docstrings redundant per hooks test convention."
-    },
-    {
       "file": "apps/modules/sandbox.py",
       "standard": "modules",
       "reason": "Read-only passport.json check in _is_devpulse() to detect branch role for policy generation — not a file-write operation, not a handler-level concern. Module reads sibling passports to determine writable/RO map."
@@ -511,16 +281,6 @@
       "file": "apps/handlers/security/presence_gate.py",
       "standard": "json_structure",
       "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
-    },
-    {
-      "file": "tests/test_presence_gate.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_presence_gate.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
     },
     {
       "file": "apps/modules/cc_sessions.py",
@@ -541,7 +301,7 @@
       "file": "tests/test_engine_contracts.py",
       "standard": "through_the_command",
       "lines": [
-        25
+        26
       ],
       "reason": "Moved from tests/test_engine.py (split leg, 2026-10-08); the ruling of that file's through_the_command row, fleet green leg 9. _run_hook, ruling (c): dispatch() runs a command hook as a shell subprocess (a spawn); contract: exit code, stdout, stderr and elapsed_ms answered, TIMEOUT and OSError answered as exit -1, never raised. _log, ruling (b): the JSONL diagnostics writer, one JSON object appended per line, a failed write never raises."
     },
@@ -554,51 +314,6 @@
       "file": "handlers/lifecycle/session_boot.py",
       "standard": "dead_code",
       "reason": "The boot wrapper's launcher is the owner's shell, outside the repo by design: typing claude in a branch directory runs python -m aipass.hooks.apps.handlers.lifecycle.session_boot. Not engine-dispatched, imported by nothing. Path is apps-relative: dead_code matches the rule against handlers/..., never apps/handlers/... (2026-10-08)."
-    },
-    {
-      "file": "tests/test_cc_sessions.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_cc_sessions.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_session_boot.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_session_boot.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_session_start.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_session_start.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_wire_verify.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/, not in the 3-layer apps structure."
-    },
-    {
-      "file": "tests/test_wire_verify.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names as documentation per pytest convention."
-    },
-    {
-      "file": "tests/test_wire_verify.py",
-      "standard": "help_text",
-      "reason": "Test fixture _BRIDGE_CMD contains 'python3' as part of a mock provider command string — not user-facing help text."
     },
     {
       "file": "apps/modules/context_window.py",
@@ -843,10 +558,10 @@
         441,
         446,
         533,
-        715,
-        800,
-        857,
-        941
+        717,
+        802,
+        859,
+        943
       ],
       "reason": "Fleet green leg 5: cadence decides which turn an injector fires on and guards no write. On doubt each answers its documented empty value ('never fired', not grounded, nothing pending), logged: the worst case is a grounding block early, late or twice, never a write let through."
     },
@@ -859,7 +574,7 @@
         188,
         286,
         349,
-        368
+        371
       ],
       "reason": "Fleet green leg 5: the context gauge's reading; None shows no gauge. Display only, guards no write. 148-151: an unreadable transcript (Claude's or a Codex rollout) reads as no usage. 188: an unreadable status-line window file reads as window unknown, logged at INFO. 286: an unreadable OpenCode store reads as no usage, logged at INFO. 349: an unreadable OpenCode catalog reads as no limit, so the window is unknown, logged at INFO. 368: an unreadable limit cache reads as empty, so the catalog is read, logged at INFO."
     },
@@ -925,8 +640,8 @@
       "lines": [
         117,
         186,
-        328,
-        862
+        330,
+        866
       ],
       "reason": "Fleet green leg 5: boot display (tmux name, age, pinned CLI version) and the dispatch-lock read for the boot banner. Guards no write."
     },
@@ -945,11 +660,6 @@
         56
       ],
       "reason": "Fleet green leg 5: an injector; an unreadable alerts.json shows no alert this turn (logged). Injectors are skipped on error by doctrine; guards no write."
-    },
-    {
-      "file": "tests/test_json_durability.py",
-      "standard": "silent_catch",
-      "reason": "Fleet green leg 5, file-wide because silent_catch passes no line (the checklist says so). The two catches are in a reader thread polling a file under concurrent os.replace. Neither is silent: each appends to local_failures, which the test asserts empty. A log call per poll would write thousands of lines from a hot loop."
     },
     {
       "file": "apps/modules/protected_paths.py",
@@ -1049,11 +759,11 @@
       "file": "tests/test_json_durability.py",
       "standard": "stdlib_patch",
       "lines": [
-        74,
-        88,
-        97
+        75,
+        89,
+        98
       ],
-      "reason": "files.os.replace is the move. 74 spies the real rename to prove the temp is staged in the target directory; 88 and 97 make it raise the test's own OSError to prove the original survives, the temp is cleaned and the error reaches the caller. No platform fails a rename on demand under tmp_path; monkeypatch undoes it at the test's end."
+      "reason": "files.os.replace is the move. 75 spies the real rename to prove the temp is staged in the target directory; 89 and 98 make it raise the test's own OSError to prove the original survives, the temp is cleaned and the error reaches the caller. No platform fails a rename on demand under tmp_path; monkeypatch undoes it at the test's end."
     },
     {
       "file": "tests/test_pre_compact_prep.py",
@@ -1165,6 +875,897 @@
       "file": "apps/handlers/bridges/seed.py",
       "standard": "architecture",
       "reason": "Bridge importing engine module is its architectural purpose."
+    },
+    {
+      "file": "apps/modules/admin_seat.py",
+      "standard": "fallback",
+      "lines": [
+        73,
+        83
+      ],
+      "reason": "Fail-closed admin check: an unimportable or raising verified-caller rail returns False, so every gate refuses the admin exemption; the refusal is the answer, and the WARNING line in the prax system log tells a dark rail from a plain no."
+    },
+    {
+      "file": "apps/handlers/lifecycle/auto_fix.py",
+      "standard": "fallback",
+      "lines": [
+        603
+      ],
+      "reason": "PostToolUse advisory, not a gate: the edit has already landed, so a crashed diagnostics pass has no decision to stand in for. It logs at ERROR, which @trigger's log watcher escalates, and the agent simply gets no diagnostics for that one edit."
+    },
+    {
+      "file": "apps/handlers/config/loader.py",
+      "standard": "fallback",
+      "lines": [
+        52
+      ],
+      "reason": "resolve() can fail only on a cwd that cannot be read; the path as spelled still names the same place, so nothing degraded stands in. INFO, not WARNING, because the answer is still right."
+    },
+    {
+      "file": "apps/handlers/config/loader.py",
+      "standard": "fallback",
+      "lines": [
+        166
+      ],
+      "reason": "Fails toward MORE enforcement: an unreadable AIPass config runs the built-in gate set from gates.builtin_config(), never no gates. It logs at ERROR, which @trigger's log watcher escalates."
+    },
+    {
+      "file": "apps/handlers/config/loader.py",
+      "standard": "fallback",
+      "lines": [
+        314
+      ],
+      "reason": "The guard file only stops a repeat of the one-per-session never-enrolled nudge; if it cannot be written the user sees the nudge again, which is itself the visible signal. No decision rests on it."
+    },
+    {
+      "file": "apps/handlers/security/edit_gate.py",
+      "standard": "fallback",
+      "lines": [
+        673
+      ],
+      "reason": "Advisory only: the section-count note never blocks, and the caps that do block are judged by _evaluate_limits under the fail-closed refusal. Raising here would turn a dark config door into a refused memory write. It logs at WARNING, which @trigger escalates."
+    },
+    {
+      "file": "apps/handlers/security/edit_gate.py",
+      "standard": "fallback",
+      "lines": [
+        774
+      ],
+      "reason": "The gate writes nothing: a memory file already unparseable on disk, met by an edit that parses, is the agent's repair, judged as a new file. Refusing it would lock a broken memory file forever. WARNING names the file, and @trigger escalates it."
+    },
+    {
+      "file": "apps/handlers/security/edit_gate.py",
+      "standard": "fallback",
+      "lines": [
+        873
+      ],
+      "reason": "The hook's own per-session /tmp snapshot of in-flight Bash calls; a corrupt copy holds only stale stats, and starting fresh costs at most one unwatched call. Raising would darken the tripwire for the whole session. Logged at WARNING, which @trigger escalates."
+    },
+    {
+      "file": "apps/handlers/security/subagent_gate.py",
+      "standard": "fallback",
+      "lines": [
+        71
+      ],
+      "reason": "A cwd outside src/<package>/<branch> is out of this gate's scope, not a failure: there is no branch whose files it could scope, so it checks none, as for a session with no repo. Nothing stands in for an answer."
+    },
+    {
+      "file": "apps/handlers/security/subagent_gate.py",
+      "standard": "fallback",
+      "lines": [
+        192
+      ],
+      "reason": "A timed-out checklist is handed on, not passed: the file goes on the unchecked list, which is logged at WARNING (escalated by @trigger) and named in the block text. The gate fails OPEN by decision (gates.FAIL_OPEN): a stop it cannot finish must not trap the sub-agent."
+    },
+    {
+      "file": "apps/handlers/security/testwrite_gate.py",
+      "standard": "fallback",
+      "lines": [
+        292
+      ],
+      "reason": "Spelling only: with no project root the line names the test file by its absolute path instead of a project-relative one. The pointer still lands on the same file and no decision rests on it."
+    },
+    {
+      "file": "apps/handlers/security/presence_gate.py",
+      "standard": "fallback",
+      "lines": [
+        76
+      ],
+      "reason": "Display only: an unreadable start leaves the age out of the refusal text (\"\" or None both drop the \"old\" part). No decision rests on the age; ranking uses _session_start."
+    },
+    {
+      "file": "apps/handlers/security/presence_gate.py",
+      "standard": "fallback",
+      "lines": [
+        95
+      ],
+      "reason": "None is handed on as \"cannot rank\", never as \"younger\": _we_are_the_incumbent then answers False, so an unreadable start keeps the refusal of the newer seat. The refusal is the answer."
+    },
+    {
+      "file": "apps/handlers/security/presence_gate.py",
+      "standard": "fallback",
+      "lines": [
+        196
+      ],
+      "reason": "OPEN by the owner's decision, recorded in gates.FAIL_OPEN: a broken presence gate would refuse every prompt in every seat, the owner's included. It logs at WARNING, which @trigger escalates."
+    },
+    {
+      "file": "apps/handlers/security/git_gate.py",
+      "standard": "fallback",
+      "lines": [
+        209
+      ],
+      "reason": "Fails closed: an unimportable admin_seat leaves the answer (None, False), so the caller is unnamed and never the admin seat, and every git refusal stands. The refusal is the answer; WARNING names the dark admin lane."
+    },
+    {
+      "file": "apps/handlers/security/rm_gate.py",
+      "standard": "fallback",
+      "lines": [
+        100
+      ],
+      "reason": "Fails closed: an unimportable admin_seat returns (None, False), so no seat is exempted and every delete refusal stands. The refusal is the answer; WARNING names the dark admin lane."
+    },
+    {
+      "file": "apps/modules/diagnostics_state.py",
+      "standard": "fallback",
+      "lines": [
+        84
+      ],
+      "reason": "None is handed on as \"unreadable\", not read as no errors here; edit_gate's red-file fence then refuses nothing. Refusing instead would hold every .py edit of the seat with no edit able to clear it. WARNING, which @trigger escalates, names the corrupt seat file."
+    },
+    {
+      "file": "apps/modules/diagnostics_state.py",
+      "standard": "fallback",
+      "lines": [
+        162
+      ],
+      "reason": "Fails toward the block: an errored file that cannot be read keeps every recorded error as found, so no error is dropped as a placeholder line. INFO, not WARNING: a just-deleted file is the usual cause, and the block it keeps is itself the signal."
+    },
+    {
+      "file": "apps/modules/diagnostics_state.py",
+      "standard": "fallback",
+      "lines": [
+        202,
+        205,
+        208,
+        211
+      ],
+      "reason": "None means \"unknown\", never clean: edit_gate keeps the recorded errors and the block stands when pyright is missing, times out or answers garbage. Each case logs at WARNING, which @trigger escalates."
+    },
+    {
+      "file": "apps/hooks.py",
+      "standard": "fallback",
+      "lines": [
+        49
+      ],
+      "reason": "One broken module costs its own verbs, never the whole drone @hooks menu: the loop skips it and the next module loads. It logs at ERROR, which @trigger escalates, and the missing verbs answer as unknown commands."
+    },
+    {
+      "file": "apps/modules/injection_ledger.py",
+      "standard": "fallback",
+      "lines": [
+        38,
+        50
+      ],
+      "reason": "A ledger line without the turn number or automated flag is still a record; raising would lose the whole line. The field reads as null in the ledger and the WARNING, which @trigger escalates, names the broken cadence import."
+    },
+    {
+      "file": "apps/handlers/lifecycle/pre_compact_prep.py",
+      "standard": "fallback",
+      "lines": [
+        129
+      ],
+      "reason": "Read-only: a corrupt inbox.json is never written here, it only drops the unread count from the compaction snapshot. Raising would lose the whole snapshot. WARNING, which @trigger escalates, names the read failure; @ai_mail owns the file."
+    },
+    {
+      "file": "apps/handlers/lifecycle/pre_compact_prep.py",
+      "standard": "fallback",
+      "lines": [
+        152
+      ],
+      "reason": "The snapshot is still stamped, truncated at the default cap instead of the branch's own; raising here would lose the whole snapshot at compaction. WARNING, which @trigger escalates, names the dark @memory door."
+    },
+    {
+      "file": "apps/handlers/lifecycle/pre_compact_prep.py",
+      "standard": "fallback",
+      "lines": [
+        276
+      ],
+      "reason": "PreCompact injector, not a gate: an unexpected error skips the snapshot and compaction proceeds. It logs at ERROR, which @trigger escalates, the same record the engine would write had it raised."
+    },
+    {
+      "file": "apps/handlers/lifecycle/auto_process.py",
+      "standard": "fallback",
+      "lines": [
+        79
+      ],
+      "reason": "UserPromptSubmit and PreCompact kicker, not a gate: a failed kick of @memory's auto-process returns exit 1, which the engine records in engine.jsonl, and logs at ERROR, which @trigger escalates. The guard is left unset, so the next prompt retries."
+    },
+    {
+      "file": "apps/handlers/lifecycle/compact.py",
+      "standard": "fallback",
+      "lines": [
+        43
+      ],
+      "reason": "Read-only: a corrupt local.json is never written here, it only drops the Last Session block from the post-compact injection. WARNING, which @trigger escalates, names the read failure."
+    },
+    {
+      "file": "apps/handlers/lifecycle/compact.py",
+      "standard": "fallback",
+      "lines": [
+        79
+      ],
+      "reason": "The injection still runs when cadence cannot reset its counter; the cost is a regrounding cadence measured from before the compaction. Raising would lose the recovery block. WARNING, which @trigger escalates, names the failure."
+    },
+    {
+      "file": "apps/handlers/lifecycle/compact.py",
+      "standard": "fallback",
+      "lines": [
+        84
+      ],
+      "reason": "The injection still runs when the grounding receipt cannot be set pending; the cost is one compaction the receipt verb does not track. It logs at ERROR, which @trigger escalates."
+    },
+    {
+      "file": "apps/handlers/lifecycle/compact.py",
+      "standard": "fallback",
+      "lines": [
+        128
+      ],
+      "reason": "Injector, not a gate: an unexpected error skips the post-compact block and the session goes on. It logs at ERROR, which @trigger escalates, the same record the engine would write had it raised."
+    },
+    {
+      "file": "apps/handlers/lifecycle/post_compact_regrounding.py",
+      "standard": "fallback",
+      "lines": [
+        82
+      ],
+      "reason": "The re-ground still ships without its release-notice head; raising would lose the whole grounding for the sake of one notice. WARNING, which @trigger escalates, names the failure."
+    },
+    {
+      "file": "apps/handlers/lifecycle/post_compact_regrounding.py",
+      "standard": "fallback",
+      "lines": [
+        224
+      ],
+      "reason": "Injector, not a gate: an unexpected error skips this part of the re-ground and the tool call goes on. It logs at ERROR, which @trigger escalates, the same record the engine would write had it raised."
+    },
+    {
+      "file": "apps/handlers/lifecycle/session_start.py",
+      "standard": "fallback",
+      "lines": [
+        39
+      ],
+      "reason": "SessionStart bookkeeping, not a gate: a failed cadence reset costs a cadence counted from the last session, never the session itself. It logs at ERROR, which @trigger escalates."
+    },
+    {
+      "file": "apps/handlers/lifecycle/session_start.py",
+      "standard": "fallback",
+      "lines": [
+        99
+      ],
+      "reason": "A missed resume pointer costs one resume landing on the older session, never the session itself. It logs at ERROR, which @trigger escalates, naming the branch."
+    },
+    {
+      "file": "apps/handlers/prompt/branch_loader.py",
+      "standard": "fallback",
+      "lines": [
+        32
+      ],
+      "reason": "Injector, withheld by design (DPLAN-0347): a cadence that cannot answer withholds this loader, and tier0_kernel's banner tells the agent on every turn that navmap, branch and identity are WITHHELD and why. The WARNING here is escalated by @trigger."
+    },
+    {
+      "file": "apps/handlers/prompt/branch_loader.py",
+      "standard": "fallback",
+      "lines": [
+        48
+      ],
+      "reason": "Injector, not a gate: a grounding block that fails to load is skipped for this prompt and the prompt goes on. It logs at ERROR, which @trigger escalates, the same record the engine would write had it raised."
+    },
+    {
+      "file": "apps/handlers/prompt/navmap.py",
+      "standard": "fallback",
+      "lines": [
+        38
+      ],
+      "reason": "Injector, withheld by design (DPLAN-0347): a cadence that cannot answer withholds this loader, and tier0_kernel's banner tells the agent on every turn that navmap, branch and identity are WITHHELD and why. The WARNING here is escalated by @trigger."
+    },
+    {
+      "file": "apps/handlers/prompt/navmap.py",
+      "standard": "fallback",
+      "lines": [
+        54
+      ],
+      "reason": "Injector, not a gate: a grounding block that fails to load is skipped for this prompt and the prompt goes on. It logs at ERROR, which @trigger escalates, the same record the engine would write had it raised."
+    },
+    {
+      "file": "apps/handlers/prompt/identity.py",
+      "standard": "fallback",
+      "lines": [
+        32
+      ],
+      "reason": "Injector, withheld by design (DPLAN-0347): a cadence that cannot answer withholds this loader, and tier0_kernel's banner tells the agent on every turn that navmap, branch and identity are WITHHELD and why. The WARNING here is escalated by @trigger."
+    },
+    {
+      "file": "apps/handlers/prompt/identity.py",
+      "standard": "fallback",
+      "lines": [
+        47
+      ],
+      "reason": "Injector, not a gate: a grounding block that fails to load is skipped for this prompt and the prompt goes on. It logs at ERROR, which @trigger escalates, the same record the engine would write had it raised."
+    },
+    {
+      "file": "apps/handlers/prompt/tier0_kernel.py",
+      "standard": "fallback",
+      "lines": [
+        53
+      ],
+      "reason": "Only the log level of the DEGRADED line depends on the turn; an unreadable turn reads as None, which raises that line to WARNING. The kernel still goes out, so nothing the agent receives stands in for an answer."
+    },
+    {
+      "file": "apps/handlers/prompt/tier0_kernel.py",
+      "standard": "fallback",
+      "lines": [
+        69
+      ],
+      "reason": "The failure is handed on as text: cadence_down carries the exception into the kernel's banner, which tells the agent on every turn that the other loaders are WITHHELD and why. WARNING here, escalated by @trigger; the kernel fires alone by design (DPLAN-0347)."
+    },
+    {
+      "file": "apps/handlers/prompt/context_gauge.py",
+      "standard": "fallback",
+      "lines": [
+        35
+      ],
+      "reason": "A dark window stamp costs only the per-window guard: the gauge guards per session instead, so after a compaction a nudge may stay quiet until the next session. The fill is still read and said. WARNING, which @trigger escalates, names the failure."
+    },
+    {
+      "file": "apps/handlers/prompt/context_gauge.py",
+      "standard": "fallback",
+      "lines": [
+        57
+      ],
+      "reason": "The guard file only stops the same context nudge repeating; if it cannot be written the agent sees the nudge again, which is itself the visible signal. No decision rests on it."
+    },
+    {
+      "file": "apps/handlers/prompt/context_gauge.py",
+      "standard": "fallback",
+      "lines": [
+        91
+      ],
+      "reason": "The context nudge still goes out without the receipt's line; the cost is one turn the grounding receipt does not record. It logs at ERROR, which @trigger escalates."
+    },
+    {
+      "file": "apps/handlers/prompt/persistent_alert.py",
+      "standard": "fallback",
+      "lines": [
+        54
+      ],
+      "reason": "Read-only: alerts.json is @trigger's, written under its lock, and is never written here. An unreadable file shows no banner this prompt; WARNING, which @trigger escalates, names the read error, and drone @hooks dismiss prints it in red."
+    },
+    {
+      "file": "apps/handlers/prompt/persistent_alert.py",
+      "standard": "fallback",
+      "lines": [
+        68
+      ],
+      "reason": "Fails toward showing: an alert whose expires_at cannot be read is kept active, so the banner is never hidden by a bad date; the agent can dismiss it by id."
+    },
+    {
+      "file": "apps/handlers/prompt/persistent_alert.py",
+      "standard": "fallback",
+      "lines": [
+        90
+      ],
+      "reason": "The guard file only stops a banner being announced twice; if it cannot be written the agent sees the banner again, which is itself the visible signal. No decision rests on it."
+    },
+    {
+      "file": "apps/handlers/prompt/persistent_alert.py",
+      "standard": "fallback",
+      "lines": [
+        102
+      ],
+      "reason": "Fails toward showing: a cadence that cannot answer lets the banner repeat every turn instead of hiding it. The WARNING says FAIL-OPEN and is escalated by @trigger."
+    },
+    {
+      "file": "apps/handlers/prompt/feedback_pulse.py",
+      "standard": "fallback",
+      "lines": [
+        50
+      ],
+      "reason": "A corrupt counter is never overwritten here (the parse fails before the write); it reads as turn 0, so the feedback line stays quiet for the session. Only a nag line is lost. WARNING, which @trigger escalates, names the failure."
+    },
+    {
+      "file": "apps/handlers/notification/email.py",
+      "standard": "fallback",
+      "lines": [
+        88
+      ],
+      "reason": "Fails toward showing: a cadence that cannot answer announces any new mail instead of hiding it, so the agent still hears of it. WARNING, which @trigger escalates, names the broken cadence."
+    },
+    {
+      "file": "apps/handlers/lifecycle/release_notice.py",
+      "standard": "fallback",
+      "lines": [
+        37
+      ],
+      "reason": "Injector, not a gate: a notice that fails to build is skipped for this session start and the session goes on. It logs at ERROR, which @trigger escalates, the same record the engine would write had it raised."
+    },
+    {
+      "file": "apps/handlers/lifecycle/rollover.py",
+      "standard": "fallback",
+      "lines": [
+        98
+      ],
+      "reason": "The stamp only spares a repeat check: if it cannot be written, the next compaction runs the rollover check again, which is the safe side. No decision is skipped on its account."
+    },
+    {
+      "file": "apps/handlers/lifecycle/comment_budget.py",
+      "standard": "fallback",
+      "lines": [
+        54
+      ],
+      "reason": "Append-only ledger, read and never rewritten from these rows: a torn line (two appends racing) costs that one row from the comment counts and the file is left as found. Raising would darken the whole comment budget for every later edit."
+    },
+    {
+      "file": "apps/handlers/lifecycle/session_boot.py",
+      "standard": "fallback",
+      "lines": [
+        115,
+        127,
+        146
+      ],
+      "reason": "Boot-menu tmux lookups: no tmux, a garbled pane line or a failed ppid read only means the session's tmux host is not found, and _stop_session falls to SIGTERM by PID and says which it did on stderr. Nothing is skipped."
+    },
+    {
+      "file": "apps/handlers/lifecycle/session_boot.py",
+      "standard": "fallback",
+      "lines": [
+        184,
+        597,
+        897
+      ],
+      "reason": "Display only: an unreadable start time, transcript mtime or lock timestamp drops the age from a boot-menu line. No choice or decision rests on the age."
+    },
+    {
+      "file": "apps/handlers/lifecycle/session_boot.py",
+      "standard": "fallback",
+      "lines": [
+        244
+      ],
+      "reason": "The failure is handed on as text: a PID already gone returns \"PID n: already dead\", which the boot menu prints to the user. That is the answer, not a stand-in."
+    },
+    {
+      "file": "apps/handlers/lifecycle/session_boot.py",
+      "standard": "fallback",
+      "lines": [
+        755
+      ],
+      "reason": "An unknown menu choice falls straight to the shown \"Pick a number, Enter, 'n', or 'c'. Exiting.\" line and exit 1, so the user sees it. Nothing stands in for the choice."
+    },
+    {
+      "file": "apps/handlers/config/ledger_store.py",
+      "standard": "fallback",
+      "lines": [
+        69
+      ],
+      "reason": "Not a file read: a hook's stdout that opens with a brace but does not parse is judged as plain text, which is what Claude Code itself does with it, so the ledger records what really reached the model. No default stands in."
+    },
+    {
+      "file": "apps/handlers/config/ledger_store.py",
+      "standard": "fallback",
+      "lines": [
+        125
+      ],
+      "reason": "A write, not a read: a record that cannot be appended returns None and logs at WARNING \"record NOT written (a gap in the ledger)\", which @trigger escalates. Raising would break the dispatch the ledger only observes."
+    },
+    {
+      "file": "apps/handlers/config/ledger_store.py",
+      "standard": "fallback",
+      "lines": [
+        140
+      ],
+      "reason": "Append-only per-session ledger, read for the drone @hooks ledger view and never rewritten from these rows: a torn line costs that one row and the file is left as found."
+    },
+    {
+      "file": "apps/handlers/config/output_merge.py",
+      "standard": "fallback",
+      "lines": [
+        45
+      ],
+      "reason": "Not a file read: a hook's stdout that opens with a brace but does not parse is plain text, exactly as Claude Code reads it, so the merge carries it as text. No default stands in for an answer."
+    },
+    {
+      "file": "apps/handlers/bridges/opencode.py",
+      "standard": "fallback",
+      "lines": [
+        88
+      ],
+      "reason": "Not a file read: None means \"plain text\", a legitimate engine answer the bridge carries as context. A deny never rests on the parse: exit 2 on a guarded event denies whatever the text, and the engine's stdin is parsed again by the engine itself."
+    },
+    {
+      "file": "apps/handlers/bridges/codex.py",
+      "standard": "fallback",
+      "lines": [
+        88
+      ],
+      "reason": "Not a file read: None means \"plain text\", a legitimate engine answer the bridge carries as context. A deny never rests on the parse: exit 2 on a guarded event denies whatever the text, and the engine's stdin is parsed again by the engine itself."
+    },
+    {
+      "file": "apps/handlers/bridges/seed.py",
+      "standard": "fallback",
+      "lines": [
+        50
+      ],
+      "reason": "Not a file read: None means \"plain text\", a legitimate engine answer the bridge carries as context. A deny never rests on the parse: exit 2 on a guarded event denies whatever the text, and the engine's stdin is parsed again by the engine itself."
+    },
+    {
+      "file": "apps/handlers/parity/smoke.py",
+      "standard": "fallback",
+      "lines": [
+        74,
+        92
+      ],
+      "reason": "A torn line in the provider's own transcript or rollout is skipped and the search goes on; an ack lost in it reads as not found, so the smoke turn FAILS rather than passes. The provider's file is only read, never written."
+    },
+    {
+      "file": "apps/handlers/parity/smoke.py",
+      "standard": "fallback",
+      "lines": [
+        139
+      ],
+      "reason": "A restore, not a read: one branch file that cannot be put back is logged at ERROR (escalated by @trigger) with its path, and the loop still restores the rest. Raising would leave every later file unrestored."
+    },
+    {
+      "file": "apps/handlers/parity/runner.py",
+      "standard": "fallback",
+      "lines": [
+        170,
+        235
+      ],
+      "reason": "A provider's stdout stream mixes JSON events with plain lines; a non-JSON line is skipped and the scan goes on. Nothing is defaulted: a session id or limit error never found reads as none, which the parity run reports as no data."
+    },
+    {
+      "file": "apps/handlers/parity/runner.py",
+      "standard": "fallback",
+      "lines": [
+        191,
+        197
+      ],
+      "reason": "engine.jsonl and its rotated .1 are append-only and only read here: a generation that is absent or unreadable, or a torn line, costs those rows, and a session left with no rows is reported as NO_DATA, never as SAME."
+    },
+    {
+      "file": "apps/handlers/parity/runner.py",
+      "standard": "fallback",
+      "lines": [
+        247
+      ],
+      "reason": "An absent session pointer is a defined state (0.0 = never written); the run compares the stamp before and after, so a pointer that appears reads as moved. No failure is hidden by it."
+    },
+    {
+      "file": "apps/sound.py",
+      "standard": "fallback",
+      "lines": [
+        90,
+        92,
+        114
+      ],
+      "reason": "Sound is cosmetic: a voice or chime that cannot play (piper timed out, no player) costs only that sound, and the hook's real output is already delivered. The event's engine.jsonl row still records the hook; a raise would only fail the hook for a missing beep."
+    },
+    {
+      "file": "apps/modules/protected_paths.py",
+      "standard": "fallback",
+      "lines": [
+        62
+      ],
+      "reason": "resolve() fails only on a symlink loop or an unreadable cwd; the path as spelled still names the file, and the name lane judges that spelling. A protected name is refused either way, so nothing opens on it."
+    },
+    {
+      "file": "apps/modules/protected_paths.py",
+      "standard": "fallback",
+      "lines": [
+        136
+      ],
+      "reason": "Absence, not failure: a target with no file yet has exactly one name, the one being written, so it cannot be a second name for a protected file. The name lane has already judged it."
+    },
+    {
+      "file": "apps/modules/protected_paths.py",
+      "standard": "fallback",
+      "lines": [
+        144
+      ],
+      "reason": "An anchor removed between the listing and its stat has no inode left to share, so it cannot be the target's other name; the loop checks the remaining anchors. Nothing is defaulted."
+    },
+    {
+      "file": "apps/modules/release_notice.py",
+      "standard": "fallback",
+      "lines": [
+        43,
+        50,
+        60
+      ],
+      "reason": "A cwd that cannot be resolved or scanned (deleted under the session, or unreadable) has no project or passport to read, so the seat reads as no manager and the notice is not built. Only an advisory notice is lost; no gate rests on it."
+    },
+    {
+      "file": "apps/modules/release_notice.py",
+      "standard": "fallback",
+      "lines": [
+        141
+      ],
+      "reason": "Read-only: a corrupt scaffold manifest is never written here; it only means no release notice is built. WARNING, which @trigger escalates, names the file; aipass init and aipass doctor own it."
+    },
+    {
+      "file": "apps/modules/write_ownership.py",
+      "standard": "fallback",
+      "lines": [
+        96
+      ],
+      "reason": "HELD from a raise: an unreadable registry still marks the project boundary and branches are still told by the src/<pkg>/<branch> shape, but project-level files lose their fence. Raising would refuse every write in the project, the repair included. WARNING on each gated call, escalated by @trigger."
+    },
+    {
+      "file": "apps/modules/write_ownership.py",
+      "standard": "fallback",
+      "lines": [
+        176
+      ],
+      "reason": "A host that publishes no PATH_MAX answers 0 and the length check falls to the real probe of the path, which still refuses an over-long one. Nothing is passed unjudged."
+    },
+    {
+      "file": "apps/modules/comment_scan.py",
+      "standard": "fallback",
+      "lines": [
+        123
+      ],
+      "reason": "An edit's fragment is often not tokenizable on its own; the scan then counts the # lines directly, a second real measure, not a stand-in for an answer. Only docstring lines go uncounted, and only advisory comment budgets read the count."
+    },
+    {
+      "file": "apps/modules/testgate_policy.py",
+      "standard": "fallback",
+      "lines": [
+        62,
+        71
+      ],
+      "reason": "Fails closed: None reads as no policy found, and load_policy turns that into the refusing Policy (_missing), so testwrite_gate refuses new test files. The refusal is the answer; its text names the search start."
+    },
+    {
+      "file": "apps/modules/engine_closure.py",
+      "standard": "fallback",
+      "lines": [
+        58
+      ],
+      "reason": "An unreadable hooks.json narrows the crash pre-check to the engine's own root modules; it never widens what an edit may do. Raising would refuse every .py edit in the fleet. WARNING, escalated by @trigger, names the file, and the engine itself answers a broken config with its loud banner."
+    },
+    {
+      "file": "apps/modules/engine_closure.py",
+      "standard": "fallback",
+      "lines": [
+        100
+      ],
+      "reason": "A closure file that cannot be parsed has its own imports left unfollowed; the file itself is still in the closure and still pre-checked by ruff when edited. WARNING, escalated by @trigger, names it."
+    },
+    {
+      "file": "apps/modules/engine_closure.py",
+      "standard": "fallback",
+      "lines": [
+        166
+      ],
+      "reason": "Defence in depth by design: sessions run the promoted .live copy, never the edited source, and drone @hooks promote's smoke run refuses a candidate that crashes. A ruff that cannot answer lets the edit land with a WARNING, escalated by @trigger, naming the file."
+    },
+    {
+      "file": "apps/modules/promote.py",
+      "standard": "fallback",
+      "lines": [
+        168
+      ],
+      "reason": "Fails closed: an answer that does not parse counts as \"not refused\", so check_smoke returns False with the exit code and output, and the promote stops. The failure is the answer."
+    },
+    {
+      "file": "apps/modules/shell_reader.py",
+      "standard": "fallback",
+      "lines": [
+        792
+      ],
+      "reason": "The reader mirrors the shell: a PATH entry the gate cannot list is one the shell's own glob cannot list either, so it offers no candidate to either. The loop reads the remaining entries, and the watched verbs are matched by name regardless."
+    },
+    {
+      "file": "apps/modules/bash_writes.py",
+      "standard": "fallback",
+      "lines": [
+        293
+      ],
+      "reason": "A second real reading, not an empty one: an unbalanced quote (which bash itself refuses to run) is split on whitespace so its write targets are still read and judged; returning no tokens would read as no writes."
+    },
+    {
+      "file": "apps/modules/cc_transcripts.py",
+      "standard": "fallback",
+      "lines": [
+        91,
+        125,
+        147,
+        158,
+        186
+      ],
+      "reason": "Read-only listing of Claude Code's own transcripts for the boot menu: a torn line (a transcript mid-write) or a transcript that vanished or cannot be read drops that chat from the menu, and --continue still reaches it. The files are never written here."
+    },
+    {
+      "file": "apps/modules/cc_sessions.py",
+      "standard": "fallback",
+      "lines": [
+        66,
+        83,
+        148,
+        179
+      ],
+      "reason": "Process probes of /proc and ps for a PID that can exit at any moment: None is handed on as \"cannot be told\" (the ancestor walk stops, the start check falls to liveness alone), and a PID that refuses a signal reads as alive, the side that keeps a seat. Nothing is written on these answers."
+    },
+    {
+      "file": "apps/modules/cc_sessions.py",
+      "standard": "fallback",
+      "lines": [
+        232
+      ],
+      "reason": "Read-only: Claude Code owns and rewrites its session PID files, never this module. One caught mid-write is skipped for this read; the sessions verb and the presence gate (fail-OPEN by the owner's decision) read it again on the next call."
+    },
+    {
+      "file": "apps/modules/cc_sessions.py",
+      "standard": "fallback",
+      "lines": [
+        280
+      ],
+      "reason": "None is handed on as \"cannot be told\", documented in the signature: callers rank no one on it (presence_gate refuses the newer seat rather than guess) and the boot menu shows no age."
+    },
+    {
+      "file": "apps/modules/engine.py",
+      "standard": "fallback",
+      "lines": [
+        208
+      ],
+      "reason": "HELD from a raise: the per-session /tmp budget counts are read in dispatch, so a raise would crash every event, gates included. A corrupt copy is reset and later overwritten; the cost is budgeted injectors firing again. WARNING, escalated by @trigger, names it."
+    },
+    {
+      "file": "apps/modules/engine.py",
+      "standard": "fallback",
+      "lines": [
+        273
+      ],
+      "reason": "Fails closed: a fail-closed gate's exit 2 whose stdout does not parse reads as \"exited 2 without a decision\", which _refuse_broken_gate turns into a BLOCK logged at ERROR with a gate_broken row in engine.jsonl."
+    },
+    {
+      "file": "apps/modules/engine.py",
+      "standard": "fallback",
+      "lines": [
+        470,
+        506
+      ],
+      "reason": "Sound is cosmetic: a timeout voice or hook chime that cannot play costs only the sound. The event itself is already recorded in engine.jsonl (the timeout row, or the hook's own row), and its output is delivered."
+    },
+    {
+      "file": "apps/modules/engine.py",
+      "standard": "fallback",
+      "lines": [
+        515
+      ],
+      "reason": "Not a default: a hook's exit 2 whose stdout does not parse is treated as a crash, never a block or an allow, and is logged at ERROR \"CRASHED exit=2\" with a crashed row in engine.jsonl. Fail-closed gates were already refused upstream."
+    },
+    {
+      "file": "apps/modules/context_window.py",
+      "standard": "fallback",
+      "lines": [
+        114
+      ],
+      "reason": "A provider transcript still being written ends mid-line as a matter of course: the torn line is skipped and the scan reads the next newest. The transcript is the provider's, only read here."
+    },
+    {
+      "file": "apps/modules/context_window.py",
+      "standard": "fallback",
+      "lines": [
+        146
+      ],
+      "reason": "Absence, not failure: on turn 0 the provider has not written the transcript yet, so there is no usage to read and the gauge stays quiet. Any other read error is logged at WARNING by the handler below it."
+    },
+    {
+      "file": "apps/modules/context_window.py",
+      "standard": "fallback",
+      "lines": [
+        186,
+        226,
+        284,
+        347,
+        387,
+        398,
+        410,
+        427
+      ],
+      "reason": "Read-only inputs of the advisory context gauge (status-line window file, provider settings, OpenCode store and config, Codex config and rollout), each owned by its provider and never written here: an unreadable one costs a reading, and the window falls to the next source or the gauge stays quiet."
+    },
+    {
+      "file": "apps/modules/context_window.py",
+      "standard": "fallback",
+      "lines": [
+        369
+      ],
+      "reason": "A rebuildable cache of catalog limits: an unreadable one is left as found (None stops the write-back) and the limit is read from the OpenCode catalog itself, so the answer is still right. WARNING, escalated by @trigger, names it."
+    },
+    {
+      "file": "apps/modules/cadence.py",
+      "standard": "fallback",
+      "lines": [
+        132
+      ],
+      "reason": "Absence, not failure: on turn 0 the provider has not written the transcript yet, so the turn token is -1, the value no real size takes. Any other stat failure is logged at WARNING by the handler below it."
+    },
+    {
+      "file": "apps/modules/cadence.py",
+      "standard": "fallback",
+      "lines": [
+        439,
+        444,
+        572
+      ],
+      "reason": "Fails toward showing: unreadable mail or advisory throttle state reads as never fired, so the banner or advisory fires rather than hides. The file holds one turn number, wholly rewritten by the next fire, so nothing else is lost. WARNING, escalated by @trigger."
+    },
+    {
+      "file": "apps/modules/cadence.py",
+      "standard": "fallback",
+      "lines": [
+        531
+      ],
+      "reason": "None is handed on as \"cannot be read\", documented in the signature: tier0_kernel raises its DEGRADED line to WARNING on it and the advisory throttle falls to elapsed seconds. Nothing reads None as a turn."
+    },
+    {
+      "file": "apps/modules/cadence.py",
+      "standard": "fallback",
+      "lines": [
+        627
+      ],
+      "reason": "reset_counter rewrites the counter whole by purpose (a compaction or new session): unreadable old state only costs the prior turn in its log line and the debounce of a second reset on one boundary. The reset itself is the repair of a corrupt counter."
+    },
+    {
+      "file": "apps/modules/cadence.py",
+      "standard": "fallback",
+      "lines": [
+        675
+      ],
+      "reason": "A reset that cannot open or write the counter file leaves the counter as it was, and the post-compact re-ground is not armed. Raising would fail the compaction hook; WARNING, escalated by @trigger, names the caller and session."
+    },
+    {
+      "file": "apps/modules/cadence.py",
+      "standard": "fallback",
+      "lines": [
+        715
+      ],
+      "reason": "None reads as \"never stamped\": consumers then keep their counts for the current window instead of opening a new one. The stamp is rewritten whole at the next reset. WARNING, escalated by @trigger, names it."
+    },
+    {
+      "file": "apps/modules/cadence.py",
+      "standard": "fallback",
+      "lines": [
+        902,
+        939
+      ],
+      "reason": "A corrupt counter is never overwritten here: the parse fails before the truncate, so the queue is left as found and only the queued re-ground parts are skipped. WARNING on each, escalated by @trigger, names the session."
+    },
+    {
+      "file": "apps/modules/engine.py",
+      "standard": "silent_catch",
+      "lines": [
+        319
+      ],
+      "reason": "The decode error is handed on as the value; the next lines refuse a PreToolUse payload at ERROR with an engine.jsonl row, and log any other event's at WARNING."
+    },
+    {
+      "file": "apps/modules/cadence.py",
+      "standard": "silent_catch",
+      "lines": [
+        105
+      ],
+      "reason": "The read error is handed on as the value; the next lines log it at ERROR and keep the built-in cadence (a raise would refuse every memory write through edit_gate)."
+    },
+    {
+      "file": "apps/handlers/config/loader.py",
+      "standard": "logged_fallback",
+      "lines": [
+        193
+      ],
+      "reason": "None here is the documented answer to find_project_config: serve the AIPass gate set, never no hooks. An unreadable trust registry fails toward MORE enforcement. It logs at ERROR naming the project and the cure, which @trigger escalates."
     }
   ],
   "notes": {

@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: wire_verify.py
-# Version: 1.9.0
+# Version: 1.9.2
 # Description: Wire verification — cross-checks provider settings vs project hook config
 # Branch: hooks
 # Layer: apps/modules
@@ -61,14 +61,15 @@ SEED_ONLY_EVENTS = frozenset({"PostCompact"})
 SEED_TIMEOUT = 120
 
 
-def _read_provider_hooks(path=None):
-    """Read hook events from provider settings. Returns {event: [entries]}."""
+def _read_provider_hooks(errors, path=None):
+    """Read hook events from provider settings. Returns {event: [entries]}; an unreadable file is an ERROR."""
     settings_path = Path(path) if path else Path.home() / ".claude" / "settings.json"
     try:
         data = json_files.read_json_file(settings_path)
         return data.get("hooks", {})
     except (OSError, json.JSONDecodeError) as exc:
         logger.info("[WIRE_VERIFY] cannot read provider settings: %s", exc)
+        errors.append(f"Cannot read {settings_path}: {exc}")
         return {}
 
 
@@ -130,7 +131,7 @@ def _codex_wired(codex_path, errors) -> frozenset[str]:
             "Fix: aipass doctor --fix, then run codex once and choose 'Trust all and continue'"
         )
         return frozenset()
-    codex_hooks = _read_provider_hooks(codex_path)
+    codex_hooks = _read_provider_hooks(errors, codex_path)
     _check_guarded_tools(codex_hooks, errors, _CODEX_MARKER, _CODEX_GUARDED_TOOLS, " (Codex)")
     wired: set[str] = set()
     for entries in codex_hooks.values():
@@ -161,6 +162,7 @@ def _opencode_wired(plugin, manifest, errors) -> frozenset[str]:
         data = json_files.read_json_file(Path(manifest)) if manifest is not None else {}
     except (OSError, json.JSONDecodeError) as exc:
         logger.info("[WIRE_VERIFY] cannot read the provider manifest: %s", exc)
+        errors.append(f"Cannot read the provider manifest {manifest}: {exc}")
         data = {}
     opencode = data.get("cli", {}).get("opencode", {}) if isinstance(data, dict) else {}
     rows = [row for row in opencode.get("hooks", []) if isinstance(row, dict)] if isinstance(opencode, dict) else []
@@ -344,7 +346,7 @@ def verify_wiring(
     Returns dict with keys: errors (list), warnings (list), info (list), ok (bool).
     """
     errors, warnings, info = [], [], []
-    provider_hooks = _read_provider_hooks(provider_path)
+    provider_hooks = _read_provider_hooks(errors, provider_path)
     if not provider_hooks:
         errors.append("No provider hooks found in ~/.claude/settings.json")
         return {"errors": errors, "warnings": warnings, "info": info, "ok": False}
@@ -413,6 +415,8 @@ def print_introspection():
 
 def _handle_seed(args) -> bool:
     """`drone @hooks seed install|remove`: the bridge rows in the Seed home's hooks.json."""
+    if args and (len(args) != 1 or args[0] not in ("install", "remove")) and not wants_help(args):
+        return False
     if len(args) != 1 or args[0] not in ("install", "remove"):
         CONSOLE.print("[bold cyan]seed[/bold cyan] — the AIPass rows in a Seed head's hooks.json")
         CONSOLE.print("  drone @hooks seed install   one seed.py row per Seed event; a re-run replaces them")

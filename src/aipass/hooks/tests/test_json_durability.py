@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_json_durability.py
-# Version: 2.0.3
+# Version: 2.1.0
 # Description: Torn-write durability tests for hooks' arbitrary-path json module
 # Branch: hooks
 # Layer: tests
 # Created: 2026-08-16
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/json/files.py's torn-write durability."""
@@ -22,6 +22,7 @@ import json
 import os
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -177,65 +178,36 @@ class TestConcurrentReadsStayUsable:
         json_files.write_json_file(target, {"version": 1, "projects": {}})
 
         stop = threading.Event()
-        failures: list = []
-        write_failures: list = []
-        reads = [0]
-        lock = threading.Lock()
 
         def writer(tag: int) -> None:
-            # A writer that dies silently would leave the content assertions passing vacuously.
-            try:
-                for i in range(150):
-                    json_files.write_json_file(
-                        target,
-                        {
-                            "version": 1,
-                            "projects": {},
-                            "writer": tag,
-                            "round": i,
-                            "filler": "x" * 4000,
-                        },
-                    )
-            except Exception as error:  # surfaced through write_failures below
-                with lock:
-                    write_failures.append(error)
+            for i in range(150):
+                json_files.write_json_file(
+                    target,
+                    {"version": 1, "projects": {}, "writer": tag, "round": i, "filler": "x" * 4000},
+                )
 
-        def reader() -> None:
-            local_reads = 0
-            local_failures = []
+        def reader() -> int:
+            """Reads until the writers stop; the first unusable read raises, and its future carries it."""
+            reads = 0
             while not stop.is_set():
-                # Yield; Event wait ends with the writers.
-                stop.wait(0.001)
-                try:
-                    raw = target.read_text(encoding="utf-8")
-                except FileNotFoundError:
-                    local_failures.append("missing")
-                    continue
-                local_reads += 1
-                if raw.strip() == "":
-                    local_failures.append("empty")
-                    continue
-                try:
-                    json.loads(raw)
-                except json.JSONDecodeError:
-                    local_failures.append("unparseable")
-            with lock:
-                reads[0] += local_reads
-                failures.extend(local_failures)
+                stop.wait(0.001)  # yield; ends with the writers
+                raw = target.read_text(encoding="utf-8")
+                assert raw.strip(), f"an empty read after {reads} usable ones"
+                json.loads(raw)
+                reads += 1
+            return reads
 
-        readers = [threading.Thread(target=reader) for _ in range(2)]
-        writers = [threading.Thread(target=writer, args=(t,)) for t in range(2)]
-        for t in readers + writers:
-            t.start()
-        for t in writers:
-            t.join()
-        stop.set()
-        for t in readers:
-            t.join()
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            readers = [pool.submit(reader) for _ in range(2)]
+            writers = [pool.submit(writer, tag) for tag in range(2)]
+            try:
+                for done in writers:
+                    done.result()  # a writer that died re-raises here
+            finally:
+                stop.set()
+            reads = sum(done.result() for done in readers)
 
-        assert write_failures == [], f"a writer died mid-race: {write_failures[0]!r}"
-        assert reads[0] > 0, "readers never ran — the test would pass vacuously"
-        assert failures == [], f"{len(failures)} unusable reads of {reads[0]}"
+        assert reads > 0, "readers never ran — the test would pass vacuously"
 
     def test_race_leaves_no_staged_files(self, tmp_path: Path):
         assert list(tmp_path.glob("*.tmp")) == []

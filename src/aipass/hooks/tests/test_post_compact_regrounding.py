@@ -4,7 +4,7 @@
 # Description: Tests for post_compact_regrounding lifecycle handler (DPLAN-0276)
 # Branch: hooks
 # Created: 2026-08-01
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/lifecycle/post_compact_regrounding.py."""
@@ -22,6 +22,8 @@ import json
 import os
 import time
 from unittest.mock import patch
+
+import pytest
 
 from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
 from aipass.hooks.apps.handlers.lifecycle import release_notice as door
@@ -134,12 +136,11 @@ class TestPostCompactRegrounding:
         assert "NAVMAP" in context
         assert "IDENTITY" in context
 
-    def test_cadence_check_failure_is_silent(self, tmp_path):
-
+    def test_cadence_check_failure_raises_to_the_engine(self, tmp_path):
+        """A dark cadence is the engine's ERROR and engine.jsonl row, never a quiet skip of the re-ground."""
         with patch("aipass.hooks.apps.modules.cadence.consume_regroup_pending", side_effect=RuntimeError("boom")):
-            result = post_compact_regrounding.handle({"cwd": str(tmp_path)})
-
-        assert result == {"stdout": "", "exit_code": 0}
+            with pytest.raises(RuntimeError, match="boom"):
+                post_compact_regrounding.handle({"cwd": str(tmp_path)})
 
     def test_end_to_end_replays_incident_multiple_resets_one_fire(self, tmp_path):
         """No mocking of cadence: several PreCompact resets fire back-to-back

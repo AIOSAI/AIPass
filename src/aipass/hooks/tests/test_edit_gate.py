@@ -768,6 +768,12 @@ class TestEditGateDiagnosticsState:
             result = self._edit_other_file(branch_tree)
         assert result["exit_code"] == 2
 
+    def test_an_unresolvable_recorded_file_refuses_never_allows(self, branch_tree: dict):
+        state = {"file": "/tmp/a\x00b.py", "errors": [LOCAL_ERROR]}
+        with patch.object(branch_tree["ds"], "load_seat", return_value=state):
+            result = self._edit_other_file(branch_tree)
+        assert result["exit_code"] == 2
+
     def _errored_at(self, tree: dict, relative: str, text: str, error: dict) -> dict:
         errored = tree["branch"] / relative
         errored.parent.mkdir(parents=True, exist_ok=True)

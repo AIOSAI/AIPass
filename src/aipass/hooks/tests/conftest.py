@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: conftest.py
-# Version: 2.9.1
+# Version: 2.9.2
 # Description: Shared pytest fixtures for hooks tests
 # Branch: hooks
 # Layer: tests
@@ -141,9 +141,11 @@ def isolated_trust_registry(tmp_path_factory, monkeypatch) -> Path:
     """Keep the trust registry out of the LIVE ~/.aipass/trusted_projects.json.
 
     REGISTRY_PATH binds at import, and bootstrap() WRITES it when a test meets an absent registry.
+    The environment seam carries the sandbox into every child process a test spawns too.
     """
     sandbox = tmp_path_factory.mktemp("trust_registry") / "trusted_projects.json"
     monkeypatch.setattr(trust_registry, "REGISTRY_PATH", sandbox)
+    monkeypatch.setenv(trust_registry.REGISTRY_ENV, str(sandbox))
     return sandbox
 
 
