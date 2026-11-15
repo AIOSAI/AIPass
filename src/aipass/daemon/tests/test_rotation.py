@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rotation.py
 # Description: Tests for the steward rotation handler and module
-# Version: 1.5.0
+# Version: 1.6.0
 # Created:2026-08-12
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/rotation.py and handlers/schedule/rotation.py — the nightly rounds (DPLAN-0287)."""
@@ -39,6 +39,7 @@ from aipass.daemon.apps.handlers.schedule.rotation import (
     render_prompt,
 )
 from aipass.daemon.apps.handlers.schedule import runstate as runstate_mod
+from aipass.ai_mail.apps.modules import door_wake
 from aipass.ai_mail.apps.modules.door_wake import wake_branch
 from aipass.daemon.apps.handlers.schedule.discovery import active_citizens, discover_jobs, framework_root
 from aipass.daemon.apps.modules import rotation as rotation_module
@@ -347,6 +348,18 @@ class TestFireRotation:
         assert "empty" in detail
         mock_wake.assert_not_called()
 
+    def test_the_rounds_wake_and_an_empty_roster_reach_the_prax_log(self, roster, caplog):
+        with caplog.at_level("INFO"):
+            self._fire(roster, {}, (True, "session started", False))
+            self._fire([], {}, (True, "", False))
+        assert "[rotation] ROUNDS: @backup — wake_branch(fresh=True, model=opus" in caplog.text
+        assert "[rotation] ROUNDS: roster is empty — nobody to wake" in caplog.text
+
+    def test_a_wake_error_logs_that_the_pointer_advanced(self, roster, caplog):
+        with caplog.at_level("INFO"):
+            self._fire(roster, {}, (False, "boom", True))
+        assert "[rotation] ERROR: @backup — boom; pointer advances" in caplog.text
+
     def test_manager_skipped_by_name_when_lane_missing(self, fleet, classes):
         with (
             patch(f"{HANDLER}.active_citizens", return_value=fleet),
@@ -459,6 +472,13 @@ class TestManagerLane:
         """
         assert "scheduled" in inspect.signature(wake_branch).parameters
         assert rotation_json(capsys, [], lane=None)["manager_lane_available"] is True
+
+    def test_an_unimportable_wake_raises_never_reads_as_no_lane(self, capsys, monkeypatch):
+        """No fallback: a broken ai_mail import was answered False, so every manager was skipped as if by choice."""
+        # Deleting the name makes the from-import raise ImportError, as a broken ai_mail would.
+        monkeypatch.delattr(door_wake, "wake_branch")
+        with pytest.raises(ImportError):
+            rotation_json(capsys, [], lane=None)
 
     def test_wake_back_is_a_live_keyword_of_wake_branch(self):
         """Our wake_back=False is only safe while ai_mail's wake_branch takes it.

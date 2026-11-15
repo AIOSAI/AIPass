@@ -2,7 +2,7 @@
 
 # Scheduler Tick
 
-How a scheduler tick fires a job, what each fire outcome consumes, how the scheduled lane differs from an interactive one, how jobs are staggered, and how run.py's code is organized.
+How a scheduler tick fires a job, what each fire outcome consumes, how the scheduled lane differs from an interactive one, where a tick is recorded (prax and the crash record), how jobs are staggered, and how run.py's code is organized.
 
 ---
 
@@ -71,6 +71,28 @@ because nothing spawned and the target being busy usually clears itself.
 
 `queue` renders `blocked` in its `last_status` column; the `--json` schema carries it as a
 `last_status` value.
+
+## Where a tick is recorded
+
+Prax is the tick's only log. Every tick event goes through `from aipass.prax import logger`
+from the module, so it lands in `logs/run.log` and in prax's system copy,
+`system_logs/daemon_run.log`. A handler's events reach the same file through the `_event`
+callback `run.py` hands it. A tick where nothing happens logs nothing: the per-job "not due"
+list and the banner are console lines only, so idle ticks spend none of prax's rotation.
+
+The console is a hand run's report: `drone @daemon run --dry-run` prints plain lines, with no
+time stamp. A dry run logs nothing.
+
+The unit (`daemon-tick.service`) sends stdout to `null` and stderr to
+`~/.aipass/daemon-tick.err`. That file is the **crash record**: a plain append of the break,
+written by systemd, outside the logger. It exists because the logger itself can be what broke.
+Prax has no stand-in logger, so a broken prax import chain kills the tick at import, before any
+prax line can be written; the traceback in `daemon-tick.err` is then the only record of why.
+A healthy tick writes nothing there. Anything else that appears in it is a stray write to stderr
+from imported code, and is a defect in that code.
+
+The journal is not used: on a host at journald's default size cap it keeps about a week, which
+is shorter than prax's own history.
 
 ## Staggering
 

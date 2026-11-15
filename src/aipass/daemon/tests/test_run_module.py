@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_run_module.py
 # Description: Tests for the drone @daemon run module
-# Version: 1.3.1
+# Version: 1.4.0
 # Created:2026-06-15
 # Modified: 2026-11-15
 # =============================================
@@ -568,6 +568,107 @@ class TestCaughtUpTick:
             results = run_tick()
         assert results["caught_up"] == 0
         assert mock_update.call_args.kwargs["caught_up"] is False
+
+
+STAMPED_LINE = re.compile(r"^\[\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\]", re.MULTILINE)
+
+
+class TestTickLinesThroughPrax:
+    """Prax is the tick's only log: under the scheduler stdout goes nowhere, so a console-only event is lost."""
+
+    def _seeding_tick(self, monkeypatch):
+        freeze_runstate_clock(monkeypatch, SLOT_SEED_CASES[0][0])
+        with (
+            patch(f"{RUN}.discover_jobs", return_value=[interval_job_with_slot()]),
+            patch(f"{RUN}.load_runstate", return_value={"jobs": {}}),
+            patch(f"{RUN}.missed_window", return_value=False),
+            patch(f"{RUN}._fire_job", return_value=(OUTCOME_FIRED, "")),
+            patch(f"{RUN}.save_runstate", return_value=True),
+        ):
+            return run_tick()
+
+    def test_a_seed_reaches_the_prax_log(self, caplog, monkeypatch):
+        with caplog.at_level("INFO"):
+            results = self._seeding_tick(monkeypatch)
+        assert results["seeded"] == 1
+        assert "[run] SEED: @sentry/shadow-cycle-weekly" in caplog.text
+
+    def test_a_tick_that_fires_logs_its_summary(self, caplog):
+        with (
+            caplog.at_level("INFO"),
+            patch(f"{RUN}.discover_jobs", return_value=[live_job()]),
+            patch(f"{RUN}.load_runstate", return_value={"jobs": {}}),
+            patch(f"{RUN}.missed_window", return_value=False),
+            patch(f"{RUN}.is_job_due", return_value=True),
+            patch(f"{RUN}._fire_job", return_value=(OUTCOME_FIRED, "")),
+            patch(f"{RUN}.save_runstate", return_value=True),
+        ):
+            assert run_tick()["fired"] == 1
+        assert "[run] Tick complete: 1 fired, 0 failed" in caplog.text
+
+    def test_a_dry_run_lane_line_tells_the_console_and_logs_nothing(self, caplog, capsys):
+        def drain(runstate, enabled, dry_run, log, fire):
+            log("DRY RUN — would fire CATCH-UP @commons/live (2 window(s))")
+            return 0
+
+        with (
+            caplog.at_level("INFO"),
+            patch(f"{RUN}.discover_jobs", return_value=[live_job()]),
+            patch(f"{RUN}.load_runstate", return_value={"jobs": {}}),
+            patch(f"{RUN}.is_job_due", return_value=False),
+            patch(f"{RUN}.missed_window", return_value=False),
+            patch(f"{RUN}.catch_up_lane.drain_one", side_effect=drain),
+        ):
+            run_tick(dry_run=True)
+        assert "would fire CATCH-UP @commons/live" in flat(capsys.readouterr().out)
+        assert "[run]" not in caplog.text
+
+    def test_no_console_line_carries_a_time_stamp(self, capsys, monkeypatch):
+        self._seeding_tick(monkeypatch)
+        out = capsys.readouterr().out
+        assert "SEED: @sentry/shadow-cycle-weekly" in flat(out)
+        assert not STAMPED_LINE.search(out), "a time-stamped console line is a second logger"
+
+    def test_a_quiet_tick_tells_the_console_and_logs_nothing(self, caplog, capsys):
+        with (
+            caplog.at_level("INFO"),
+            patch(f"{RUN}.discover_jobs", return_value=[live_job()]),
+            patch(f"{RUN}.load_runstate", return_value={"jobs": {}}),
+            patch(f"{RUN}.is_job_due", return_value=False),
+            patch(f"{RUN}.missed_window", return_value=False),
+            patch(f"{RUN}.save_runstate", return_value=True),
+        ):
+            run_tick()
+        assert "@commons/live — not due" in flat(capsys.readouterr().out)
+        assert "[run]" not in caplog.text, "every idle tick would spend prax's history on nothing"
+
+    def test_a_catch_up_lane_line_reaches_the_prax_log(self, caplog):
+        def drain(runstate, enabled, dry_run, log, fire):
+            log("CATCH-UP FIRED: @commons/live (2 window(s))")
+            return 1
+
+        with (
+            caplog.at_level("INFO"),
+            patch(f"{RUN}.discover_jobs", return_value=[live_job()]),
+            patch(f"{RUN}.load_runstate", return_value={"jobs": {}}),
+            patch(f"{RUN}.is_job_due", return_value=False),
+            patch(f"{RUN}.missed_window", return_value=False),
+            patch(f"{RUN}.save_runstate", return_value=True),
+            patch(f"{RUN}.catch_up_lane.drain_one", side_effect=drain),
+        ):
+            assert run_tick()["drained"] == 1
+        assert "[run] CATCH-UP FIRED: @commons/live (2 window(s))" in caplog.text
+
+    def test_a_tick_that_finds_the_lock_held_says_so_in_the_prax_log(self, caplog):
+        with (
+            caplog.at_level("INFO"),
+            patch(f"{RUN}.tick_lock.prepare"),
+            patch(f"{RUN}.tick_lock.acquire", return_value=None),
+            patch(f"{RUN}.run_tick") as tick,
+        ):
+            assert handle_command("run", []) is True
+        tick.assert_not_called()
+        assert "[run] Another scheduler instance is running, skipping." in caplog.text
 
 
 def fake_drone(tmp_path, program: str = "", mail_exit: int = 0) -> tuple:

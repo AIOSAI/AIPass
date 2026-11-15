@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_inbox_sweep.py
 # Description: Fleet inbox sweep tests — stale unread mail detection, wake policy and waking
-# Version: 1.1.1
+# Version: 1.2.0
 # Created:2026-08-11
 # Modified: 2026-11-15
 # =============================================
@@ -13,6 +13,7 @@
 # sentry: no-test-needed(constant) — MAX_WAKES, WAKE_MODEL and the help and introspection text
 
 import json
+import re
 import shutil
 import tempfile
 from datetime import datetime, timedelta
@@ -462,7 +463,9 @@ class TestWakeOwner:
         ):
             results = inbox_sweep.run_sweep()
         assert (results["woken"], results["failed"]) == (0, 1)
-        assert "ERROR: @a — boom" in capsys.readouterr().out
+        out, err = capsys.readouterr()
+        assert "@a — boom" in err
+        assert "boom" not in out, "an error goes to stderr, where drone's piping expects it"
 
     def test_wake_message_names_the_backlog(self):
         """Mutant killed: _wake_owner passes an empty custom_message."""
@@ -479,6 +482,31 @@ class TestWakeOwner:
 
 
 # ── CLI routing ───────────────────────────────────────
+
+
+class TestSweepLinesThroughPrax:
+    def test_wake_skip_defer_and_summary_reach_the_prax_log(self, caplog, monkeypatch):
+        monkeypatch.setattr(inbox_sweep, "WAKE_STAGGER_SECONDS", 0)
+        status = MagicMock()
+        status.summary = "spawned"
+        entries = [entry("@a", age=50), entry("@b"), entry("@m", skip_reason="manager")]
+        with (
+            caplog.at_level("INFO"),
+            patch.object(inbox_sweep, "find_stale_inboxes", return_value=entries),
+            patch(f"{WAKE}.wake_branch", return_value=(status, True)),
+        ):
+            inbox_sweep.run_sweep(limit=1)
+        assert "[inbox_sweep] WAKE: @a — 1 unread, oldest 50h" in caplog.text
+        assert "[inbox_sweep] SKIP: @m — manager, mail lands live" in caplog.text
+        assert "[inbox_sweep] DEFERRED (limit 1): @b — will be picked up by the next sweep" in caplog.text
+        assert "[inbox_sweep] Sweep complete: 1 woken, 0 failed, 1 skipped, 1 deferred" in caplog.text
+
+    def test_no_console_line_carries_a_time_stamp(self, capsys):
+        with patch.object(inbox_sweep, "find_stale_inboxes", return_value=[]):
+            assert inbox_sweep.handle_command("inbox-sweep", []) is True
+        out = capsys.readouterr().out
+        assert "No branch is sitting on stale unread mail." in out
+        assert not re.search(r"^\[\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\]", out, re.MULTILINE)
 
 
 class TestCliRouting:

@@ -65,8 +65,8 @@ interval, daily, slot and backoff logic is unchanged, because due-ness never rea
 `drone @daemon queue` shows `command: <the command>` in the preview column. The frozen `--json`
 keys are unchanged.
 
-**Two log lines every fire, pass or fail**, written to both the tick log
-(`~/.aipass/daemon-tick.log`) and `logs/run.log`:
+**Two log lines every fire, pass or fail**, written through prax to `logs/run.log` (and its
+system copy, `system_logs/daemon_run.log`):
 
 ```
 FIRE: @daemon/dplan-0338-proof -> command: drone @daemon --help

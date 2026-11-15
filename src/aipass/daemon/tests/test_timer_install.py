@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_timer_install.py
 # Description: Tests for the timer_install module (systemd user timer installer)
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-06-25
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/timer_install.py — install-timer and uninstall-timer, the systemd user timer."""
@@ -277,6 +277,17 @@ class TestInstall:
             ("enable", "daemon-tick.timer"),
             ("start", "daemon-tick.timer"),
         ]
+
+    @patch(f"{TI}._run_systemctl", return_value=True)
+    def test_the_shipped_unit_drops_stdout_and_keeps_stderr_as_the_crash_record(self, _systemctl, tmp_path):
+        install_dir = tmp_path / "systemd"
+        install_dir.mkdir()
+        with patch(f"{TI}._UNIT_DIR", install_dir):
+            assert handle_command("install-timer", []) is True
+        unit = (install_dir / "daemon-tick.service").read_text(encoding="utf-8").splitlines()
+        assert "StandardOutput=null" in unit
+        assert "StandardError=append:%h/.aipass/daemon-tick.err" in unit
+        assert not [line for line in unit if "daemon-tick.log" in line or "journal" in line]
 
     @patch(f"{TI}._run_systemctl", return_value=False)
     def test_install_systemctl_fails(self, mock_systemctl, tmp_path):

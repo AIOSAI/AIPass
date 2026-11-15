@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: inbox_sweep.py
 # Description: Fleet inbox sweep — wake branches sitting on mail unread past 24h
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-08-11
 # Modified: 2026-11-15
 # =============================================
@@ -23,7 +23,7 @@ import time
 from typing import List
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console
+from aipass.cli.apps.modules import console, error
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.cli.arg_gate import gate
 from aipass.daemon.apps.handlers.monitoring.inbox_scanner import (
@@ -85,12 +85,10 @@ def print_help():
     console.print()
 
 
-def _log(message: str) -> None:
-    """Print timestamped log line."""
-    from datetime import datetime
-
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    console.print(f"[{timestamp}] {message}")
+def _event(message: str) -> None:
+    """One sweep event: the prax line is the record, the console line the hand run's report."""
+    logger.info("[inbox_sweep] %s", message)
+    console.print(message)
 
 
 def _apply_wake_policy(entries: List[dict]) -> None:
@@ -123,7 +121,7 @@ def _wake_owner(entry: dict) -> tuple:
     from aipass.ai_mail.apps.modules.door_wake import wake_branch
 
     owner = entry["owner"]
-    _log(f"WAKE: {owner} — {entry['stale_count']} unread, oldest {entry['oldest_age_hours']:.0f}h")
+    _event(f"WAKE: {owner} — {entry['stale_count']} unread, oldest {entry['oldest_age_hours']:.0f}h")
 
     try:
         status, ok = wake_branch(
@@ -138,16 +136,16 @@ def _wake_owner(entry: dict) -> tuple:
         )
     except Exception as e:
         logger.error("[inbox_sweep] Exception waking %s: %s", owner, e)
-        _log(f"ERROR: {owner} — {e}")
+        error(f"{owner} — {e}")
         return False, str(e)
 
     if ok:
         logger.info("[inbox_sweep] Woke %s (%d unread)", owner, entry["stale_count"])
-        _log(f"OK: {owner} — {status.summary}")
+        console.print(f"OK: {owner} — {status.summary}")
         return True, status.summary
 
     logger.warning("[inbox_sweep] Wake failed for %s: %s", owner, status.summary)
-    _log(f"FAIL: {owner} — {status.summary}")
+    console.print(f"FAIL: {owner} — {status.summary}")
     return False, status.summary
 
 
@@ -190,12 +188,12 @@ def run_sweep(dry_run: bool = False, stale_hours: int = DEFAULT_STALE_HOURS, lim
 
     json_handler.log_operation("inbox_sweep", {"dry_run": dry_run, "stale_hours": stale_hours})
 
-    _log(f"Scanning branch inboxes for mail unread past {stale_hours}h...")
+    console.print(f"Scanning branch inboxes for mail unread past {stale_hours}h...")
     entries = find_stale_inboxes(stale_hours=stale_hours)
     results["stale_branches"] = len(entries)
 
     if not entries:
-        _log("No branch is sitting on stale unread mail.")
+        console.print("No branch is sitting on stale unread mail.")
         return results
 
     _apply_wake_policy(entries)
@@ -209,7 +207,7 @@ def run_sweep(dry_run: bool = False, stale_hours: int = DEFAULT_STALE_HOURS, lim
     _report_candidates(wakeable, skipped)
 
     for entry in skipped:
-        _log(f"SKIP: {entry['owner']} — {entry['skip_reason']}, mail lands live")
+        _event(f"SKIP: {entry['owner']} — {entry['skip_reason']}, mail lands live")
 
     targets = wakeable[:limit]
     deferred = wakeable[limit:]
@@ -219,11 +217,11 @@ def run_sweep(dry_run: bool = False, stale_hours: int = DEFAULT_STALE_HOURS, lim
 
     if deferred:
         names = ", ".join(e["owner"] for e in deferred)
-        _log(f"DEFERRED (limit {limit}): {names} — will be picked up by the next sweep")
+        _event(f"DEFERRED (limit {limit}): {names} — will be picked up by the next sweep")
 
     if dry_run:
         names = ", ".join(e["owner"] for e in targets) or "nobody"
-        _log(f"DRY RUN — would wake: {names}")
+        console.print(f"DRY RUN — would wake: {names}")
         return results
 
     for index, entry in enumerate(targets):
@@ -235,7 +233,7 @@ def run_sweep(dry_run: bool = False, stale_hours: int = DEFAULT_STALE_HOURS, lim
         if index < len(targets) - 1:
             time.sleep(WAKE_STAGGER_SECONDS)
 
-    _log(
+    _event(
         f"Sweep complete: {results['woken']} woken, {results['failed']} failed, "
         f"{results['skipped']} skipped, {results['deferred']} deferred"
     )
@@ -274,10 +272,10 @@ def handle_command(command: str, args: List[str]) -> bool:
     stale_hours = _parse_int_flag(args, "--hours", DEFAULT_STALE_HOURS)
     limit = _parse_int_flag(args, "--limit", MAX_WAKES)
 
-    _log("=" * 60)
-    _log("Fleet inbox sweep")
+    console.print("=" * 60)
+    console.print("Fleet inbox sweep")
 
     run_sweep(dry_run=dry_run, stale_hours=stale_hours, limit=limit)
 
-    _log("=" * 60)
+    console.print("=" * 60)
     return True

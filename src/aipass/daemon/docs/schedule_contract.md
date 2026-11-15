@@ -18,8 +18,9 @@ there is no daemon process at all.
 The 2 min is nominal, not exact: `OnUnitActiveSec` measures from the *last activation*, and systemd's
 default `AccuracySec=1min` batches the wakeup, so observed gaps run **2–3 min**. A tick costs well
 under a second of CPU (`systemctl --user show daemon-tick.service -p CPUUsageNSec` reads it) and
-roughly 1s wall. `systemctl --user list-timers` shows the next fire; the tick's own output appends
-to `~/.aipass/daemon-tick.log`.
+roughly 1s wall. `systemctl --user list-timers` shows the next fire. The tick logs through prax
+(`logs/run.log`); a tick that dies leaves its traceback in `~/.aipass/daemon-tick.err` — see
+[scheduler_tick.md](scheduler_tick.md#where-a-tick-is-recorded).
 
 **Three tiers are swept.** Core citizens under `src/aipass/*` (listed in `AIPASS_REGISTRY.json`). Resident citizens under `projects/<name>/` (listed in that project's own sealed `<NAME>_REGISTRY.json`). And **federated externals** — citizens in separate repos entirely, reached through their own registries. `drone @daemon rotation` prints the tier label; nothing routes on it. The sweep covers all three tiers; the nightly rounds serve only the first — see [docs/rounds.md](rounds.md).
 
