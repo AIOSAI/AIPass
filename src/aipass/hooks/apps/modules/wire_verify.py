@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: wire_verify.py
-# Version: 1.8.1
+# Version: 1.9.0
 # Description: Wire verification — cross-checks provider settings vs project hook config
 # Branch: hooks
 # Layer: apps/modules
@@ -13,6 +13,7 @@
 Cross-checks ~/.claude/settings.json (provider hooks) against .aipass/hooks.json (project hook config).
 A handler wired only in Codex's user-level hooks.json, or only in the manifest's cli.opencode rows that
 OpenCode's plugin runs, counts as wired; that file or plugin missing (or the plugin stale) is an ERROR.
+A provider CLI that is not installed is not checked (INFO), by the test setup.sh wires it by.
 A Seed head's hooks.json is checked for one seed.py row per event Seed fires; `seed install` writes them.
 Detects: empty provider hook arrays; enabled handlers with no bridge entry; duplicate and orphaned
 entries; a tool a gate guards that the provider's PreToolUse bridge never sees (R7: NotebookEdit).
@@ -23,6 +24,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import sys
 from pathlib import Path
 
@@ -397,6 +399,13 @@ def _render_results(results):
     CONSOLE.print(f"[bold]{len(results['errors'])} errors, {len(results['warnings'])} warnings[/bold]")
 
 
+def _installed(cli: str) -> bool:
+    """Whether *cli* is installed, by setup.sh's own test: on PATH, or OpenCode in ~/.opencode/bin."""
+    if shutil.which(cli) is not None:
+        return True
+    return cli == "opencode" and os.access(Path.home() / ".opencode" / "bin" / "opencode", os.X_OK)
+
+
 def print_introspection():
     """Print module structure for drone routing."""
     CONSOLE.print("[bold cyan]wire_verify[/bold cyan] — Provider ↔ project hook wiring checker")
@@ -430,12 +439,16 @@ def handle_command(command, args) -> bool:
 
     if not args:
         print_introspection()
+        codex, opencode = _installed("codex"), _installed("opencode")
         results = verify_wiring(
-            codex_path=codex_hooks_path(),
-            opencode_plugin=opencode_plugin_path(),
+            codex_path=codex_hooks_path() if codex else None,
+            opencode_plugin=opencode_plugin_path() if opencode else None,
             manifest_path=_manifest_path(),
             seed_path=seed_hooks_path(),
         )
+        for name, there in (("Codex", codex), ("OpenCode", opencode)):
+            if not there:
+                results["info"].append(f"{name}: not installed, no seat to gate: its wiring is not checked")
         _render_results(results)
         if not results["ok"]:
             # Returning True would become exit 0: a wiring break must fail anything reading the exit code.
@@ -449,7 +462,10 @@ def handle_command(command, args) -> bool:
         CONSOLE.print()
         CONSOLE.print("Reads ~/.claude/settings.json, .aipass/hooks.json and Codex's user-level hooks.json")
         CONSOLE.print("($CODEX_HOME, else ~/.codex) and OpenCode's plugin with the manifest's cli.opencode rows;")
-        CONSOLE.print("a missing Codex file or OpenCode plugin is an ERROR. It also reads a Seed head's")
+        CONSOLE.print("a missing Codex file or OpenCode plugin is an ERROR when that CLI is installed (on PATH;")
+        CONSOLE.print(
+            "OpenCode also in ~/.opencode/bin); a CLI not installed is not checked. It also reads a Seed head's"
+        )
         CONSOLE.print("hooks.json ($SEED_HOME, else ~/.config/seed) for one seed.py row per Seed event. It")
         CONSOLE.print("verifies every enabled handler has a working provider bridge entry.")
         CONSOLE.print("Exits non-zero on any ERROR finding.")

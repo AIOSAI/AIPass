@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_wire_verify.py
-# Version: 1.7.0
+# Version: 1.8.0
 # Description: Tests for wire_verify module — provider ↔ project hook wiring checker
 # Branch: hooks
 # Created: 2026-07-09
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/wire_verify.py."""
@@ -501,6 +501,16 @@ class TestTheProjectRow:
         assert "UserPromptSubmit:hark_events: wired for Codex only" in result["info"]
 
 
+def _on_path(tmp_path, monkeypatch, *clis: str):
+    """PATH holds only a bin dir with an executable stub per name in *clis*: installed, as `command -v` sees it."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    for cli in clis:
+        (bin_dir / cli).write_text("#!/bin/sh\n", encoding="utf-8")
+        (bin_dir / cli).chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir))
+
+
 class TestHandleCommand:
     def test_returns_false_for_non_verify(self):
         assert wire_verify.handle_command("status", []) is False
@@ -510,6 +520,7 @@ class TestHandleCommand:
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
         monkeypatch.setenv("AIPASS_HOME", str(tmp_path / "home"))
         monkeypatch.setenv("SEED_HOME", str(tmp_path / "seed_home"))
+        _on_path(tmp_path, monkeypatch, "codex", "opencode")
         mock_result = {"ok": True, "errors": [], "warnings": [], "info": []}
         with patch.object(wire_verify, "verify_wiring", return_value=mock_result) as mock_verify:
             assert wire_verify.handle_command("verify", []) is True
@@ -557,6 +568,7 @@ class TestHandleCommand:
         monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
         monkeypatch.setenv("AIPASS_HOME", str(tmp_path / "home"))
         monkeypatch.delenv("SEED_HOME", raising=False)
+        _on_path(tmp_path, monkeypatch, "codex", "opencode")
         mock_result = {"ok": True, "errors": [], "warnings": ["cosmetic"], "info": []}
         with patch.object(wire_verify, "verify_wiring", return_value=mock_result) as mock_verify:
             assert wire_verify.handle_command("verify", []) is True
@@ -570,6 +582,58 @@ class TestHandleCommand:
         assert "Wire check passed" in err
         assert "cosmetic" in err
         assert "0 errors, 1 warnings" in err
+
+    def test_a_provider_cli_not_installed_is_not_checked_and_says_so(self, capsys, tmp_path, monkeypatch):
+        """A Claude-only machine has no Codex or OpenCode seat to run ungated: their wiring is not an ERROR."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("AIPASS_HOME", str(tmp_path / "home"))
+        _on_path(tmp_path, monkeypatch)
+        mock_result = {"ok": True, "errors": [], "warnings": [], "info": []}
+        with patch.object(wire_verify, "verify_wiring", return_value=mock_result) as mock_verify:
+            assert wire_verify.handle_command("verify", []) is True
+        kwargs = mock_verify.call_args.kwargs
+        assert kwargs["codex_path"] is None
+        assert kwargs["opencode_plugin"] is None
+        err = capsys.readouterr().err
+        assert "Codex: not installed" in err
+        assert "OpenCode: not installed" in err
+
+    def test_opencode_in_its_own_bin_dir_is_installed(self, tmp_path, monkeypatch):
+        """setup.sh wires OpenCode found at ~/.opencode/bin/opencode too, so verify checks it there."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+        _on_path(tmp_path, monkeypatch, "codex")
+        opencode = tmp_path / ".opencode" / "bin" / "opencode"
+        opencode.parent.mkdir(parents=True)
+        opencode.write_text("#!/bin/sh\n", encoding="utf-8")
+        opencode.chmod(0o755)
+        mock_result = {"ok": True, "errors": [], "warnings": [], "info": []}
+        with patch.object(wire_verify, "verify_wiring", return_value=mock_result) as mock_verify:
+            wire_verify.handle_command("verify", [])
+        assert (
+            mock_verify.call_args.kwargs["opencode_plugin"] == tmp_path / "cfg" / "opencode" / "plugins" / "aipass.ts"
+        )
+
+    def test_an_installed_cli_with_its_wiring_missing_stays_an_error(self, capsys, tmp_path, monkeypatch):
+        """Installed with no hooks file or plugin: that seat runs ungated, so verify exits non-zero."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex_home"))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+        _on_path(tmp_path, monkeypatch, "codex", "opencode")
+        provider = tmp_path / "settings.json"
+        provider.write_text(json.dumps({"hooks": {"Stop": [_provider_entry("Stop")]}}), encoding="utf-8")
+        real = wire_verify.verify_wiring
+
+        def _verify(**kwargs):
+            return real(provider_path=provider, project_config={}, **kwargs)
+
+        with patch.object(wire_verify, "verify_wiring", side_effect=_verify):
+            with pytest.raises(SystemExit) as exc:
+                wire_verify.handle_command("verify", [])
+        assert exc.value.code != 0
+        err = " ".join(capsys.readouterr().err.split())
+        assert "Codex hooks file missing" in err
+        assert "OpenCode plugin missing" in err
 
 
 class TestRenderResults:
