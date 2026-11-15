@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: codex.py
-# Version: 2.5.2
+# Version: 2.6.0
 # Description: Codex bridge — mounts the promoted hook code, maps apply_patch, fails closed on PreToolUse
 # Branch: hooks
 # Layer: apps/handlers/bridges
 # Created: 2026-07-10
-# Modified: 2026-10-28
+# Modified: 2026-11-15
 # =============================================
 
 """Codex bridge.
@@ -19,6 +19,7 @@ permissionDecision, not exit code 2. The hook code is the promoted copy (mount.p
 call whose hook code cannot load, raises, or exits 2 is DENIED.
 """
 
+import contextlib
 import importlib.util
 import json
 import os
@@ -227,22 +228,46 @@ def _mount() -> str:
     return mount.mount_or_source(__file__, "codex")
 
 
-def _broken_output(event_type: str, exc: BaseException) -> str:
-    """Deny a guarded event outright; any other event gets an empty document. Answer first, record after."""
-    reason = BROKEN.format(error=f"{type(exc).__name__}: {exc}")
+def _reason(exc: BaseException) -> str:
+    """The BROKEN text for *exc*; one whose message itself raises is named by its type, and still denied."""
+    try:
+        return BROKEN.format(error=f"{type(exc).__name__}: {exc}")
+    except Exception:
+        return BROKEN.format(error=f"{type(exc).__name__}, whose message could not be read")
+
+
+def _record_break(event_type: str, line: str) -> None:
+    """Append one ERROR line in prax's format, after the answer has left: an attempt, never a wait."""
+    if "_pytest" in sys.modules and BREAK_LOG == LIVE_BREAK_LOG:
+        return  # prax's own test seam: a suite run's break never lands in the live log medic reads
+    try:
+        entry = f"{time.strftime('%Y-%m-%d %H:%M:%S')} | bridges.codex | ERROR | {line} on {event_type}\n"
+        fd = os.open(BREAK_LOG, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NONBLOCK, 0o666)
+        try:
+            os.write(fd, entry.encode("utf-8", "backslashreplace"))
+        finally:
+            os.close(fd)
+    except BaseException as exc:  # the answer is already out: nothing the record raises may change it
+        with contextlib.suppress(BaseException):
+            sys.stderr.write(
+                f"[HOOKS:codex] bridge: the break was not recorded in {BREAK_LOG}: {type(exc).__name__}: {exc}\n"
+            )
+
+
+def _broken(event_type: str, exc: BaseException) -> None:
+    """Deny a guarded event outright; any other event gets an empty document. Answer first, record after.
+
+    Codex reads the answer from stdout alone, so it is written and flushed before anything else runs.
+    """
+    reason = _reason(exc)
     answer = json.dumps({})
     if event_type in GUARDED_EVENTS:
         answer = _wrap_output(event_type, json.dumps({"decision": "block", "reason": reason}), 2)
-    sys.stderr.write(reason + "\n")
-    if "_pytest" in sys.modules and BREAK_LOG == LIVE_BREAK_LOG:
-        return answer  # prax's own test seam: a suite run's break never lands in the live log medic reads
-    entry = f"{time.strftime('%Y-%m-%d %H:%M:%S')} | bridges.codex | ERROR | {reason.splitlines()[0]} on {event_type}\n"
-    try:
-        with open(BREAK_LOG, "a", encoding="utf-8") as handle:
-            handle.write(entry)
-    except OSError as err:
-        sys.stderr.write(f"[HOOKS:codex] bridge: the break was not recorded in {BREAK_LOG}: {err}\n")
-    return answer
+    sys.stdout.write(answer)
+    sys.stdout.flush()
+    with contextlib.suppress(BaseException):
+        sys.stderr.write(reason.encode("utf-8", "backslashreplace").decode("utf-8") + "\n")
+    _record_break(event_type, reason.splitlines()[0])
 
 
 def main() -> None:
@@ -253,17 +278,17 @@ def main() -> None:
 
     arg = sys.argv[1]
     event_type = arg.split(":", 1)[0]
-    stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
-    payload = _as_object(stdin_data)
-    if payload is not None and payload.get("session_id"):
-        # Cadence and the ledgers key a seat on this variable; a Codex hook inherits none, or its launcher's.
-        os.environ[SESSION_ENV] = str(payload["session_id"])
 
     try:
+        stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
+        payload = _as_object(stdin_data)
+        if payload is not None and payload.get("session_id"):
+            # Cadence and the ledgers key a seat on this variable; a Codex hook inherits none, or its launcher's.
+            os.environ[SESSION_ENV] = str(payload["session_id"])
         _mount()
         output, exit_code = _run_calls(arg, stdin_data)
-    except Exception as exc:  # fail closed on the guarded event, see _broken_output
-        sys.stdout.write(_broken_output(event_type, exc))
+    except BaseException as exc:  # fail closed on the guarded event, however it broke: see _broken
+        _broken(event_type, exc)
         return
 
     sys.stdout.write(_wrap_output(event_type, output, exit_code))

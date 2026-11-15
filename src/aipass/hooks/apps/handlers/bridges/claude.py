@@ -1,21 +1,20 @@
 # =================== AIPass ====================
 # Name: claude.py
-# Version: 2.0.2
+# Version: 2.1.0
 # Description: Claude Code bridge — mounts the promoted hook code, fails closed on PreToolUse
 # Branch: hooks
 # Layer: apps/handlers/bridges
 # Created: 2026-05-18
-# Modified: 2026-10-25
+# Modified: 2026-11-15
 # =============================================
 
-"""
-Claude Code bridge.
+"""Claude Code bridge: runs the promoted copy (`drone @hooks promote`), never the tree being edited.
 
-Runs the promoted copy (`drone @hooks promote`), never the tree being edited.
-A PreToolUse that cannot load or raises is refused (exit 2): Claude Code runs the
+A PreToolUse that cannot load or raises is refused (exit 2, set in a finally): Claude Code runs the
 tool on any other exit. Every other event exits 0 with the reason on stderr.
 """
 
+import contextlib
 import importlib.util
 import json
 import os
@@ -36,45 +35,56 @@ BROKEN = (
 
 
 def _mount() -> str:
-    """Serve aipass.hooks.apps from the promoted copy; on a bad copy, from the source tree, loudly."""
+    """Serve aipass.hooks.apps from the promoted copy; on a bad copy, from the source tree, loudly (mount.py)."""
     here = os.path.dirname(os.path.abspath(__file__))
     spec = importlib.util.spec_from_file_location("_aipass_hooks_mount", os.path.join(here, "mount.py"))
     if spec is None or spec.loader is None:
         raise ImportError("mount.py has no import spec")
     mount = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mount)
-    try:
-        served = mount.mount(mount.branch_root(__file__))
-    except Exception as exc:  # a bad promoted copy: the source still gates, and says so
-        from aipass.prax.apps.modules.logger import system_logger as logger
-
-        logger.error("[HOOKS] bridge: promoted copy unusable, serving the source tree: %s", exc)
-        served = "source (fallback)"
+    served = mount.mount_or_source(__file__, "claude")
     if os.environ.get(mount.OVERRIDE_ENV):
         sys.stderr.write(f"[HOOKS] served by {served}\n")
     return served
 
 
+def _printable(text: str) -> str:
+    """*text* safe on a UTF-8 stream: a lone surrogate (a path that is not UTF-8) becomes its escape."""
+    return text.encode("utf-8", "backslashreplace").decode("utf-8")
+
+
 def _record_break(event_type: str, line: str) -> None:
-    """One ERROR line in prax's format, written with the stdlib: the prax logger can be what broke."""
+    """Append one ERROR line in prax's format, after the answer has left: an attempt, never a wait."""
     if "_pytest" in sys.modules and BREAK_LOG == LIVE_BREAK_LOG:
         return  # prax's own test seam: a suite run's break never lands in the live log medic reads
-    entry = f"{time.strftime('%Y-%m-%d %H:%M:%S')} | bridges.claude | ERROR | {line} on {event_type}\n"
     try:
-        with open(BREAK_LOG, "a", encoding="utf-8") as handle:
-            handle.write(entry)
-    except OSError as exc:
-        sys.stderr.write(f"[HOOKS] bridge: the break was not recorded in {BREAK_LOG}: {exc}\n")
+        entry = f"{time.strftime('%Y-%m-%d %H:%M:%S')} | bridges.claude | ERROR | {line} on {event_type}\n"
+        fd = os.open(BREAK_LOG, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NONBLOCK, 0o666)
+        try:
+            os.write(fd, entry.encode("utf-8", "backslashreplace"))
+        finally:
+            os.close(fd)
+    except BaseException as exc:  # the answer is already out: nothing the record raises may change it
+        with contextlib.suppress(BaseException):
+            sys.stderr.write(
+                f"[HOOKS] bridge: the break was not recorded in {BREAK_LOG}: {type(exc).__name__}: {exc}\n"
+            )
 
 
 def _broken(event_type: str, exc: BaseException) -> None:
-    """Refuse a guarded event outright; let any other event pass with the reason on stderr."""
-    reason = BROKEN.format(error=f"{type(exc).__name__}: {exc}")
-    sys.stderr.write(reason + "\n")
-    _record_break(event_type, reason.splitlines()[0])
-    if event_type in GUARDED_EVENTS:
-        sys.stdout.write(json.dumps({"decision": "block", "reason": reason}))
-        sys.exit(2)
+    """Refuse a guarded event outright; any other event passes, the reason on stderr. Answer first, record after."""
+    code = 2 if event_type in GUARDED_EVENTS else 0
+    try:
+        reason = _printable(BROKEN.format(error=f"{type(exc).__name__}: {exc}"))
+        sys.stderr.write(reason + "\n")
+        if code:
+            sys.stdout.write(json.dumps({"decision": "block", "reason": reason}))
+        sys.stdout.flush()
+        sys.stderr.flush()
+        _record_break(event_type, reason.splitlines()[0])
+    finally:
+        if code:
+            sys.exit(code)
 
 
 def main() -> None:
@@ -85,21 +95,23 @@ def main() -> None:
 
     arg = sys.argv[1]
     event_type = arg.split(":", 1)[0]
-    stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
 
     try:
+        stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
         _mount()
         from aipass.hooks.apps.modules.engine import run_event
 
         output, exit_code = run_event(arg, stdin_data)
-    except Exception as exc:  # fail closed on the guarded event, see _broken
+    except BaseException as exc:  # fail closed on the guarded event, however it broke: see _broken
         _broken(event_type, exc)
         return
 
-    if output:
-        sys.stdout.write(output)
-    if exit_code:
-        sys.exit(exit_code)
+    try:
+        if output:
+            sys.stdout.write(_printable(output))
+    finally:
+        if exit_code:
+            sys.exit(exit_code)
 
 
 if __name__ == "__main__":

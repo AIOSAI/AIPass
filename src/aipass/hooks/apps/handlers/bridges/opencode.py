@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: opencode.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Description: OpenCode bridge — the aipass.ts plugin's calls, mapped to Claude's protocol, answered in one JSON line
 # Branch: hooks
 # Layer: apps/handlers/bridges
 # Created: 2026-10-28
-# Modified: 2026-10-28
+# Modified: 2026-11-15
 # =============================================
 
 """OpenCode bridge.
@@ -16,6 +16,7 @@ The answer is one JSON object: {"deny": reason}, {"context": text}, {"entry": {"
 See docs/wiring.md.
 """
 
+import contextlib
 import importlib.util
 import json
 import os
@@ -133,21 +134,40 @@ def _mount() -> str:
     return mount.mount_or_source(__file__, "opencode")
 
 
-def _broken(event_type: str, exc: BaseException) -> dict:
-    """Deny a guarded event outright; any other event answers nothing. Answer first, record after."""
-    reason = BROKEN.format(error=f"{type(exc).__name__}: {exc}")
-    sys.stderr.write(reason + "\n")
-    result = {"deny": reason} if event_type in GUARDED_EVENTS else {}
-    if "_pytest" in sys.modules and BREAK_LOG == LIVE_BREAK_LOG:
-        return result  # prax's own test seam: a suite run's break never lands in the live log medic reads
-    line = reason.splitlines()[0]
-    entry = f"{time.strftime('%Y-%m-%d %H:%M:%S')} | bridges.opencode | ERROR | {line} on {event_type}\n"
+def _reason(exc: BaseException) -> str:
+    """The BROKEN text for *exc*; one whose message itself raises is named by its type, and still denied."""
     try:
-        with open(BREAK_LOG, "a", encoding="utf-8") as handle:
-            handle.write(entry)
-    except OSError as err:
-        sys.stderr.write(f"[HOOKS:opencode] bridge: the break was not recorded in {BREAK_LOG}: {err}\n")
-    return result
+        return BROKEN.format(error=f"{type(exc).__name__}: {exc}")
+    except Exception:
+        return BROKEN.format(error=f"{type(exc).__name__}, whose message could not be read")
+
+
+def _record_break(event_type: str, line: str) -> None:
+    """Append one ERROR line in prax's format, after the answer has left: an attempt, never a wait."""
+    if "_pytest" in sys.modules and BREAK_LOG == LIVE_BREAK_LOG:
+        return  # prax's own test seam: a suite run's break never lands in the live log medic reads
+    try:
+        entry = f"{time.strftime('%Y-%m-%d %H:%M:%S')} | bridges.opencode | ERROR | {line} on {event_type}\n"
+        fd = os.open(BREAK_LOG, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NONBLOCK, 0o666)
+        try:
+            os.write(fd, entry.encode("utf-8", "backslashreplace"))
+        finally:
+            os.close(fd)
+    except BaseException as exc:  # the answer is already out: nothing the record raises may change it
+        with contextlib.suppress(BaseException):
+            sys.stderr.write(
+                f"[HOOKS:opencode] bridge: the break was not recorded in {BREAK_LOG}: {type(exc).__name__}: {exc}\n"
+            )
+
+
+def _broken(event_type: str, exc: BaseException) -> None:
+    """Deny a guarded event outright; any other event answers nothing. Answer first, record after."""
+    reason = _reason(exc)
+    sys.stdout.write(json.dumps({"deny": reason} if event_type in GUARDED_EVENTS else {}))
+    sys.stdout.flush()
+    with contextlib.suppress(BaseException):
+        sys.stderr.write(reason.encode("utf-8", "backslashreplace").decode("utf-8") + "\n")
+    _record_break(event_type, reason.splitlines()[0])
 
 
 def _run_patch(arg: str, payload: dict) -> tuple[str, int]:
@@ -163,7 +183,10 @@ def _run_patch(arg: str, payload: dict) -> tuple[str, int]:
 
 
 def run(arg: str, stdin_data: str) -> dict:
-    """One plugin call: the event *arg* (``Event`` or ``Event:hook``) on the plugin's payload, answered."""
+    """One plugin call: the event *arg* (``Event`` or ``Event:hook``) on the plugin's payload, answered.
+
+    A broken engine raises out of here; main answers for it (see _broken).
+    """
     event_type = arg.split(":", 1)[0]
     payload = _as_object(stdin_data) or {}
     if event_type in GUARDED_EVENTS and payload.get("tool") == CODE_TOOL:
@@ -171,16 +194,13 @@ def run(arg: str, stdin_data: str) -> dict:
     if payload.get("session_id"):
         # Cadence and the ledgers key a seat on this variable; the OpenCode server inherits none, or a stale one.
         os.environ[SESSION_ENV] = str(payload["session_id"])
-    try:
-        _mount()
-        from aipass.hooks.apps.modules.engine import run_event
+    _mount()
+    from aipass.hooks.apps.modules.engine import run_event
 
-        if payload.get("tool") == PATCH_TOOL:
-            output, exit_code = _run_patch(arg, payload)
-        else:
-            output, exit_code = run_event(arg, json.dumps(claude_payload(payload)))
-    except Exception as exc:  # fail closed on the guarded event, see _broken
-        return _broken(event_type, exc)
+    if payload.get("tool") == PATCH_TOOL:
+        output, exit_code = _run_patch(arg, payload)
+    else:
+        output, exit_code = run_event(arg, json.dumps(claude_payload(payload)))
     result = answer(output, exit_code)
     key = GROUNDING.get(arg)
     # Only a plugin that says it keeps entries gets one; an older installed copy would drop the text.
@@ -194,8 +214,13 @@ def main() -> None:
     if len(sys.argv) < 2:
         sys.stderr.write("Usage: opencode.py <EventType> or opencode.py <EventType:hook_name>\n")
         sys.exit(1)
-    stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
-    sys.stdout.write(json.dumps(run(sys.argv[1], stdin_data)))
+    try:
+        stdin_data = "" if sys.stdin.isatty() else sys.stdin.read()
+        result = run(sys.argv[1], stdin_data)
+    except BaseException as exc:  # fail closed on the guarded event, however it broke: see _broken
+        _broken(sys.argv[1].split(":", 1)[0], exc)
+        return
+    sys.stdout.write(json.dumps(result))
 
 
 if __name__ == "__main__":

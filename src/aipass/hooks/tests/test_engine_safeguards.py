@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_engine_safeguards.py
 # Description: The hook engine's safeguards: trust, timeouts, one document, the ledger, fail-closed gates, promote
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-10-08
 # Modified: 2026-11-15
 # =============================================
@@ -18,7 +18,9 @@
 # sentry: no-test-needed(ruff) — that engine.py parses and imports, ruff and collection cover it
 
 import importlib
+import io
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -1022,6 +1024,29 @@ def _load_by_path(name: str, path: Path):
     return module
 
 
+class _Unwritable:
+    """A break log whose every use raises something that is not an OSError."""
+
+    def __fspath__(self) -> str:
+        raise RuntimeError("the record itself broke")
+
+    def __str__(self) -> str:
+        return "<unwritable break log>"
+
+
+class _DeadStream:
+    """A stream whose reader has gone: every write is a broken pipe."""
+
+    def write(self, _text: str) -> int:
+        raise BrokenPipeError("reader gone")
+
+    def flush(self) -> None:
+        raise BrokenPipeError("reader gone")
+
+
+_NOT_UTF8 = os.fsdecode(b"bad\xff.py")
+
+
 class TestTheBridgeFailsClosed:
     """DPLAN-0356 item 2: an engine that cannot import made Python exit 1, and Claude Code ran the tool."""
 
@@ -1066,6 +1091,65 @@ class TestTheBridgeFailsClosed:
     def test_every_other_event_passes(self, monkeypatch, capsys, mock_logger):
         self._bridge("UserPromptSubmit:branch_prompt", monkeypatch).main()  # returns: no SystemExit, so exit 0
         assert capsys.readouterr().out == ""
+
+    def _assert_refused(self, bridge, capsys) -> None:
+        with pytest.raises(SystemExit) as refused:
+            bridge.main()
+        assert refused.value.code == 2
+        assert json.loads(capsys.readouterr().out)["reason"].startswith("HOOKS BROKEN")
+
+    def test_a_break_naming_a_non_utf8_path_is_still_refused(self, monkeypatch, capsys, mock_logger):
+        """The stdlib record raised UnicodeEncodeError on this text, Python exited 1, and Claude Code ran the tool."""
+        bridge = self._bridge("PreToolUse", monkeypatch)
+        monkeypatch.setattr(bridge, "_mount", MagicMock(side_effect=ImportError(f"No module named {_NOT_UTF8}")))
+        self._assert_refused(bridge, capsys)
+
+    def test_a_record_that_raises_anything_is_still_refused_and_says_so(self, monkeypatch, capsys, mock_logger):
+        bridge = self._bridge("PreToolUse", monkeypatch)
+        monkeypatch.setattr(bridge, "BREAK_LOG", _Unwritable())
+        with pytest.raises(SystemExit) as refused:
+            bridge.main()
+        out, err = capsys.readouterr()
+        assert (refused.value.code, json.loads(out)["reason"][:12]) == (2, "HOOKS BROKEN")
+        assert "not recorded" in err and "the record itself broke" in err
+
+    def test_the_answer_is_out_before_the_record_is_attempted(self, monkeypatch, capsys, mock_logger):
+        """A record that hangs can then cost a timeout, never the refusal."""
+        bridge = self._bridge("PreToolUse", monkeypatch)
+        seen: list[str] = []
+        monkeypatch.setattr(bridge, "_record_break", lambda *_: seen.append(sys.stdout.getvalue()))
+        with pytest.raises(SystemExit):
+            bridge.main()
+        assert '"decision": "block"' in seen[0]
+
+    def test_a_stderr_that_cannot_be_written_still_refuses_with_exit_2(self, monkeypatch, capsys, mock_logger):
+        bridge = self._bridge("PreToolUse", monkeypatch)
+        monkeypatch.setattr("sys.stderr", _DeadStream())
+        with pytest.raises(SystemExit) as refused:
+            bridge.main()
+        assert refused.value.code == 2
+
+    def test_a_dispatch_that_exits_quietly_is_refused_not_run(self, monkeypatch, capsys, mock_logger):
+        """Claude Code ran the tool when the bridge died at exit 1 (a real run, 2026-11-15): exit 0 is no better."""
+        bridge = self._bridge("PreToolUse", monkeypatch)
+        monkeypatch.setattr(bridge, "_mount", MagicMock(side_effect=SystemExit(0)))
+        self._assert_refused(bridge, capsys)
+
+    def test_a_payload_that_is_not_utf8_is_refused_not_run(self, monkeypatch, capsys, mock_logger):
+        bridge = self._bridge("PreToolUse", monkeypatch)
+        monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO(b'{"x": "\xff"}'), encoding="utf-8"))
+        self._assert_refused(bridge, capsys)
+
+    def test_an_engine_refusal_naming_a_non_utf8_path_still_exits_2_with_its_reason(
+        self, monkeypatch, capsys, mock_logger
+    ):
+        bridge = self._bridge("PreToolUse", monkeypatch)
+        monkeypatch.setattr(bridge, "_mount", MagicMock(return_value="test"))
+        monkeypatch.setattr(engine, "run_event", MagicMock(return_value=(f"refused: {_NOT_UTF8}", 2)))
+        with pytest.raises(SystemExit) as refused:
+            bridge.main()
+        assert refused.value.code == 2
+        assert "refused: bad" in capsys.readouterr().out
 
 
 class TestPromote:

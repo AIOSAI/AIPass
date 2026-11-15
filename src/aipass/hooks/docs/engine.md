@@ -44,7 +44,19 @@ The workflow: edit -> test -> `drone @hooks promote`.
 - `FAIL_OPEN`, each with its reason: `presence_gate` (a broken one would refuse every prompt, including the one that fixes it) and `subagent_gate` (a block at SubagentStop would trap the sub-agent in a loop).
 - Everything else is an injector (prompt, lifecycle, notification handlers): a crash is logged and skipped, and one broken injector never blocks the rest.
 
-Each fail-closed gate also refuses the call it guards when it crashes internally (its own `GATE_CRASHED` text). One layer up, the bridge refuses a PreToolUse call when the engine cannot load at all (block JSON and exit 2; Codex: a deny envelope); every other event exits 0 with the reason on stderr.
+Each fail-closed gate also refuses the call it guards when it crashes internally (its own `GATE_CRASHED` text). One layer up, the bridge refuses a PreToolUse call when the engine cannot load at all (block JSON and exit 2; Codex: a deny envelope); every other event exits 0 with the reason on stderr. The refusal is sent before the break is recorded, and nothing the record does can undo it ([wiring.md](wiring.md#when-a-bridge-breaks)).
+
+## A Blocked Seat
+
+When the engine cannot load, every PreToolUse in every session of the fleet is refused with `HOOKS BROKEN`, until a person fixes it. No agent can repair it: each agent's tools pass through the same bridge, so the agent can still read prompts and answer, but cannot run a command or edit a file. The repair is the owner's, from a terminal outside any agent session (a plain shell runs no hooks):
+
+1. Read the cause: `tail -5 src/aipass/hooks/logs/bridge.log` (from the repo root). Each line names the exception and the event.
+2. If the line names the promoted hooks copy (a module under `.live-<stamp>`), point back to the previous copy: `ls -d src/aipass/hooks/.live-2*` lists the 3 kept, and `echo .live-<earlier stamp> > src/aipass/hooks/.live-current` serves it on the next hook call.
+3. If it names another branch's source (prax most often: the bridges import it live, never from a snapshot), restore that file in the same terminal, with git or by hand.
+4. Prove the gate answers again: `echo '{"tool_name":"Read","tool_input":{"file_path":"README.md"},"cwd":"'"$PWD"'"}' | .venv/bin/python src/aipass/hooks/apps/handlers/bridges/claude.py PreToolUse; echo "exit $?"` prints `exit 0`. A `HOOKS BROKEN` text and `exit 2` means it is still down.
+5. The agents need nothing: their next tool call goes through.
+
+A bridge file that is itself half-edited cannot refuse at all on Claude Code and Codex: they run the tool when the hook process dies before answering (the table in [wiring.md](wiring.md#when-a-bridge-breaks)). Edit a bridge only from a terminal, and run step 4 after.
 
 ## Dynamic Dispatch
 

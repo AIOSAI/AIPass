@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: mount.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Mounts the promoted copy of aipass.hooks.apps before a bridge imports anything from it
 # Branch: hooks
 # Layer: apps/handlers/bridges
 # Created: 2026-09-30
-# Modified: 2026-10-28
+# Modified: 2026-11-15
 # =============================================
 
 """The code a hook runs is the PROMOTED copy, never the tree being edited (DPLAN-0356 item 3).
@@ -14,9 +14,11 @@ Loaded BY PATH and stdlib-only: importing it through the package imports the sou
 Snapshots sit beside apps/ so every module's __file__ arithmetic still lands in the real branch.
 """
 
+import contextlib
 import importlib.util
 import os
 import sys
+import time
 
 POINTER = ".live-current"
 PREFIX = ".live-"
@@ -34,6 +36,10 @@ def branch_root(bridge_file: str) -> str:
     for _ in range(4):
         path = os.path.dirname(path)
     return path
+
+
+#: The log medic reads (@trigger's branch watcher reads src/aipass/*/logs/*.log for ERROR lines).
+LIVE_BREAK_LOG = os.path.join(branch_root(__file__), "logs", "bridge.log")
 
 
 def promoted_dir(root: str) -> str | None:
@@ -84,16 +90,29 @@ def mount(root: str) -> str:
     return os.path.basename(snapshot)
 
 
+def _record(log: str, source: str, line: str) -> None:
+    """Append one ERROR line in prax's format: an attempt, never a wait; prax can be what broke."""
+    if "_pytest" in sys.modules and os.path.abspath(log) == LIVE_BREAK_LOG:
+        return  # prax's own test seam: a suite run's line never lands in the live log medic reads
+    try:
+        entry = f"{time.strftime('%Y-%m-%d %H:%M:%S')} | {source} | ERROR | {line}\n"
+        fd = os.open(log, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NONBLOCK, 0o666)
+        try:
+            os.write(fd, entry.encode("utf-8", "backslashreplace"))
+        finally:
+            os.close(fd)
+    except BaseException as exc:  # an attempt: what it raises is said on stderr and goes no further
+        with contextlib.suppress(BaseException):
+            sys.stderr.write(f"[HOOKS] bridge: not recorded in {log}: {type(exc).__name__}: {exc}\n")
+
+
 def mount_or_source(bridge_file: str, tag: str) -> str:
-    """A bridge's mount: a bad promoted copy serves the source tree and says so at ERROR, through prax or stderr."""
+    """A bridge's mount: a bad promoted copy serves the source tree, at ERROR in logs/bridge.log and on stderr."""
     try:
         return mount(branch_root(bridge_file))
     except Exception as exc:  # a bad promoted copy: the source still gates, and says so
         message = f"[HOOKS:{tag}] promoted copy unusable, serving the source tree: {exc}"
-        try:
-            from aipass.prax.apps.modules.logger import system_logger as logger
-
-            logger.error(message)
-        except Exception as err:
-            sys.stderr.write(f"{message} (prax unavailable: {err})\n")
+        with contextlib.suppress(BaseException):
+            sys.stderr.write(message.encode("utf-8", "backslashreplace").decode("utf-8") + "\n")
+        _record(os.path.join(branch_root(bridge_file), "logs", "bridge.log"), f"bridges.{tag}", message)
         return "source (fallback)"

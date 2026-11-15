@@ -112,9 +112,26 @@ A Seed head (the Seed repo's `src/hooks/hooks.md`) fires Claude Code's events it
 | an engine answer in JSON, exit 0 | stdout as is | the document: `decision`, `hookSpecificOutput`, `systemMessage` |
 | plain text, exit 0 | `additionalContext` on SessionStart and UserPromptSubmit, `systemMessage` elsewhere | the document |
 | a block, exit 2 | stdout as is, the reason on stderr, exit 2 | stderr as the reason |
-| an engine that cannot load or raises | `HOOKS BROKEN` on stderr and in `logs/bridge.log`; exit 2 on PreToolUse, else exit 0 and no stdout | a block, or no answer |
+| a payload, mount or engine that cannot load or raises | `HOOKS BROKEN` on stderr, exit 2 on PreToolUse, else exit 0 and no stdout; then the line in `logs/bridge.log` | a block, or no answer |
 
 `seed.py` runs from the source tree and mounts the promoted copy, as every bridge does. The engine resolves its config from the working directory, which Seed sets to the agent's directory: an agent outside an AIPass project gets the gate set only, so no grounding and no identity. Seed's `transcript.jsonl` is its own shape (`who`, `text`, `time`, `compaction`), not Claude's. On `provider: "seed"` the context gauge and the PreCompact snapshot read no fill, `context_window` answers no usage and no model without parsing a line, the session pointer is not written (Seed has no resume), the culture file is injected (Seed reads no AGENTS.md), and cadence counts turns by the file's size, as on every CLI. `drone @hooks verify` reads the Seed file too: no file or no AIPass row is a head not wired (INFO), a missing event row an ERROR naming the cure, a duplicate a WARN, a file Seed would refuse at start an ERROR. A `PostCompact` section with no Claude row is INFO, not an ERROR (`wire_verify.SEED_ONLY_EVENTS`): Claude Code fires PostCompact, but its output never reaches the model, so Claude re-grounds through PostToolUse and the section is wired for Seed only.
+
+---
+
+## When a bridge breaks
+
+A bridge that cannot read its payload, mount, import the engine, or finish a dispatch (any exception, `SystemExit` and `KeyboardInterrupt` included) answers PreToolUse with a refusal and every other event with nothing. The refusal leaves first: Claude and Seed write the reason and exit 2 from a `finally`; Codex and OpenCode write their deny document and flush it. Only then is the break recorded: one ERROR line in prax's format, appended to `logs/bridge.log` with a single `os.write` on an `O_APPEND | O_NONBLOCK` descriptor, no lock and no prax, guarded against any exception. A record that fails says so in one stderr line and changes nothing about the answer. Text that is not UTF-8 (a path the filesystem holds as bytes) is written with backslash escapes, never raised on. The OpenCode plugin (`opencode_plugin.ts`) writes the same file; with `AIPASS_HOME` unset it refuses every tool and puts its line on stderr, since a relative path would land where nothing reads it.
+
+What each CLI does when a PreToolUse hook exits with no answer. Cells marked *run* come from a real session (2026-11-15) whose hook processes were made to exit at start; the rest are the CLI's contract or code:
+
+| CLI | Hook exits 1, nothing on stdout | Exits 2, nothing on stdout | Exits 0 with a deny document |
+|---|---|---|---|
+| Claude Code | runs the tool (*run*) | refuses (hook contract) | refuses (hook contract) |
+| Codex 0.164 | runs the tool, "PreToolUse Failed" (*run*) | runs the tool (*run*) | refuses, "PreToolUse Blocked" (*run*) |
+| OpenCode | refuses: the plugin reads any non-zero exit as broken (`opencode_plugin.ts`, its Node test) | refuses | refuses |
+| Seed | refuses, "is broken: exited 1" (*run*, Seed's own runner) | refuses (*run*) | refuses |
+
+So the bridge code refuses every break it lives to see. A bridge process that dies before it answers (a `SyntaxError` in the bridge file itself, which runs from the source tree; a kill; a missing interpreter) is refused by OpenCode and Seed, and RUN by Claude Code and Codex.
 
 ---
 

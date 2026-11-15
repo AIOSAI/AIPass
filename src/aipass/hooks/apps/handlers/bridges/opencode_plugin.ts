@@ -21,10 +21,12 @@ export default Plugin.define({
     const cwd: string = ctx.location.directory
     const logError = (message: string) => {
       const line = `${new Date().toISOString()} | bridges.opencode_plugin | ERROR | ${message.split("\n")[0]}\n`
+      // Unset, join() would be relative to wherever the server started: a log medic never reads.
+      if (!home) return console.error(`${line.trimEnd()} (not in bridge.log: AIPASS_HOME is not set)`)
       try {
         appendFileSync(join(home, "src", "aipass", "hooks", "logs", "bridge.log"), line)
-      } catch {
-        console.error(line)
+      } catch (e) {
+        console.error(`${line.trimEnd()} (not in bridge.log: ${e})`)
       }
     }
 
