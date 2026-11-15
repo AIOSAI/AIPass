@@ -114,8 +114,8 @@ in [`apps/modules/init_flow.py`](../apps/modules/init_flow.py).
 Scaffolding itself lives in
 [`apps/handlers/init/`](../apps/handlers/init) — `bootstrap.py`,
 `git_auth.py`, `scaffold_manifest.py` — with the template text in
-[`shared/scaffold_content.py`](../shared/scaffold_content.py), which is
-stdlib-only because it loads before drone exists.
+[`shared/scaffold_content.py`](../shared/scaffold_content.py), which imports
+no branch because @spawn loads `shared/` into its own process.
 
 ---
 

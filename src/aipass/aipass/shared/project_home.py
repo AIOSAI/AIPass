@@ -8,19 +8,17 @@
 
 """Project home — AIPASS_HOME detection, path validation, settings content.
 
-One copy per helper for init, new and adopt. Stdlib only: importable before drone/prax exist.
+One copy per helper for init, new and adopt. Logs through prax; no other branch loads at import.
 """
 
 import importlib.util
 import json
-import logging
 import os
 import tempfile
 from pathlib import Path
 
 from aipass.aipass.shared.scaffold_content import agents_md
-
-logger = logging.getLogger(__name__)
+from aipass.prax import logger
 
 
 def is_throwaway_path(path: str | Path) -> bool:
@@ -133,25 +131,21 @@ def merge_local_settings(existing: dict, generated: dict) -> dict:
     return merged
 
 
-def _enroll_project(target: Path) -> bool | None:
-    """Enroll a project in the trusted-project registry (DPLAN-0244).
+def _enroll_project(target: Path) -> bool:
+    """Enroll a project in the trusted-project registry: True enrolled, False skipped (throwaway) or refused.
 
-    True enrolled, False skipped (throwaway path) or refused, None when hooks' registry
-    cannot be imported (a clone before install), so the caller can say 'unavailable'."""
+    hooks is imported here, not at the top, so @spawn's process never loads it; it ships in the same
+    wheel, so an ImportError is a broken install and raises."""
     if is_throwaway_path(target):
         logger.info("Skipping trust enrollment for throwaway path: %s", target)
         return False
-    try:
-        from aipass.hooks.apps.modules.door_trust_registry import enroll
+    from aipass.hooks.apps.modules.door_trust_registry import enroll
 
-        if enroll(str(target)):
-            logger.info("Enrolled project in trust registry: %s", target)
-            return True
-        logger.warning("Trust enrollment failed for %s", target)
-        return False
-    except ImportError as exc:
-        logger.info("Trust registry unavailable, skipping enrollment: %s", exc)
-        return None
+    if enroll(str(target)):
+        logger.info("Enrolled project in trust registry: %s", target)
+        return True
+    logger.warning("Trust enrollment failed for %s", target)
+    return False
 
 
 def not_enrolled_note(target: Path) -> str:

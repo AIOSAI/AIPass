@@ -10,11 +10,10 @@
 Init Bootstrap Handler - PRIVATE implementation
 
 Projects are not citizens (no .trinity/); identity lives in the registry JSON.
-Init is re-runnable: existing files are skipped, not errors. No module/prax/cli imports.
+Init is re-runnable: existing files are skipped, not errors. Logs through prax; no module/cli imports.
 """
 
 import json
-import logging
 import re
 import shutil
 import uuid
@@ -35,8 +34,7 @@ from aipass.aipass.shared.project_home import (
     is_throwaway_path,
 )
 from aipass.aipass.shared.registry_discovery import registries_in
-
-logger = logging.getLogger(__name__)
+from aipass.prax import logger
 
 _STALE_MANAGED_FILES: list[Path] = [
     Path(".aipass") / "aipass_global_prompt.md",
@@ -424,7 +422,6 @@ def init_project(
     registry_id = str(uuid.uuid4())
     today = date.today().isoformat()
     created = []
-    trusted: bool | None = False
     aipass_home = _detect_aipass_home()
 
     registry_filename = f"{name}_REGISTRY.json"
@@ -467,7 +464,7 @@ def init_project(
         if template.is_file():
             sm.write_text_lf(hooks_json_path, template.read_text(encoding="utf-8"))
             created.append(str(hooks_json_path))
-            trusted = _enroll_project(target)
+            _enroll_project(target)
         else:
             logger.info("hooks template not found at %s — skipping", template)
 
@@ -510,10 +507,6 @@ def init_project(
         created.append(str(prep_path))
     created.extend(str(target / rel) for rel in write_switch_pair(target))
     notes: list[str] = []
-    if trusted is None:
-        notes.append(
-            f"Trust registry unavailable — not enrolled. Run 'aipass trust {target}' once AIPass is installed."
-        )
     if shared_skills_state(target)["link"] == LINK_STATE_MISSING:
         note = link_skills(target)
         notes.extend([note] if note else [])

@@ -16,26 +16,6 @@
       "reason": "Doctor reads system files (registry, passport) directly for health-check diagnosis — pure reads only, no mutations. Using a handler adds indirection without benefit for diagnostic reads."
     },
     {
-      "file": "apps/handlers/init/bootstrap.py",
-      "standard": "json_structure",
-      "reason": "bootstrap.py is Pure Python only (no module/prax/cli imports) by design — it must work during initial project setup before any AIPass services exist."
-    },
-    {
-      "file": "apps/handlers/init/bootstrap.py",
-      "standard": "log_visibility",
-      "reason": "bootstrap.py is Pure Python only (no module/prax/cli imports) by design — stdlib getLogger is correct here. prax system_logger requires AIPass to be installed, which hasn't happened at bootstrap time."
-    },
-    {
-      "file": "apps/handlers/init/scaffold_manifest.py",
-      "standard": "json_structure",
-      "reason": "Imported BY bootstrap.py, so it inherits bootstrap's Pure Python only contract — importing json_handler here would pull prax into the first-install path bootstrap exists to survive. It reads and writes one JSON document (the scaffold manifest) with stdlib json; every caller that logs is a module above it."
-    },
-    {
-      "file": "apps/handlers/init/scaffold_manifest.py",
-      "standard": "log_visibility",
-      "reason": "Same inheritance as bootstrap.py: prax system_logger requires AIPass to be installed, and this module is on the path that runs before that is true. stdlib getLogger is correct here."
-    },
-    {
       "file": "apps/modules/doctor.py",
       "standard": "introspection",
       "reason": "aipass is binary-invoked: aipass doctor runs the command; introspection via --info"
@@ -86,16 +66,6 @@
       "reason": "Thin bootstrap orchestrator — preps the target/project dir (mkdir) immediately before shelling out to git clone / setup.sh / aipass init. Pre-subprocess dir prep, not business file ops; a handler adds indirection for 2 mkdir calls in a linear flow (same pattern as init_flow/doctor)."
     },
     {
-      "file": "shared/json_ops.py",
-      "standard": "log_visibility",
-      "reason": "pre-infra leaf — stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
-    },
-    {
-      "file": "shared/json_ops.py",
-      "standard": "trigger",
-      "reason": "pre-infra leaf — stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
-    },
-    {
       "file": "apps/aipass.py",
       "standard": "logged_fallback",
       "lines": [266],
@@ -128,7 +98,7 @@
     {
       "file": "apps/handlers/init/scaffold_manifest.py",
       "standard": "logged_fallback",
-      "lines": [164],
+      "lines": [156],
       "reason": "read_ignore: a .updateignore that does not exist means no ignore patterns, which is the answer []. A file that is there but unreadable raises UpdateIgnoreUnreadable on the next line (fleet green leg 5), so its callers (bootstrap.update_project:418, doctor scaffold group:1098) never read an unreadable file as an empty one. Re-read in fleet green leg 7 (aipass's decision). Re-pinned 2026-10-21 (DPLAN-0418 wave 2: docstring closings joined, the line moved up); 2026-10-27 (FPLAN-0705: trusted_hashes and the managed key moved it down)."
     },
     {
@@ -160,22 +130,6 @@
       "standard": "through_the_command",
       "lines": [32],
       "reason": "Ruling (c), fleet green leg 7: _doctor_wire's public callers, run_doctor --fix (fix_provider_settings) and check_provider_manifest with a yes at the prompt, write the provider settings (~/.claude/settings.json); its verify, merge and reconcile rows are pinned on a tmp settings file with the wire stubbed, and the FPLAN-0646 ask tests run through run_doctor and handle_command, reading the module only for its message constants. The module is private because the CLI never routes to it (discover_modules skips it). Re-pinned 2026-10-15 (FPLAN-0646: import re moved it 30 -> 31)."
-    },
-    {
-      "file": "shared/project_home.py",
-      "standard": "imports",
-      "reason": "2026-10-08, devpulse's ruling (fleet green, shared/ rows): shared/ is the pre-install library. init and doctor reach it from a fresh clone before aipass.prax can be imported, and @spawn imports it into its own process (docs/shared_contract.md), so the prax logger cannot be a dependency here. Stdlib-only by contract; tests/test_shared_bootstrap_safety.py guards it."
-    },
-    {
-      "file": "shared/json_ops.py",
-      "standard": "imports",
-      "reason": "2026-10-08, devpulse's ruling (fleet green, shared/ rows): shared/ is the pre-install library. init and doctor reach it from a fresh clone before aipass.prax can be imported, and @spawn imports it into its own process (docs/shared_contract.md), so the prax logger cannot be a dependency here. Stdlib-only by contract; tests/test_shared_bootstrap_safety.py guards it."
-    },
-    {
-      "file": "shared/project_home.py",
-      "standard": "log_visibility",
-      "lines": [23],
-      "reason": "2026-10-08, devpulse's ruling (fleet green, shared/ rows): the stdlib logging.getLogger on line 23 is the right logger for a pre-install file. aipass.prax is not importable when init first reads the project home, and @spawn imports this module into its own process."
     },
     {
       "file": "shared/scaffold_content.py",
@@ -369,19 +323,13 @@
     {
       "file": "shared/project_home.py",
       "standard": "fallback",
-      "lines": [152],
-      "reason": "shared/ is the stdlib-only pre-install library (docs/shared_contract.md): aipass.hooks is not importable from a fresh clone before install, so this import guard is necessary. None is the documented 'unavailable' answer, distinct from a refusal. init update shows it as the warning 'Trust registry unavailable - not enrolled. Run aipass trust <target> once AIPass is installed' (init_flow.py), and init_project now puts the same line in its notes (bootstrap.py). new_project and adopt still drop the None (handlers/new_project, not this lane)."
-    },
-    {
-      "file": "shared/project_home.py",
-      "standard": "fallback",
-      "lines": [202],
+      "lines": [196],
       "reason": "find_fenceless_projects: a corrupt settings.local.json is listed as fenceless, not skipped, so doctor shows a WARN row 'instruction fence: <project>' with the cure 'Run aipass init update <project>'. That command now refuses and names the corrupt file ('<path> is unusable (...): fix or move it aside', bootstrap._load_json). Doctor only reads; the file is left untouched."
     },
     {
       "file": "apps/handlers/init/scaffold_manifest.py",
       "standard": "fallback",
-      "lines": [99],
+      "lines": [91],
       "reason": "read_manifest: a corrupt manifest reads as no recorded hashes, the safe direction. decide() then keeps every file that differs from the template ('unknown provenance'), so an update never overwrites one. Doctor's Scaffold group shows the WARN row 'scaffold manifest  not stamped'. Raising here would crash doctor, which catches only UpdateIgnoreUnreadable (doctor.py is agent A's lane); the better cure, a ManifestUnreadable doctor shows as a row, is HELD."
     },
     {
@@ -415,6 +363,21 @@
       "standard": "fallback",
       "lines": [86],
       "reason": "Not on the audit list but flagged in this file. read_readme_at returns None after an ERROR log naming the path. Its one caller, apps/modules/read.py _render_readme, prints the error 'Could not read <path>.' to the person and logs ERROR, so a None never renders as an empty README."
+    },
+    {
+      "file": "apps/handlers/init/bootstrap.py",
+      "standard": "json_structure",
+      "reason": "bootstrap.py is the init/update handler: its operation is recorded once by its module: init_flow.py logs aipass_init and aipass_init_update through json_handler with the handler's whole result; a handler log_operation would record the same run twice."
+    },
+    {
+      "file": "apps/handlers/init/scaffold_manifest.py",
+      "standard": "json_structure",
+      "reason": "scaffold_manifest.py is a step of bootstrap's init/update: its operation is recorded once by its module: init_flow.py logs aipass_init and aipass_init_update through json_handler with the handler's whole result; a handler log_operation would record the same run twice."
+    },
+    {
+      "file": "shared/json_ops.py",
+      "standard": "trigger",
+      "reason": "backup_json is one step of @spawn's update (spawn/apps/handlers/update_ops.py), which records the run itself (update_executed); the event belongs to the caller that knows what was backed up and why, not to the shared helper."
     }
   ]
 }

@@ -3,7 +3,7 @@
 # Description: Tests for aipass init — scaffold, update, agent routes
 # Version: 2.1.0
 # Created: 2026-04-16
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/init_flow.py and the handlers it drives."""
@@ -236,27 +236,6 @@ class TestInitUpdateRegistrySync:
         ):
             rc = _init_update([str(tmp_path)])
         assert rc == 0
-
-    def test_an_unavailable_trust_registry_is_said_not_skipped(self, tmp_path: Path) -> None:
-        """trust_enrolled None (hooks' registry could not be imported) is warned with
-        the command that enrolls later; a refusal (False) stays silent as before.
-
-        Mutant: the `trust_enrolled is None` warning arm deleted -> red.
-        """
-        with (
-            patch(
-                "aipass.aipass.apps.handlers.init.bootstrap.update_project",
-                return_value={"updated_files": [], "already_current": [], "trust_enrolled": None},
-            ),
-            patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
-            patch("subprocess.run", return_value=MagicMock(returncode=0, stdout="", stderr="")),
-            patch(f"{_MOD_UPDATE}.warning") as mock_warning,
-            patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
-        ):
-            rc = _init_update([str(tmp_path)])
-        assert rc == 0
-        warned = [str(c) for c in mock_warning.call_args_list]
-        assert any("aipass trust" in w and "unavailable" in w for w in warned), warned
 
 
 class TestInitUpdateGitAuth:

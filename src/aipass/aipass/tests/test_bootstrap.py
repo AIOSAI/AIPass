@@ -691,8 +691,8 @@ def test_init_repoints_a_venv_link_left_dangling_by_a_moved_home(tmp_path, monke
     assert (target / ".venv").resolve() == (host / ".venv").resolve()
 
 
-def test_init_says_when_the_trust_registry_cannot_be_imported(tmp_path, monkeypatch):
-    """Mutant: init_project drops _enroll_project's None again (init said nothing) -> red."""
+def test_init_raises_when_the_trust_registry_cannot_be_imported(tmp_path, monkeypatch):
+    """Mutant: project_home's ImportError arm restored (init notes and carries on) -> red."""
     host = _host(tmp_path, {".aipass/project_hooks.json": "{}"})
     monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
     target = tmp_path / "proj"
@@ -700,9 +700,8 @@ def test_init_says_when_the_trust_registry_cannot_be_imported(tmp_path, monkeypa
     monkeypatch.setattr(project_home, "is_throwaway_path", lambda path: str(path) != str(target.resolve()))
     monkeypatch.delattr(door_trust_registry, "enroll")  # the import inside _enroll_project now raises ImportError
 
-    result = init_project(target, project_name="untrusted")
-
-    assert f"Trust registry unavailable — not enrolled. Run 'aipass trust {target}'" in " ".join(result["notes"])
+    with pytest.raises(ImportError, match="enroll"):
+        init_project(target, project_name="untrusted")
 
 
 def _refuse_skills_symlink(monkeypatch) -> None:

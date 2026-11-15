@@ -8,16 +8,16 @@
 
 """Scaffold manifest: which AIPass version wrote which file, and its hash. Conffile rule (dpkg's):
 overwrite a managed file only when absent or unedited, else write ``<name>.aipass-new`` beside it.
-Keys are a contract (@hooks release_notice reads ``aipass_version``); pure Python, bootstrap imports it."""
+Keys are a contract (@hooks release_notice reads ``aipass_version``); bootstrap imports it."""
 
 import fnmatch
 import hashlib
 import json
-import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+import aipass
+from aipass.prax import logger
 
 MANIFEST_REL: Path = Path(".aipass") / "scaffold_manifest.json"
 
@@ -70,16 +70,8 @@ def hash_file(path: Path) -> str | None:
 
 
 def installed_version() -> str:
-    """The AIPass version running right now, or 'unknown' if it cannot be read.
-
-    Imported lazily: the plan must still compute where the package will not import."""
-    try:
-        import aipass
-
-        return str(getattr(aipass, "__version__", "unknown"))
-    except Exception as exc:  # pragma: no cover - defensive, package always imports here
-        logger.info("[scaffold] version unreadable: %s", exc)
-        return "unknown"
+    """The AIPass version running right now: this module is inside the package it reports."""
+    return aipass.__version__
 
 
 def manifest_path(target: Path) -> Path:

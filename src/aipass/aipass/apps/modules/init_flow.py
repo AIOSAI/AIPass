@@ -3,7 +3,7 @@
 # Description: aipass init — project scaffold, scaffold update, first agent
 # Version: 2.1.0
 # Created: 2026-04-16
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -292,9 +292,6 @@ def _handle_init_update(args: list[str]) -> int:
     try:
         if result.get("trust_enrolled"):
             success("Enrolled in trust registry — hooks active.")
-        elif "trust_enrolled" in result and result["trust_enrolled"] is None:
-            # None is project_home's 'registry unavailable', distinct from a refusal.
-            warning(f"Trust registry unavailable — not enrolled. Run 'aipass trust {target}' once AIPass is installed.")
         from aipass.aipass.apps.modules.install import _check_and_fix_owner
 
         _check_and_fix_owner(target)

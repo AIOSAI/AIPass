@@ -8,14 +8,12 @@
 
 """Shared JSON operations — deep merge and backup utilities."""
 
-# Stdlib only: importable before drone/prax exist.
-import logging
 import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from aipass.prax import logger
 
 
 def deep_merge(template_data: Any, existing_data: Any) -> Any:

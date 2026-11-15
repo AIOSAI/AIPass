@@ -85,7 +85,7 @@ aipass/
 │   │   └── telegram_readiness.py.disabled
 │   ├── integrations/              # placeholder, README only
 │   └── plugins/                   # placeholder
-├── shared/                        # stdlib-only, loads pre-drone
+├── shared/                        # no branch but prax at import (spawn loads it)
 │                                  #   json_ops, project_home, registry_discovery, scaffold_content
 ├── docs/                          # README depth, one page per group
 ├── tests/                         # test_*.py per module + conftest.py
@@ -101,7 +101,7 @@ aipass/
 # Integration
 
  - Depends on: @drone (routing), @spawn (agent creation, registry sync, identity repair), @hooks (trust registry, verify, smoke), @prax (logging), @trigger (soft, degrades), pytest, the CLI tools.
- - Serves humans. Fleet importers: @spawn, three `shared/` modules (stdlib-only by contract, docs/shared_contract.md); @api, `apps/modules/new_project` (the phone's project door).
+ - Serves humans. Fleet importers: @spawn, three `shared/` modules (no branch but prax at import, docs/shared_contract.md); @api, `apps/modules/new_project` (the phone's project door).
  - Hands the install to devpulse through `devpulse/dropbox/install_report.json`; setup.sh's items arrive via `<home>/.aipass/setup_attention.txt`.
 
 # Working habits

@@ -394,9 +394,9 @@ def test_create_project_refuses_without_git_identity_before_building(host_env, m
     enroll.assert_not_called()
 
 
-@pytest.mark.parametrize("enrolled", [None, False, True])
+@pytest.mark.parametrize("enrolled", [False, True])
 def test_a_project_the_trust_registry_did_not_take_says_so_in_its_notes(host_env, monkeypatch, tmp_path, enrolled):
-    """Mutant: _enroll_project's answer ignored again -> a None/False enrolment leaves no note -> red."""
+    """Mutant: _enroll_project's answer ignored again -> a False enrolment leaves no note -> red."""
     monkeypatch.chdir(host_env)
     home = tmp_path / "home"
     (home / ".aipass").mkdir(parents=True)

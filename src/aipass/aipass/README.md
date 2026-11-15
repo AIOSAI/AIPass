@@ -111,7 +111,7 @@ binary, install and point;
 and `provider_reconcile.py` for the provider settings, with `settings_backup.py`
 for the backup and receipt each of their writes takes first; `opencode_cli.py`
 for the OpenCode rows; `help_flag.py`, `json/` and `ui/` for the
-plumbing. `shared/` is a separate contract — stdlib-only, because other
+plumbing. `shared/` is a separate contract — no branch but prax at import, because other
 branches import it.
 
 The directory tree lives in the branch prompt, where it is re-derived from the

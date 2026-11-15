@@ -678,9 +678,9 @@ class TestContractorMode:
         assert result["gitignore_action"] == "untouched"
         enroll.assert_called_once_with(client_repo.resolve())
 
-    @pytest.mark.parametrize("enrolled", [None, False, True])
+    @pytest.mark.parametrize("enrolled", [False, True])
     def test_an_enrolment_that_did_not_take_is_a_note(self, client_repo, tmp_path, enrolled):
-        """Mutant: _enroll_project's answer ignored -> a None/False enrolment leaves no note -> red."""
+        """Mutant: _enroll_project's answer ignored -> a False enrolment leaves no note -> red."""
         home = _fake_home(tmp_path)
         with (
             patch("aipass.aipass.apps.handlers.new_project.adopt._detect_aipass_home", return_value=str(home)),

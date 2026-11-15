@@ -3,7 +3,7 @@
 # Description: Tests for trust CLI commands, init enrollment, setup.sh enrollment
 # Version: 1.2.6
 # Created: 2026-07-15
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/trust.py and the handlers it drives."""
@@ -316,13 +316,8 @@ def test_update_project_reports_trust_enrolled(tmp_path, monkeypatch):
     assert result["trust_enrolled"] is True
 
 
-def test_update_project_reports_none_when_the_trust_registry_cannot_be_imported(tmp_path, monkeypatch):
-    """A re-enrol with hooks' door unimportable (a clone before install) reports None,
-    not the False of a refused enrollment, so the receipt can say which it was.
-    The door's enroll is removed at the edge; _enroll_project's lazy import fails.
-
-    Mutant: project_home's ImportError arm returns False again -> red.
-    """
+def test_update_project_raises_when_the_trust_registry_cannot_be_imported(tmp_path, monkeypatch):
+    """Mutant: project_home's ImportError arm restored (a None receipt, no raise) -> red."""
     target = tmp_path / "noregproj"
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
@@ -350,9 +345,8 @@ def test_update_project_reports_none_when_the_trust_registry_cannot_be_imported(
     )
     monkeypatch.delattr(door_trust_registry, "enroll")
 
-    result = update_project(target)
-
-    assert result["trust_enrolled"] is None
+    with pytest.raises(ImportError, match="enroll"):
+        update_project(target)
 
 
 def test_prune_removes_stale_entries(tmp_path):
