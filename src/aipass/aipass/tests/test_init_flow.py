@@ -3,7 +3,7 @@
 # Description: Tests for aipass init_flow Phase 3
 # Version: 1.3.0
 # Created: 2026-04-16
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/init_flow.py and the handlers it drives."""

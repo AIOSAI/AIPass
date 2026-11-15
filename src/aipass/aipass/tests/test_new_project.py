@@ -3,7 +3,7 @@
 # Description: Tests for aipass new — project creation handler
 # Version: 1.5.1
 # Created: 2026-07-17
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/new_project/__init__.py and apps/modules/new_project.py."""

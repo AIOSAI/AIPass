@@ -3,7 +3,7 @@
 # Description: Tests for trust CLI commands, init enrollment, setup.sh enrollment
 # Version: 1.2.6
 # Created: 2026-07-15
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/trust.py and the handlers it drives."""

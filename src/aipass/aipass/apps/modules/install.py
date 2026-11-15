@@ -3,7 +3,7 @@
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + handoff)
 # Version: 1.5.3
 # Created: 2026-07-05
-# Modified: 2026-11-01
+# Modified: 2026-11-14
 # =============================================
 
 """
@@ -146,7 +146,7 @@ def acquire_install_lock(home: Path, _retry: bool = True) -> Path | None:
     except FileExistsError:
         logger.info("[install] install lock %s already held, inspecting holder", lock)
         holder_pid = _lock_holder_pid(lock)
-        # Only a holder PROVEN dead (False) is taken over; unknown (None) is left alone.
+        # Only a holder PROVEN dead (False) is taken over; no readable pid (None) is left alone.
         alive = _pid_alive(int(holder_pid)) if holder_pid else None
         if _retry and alive is False:
             if not _clear_stale_lock(lock, holder_pid):
@@ -154,8 +154,6 @@ def acquire_install_lock(home: Path, _retry: bool = True) -> Path | None:
             # One takeover only, so two racing installs cannot ping-pong clearing each other.
             return acquire_install_lock(home, _retry=False)
         holder = f", held by pid {holder_pid}" if holder_pid else ""
-        if holder_pid and alive is None:
-            holder += f" - could not tell whether pid {holder_pid} is alive"
         error(
             f"REFUSED: another install of {home} is already running "
             f"(lock: {lock}{holder}). "

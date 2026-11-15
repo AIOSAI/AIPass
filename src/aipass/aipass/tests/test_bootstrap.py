@@ -3,7 +3,7 @@
 # Description: Tests for init bootstrap handler (DPLAN-0164)
 # Version: 1.5.0
 # Created: 2026-05-04
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py and the init/update flows it drives."""

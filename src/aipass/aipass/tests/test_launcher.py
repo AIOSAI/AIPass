@@ -3,7 +3,7 @@
 # Description: Tests for the repo-root ./aipass cold-clone launcher
 # Version: 1.1.0
 # Created: 2026-07-05
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for the repo-root ./aipass launcher (bash), which forwards to apps/aipass.py once installed."""

@@ -3,7 +3,7 @@
 # Description: Tests for aipass doctor: the command, the run and the provider checks
 # Version: 1.9.0
 # Created: 2026-04-16
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/doctor.py and apps/modules/_doctor_wire.py: the run and the provider checks."""

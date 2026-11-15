@@ -3,7 +3,7 @@
 # Description: Tests for doctor's system detection and progress helpers
 # Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/system_detect/system_detector.py and apps/handlers/ui/progress.py."""

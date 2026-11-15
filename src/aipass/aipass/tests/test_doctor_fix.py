@@ -3,7 +3,7 @@
 # Description: Tests for doctor --fix remediation report (DPLAN-0177 Phase 2)
 # Version: 1.2.1
 # Created: 2026-05-15
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/_doctor_fix.py."""

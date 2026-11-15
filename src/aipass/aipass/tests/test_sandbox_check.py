@@ -3,7 +3,7 @@
 # Description: Tests for sandbox prerequisite checker and doctor integration
 # Version: 1.2.0
 # Created: 2026-06-10
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/sandbox_check/sandbox_checker.py and the doctor integration it drives."""

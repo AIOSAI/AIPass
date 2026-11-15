@@ -3,7 +3,7 @@
 # Description: Pins for *_REGISTRY.json discovery
 # Version: 1.2.2
 # Created: 2026-08-31
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for shared/registry_discovery.py."""

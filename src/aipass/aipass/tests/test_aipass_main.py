@@ -3,7 +3,7 @@
 # Description: Tests for aipass.py entry point / CLI main
 # Version: 1.4.5
 # Created: 2026-05-12
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/aipass.py and the handlers it drives."""

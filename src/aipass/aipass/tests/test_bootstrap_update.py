@@ -3,7 +3,7 @@
 # Description: Tests for update_project: the plan, stamp-only, the retrofit, seeds and cleanup
 # Version: 1.6.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py: update_project and the plans it reads."""

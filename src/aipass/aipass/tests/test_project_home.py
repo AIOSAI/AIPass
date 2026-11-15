@@ -3,7 +3,7 @@
 # Description: Tests for shared/project_home.py — instruction-file ancestor fence helpers
 # Version: 1.4.0
 # Created: 2026-07-31
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for shared/project_home.py and the instruction-file ancestor-fence helpers it drives."""

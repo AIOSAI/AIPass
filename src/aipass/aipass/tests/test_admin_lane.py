@@ -3,7 +3,7 @@
 # Description: Tests for the admin-lane doctor row (DPLAN-0319 train)
 # Version: 1.1.4
 # Created: 2026-08-28
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/admin_lane.py."""

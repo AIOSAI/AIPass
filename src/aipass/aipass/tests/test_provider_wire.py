@@ -3,7 +3,7 @@
 # Description: Tests for provider_wire — hook merges per CLI, backup and receipt first; doctor's codex, opencode rows
 # Version: 1.12.0
 # Created: 2026-08-01
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/provider_wire.py and the manifest-driven hook merge it drives."""

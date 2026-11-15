@@ -3,7 +3,7 @@
 # Description: Tests for the init git-auth provisioning handler (DPLAN-0281 P2)
 # Version: 1.2.2
 # Created: 2026-08-04
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/handlers/init/git_auth.py."""

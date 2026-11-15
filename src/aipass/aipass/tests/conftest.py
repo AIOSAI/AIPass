@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for aipass tests — json and profile redirects, console width, command state
 # Version: 1.7.0
 # Created: 2026-05-04
-# Modified: 2026-10-28
+# Modified: 2026-11-14
 #
 # CHANGELOG (Max 5 entries):
 #   - v1.7.0 (2026-10-28): no_real_opencode keeps doctor's OpenCode rows off the real binary and config (FPLAN-0721)

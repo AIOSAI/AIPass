@@ -3,7 +3,7 @@
 # Description: Tests for aipass install — one-command bootstrap (DPLAN-0233)
 # Version: 1.4.3
 # Created: 2026-07-05
-# Modified: 2026-11-02
+# Modified: 2026-11-14
 # =============================================
 
 """Tests for apps/modules/install.py (DPLAN-0233) and the install command it drives."""
@@ -221,23 +221,22 @@ class TestInstallLock:
 
         assert "999999999" in lock.read_text(encoding="utf-8")
 
-    def test_holder_of_unknown_liveness_is_never_stolen(self, tmp_path: Path) -> None:
-        """A probe that cannot tell (None) is not a dead holder: the lock stays, and the refusal says so.
+    def test_holder_with_no_readable_pid_is_never_stolen(self, tmp_path: Path) -> None:
+        """A lock naming no pid is not a dead holder: the lock stays, and the refusal names it.
 
-        Unknown is its own answer, never a guess of "alive".
         Mutant: `if _retry and alive is False:` -> `if _retry and not alive:` -> red.
         """
         home = tmp_path / "AIPass"
         lock = install_lock_path(home)
         lock.parent.mkdir(parents=True, exist_ok=True)
-        lock.write_text("999999999 2026-09-07T00:00:00+00:00\n", encoding="utf-8")
+        lock.write_text("garbage\n", encoding="utf-8")
 
-        with patch(f"{_MOD}._pid_alive", return_value=None), patch(f"{_MOD}.error") as err, patch(_BUS) as bus:
+        with patch(f"{_MOD}.error") as err, patch(_BUS) as bus:
             assert acquire_install_lock(home) is None
 
         bus.fire.assert_not_called()
-        assert "999999999" in lock.read_text(encoding="utf-8")
-        assert "could not tell whether pid 999999999 is alive" in err.call_args[0][0]
+        assert lock.read_text(encoding="utf-8") == "garbage\n"
+        assert f"(lock: {lock})" in err.call_args[0][0]
 
 
 class TestCloneRepo:
