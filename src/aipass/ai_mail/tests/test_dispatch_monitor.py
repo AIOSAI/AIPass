@@ -935,10 +935,7 @@ def test_env_vars_set_correctly(monkeypatch, main_argv, tmp_path):
 
     venv_dir = "bin"
     path_entries = captured_env.get("PATH", "").split(os.pathsep)
-    venv_in_path = any(
-        entry.endswith(os.sep + ".venv" + os.sep + venv_dir) or entry.endswith("/.venv/" + venv_dir)
-        for entry in path_entries
-    )
+    venv_in_path = any(entry.endswith("/.venv/" + venv_dir) for entry in path_entries)
     assert venv_in_path, f"Expected .venv/{venv_dir} in PATH entries: {path_entries}"
 
 
@@ -1135,8 +1132,5 @@ def test_env_vars_setup(monkeypatch, main_argv, tmp_path):
 
     venv_dir = "bin"
     path_entries = captured_env.get("PATH", "").split(os.pathsep)
-    venv_in_path = any(
-        entry.endswith(os.sep + ".venv" + os.sep + venv_dir) or entry.endswith("/.venv/" + venv_dir)
-        for entry in path_entries
-    )
+    venv_in_path = any(entry.endswith("/.venv/" + venv_dir) for entry in path_entries)
     assert venv_in_path, f"Expected .venv/{venv_dir} in PATH entries: {path_entries}"
