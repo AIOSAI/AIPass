@@ -13,7 +13,7 @@ shelf is committed — write it as if it ships.
 |---|---|
 | [rollover_pipeline.md](rollover_pipeline.md) | The rollover engine: the pipeline, normalization, the safety valve, the newest-first guardrail, the one definition of the fleet and the external tier |
 | [trinity_standard.md](trinity_standard.md) | The entry shape and the write gate: the closed field shape, `unknown_field` and `field_over_cap`, authored-versus-carried, the char caps, the renderer and the per-branch receipt |
-| [trinity_push.md](trinity_push.md) | The push lane: vectorize → verify → prune, what counts as non-canonical, todos to the backlog, the scope and the two gates |
+| [trinity_push.md](trinity_push.md) | The push lane: vectorize → verify → prune, what counts as non-canonical, todos to the backlog, the scope and the three gates |
 | [todos_and_backlog.md](todos_and_backlog.md) | The sticky-note pad and its backlog file — the roll, the restore, and why a non-canonical restore is refused |
 | [todos_v2_shape_contract.md](todos_v2_shape_contract.md) | The todos v2 shape contract in full: the entry rules, the tab string, the `next #N` derivation, the backlog schema and the high-water floor |
 | [config_verbs.md](config_verbs.md) | The rollover limit verbs, the keep-count ceiling computed from the file budgets, and the `--json` machine surface |

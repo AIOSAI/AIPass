@@ -107,7 +107,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 |---|---|
 | [docs/rollover_pipeline.md](docs/rollover_pipeline.md) | The rollover engine: the pipeline, normalization, the safety valve, the newest-first guardrail, and the one definition of the fleet |
 | [docs/trinity_standard.md](docs/trinity_standard.md) | The entry shape and the write gate: the closed field shape, the refusal reasons, authored-versus-carried, the char caps and the per-branch receipt |
-| [docs/trinity_push.md](docs/trinity_push.md) | The push lane: vectorize → verify → prune, what counts as non-canonical, the scope and the two gates |
+| [docs/trinity_push.md](docs/trinity_push.md) | The push lane: vectorize → verify → prune, what counts as non-canonical, the scope and the three gates |
 | [docs/todos_and_backlog.md](docs/todos_and_backlog.md) | The sticky-note pad, the backlog file, the roll and the restore |
 | [docs/todos_v2_shape_contract.md](docs/todos_v2_shape_contract.md) | The todos v2 shape contract in full — the field-by-field contract other branches build against |
 | [docs/config_verbs.md](docs/config_verbs.md) | The rollover limit verbs, the keep-count ceiling, and the `--json` machine surface |

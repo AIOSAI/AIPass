@@ -20,11 +20,13 @@ import json
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
 from aipass.memory.apps.handlers import write_fence
+from aipass.memory.apps.handlers.cli import caller_gate
 from aipass.memory.apps.handlers.json import entry_limits
 from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.rollover import orchestrator
@@ -886,6 +888,10 @@ class TestRefreshIsScopable:
 class TestTheFleetGate:
     """A fleet write needs --confirm; a dry-run and a single branch do not."""
 
+    @pytest.fixture(autouse=True)
+    def _memory_seat(self, monkeypatch):
+        monkeypatch.setattr(caller_gate, "verified_caller", lambda: ("@memory", False))
+
     def test_a_bare_fleet_push_is_refused(self, monkeypatch):
         ran = []
         monkeypatch.setattr(push_module, "_run_push", lambda *a, **k: ran.append(a))
@@ -935,6 +941,60 @@ class TestTheFleetGate:
         """`push` fired a fleet-wide per_branch reset from a bare word. It must not again."""
         source = (_MEMORY_ROOT / "apps" / "memory.py").read_text(encoding="utf-8")
         assert 'route_command("rollover", ["push"], modules)' not in source
+
+
+class TestTheCallerGate:
+    """A writing push names another branch, or the fleet, only from @memory's seat or the verified admin's."""
+
+    @pytest.fixture
+    def push(self, monkeypatch):
+        ran, logged = [], []
+        monkeypatch.setattr(push_module, "_run_push", lambda branch, dry: ran.append((branch, dry)))
+        monkeypatch.setattr(caller_gate.json_handler, "log_operation", lambda op, data, **k: logged.append(data))
+
+        def as_caller(caller, admin, *args):
+            monkeypatch.setattr(caller_gate, "verified_caller", lambda: (caller, admin))
+            push_module.handle_command("push", list(args))
+            return ran
+
+        return SimpleNamespace(as_caller=as_caller, logged=logged, ran=ran)
+
+    @pytest.mark.parametrize(
+        ("caller", "admin", "args"),
+        [
+            ("@canary", False, ("--branch", "@canary")),
+            ("@memory", False, ("--branch", "@canary")),
+            ("@devpulse", True, ("--branch", "@canary")),
+            ("@devpulse", True, ("--confirm",)),
+            ("@seed", False, ("--branch", "@canary", "--dry-run")),
+            ("", False, ("--dry-run",)),
+        ],
+    )
+    def test_its_own_seat_memory_the_admin_and_any_dry_run_pass(self, push, caller, admin, args):
+        assert push.as_caller(caller, admin, *args) != []
+
+    @pytest.mark.parametrize(
+        ("caller", "args", "sentence"),
+        [
+            ("@seed", ("--branch", "@canary"), "not @seed - run it from inside @canary's own directory"),
+            ("", ("--branch", "@canary"), "not an unverified caller - run it from inside @canary's own directory"),
+            ("@canary", ("--confirm",), "not @canary - mail @devpulse, whose lane the fleet push is"),
+        ],
+    )
+    def test_another_seat_is_refused_non_zero_and_nothing_is_pushed(self, push, capsys, caller, args, sentence):
+        assert push.as_caller(caller, False, *args) == []
+        assert sentence in " ".join(capsys.readouterr().err.split())
+        assert push.logged[-1]["caller"] == (caller or "an unverified caller")
+        assert sentence in push.logged[-1]["refused"]
+
+    def test_a_dark_rail_refuses_rather_than_passes(self, push, monkeypatch, capsys):
+        def dark():
+            raise ImportError("no ai_mail")
+
+        monkeypatch.setattr(caller_gate, "verified_caller", dark)
+        push_module.handle_command("push", ["--branch", "@canary"])
+        assert "verified-caller rail is unavailable (ImportError: no ai_mail)" in capsys.readouterr().err
+        assert push.ran == []
 
 
 class TestTodosMoveToTheBacklog:

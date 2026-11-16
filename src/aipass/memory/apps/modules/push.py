@@ -3,7 +3,7 @@
 # Description: The trinity push lane — dry-run reporting and gated execution
 # Version: 1.2.0
 # Created: 2026-08-27
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Trinity Push Module
@@ -20,6 +20,7 @@ from rich import box
 
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error
+from aipass.memory.apps.handlers.cli import caller_gate
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.templates import push_report
@@ -59,6 +60,11 @@ def handle_command(command: str, args: List[str]) -> bool:
                 "Run 'drone @memory push --dry-run' first — that report is the gate; then re-run with --confirm"
             ),
         )
+        return True
+
+    refusal = None if dry_run else caller_gate.other_branch_refusal("push", branch)
+    if refusal:
+        error(refusal)
         return True
 
     _run_push(branch, dry_run)

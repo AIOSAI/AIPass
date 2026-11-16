@@ -35,7 +35,7 @@ memory/
 │   │   ├── verify.py            # Plan vectorization check
 │   │   └── watch.py             # Auto-rollover watcher
 │   └── handlers/
-│       ├── cli/                 # help_flags.py, json_flag.py, branch_flag.py
+│       ├── cli/                 # help_flags.py, json_flag.py, branch_flag.py, caller_gate.py
 │       ├── governance/          # engine.py
 │       ├── intake/              # plans_processor.py, pool_processor.py, auto_process.py
 │       ├── json/                # json_handler.py (fleet shim), memory_files.py (the write gate),
