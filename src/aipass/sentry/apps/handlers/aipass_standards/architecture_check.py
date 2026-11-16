@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: architecture_check.py
 # Description: Architecture Standards Checker Handler
-# Version: 1.2.2
+# Version: 1.3.0
 # Created: 2026-03-05
-# Modified: 2026-11-14
+# Modified: 2026-11-16
 # =============================================
 
 """Architecture Standards Checker Handler
@@ -12,6 +12,7 @@ Checks 3-layer pattern, handler independence, file size, domain organization; fo
 primary entry point, also the branch structure against spawn's template baseline.
 """
 
+import ast
 import json
 from pathlib import Path, PurePath
 from typing import Dict, List, Optional
@@ -19,7 +20,8 @@ from typing import Dict, List, Optional
 from aipass.sentry.apps.handlers.bypass.ignore_handler import get_template_ignore_patterns
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE, is_bypassed
+from aipass.sentry.apps.handlers.aipass_standards.check_support import find_enclosing_function
 from aipass.sentry.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify, hash_lines
 
 # Spawn's modules gateway is the ONLY source for the class->template question. No
@@ -93,20 +95,20 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     if not is_init:
         layer_check = check_layer_location(is_entry_point, is_module, is_handler, is_library)
-        checks.append(layer_check)
+        checks.append(_waive_file_level(layer_check, module_path, bypass_rules))
 
-    size_check = check_file_size(lines, module_path)
+    size_check = _waive_file_level(check_file_size(lines, module_path), module_path, bypass_rules)
     checks.append(size_check)
 
     if is_handler:
-        independence_check = check_handler_independence(lines, module_path)
+        independence_check = check_handler_independence(lines, module_path, bypass_rules)
         if independence_check:
             checks.append(independence_check)
 
     if is_handler:
         domain_check = check_domain_organization(module_path)
         if domain_check:
-            checks.append(domain_check)
+            checks.append(_waive_file_level(domain_check, module_path, bypass_rules))
 
     # Check 5: Template baseline, primary entry point only ({branch}.py); secondary
     # entry points skip it to avoid duplicate branch-level template checks.
@@ -114,7 +116,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         branch_dir = path.parent.parent  # apps/ -> branch/
         if path.stem == branch_dir.name:
             baseline_checks = check_template_baseline(module_path, bypass_rules=bypass_rules)
-            checks.extend(baseline_checks)
+            checks.extend(_waive_file_level(check, module_path, bypass_rules) for check in baseline_checks)
 
     passed_checks = sum(1 for check in checks if check["passed"])
     total_checks = len(checks)
@@ -178,8 +180,8 @@ def check_file_size(lines: List[str], module_path: str) -> Dict:
         }
 
 
-def check_handler_independence(lines: List[str], module_path: str) -> Optional[Dict]:
-    """Check that handlers don't import from parent branch modules (prax and cli services allowed)"""
+def check_handler_independence(lines: List[str], module_path: str, bypass_rules: list | None = None) -> Optional[Dict]:
+    """Handlers don't import from parent branch modules (prax and cli services allowed); each import is a site."""
     parent_branch = None
     if module_path:
         path_parts = Path(module_path).parts
@@ -196,6 +198,7 @@ def check_handler_independence(lines: List[str], module_path: str) -> Optional[D
         logger.info("architecture: unparseable, every non-# line read as code: %s", exc)
         prose = hash_lines(source)
 
+    sites = []
     for i, line in enumerate(lines, 1):
         if i in prose or not line.strip():
             continue
@@ -210,21 +213,18 @@ def check_handler_independence(lines: List[str], module_path: str) -> Optional[D
                 if "prax.apps.modules" in code_part or "cli.apps.modules" in code_part:
                     continue
 
-                if parent_branch and f"{parent_branch}.apps.modules" in code_part:
-                    return {
-                        "name": "Handler independence",
-                        "passed": False,
-                        "message": f"Handler importing from parent module on line {i} (violates independence)",
-                    }
+                if not parent_branch or f"{parent_branch}.apps.modules" in code_part:
+                    sites.append(i)
 
-                if not parent_branch:
-                    return {
-                        "name": "Handler independence",
-                        "passed": False,
-                        "message": f"Handler importing from branch module on line {i} (violates independence)",
-                    }
+    open_sites = _open_sites(sites, source, module_path, bypass_rules)
+    if not open_sites:
+        message = f"All {len(sites)} sites waived by rows" if sites else "No forbidden module imports detected"
+        return {"name": "Handler independence", "passed": True, "message": message}
 
-    return {"name": "Handler independence", "passed": True, "message": "No forbidden module imports detected"}
+    kind = "parent module" if parent_branch else "branch module"
+    where = ", ".join(f"line {i}" for i in open_sites)
+    message = f"Handler importing from {kind} on {where} (violates independence)"
+    return {"name": "Handler independence", "passed": False, "message": message}
 
 
 def check_domain_organization(module_path: str) -> Optional[Dict]:
@@ -529,3 +529,29 @@ def check_template_baseline(module_path: str, bypass_rules: list | None = None) 
     )
 
     return checks
+
+
+def _open_sites(sites: List[int], source: str, module_path: str, bypass_rules: list | None) -> List[int]:
+    """The site lines no row waives; a site's function is the def holding it, FILE_SCOPE at module level."""
+    if not sites or not bypass_rules:
+        return sites
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError) as exc:
+        # An unparseable file has no functions to read: every site sits at file level.
+        logger.info("architecture: unparseable, sites read at file level: %s", exc)
+        tree = None
+    open_sites = []
+    for line in sites:
+        holder = find_enclosing_function(tree, line) if tree else None
+        name = holder.name if holder else FILE_SCOPE
+        if not is_bypassed(module_path, "architecture", line=line, bypass_rules=bypass_rules, name=name):
+            open_sites.append(line)
+    return open_sites
+
+
+def _waive_file_level(check: Dict, module_path: str, bypass_rules: list | None) -> Dict:
+    """A failing file-level check passed by a row naming FILE_SCOPE under functions."""
+    if check["passed"] or not is_bypassed(module_path, "architecture", bypass_rules=bypass_rules, name=FILE_SCOPE):
+        return check
+    return {**check, "passed": True, "message": f"Waived by a {FILE_SCOPE} bypass row: {check['message']}"}

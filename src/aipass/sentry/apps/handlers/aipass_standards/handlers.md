@@ -1338,6 +1338,19 @@ def _get_registered_emails() -> set:
 
 ---
 
+## Bypass Rows
+
+Each import that breaks independence (another branch's handlers) or orchestration (its own
+branch's modules) is its own site, at its line, inside the function that holds it (`<file>` at
+module level). The message names every open site. A row with `"lines": [n]` waives the import on
+line n; a row with `"functions": ["load"]` waives the imports inside `load`. Every other site still
+convicts.
+
+The auto-detection finding is file-level: a row with `"functions": ["<file>"]` waives it and a line
+row does not. A row with no `lines` or `functions` waives the whole file.
+
+---
+
 ## TODO
 
 - [x] Handler independence rules detailed (2025-11-13)

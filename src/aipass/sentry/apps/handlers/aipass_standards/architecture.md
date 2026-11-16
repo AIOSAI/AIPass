@@ -438,6 +438,18 @@ def handle_command(command: str, args: List[str]) -> bool:
 
 ---
 
+## Bypass Rows
+
+A handler's import of its own branch's modules is a site, at its line, inside the function that
+holds it (`<file>` at module level), and the message names every open site. A row with
+`"lines": [n]` or `"functions": ["load"]` waives those sites only.
+
+The layer, file-size, domain and template-baseline findings are file-level: a row with
+`"functions": ["<file>"]` waives them and a line row does not. A row with no `lines` or `functions`
+waives the whole file.
+
+---
+
 ## The Core Insight
 
 This pattern optimizes for CONSTRAINTS:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: handlers_check.py
 # Description: Handlers Standards Checker Handler
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Handlers Standards Checker Handler"""
@@ -15,7 +15,8 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE, is_bypassed
+from aipass.sentry.apps.handlers.aipass_standards.check_support import find_enclosing_function
 from aipass.sentry.apps.handlers.aipass_standards.string_imports import STRING_IMPORT_NOTE, iter_string_imports
 
 AUDIT_SCOPE = "all_files"
@@ -75,14 +76,14 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "HANDLERS",
         }
 
-    independence_check = check_handler_independence(content, lines, module_path)
+    independence_check = check_handler_independence(content, lines, module_path, bypass_rules)
     checks.append(independence_check)
 
     auto_detect_check = check_auto_detection(content)
     if auto_detect_check:
-        checks.append(auto_detect_check)
+        checks.append(_waive_file_level(auto_detect_check, module_path, bypass_rules))
 
-    orchestration_check = check_no_orchestration(content, lines, module_path)
+    orchestration_check = check_no_orchestration(content, lines, module_path, bypass_rules)
     if orchestration_check:
         checks.append(orchestration_check)
 
@@ -157,8 +158,10 @@ def _branch_of_modules_import(module: str) -> Optional[str]:
     return _branch_before(module, ".apps.modules")
 
 
-def check_handler_independence(content: str, lines: List[str], module_path: str) -> Dict:
-    """Check handler independence - handlers are private to their own branch."""
+def check_handler_independence(
+    content: str, lines: List[str], module_path: str, bypass_rules: list | None = None
+) -> Dict:
+    """Check handler independence - handlers are private to their own branch; each import is a site."""
     forbidden_imports = []
 
     own_branch = _branch_of_path(module_path)
@@ -178,12 +181,19 @@ def check_handler_independence(content: str, lines: List[str], module_path: str)
         if _branch_of_import(module) == own_branch:
             continue
 
-        forbidden_imports.append(f"line {lineno}: {_line_text(lines, lineno, module)}")
+        forbidden_imports.append((lineno, f"line {lineno}: {_line_text(lines, lineno, module)}"))
 
     # The same rule over targets named as a call's string
     for lineno, target in iter_string_imports(content):
         if _branch_of_import(target) != own_branch:
-            forbidden_imports.append(f"line {lineno}: {_line_text(lines, lineno, target)} {STRING_IMPORT_NOTE}")
+            forbidden_imports.append(
+                (lineno, f"line {lineno}: {_line_text(lines, lineno, target)} {STRING_IMPORT_NOTE}")
+            )
+
+    total = len(forbidden_imports)
+    forbidden_imports = _open_sites(forbidden_imports, content, module_path, bypass_rules)
+    if total and not forbidden_imports:
+        return {"name": "Handler independence", "passed": True, "message": f"All {total} sites waived by scoped rows"}
 
     if forbidden_imports:
         return {
@@ -330,8 +340,10 @@ def check_auto_detection(content: str) -> Optional[Dict]:
     }
 
 
-def check_no_orchestration(content: str, lines: List[str], module_path: str = "") -> Optional[Dict]:
-    """Check that a handler does not reach up into its OWN branch's modules layer."""
+def check_no_orchestration(
+    content: str, lines: List[str], module_path: str = "", bypass_rules: list | None = None
+) -> Optional[Dict]:
+    """Check that a handler does not reach up into its OWN branch's modules layer; each import is a site."""
     module_imports = []
 
     own_branch = _branch_of_path(module_path) if module_path else None
@@ -348,7 +360,12 @@ def check_no_orchestration(content: str, lines: List[str], module_path: str = ""
         if own_branch and imported_branch and imported_branch != own_branch:
             continue
 
-        module_imports.append(f"line {lineno}: {_line_text(lines, lineno, module)}")
+        module_imports.append((lineno, f"line {lineno}: {_line_text(lines, lineno, module)}"))
+
+    total = len(module_imports)
+    module_imports = _open_sites(module_imports, content, module_path, bypass_rules)
+    if total and not module_imports:
+        return {"name": "No orchestration", "passed": True, "message": f"All {total} sites waived by scoped rows"}
 
     if module_imports:
         return {
@@ -358,3 +375,28 @@ def check_no_orchestration(content: str, lines: List[str], module_path: str = ""
         }
 
     return {"name": "No orchestration", "passed": True, "message": "No module imports detected (pure implementation)"}
+
+
+def _open_sites(sites: List[Tuple[int, str]], content: str, module_path: str, bypass_rules: list | None) -> List[str]:
+    """The text of each (line, text) site no row waives; a site's function is the def holding its line."""
+    if not sites or not bypass_rules:
+        return [text for _line, text in sites]
+    tree = ast.parse(content)  # every site came from this content's own parse
+    return [
+        text
+        for line, text in sites
+        if not is_bypassed(module_path, "handlers", line=line, bypass_rules=bypass_rules, name=_function_at(tree, line))
+    ]
+
+
+def _function_at(tree: ast.Module, line: int) -> str:
+    """The innermost function holding ``line``, or FILE_SCOPE for module-level code."""
+    holder = find_enclosing_function(tree, line)
+    return holder.name if holder else FILE_SCOPE
+
+
+def _waive_file_level(check: Dict, module_path: str, bypass_rules: list | None) -> Dict:
+    """A failing file-level check passed by a row naming FILE_SCOPE under functions."""
+    if check["passed"] or not is_bypassed(module_path, "handlers", bypass_rules=bypass_rules, name=FILE_SCOPE):
+        return check
+    return {**check, "passed": True, "message": f"Waived by a {FILE_SCOPE} bypass row: {check['message']}"}

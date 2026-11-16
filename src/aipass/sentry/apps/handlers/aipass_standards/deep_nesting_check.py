@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: deep_nesting_check.py
 # Description: Deep Nesting Standards Checker Handler
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-03-22
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -99,14 +99,22 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> dict:
             "standard": "DEEP_NESTING",
         }
 
-    violations = _scan_file(path)
+    found = _scan_file(path)
+    # Each function is a site: a row waives it by its name or by its def line.
+    violations = [
+        v
+        for v in found
+        if not is_bypassed(module_path, "deep_nesting", line=v["line"], bypass_rules=bypass_rules, name=v["func"])
+    ]
 
     if not violations:
         checks.append(
             {
                 "name": "Deep nesting",
                 "passed": True,
-                "message": "All functions within nesting limit (max depth 3)",
+                "message": f"All {len(found)} deep functions waived by scoped bypass rows"
+                if found
+                else "All functions within nesting limit (max depth 3)",
             }
         )
     else:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_handlers.py
 # Description: handlers_check auto-detection rulings (split from test_checkers_batch7.py)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-11-14
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/handlers_check.py."""
@@ -17,6 +17,7 @@ import pytest
 
 from aipass.sentry.apps.handlers.aipass_standards import handlers_check
 from aipass.sentry.apps.handlers.aipass_standards.handlers_check import check_auto_detection
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE
 
 pytestmark = pytest.mark.usefixtures("_pin_bypass_log")
 
@@ -137,3 +138,64 @@ class TestAutoDetectionNoLongerMandatesTheDeadCwdDefect:
         for call in ("inspect.currentframe()", "traceback.extract_stack()", "inspect.getouterframes(None)"):
             content = f"import inspect, traceback\n\ndef run(module_name=None):\n    x = {call}\n    return x\n"
             assert self._check(content)["passed"] is True, call
+
+
+class TestScopedBypassRows:
+    """Each import is a site (line, enclosing function); the auto-detection finding is file-level."""
+
+    _TWO_IMPORTS = (
+        '"""Doc."""\n'
+        "\n"
+        "\n"
+        "def load():\n"
+        "    from aipass.flow.apps.handlers.plan import ops\n"
+        "    return ops\n"
+        "\n"
+        "\n"
+        "def save():\n"
+        "    from aipass.demo.apps.modules import door\n"
+        "    from aipass.memory.apps.handlers.json import store\n"
+        "    return door, store\n"
+    )
+
+    @staticmethod
+    def _verdicts(tmp_path, source: str, **scope) -> dict:
+        """handlers check_module on demo/apps/handlers/work/thing.py under one row of the scope given."""
+        target = tmp_path / "demo" / "apps" / "handlers" / "work" / "thing.py"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(source, encoding="utf-8")
+        rules = (
+            [{"file": "apps/handlers/work/thing.py", "standard": "handlers", "reason": "t", **scope}] if scope else []
+        )
+        result = handlers_check.check_module(str(target), bypass_rules=rules)
+        return {"score": result["score"], **{check["name"]: check for check in result["checks"]}}
+
+    def test_a_line_row_waives_its_import_and_the_other_still_convicts(self, tmp_path):
+        """Mutant: the per-site ask drops line= — killed."""
+        verdict = self._verdicts(tmp_path, self._TWO_IMPORTS, lines=[5])
+        assert verdict["Handler independence"]["passed"] is False
+        assert "line 11" in verdict["Handler independence"]["message"]
+        assert "line 5" not in verdict["Handler independence"]["message"]
+
+    def test_a_function_row_waives_the_imports_inside_that_function_only(self, tmp_path):
+        """Mutant: the per-site ask drops name= — killed."""
+        verdict = self._verdicts(tmp_path, self._TWO_IMPORTS, functions=["save"])
+        assert verdict["No orchestration"]["passed"] is True
+        assert verdict["Handler independence"]["message"].endswith(
+            "line 5: from aipass.flow.apps.handlers.plan import ops"
+        )
+
+    def test_rows_on_every_site_pass_and_a_whole_file_row_still_waives(self, tmp_path):
+        """Mutant: one waived site waives every site — killed by the line-row pin."""
+        assert self._verdicts(tmp_path, self._TWO_IMPORTS, functions=["load", "save"])["score"] == 100
+        assert self._verdicts(tmp_path, self._TWO_IMPORTS, lines=None)["score"] == 100
+
+    def test_auto_detection_is_waived_by_the_file_scope_name_and_not_by_a_line(self, tmp_path):
+        """Mutant: the file-level waiver drops name=FILE_SCOPE — killed."""
+        source = '"""Doc."""\n\n\ndef log(message, module_name=None):\n    return message\n'
+        by_scope = self._verdicts(tmp_path, source, functions=[FILE_SCOPE])
+        by_line = self._verdicts(tmp_path, source, lines=[4])
+        assert (by_scope["Auto-detection pattern"]["passed"], by_line["Auto-detection pattern"]["passed"]) == (
+            True,
+            False,
+        )

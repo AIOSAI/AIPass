@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch1.py
 # Description: Unit tests for 8 aipass_standards checkers
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-29
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/architecture_check.py and seven batch-1 sibling checkers."""
@@ -460,3 +460,44 @@ def test_encapsulation_check_bypass_respected(tmp_path):
     bypass_rules = [{"standard": "encapsulation", "file": "bypassed.py"}]
     result = check_encapsulation(str(f), bypass_rules=bypass_rules)
     assert result["score"] == 100, f"Bypass should yield 100: {result}"
+
+
+_DEEP_BODY = (
+    "    if x:\n        for a in x:\n            while a:\n"
+    "                with a:\n                    if a:\n                        return 1\n"
+)
+_TWO_DEEP = f'"""Doc."""\n\n\ndef deep_one(x):\n{_DEEP_BODY}\n\ndef deep_two(x):\n{_DEEP_BODY}'
+
+
+def _deep_nesting(tmp_path, **scope) -> dict:
+    """deep_nesting on apps/handlers/deep.py (depth-5 functions at lines 4 and 13) under one row of this scope."""
+    target = tmp_path / "apps" / "handlers" / "deep.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(_TWO_DEEP, encoding="utf-8")
+    rules = [{"file": "apps/handlers/deep.py", "standard": "deep_nesting", "reason": "t", **scope}] if scope else []
+    return check_deep_nesting(str(target), bypass_rules=rules)
+
+
+def test_deep_nesting_a_line_row_waives_its_function_and_the_other_still_convicts(tmp_path):
+    """Mutant: the per-site ask drops line= in deep_nesting_check.py — killed."""
+    check = _deep_nesting(tmp_path, lines=[4])["checks"][0]
+    assert (check["passed"], check["message"]) == (
+        False,
+        "1 function exceed nesting limit: deep_two() depth 5 line 13",
+    )
+
+
+def test_deep_nesting_a_function_row_waives_the_functions_it_lists_only(tmp_path):
+    """Mutant: the per-site ask drops name= in deep_nesting_check.py — killed."""
+    one = _deep_nesting(tmp_path, functions=["deep_two"])["checks"][0]
+    both = _deep_nesting(tmp_path, functions=["deep_one", "deep_two"])
+    assert one["message"] == "1 function exceed nesting limit: deep_one() depth 5 line 4"
+    assert (both["checks"][0]["passed"], both["score"]) == (True, 100)
+
+
+def test_deep_nesting_with_no_row_names_every_site_and_a_whole_file_row_waives_all(tmp_path):
+    """Mutant: one waived site waives every site in deep_nesting_check.py — killed by the line-row pin."""
+    assert _deep_nesting(tmp_path)["checks"][0]["message"].endswith(
+        "deep_one() depth 5 line 4, deep_two() depth 5 line 13"
+    )
+    assert _deep_nesting(tmp_path, lines=None)["score"] == 100
