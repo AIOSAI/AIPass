@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_trinity_tripwire.py
 # Description: edit_gate's memory tripwire: a .trinity write a shell made is reported at PostToolUse, project-wide
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-08
 # Modified: 2026-11-16
 # =============================================
@@ -124,9 +124,47 @@ class TestShellMemoryTripwire:
         assert result["exit_code"] == 2
         reason = json.loads(result["stdout"])["reason"]
         assert "could not take this call's before-image (NotADirectoryError" in reason
-        assert "drone @hooks promote rollback" in reason
+        assert "This seat may still run exactly drone @hooks promote rollback, alone" in reason
         assert [c.args for c in log.error.call_args_list] == [(edit_gate.SNAPSHOT_FAILED_LOG,)]
         assert str(blocker) in str(log.info.call_args_list)
+
+    ROLLBACK = "drone @hooks promote rollback"
+    NEAR_MISSES = (
+        "drone @hooks promote rollback; ls",
+        "drone @hooks promote rollback && ls",
+        "drone @hooks promote rollback | cat",
+        "drone @hooks promote rollback > out.txt",
+        "drone @hooks promote rollback $(ls)",
+        "drone @hooks promote rollback `ls`",
+        "PATH=/tmp drone @hooks promote rollback",
+        "drone @hooks promote rollback --force",
+        "drone @hooks promote",
+        "drone @memory promote rollback",
+        "drone @hooks promote rollback\nls",
+        "(drone @hooks promote rollback)",
+        "drone '@hooks' promote rollback",
+    )
+
+    def _dark_snapshot(self, tmp_path, monkeypatch, command):
+        seat = self._seat(tmp_path, monkeypatch)
+        blocker = tmp_path / "not_a_dir"
+        blocker.write_text("", encoding="utf-8")
+        monkeypatch.setattr(edit_gate, "_TRIPWIRE_DIR", blocker)
+        with patch.object(edit_gate, "logger") as log:
+            result = edit_gate.tripwire_snapshot(self._data(seat, command))
+        return result, [c.args for c in log.error.call_args_list]
+
+    def test_with_the_snapshot_dark_the_exact_rollback_still_runs_and_the_fault_is_logged(self, tmp_path, monkeypatch):
+        for i, command in enumerate((self.ROLLBACK, f"  {self.ROLLBACK}\n")):
+            result, errors = self._dark_snapshot(tmp_path / str(i), monkeypatch, command)
+            assert result == self.SILENT, command
+            assert errors == [(edit_gate.SNAPSHOT_FAILED_LOG,)]
+
+    def test_with_the_snapshot_dark_every_near_miss_of_the_rollback_is_refused(self, tmp_path, monkeypatch):
+        for i, command in enumerate(self.NEAR_MISSES):
+            result, errors = self._dark_snapshot(tmp_path / str(i), monkeypatch, command)
+            assert result["exit_code"] == 2, command
+            assert errors == [(edit_gate.SNAPSHOT_FAILED_LOG,)]
 
     def test_a_comparison_that_fails_tells_the_seat_and_logs_one_stable_error(self, tmp_path, monkeypatch):
         seat = self._seat(tmp_path, monkeypatch)

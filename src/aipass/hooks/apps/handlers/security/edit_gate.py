@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.24.0
+# Version: 1.25.0
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
@@ -40,10 +40,12 @@ TRIPWIRE_FAILED_LOG = "[HOOKS] edit_gate tripwire: the memory check failed, a sh
 SNAPSHOT_REFUSED = (
     "The shell-memory tripwire could not take this call's before-image ({error}), so this Bash call is refused: "
     "a memory write it cannot see would land unreported. Every Bash call in this seat is refused until it is "
-    "fixed; Read, Edit and Write still work, so drone cannot be reached from here.\n"
-    "Tell the user this text. The repair is outside this seat: the owner runs drone @hooks promote rollback "
-    "from a terminal, or clears the cause named above."
+    "fixed but one; Read, Edit and Write still work.\n"
+    "Tell the user this text. This seat may still run exactly drone @hooks promote rollback, alone, to put back "
+    "the copy that worked; the owner's terminal is the other route, or the cause named above cleared."
 )
+# The one call a dark snapshot lets through, compared whole: no parser runs, so none can be what broke.
+ROLLBACK_COMMAND = "drone @hooks promote rollback"
 TRIPWIRE_DARK = (
     "MEMORY CHECK DID NOT RUN for this Bash call ({error}): if the command wrote a .trinity file, nothing "
     "measured it. Read your memory files; anything a shell wrote is re-landed with Edit/Write."
@@ -1113,7 +1115,8 @@ def handle(hook_data: dict) -> dict:
 def tripwire_snapshot(hook_data: dict) -> dict:
     """PreToolUse (Bash): record the seat's memory-file stats under this call's tool_use_id.
 
-    A snapshot that cannot be taken refuses the call: an unwatched shell call is not let through."""
+    A snapshot that cannot be taken refuses the call: an unwatched shell call is not let through, except
+    ROLLBACK_COMMAND, the seat's own repair."""
     try:
         if hook_data.get("tool_name") != "Bash":
             return {"stdout": "", "exit_code": 0}
@@ -1137,6 +1140,9 @@ def tripwire_snapshot(hook_data: dict) -> dict:
     except Exception as exc:  # declared FAIL_CLOSED: an unwatched call is refused, never let through
         logger.error(SNAPSHOT_FAILED_LOG)
         logger.info("[HOOKS] edit_gate tripwire: snapshot into %s: %s: %s", _TRIPWIRE_DIR, type(exc).__name__, exc)
+        if str(hook_data.get("tool_input", {}).get("command", "")).strip() == ROLLBACK_COMMAND:
+            logger.info("[HOOKS] edit_gate tripwire: snapshot dark, %s let through unwatched", ROLLBACK_COMMAND)
+            return {"stdout": "", "exit_code": 0}
         return _refuse(SNAPSHOT_REFUSED.format(error=f"{type(exc).__name__}: {exc}"))
     return {"stdout": "", "exit_code": 0}
 

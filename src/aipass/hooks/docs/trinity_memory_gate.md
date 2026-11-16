@@ -35,9 +35,12 @@ that it may not have been this command — @memory's rollover, run by *any* seat
 too. A clean change logs at INFO, a charged one at WARNING. A report never blocks. Keying on `tool_use_id` is what keeps a memory Edit made just before the call from being blamed on it.
 
 **Both halves fail loud.** A snapshot that cannot be taken refuses the Bash call: an unwatched shell call is
-not let through. The text names the cause and says that every Bash call in that seat is refused until it is
-fixed, that Read, Edit and Write still work, and that the repair is outside the seat (`drone @hooks promote
-rollback` from a terminal, or the cause cleared), because a seat with no Bash cannot reach drone. It logs one
+not let through, with one exception: a command that is exactly `drone @hooks promote rollback` (outer
+whitespace trimmed, nothing chained, piped, redirected, substituted, prefixed or added) runs, so any seat can
+put back the copy that worked; rollback smokes that copy before it moves the pointer. The match is a whole-string
+comparison, not a parse, so no parser can be what broke, and a quoted or respaced spelling is refused. Every
+other Bash call is refused with a text that names the cause, says Read, Edit and Write still work, and names the
+two repairs: that one command from the seat, or the owner's terminal. Either way it logs one
 fixed ERROR line, `[HOOKS] edit_gate tripwire: the memory snapshot could not be taken, Bash is refused until it
 can`, with the snapshot directory and cause at INFO. A comparison that fails runs after the command, so there is
 nothing left to refuse: the seat is told `MEMORY CHECK DID NOT RUN for this Bash call (<cause>)`, and one fixed
