@@ -43,6 +43,17 @@ def repo_root(tmp_path):
     return root
 
 
+@pytest.fixture(autouse=True)
+def admin_seat(monkeypatch):
+    """Every delete here runs from the admin seat unless a test stands it elsewhere."""
+    _admin_answers(monkeypatch, True)
+
+
+def _admin_answers(monkeypatch, admin):
+    """The ai_mail rail's admin verdict, stood on one answer for delete_ops."""
+    monkeypatch.setattr("aipass.spawn.apps.handlers.delete_ops.is_verified_admin_caller", lambda: admin)
+
+
 @pytest.fixture
 def mock_branch(repo_root):
     """Create a mock branch directory with .trinity/passport.json."""
@@ -1280,6 +1291,66 @@ class TestDeleteByPath:
         (archive,) = (root / ".archive" / "deleted_branches").iterdir()
         assert (archive / ".git" / "HEAD").read_text(encoding="utf-8") == ".git/HEAD"
         assert (archive / ".chroma" / "chroma.sqlite3").read_text(encoding="utf-8") == ".chroma/chroma.sqlite3"
+
+
+class TestDeleteRunsFromTheAdminSeat:
+    """A real delete or retire runs from the verified admin seat only; a dry run stays open to every seat."""
+
+    def test_a_real_retire_off_the_admin_seat_is_refused_touches_nothing_and_records_who_tried(
+        self, capsys, tmp_path, monkeypatch, _isolate_spawn_json
+    ):
+        root, branch, registry = _foreign_project(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        _seat(monkeypatch, "commons")
+        _admin_answers(monkeypatch, False)
+        before = _tree_bytes(branch)
+
+        result = handle_delete([str(branch), "--retire", "--yes"])
+
+        said = _said(capsys)
+        assert result == 1
+        assert "admin seat" in said and "mail @devpulse" in said
+        assert _tree_bytes(branch) == before
+        assert _registry_names(registry) == ["WORKER"]
+        assert not (root / ".archive").exists()
+        assert _deletion_rows(tmp_path) == []
+        log = json.loads((_isolate_spawn_json / "delete_ops_log.json").read_text(encoding="utf-8"))
+        (refused,) = [e for e in log if e["operation"] == "delete_refused"]
+        assert refused["timestamp"]
+        assert (refused["data"]["caller"], refused["data"]["branch"]) == ("@commons", "WORKER")
+        assert refused["data"]["requested"] == str(branch)
+
+    def test_a_raising_verifier_refuses_the_real_run(self, capsys, tmp_path, monkeypatch):
+        root, branch, registry = _foreign_project(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        _seat(monkeypatch)
+
+        def boom():
+            raise RuntimeError("registry unreadable")
+
+        monkeypatch.setattr("aipass.spawn.apps.handlers.delete_ops.is_verified_admin_caller", boom)
+
+        assert handle_delete([str(branch), "--retire", "--yes"]) == 1
+        assert "admin seat" in _said(capsys)
+        assert branch.exists()
+        assert _registry_names(registry) == ["WORKER"]
+
+    def test_a_dry_run_off_the_admin_seat_previews_and_says_the_real_run_is_the_admins(
+        self, capsys, tmp_path, monkeypatch
+    ):
+        root, branch, registry = _foreign_project(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        _seat(monkeypatch, "commons")
+        _admin_answers(monkeypatch, False)
+
+        result = handle_delete([str(branch), "--retire", "--dry-run"])
+
+        said = _said(capsys)
+        assert result == 0
+        assert "admin seat" in said and "mail @devpulse" in said
+        assert branch.exists()
+        assert _registry_names(registry) == ["WORKER"]
+        assert not (root / ".archive").exists()
 
 
 def _retire_rig(tmp_path, monkeypatch, admin=True):

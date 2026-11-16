@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: delete_ops.py
 # Description: Delete handler — branch deletion by name or path, and whole-project retirement
-# Version: 1.3.2
+# Version: 1.4.0
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """Delete handler implementation for branch lifecycle management."""
@@ -22,6 +22,7 @@ from aipass.hooks.apps.modules.door_trust_registry import revoke as revoke_trust
 from aipass.spawn.apps.handlers.deletion_receipts import build_receipt, measure, receipt_problem, write_receipts
 from aipass.spawn.apps.handlers.passport_migration import repo_root
 from aipass.spawn.apps.handlers.registry import (
+    ADMIN_BRANCH,
     find_registry,
     is_protected,
     load_registry,
@@ -139,6 +140,7 @@ def delete_branch(
 ) -> dict:
     """Archive and deregister a branch; the archive is always written before removal.
 
+    The real run is the verified admin seat's; a dry run previews from any seat.
     retire=True lets an active citizen through and archives its passport with registered false;
     the floor and the registry owner stay refused. registry_path=None reads the cwd's registry.
     """
@@ -177,6 +179,20 @@ def delete_branch(
         logger.error(f"[delete] {msg}")
         return _error_result(branch_name, msg)
 
+    caller = resolve_verified_caller() or "unknown"
+    admin = _admin_seat()
+    if not dry_run and not admin:
+        msg = (
+            f"Cannot delete '{branch_name}' - a real delete or retire runs from the verified admin seat only; "
+            f"mail @{ADMIN_BRANCH} the branch and why"
+        )
+        logger.warning("[delete] %s (caller %s, requested %s)", msg, caller, requested or branch_name)
+        json_handler.log_operation(
+            "delete_refused",
+            data={"branch": branch_name, "requested": requested or branch_name, "caller": caller, "retire": retire},
+        )
+        return _error_result(branch_name, msg)
+
     if confirm and not dry_run:
         try:
             answer = input("Are you sure? (y/N): ").strip().lower()
@@ -192,7 +208,6 @@ def delete_branch(
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     archive_dir = project_root / ".archive" / "deleted_branches" / f"{branch_name}_{timestamp}"
 
-    caller = resolve_verified_caller() or "unknown"
     receipt = build_receipt(
         lane="spawn_delete",
         caller=caller,
@@ -212,6 +227,9 @@ def delete_branch(
             "registry_updated": False,
             "dry_run": True,
             "retired": retire,
+            "note": ""
+            if admin
+            else f"The real run is the verified admin seat's: mail @{ADMIN_BRANCH} the branch and why",
         }
 
     problem = receipt_problem([receipt])
@@ -284,7 +302,7 @@ def _admin_seat() -> bool:
     try:
         return bool(is_verified_admin_caller())
     except Exception as exc:
-        logger.warning("[retire] admin verification raised, refusing: %s", exc)
+        logger.warning("[spawn] admin verification raised, refusing: %s", exc)
         return False
 
 

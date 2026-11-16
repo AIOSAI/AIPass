@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: delete.py
 # Description: Branch deletion — thin CLI layer for archive and deregister
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-03-07
 # Modified: 2026-11-15
 # =============================================
@@ -61,7 +61,9 @@ def handle_delete(args: list[str]) -> int:
             "  [green]--retire[/green]   Retire an active citizen: its archived passport reads registered false"
         )
         console.print("  [green]--yes[/green]      Skip confirmation prompt")
-        console.print("  [green]--dry-run[/green]  Preview what would happen without changes")
+        console.print("  [green]--dry-run[/green]  Preview what would happen without changes, from any seat")
+        console.print()
+        console.print("  [dim]The real run is the verified admin seat's; any other seat mails @devpulse.[/dim]")
         return 0 if help_asked else 1
 
     dry_run = "--dry-run" in args
@@ -125,6 +127,8 @@ def _print_summary(result: dict, dry_run: bool) -> None:
     if success and result.get("retired"):
         verb = "would read" if dry_run else "reads"
         console.print(f"  Retired: the archived passport {verb} citizenship.registered false")
+    if result.get("note"):
+        console.print(f"  {result['note']}")
 
     err_msg = result.get("error", "")
     if err_msg:

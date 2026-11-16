@@ -3,7 +3,7 @@
 # Description: Birth receipt lane — a newborn arrives carrying .trinity/.template_version.json
 # Version: 1.2.2
 # Created: 2026-08-27
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/receipt_ops.py and the birth-receipt lane it drives through apps/modules/core.py."""
@@ -14,6 +14,7 @@
 
 import ast
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -297,6 +298,10 @@ def test_retire_carries_the_whole_trinity_into_the_archive(tmp_path, monkeypatch
 
     monkeypatch.setattr(delete_ops, "find_registry", lambda *a, **k: registry_path)
     monkeypatch.setattr(delete_ops, "is_protected", lambda *a, **k: (False, ""))
+    monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
+    monkeypatch.setattr(
+        delete_ops, "is_verified_admin_caller", lambda: os.environ["AIPASS_CALLER_BRANCH"] == "devpulse"
+    )
 
     result = delete_ops.delete_branch("leaver", confirm=False)
 

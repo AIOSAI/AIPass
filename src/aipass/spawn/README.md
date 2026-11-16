@@ -33,6 +33,7 @@ drone @spawn delete @my_agent --retire --dry-run   # preview retiring a citizen
   added, JSON is deep-merged, `.py` is skipped by design, markdown is compared and reported
   but never written, and a branch's own `.updateignore` is honoured before every other rule.
 - **Retires citizens.** Archive the whole tree including its memories, then deregister. A
+  real delete runs from the verified admin seat only; a dry run previews from any seat. A
   registered citizen goes only with `--retire`, which archives its passport as unregistered.
   A path reaches a branch in any project; `retire-project` retires a whole project from the
   admin seat. Every removal leaves a row in `.ai_central/deletions.jsonl`.

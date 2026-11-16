@@ -3,7 +3,7 @@
 # Description: Torn-write durability tests for spawn's JSON/text write paths
 # Version: 1.1.4
 # Created: 2026-08-16
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/atomic_write.py and the write paths it makes durable."""
@@ -763,8 +763,11 @@ class TestRegistryWritersWaitAndReload:
     """Every registry read-modify-write runs under registry_lock and reloads inside it."""
 
     @pytest.mark.parametrize("writer", sorted(_REGISTRY_WRITERS))
-    def test_a_waiting_writer_keeps_the_entry_another_writer_landed(self, tmp_path, writer):
+    def test_a_waiting_writer_keeps_the_entry_another_writer_landed(self, tmp_path, monkeypatch, writer):
         """Pins a stale copy saved over an entry another agent added while this one held its load."""
+
+        # delete_branch's real run is the admin seat's; the rail is ai_mail's, so it is stood here.
+        monkeypatch.setattr(delete_ops, "is_verified_admin_caller", lambda: writer == "delete_branch")
 
         for rel in ("alpha", "devpulse", "gamma", "deep/x/y/late"):
             _make_citizen(tmp_path, rel, passport_rid="cred")

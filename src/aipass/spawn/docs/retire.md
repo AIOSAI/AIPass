@@ -35,6 +35,18 @@ place, and exits 1.
 
 ---
 
+## Only the admin seat runs a real delete
+
+A real `delete` or `delete --retire` runs from the verified admin seat only: the same rail
+`retire-project` asks (`is_verified_admin_caller()`, five legs). A verifier that raises
+answers no. The check runs after the branch resolves and before the confirmation prompt, so
+a refused caller is never asked and nothing is touched; the refusal names the cure (mail
+@devpulse the branch and why), exits 1, and is logged with the caller, the target and the
+time (`delete_refused` in spawn's operation log). `--dry-run` previews from any seat and says
+the real run is the admin seat's.
+
+---
+
 ## Delete refuses protected branches; `--retire` is the door for a live citizen
 
 `is_protected()` guards three layers, any one sufficient:
