@@ -3,7 +3,7 @@
 # Description: Tests for the gh passthrough verbs, release edit, restore and the external-repo door (--repo)
 # Version: 1.9.2
 # Created: 2026-10-08
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/git/repo_door.py, the gh verbs and release edit of apps/modules/git_module.py."""
@@ -923,7 +923,10 @@ class TestRepoDoorRunReads:
         [
             (["list"], ["gh", "run", "list", "--repo", "AIOSAI/ext"]),
             (["view", "123", "--log-failed"], ["gh", "run", "view", "123", "--log-failed", "--repo", "AIOSAI/ext"]),
-            (["watch", "123"], ["gh", "run", "watch", "123", "--repo", "AIOSAI/ext", "--interval", "60", "--exit-status"]),
+            (
+                ["watch", "123"],
+                ["gh", "run", "watch", "123", "--repo", "AIOSAI/ext", "--interval", "60", "--exit-status"],
+            ),
         ],
     )
     def test_the_door_hands_gh_the_origins_owner_name(

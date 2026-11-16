@@ -3,7 +3,7 @@
 # Description: CLI Routing Tests for Drone (adapted from universal template)
 # Version: 1.1.1
 # Created: 2026-03-27
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/drone.py, the drone CLI entry point and its routing."""
@@ -1135,15 +1135,16 @@ class TestInertTimeoutIsReported:
 class TestMainModuleThatCannotLoad:
     """A drone module whose import fails is reported with its real error and exit 1, never 'unknown command'."""
 
-    def test_the_import_error_is_named(self, capsys: pytest.CaptureFixture[str], monkeypatch) -> None:
+    def test_the_import_error_is_named(self, capsys: pytest.CaptureFixture[str], monkeypatch, tmp_path: Path) -> None:
         """Mutant: the old warning-only arm falls through to 'unknown command'."""
-        # None in sys.modules makes the import itself raise ImportError, with no import machinery patched.
-        monkeypatch.setitem(sys.modules, "aipass.drone.apps.modules.commands", None)
-        with patch("sys.argv", ["drone", "commands"]):
+        # A module file the listing sees but the package cannot import: a real ImportError, nothing stubbed.
+        (tmp_path / "ghost_module.py").write_text("", encoding="utf-8")
+        monkeypatch.setattr(f"{_DRONE}.MODULES_DIR", tmp_path)
+        with patch("sys.argv", ["drone", "ghost_module"]):
             rc = main()
         err = capsys.readouterr().err
         assert rc == 1
-        assert "module 'commands' failed to import:" in err
+        assert "module 'ghost_module' failed to import:" in err
         assert "unknown command" not in err
 
 
