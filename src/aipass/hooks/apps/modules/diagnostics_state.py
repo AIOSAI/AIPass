@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: diagnostics_state.py
-# Version: 2.3.2
+# Version: 2.4.0
 # Description: Post-edit diagnostics state per seat — location, meaning, and live re-validation
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-13
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Owns what the diagnostics state means: one file per seat since leg 4 (see load_seat).
@@ -14,6 +14,7 @@ A cross-file error must not block other files (red-first edits the test elsewher
 block is re-checked live: a write the hook never saw (heredoc, editor) leaves stale state.
 """
 
+import fcntl
 import hashlib
 import json
 import os
@@ -21,7 +22,10 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
@@ -67,67 +71,152 @@ def _seat_file(seat: str) -> Path:
     return STATE_DIR / f"{hashlib.sha256(seat.encode('utf-8')).hexdigest()[:32]}.json"
 
 
-def load_seat(seat: str) -> dict | None:
-    """Return this seat's recorded errors as {"file", "errors"}, {} when it has none.
-
-    None means unreadable (logged): the gate then refuses nothing, the side a broken state errs to.
-    """
-    return _read_seat_file(_seat_file(seat))
+def _lock_dir() -> Path:
+    """Beside STATE_DIR, never in it: a lock file is no seat record."""
+    return STATE_DIR.with_name(STATE_DIR.name + ".locks")
 
 
-def _read_seat_file(path: Path) -> dict | None:
-    """One seat file read by load_seat's rules: {} absent, stale or not version 2, None unreadable."""
-    if not path.exists():
-        return {}
+def _still_named(fd: int, path: Path) -> bool:
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError, ValueError) as exc:
-        logger.warning("[HOOKS] diagnostics_state: seat file unreadable: %s", exc)
-        return None
+        return os.stat(path).st_ino == os.fstat(fd).st_ino
+    except FileNotFoundError:
+        return False
+
+
+@contextmanager
+def _locked(name: str, wait: bool = True) -> Iterator[None]:
+    """flock on lock *name* across read, decide, write; a waiter woken on a pruned inode reopens the name."""
+    lock = _lock_dir() / f"{name}.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    while True:
+        fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX if wait else fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(fd)
+            raise
+        if _still_named(fd, lock):
+            break
+        os.close(fd)
+    try:
+        yield
+    finally:
+        os.close(fd)
+
+
+def load_seat(seat: str) -> dict:
+    """Return this seat's recorded errors as {"file", "errors"}, {} when it has none or its file was damaged.
+
+    A damaged file is set aside and logged at ERROR. Any OSError but absence raises: edit_gate's
+    fail-closed catch refuses with it.
+    """
+    with _locked(_seat_file(seat).stem):
+        return _read_seat_file(_seat_file(seat))
+
+
+def _damage(data: object) -> str:
+    """Why a record is damage, not stale, "" if sound: save_seat only writes v2, str file, list, numeric ts."""
     if not isinstance(data, dict) or data.get("version") != 2:
-        return {}
+        return "not a version 2 record"
+    if not isinstance(data.get("file"), str) or not isinstance(data.get("errors"), list):
+        return "wrong shape"
     ts = data.get("ts")
-    if not isinstance(ts, (int, float)) or _now() - ts > MAX_AGE_SECONDS:
+    if isinstance(ts, bool) or not isinstance(ts, (int, float)) or ts > _now() + MAX_AGE_SECONDS:
+        return "no usable timestamp"
+    return ""
+
+
+def _read_seat_file(path: Path) -> dict:
+    """One seat file, read under its lock: {} absent or stale, damage set aside as {}, the record else."""
+    raw = _bytes(path)
+    if raw is None:
         return {}
-    return {"file": data.get("file", ""), "errors": data.get("errors", [])}
+    data, damage = _parse(raw)
+    damage = damage or _damage(data)
+    if damage:
+        return _set_aside(path, damage)
+    if _now() - data["ts"] > MAX_AGE_SECONDS:
+        return {}
+    return {"file": data["file"], "errors": data["errors"]}
+
+
+def _bytes(path: Path) -> bytes | None:
+    """The file's bytes, or None when it is absent; any other OSError raises."""
+    try:
+        return path.read_bytes()
+    except FileNotFoundError:
+        return None
+
+
+def _parse(raw: bytes) -> tuple[Any, str]:
+    """(the parsed value, "") or (None, why it is no JSON)."""
+    try:
+        return json.loads(raw), ""
+    except ValueError as exc:
+        return None, f"not JSON ({type(exc).__name__})"
+
+
+def _set_aside(path: Path, why: str) -> dict:
+    """Quarantine, under the lock: renamed beside, never unlinked; ERROR once, as the name is then absent."""
+    logger.error("[HOOKS] diagnostics_state: a damaged seat file is set aside, the seat reads empty: %s", why)
+    aside = path.with_name(f"{path.name}.corrupt-{time.time_ns()}")
+    os.replace(path, aside)
+    os.utime(aside)
+    logger.info("[HOOKS] diagnostics_state: set aside as %s", aside)
+    return {}
 
 
 def save_seat(seat: str, file_path: str, errors: list[dict]) -> None:
-    """Record this seat's errors whole: a temp file in the same directory, then a replace.
-
-    Never raises: a failed write is logged and leaves the seat unrefused.
-    """
+    """Record this seat's errors whole under its lock (temp file, replace); a failure logs ERROR, never raises."""
     temp_name = ""
     try:
-        STATE_DIR.mkdir(parents=True, exist_ok=True)
-        payload = {"version": 2, "file": str(Path(file_path).resolve()), "errors": errors, "ts": _now()}
-        fd, temp_name = tempfile.mkstemp(dir=STATE_DIR, prefix=".", suffix=".tmp")
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle)
-        os.replace(temp_name, _seat_file(seat))
-        temp_name = ""
+        with _locked(_seat_file(seat).stem):
+            STATE_DIR.mkdir(parents=True, exist_ok=True)
+            payload = {"version": 2, "file": str(Path(file_path).resolve()), "errors": errors, "ts": _now()}
+            fd, temp_name = tempfile.mkstemp(dir=STATE_DIR, prefix=".", suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle)
+            os.replace(temp_name, _seat_file(seat))
+            temp_name = ""
         _prune()
     except (OSError, ValueError) as exc:
-        logger.warning("[HOOKS] diagnostics_state: seat state write failed: %s", exc)
+        logger.error("[HOOKS] diagnostics_state: seat state write failed: %s", exc)
         if temp_name:
             Path(temp_name).unlink(missing_ok=True)
 
 
-def clear_seat(seat: str) -> None:
-    """Remove this seat's entry alone. Safe when it is already gone."""
+def clear_seat(seat: str, when: Callable[[dict], bool] | None = None) -> None:
+    """Remove this seat's entry alone, if *when* (asked under the lock, on the record as it stands) agrees.
+
+    A save from a parallel tool call after the caller's own read is never removed on that stale read.
+    """
     try:
-        _seat_file(seat).unlink(missing_ok=True)
+        with _locked(_seat_file(seat).stem):
+            path = _seat_file(seat)
+            if when is None or when(_read_seat_file(path)):
+                path.unlink(missing_ok=True)
     except OSError as exc:
-        logger.warning("[HOOKS] diagnostics_state: could not clear seat state: %s", exc)
+        logger.error("[HOOKS] diagnostics_state: could not clear seat state: %s", exc)
+
+
+def _older(path: Path, cutoff: float) -> bool:
+    try:
+        return path.stat().st_mtime < cutoff
+    except FileNotFoundError:
+        return False
 
 
 def _prune() -> None:
-    """Remove seat files older than the age rule: their sessions ended without saying so."""
+    """Age out seat files, set-aside copies and idle locks, each under its lock taken without waiting."""
     cutoff = _now() - MAX_AGE_SECONDS
-    for path in STATE_DIR.glob("*.json"):
+    found = [*STATE_DIR.glob("*.json*"), *_lock_dir().glob("*.lock")]
+    for path in [path for path in found if _older(path, cutoff)]:
         try:
-            if path.stat().st_mtime < cutoff:
-                path.unlink(missing_ok=True)
+            with _locked(path.name.split(".")[0], wait=False):
+                if _older(path, cutoff):
+                    path.unlink(missing_ok=True)
+        except BlockingIOError:
+            logger.warning("[HOOKS] diagnostics_state: %s is in use, kept for the next prune", path.name)
         except OSError as exc:
             logger.warning("[HOOKS] diagnostics_state: could not prune %s: %s", path.name, exc)
 

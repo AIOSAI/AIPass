@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.23.0
+# Version: 1.23.1
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Blocks unsafe edits: inbox, cross-project, cross-branch and shell-to-memory writes, daemon confinement, diagnostics
@@ -1066,7 +1066,7 @@ def handle(hook_data: dict) -> dict:
         fresh = ds.of_the_tree(errored, ds.revalidate(errored), 0)  # pyright counts from 0
         if fresh is not None:
             if not fresh:
-                ds.clear_seat(seat)
+                ds.clear_seat(seat, when=lambda now: now == state)
                 return {"stdout": "", "exit_code": 0}
             errors = fresh
 

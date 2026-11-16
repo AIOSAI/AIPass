@@ -51,6 +51,21 @@ exists — hard-deleted, renamed to `name(disabled).py`, or moved to `.archive/`
 those three are the house cleanup pattern. Escape: recreate the file clean, let re-validation drop the
 state, then remove it.
 
+**One writer at a time per seat file.** `load_seat`'s repair, `save_seat` and `clear_seat` each hold an
+`fcntl` lock on the seat (a sibling `aipass-diagnostics-state.locks/` directory) across read, decide and
+write. A clear that depends on what it read passes `clear_seat(seat, when=...)`: the check runs under the
+lock on the record as it is then, so a save that raced the decision survives. A missing file is absence and
+reads empty; any other `OSError` raises, and `edit_gate`'s fail-closed catch refuses the edit. A failed save
+or clear logs ERROR.
+
+**Damage is set aside, staleness is dropped.** Only `save_seat` writes a seat file, always as version 2 with a
+string `file`, a list of `errors` and a numeric `ts` no later than now plus the age rule. Bytes that are not
+JSON, or JSON of any other shape, are damage: the file is renamed beside itself as `<name>.corrupt-<ns>`, one
+ERROR line names it, and the seat reads empty. Because the name is gone, the next read finds absence and the
+ERROR does not repeat. A well-formed record older than 24 hours is stale, not damaged: it reads empty and stays
+where it is. `_prune` removes seat files, `.corrupt-*` copies and idle lock files past the same 24 hours, each
+under its own lock taken without waiting; one in use is kept for the next prune.
+
 **A pass is silent, and a finding is the model's.** A clean edit prints nothing. An error (`[AUTO-FIX]`) and
 a checker that gave no answer (`[diagnostics] NO ANSWER from <checker>`) go to the model as PostToolUse
 `additionalContext` and to the hooks log, never as a `systemMessage`: that is a chat line the user sees (and

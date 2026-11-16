@@ -532,10 +532,10 @@
       "file": "apps/modules/diagnostics_state.py",
       "standard": "logged_fallback",
       "lines": [
-        204,
-        207,
-        210,
-        213
+        293,
+        296,
+        299,
+        302
       ],
       "reason": "Fleet green leg 5: revalidate's None is 'unknown' (pyright missing, timed out, unparseable, failed) and its docstring says it must never be read as clean; the success path returns a list. edit_gate keeps the recorded errors on None, so the fence stays as it was: fail-closed."
     },
@@ -555,13 +555,13 @@
       "file": "apps/modules/cadence.py",
       "standard": "logged_fallback",
       "lines": [
-        441,
-        446,
-        533,
-        717,
-        802,
-        859,
-        943
+        475,
+        480,
+        568,
+        752,
+        834,
+        887,
+        971
       ],
       "reason": "Fleet green leg 5: cadence decides which turn an injector fires on and guards no write. On doubt each answers its documented empty value ('never fired', not grounded, nothing pending), logged: the worst case is a grounding block early, late or twice, never a write let through."
     },
@@ -889,7 +889,7 @@
       "file": "apps/handlers/lifecycle/auto_fix.py",
       "standard": "fallback",
       "lines": [
-        603
+        602
       ],
       "reason": "PostToolUse advisory, not a gate: the edit has already landed, so a crashed diagnostics pass has no decision to stand in for. It logs at ERROR, which @trigger's log watcher escalates, and the agent simply gets no diagnostics for that one edit."
     },
@@ -1009,15 +1009,7 @@
       "file": "apps/modules/diagnostics_state.py",
       "standard": "fallback",
       "lines": [
-        84
-      ],
-      "reason": "None is handed on as \"unreadable\", not read as no errors here; edit_gate's red-file fence then refuses nothing. Refusing instead would hold every .py edit of the seat with no edit able to clear it. WARNING, which @trigger escalates, names the corrupt seat file."
-    },
-    {
-      "file": "apps/modules/diagnostics_state.py",
-      "standard": "fallback",
-      "lines": [
-        162
+        251
       ],
       "reason": "Fails toward the block: an errored file that cannot be read keeps every recorded error as found, so no error is dropped as a placeholder line. INFO, not WARNING: a just-deleted file is the usual cause, and the block it keeps is itself the signal."
     },
@@ -1025,10 +1017,10 @@
       "file": "apps/modules/diagnostics_state.py",
       "standard": "fallback",
       "lines": [
-        202,
-        205,
-        208,
-        211
+        291,
+        294,
+        297,
+        300
       ],
       "reason": "None means \"unknown\", never clean: edit_gate keeps the recorded errors and the block stands when pyright is missing, times out or answers garbage. Each case logs at WARNING, which @trigger escalates."
     },
@@ -1688,7 +1680,7 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        132
+        133
       ],
       "reason": "Absence, not failure: on turn 0 the provider has not written the transcript yet, so the turn token is -1, the value no real size takes. Any other stat failure is logged at WARNING by the handler below it."
     },
@@ -1696,9 +1688,9 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        439,
-        444,
-        572
+        473,
+        478,
+        607
       ],
       "reason": "Fails toward showing: unreadable mail or advisory throttle state reads as never fired, so the banner or advisory fires rather than hides. The file holds one turn number, wholly rewritten by the next fire, so nothing else is lost. WARNING, escalated by @trigger."
     },
@@ -1706,7 +1698,7 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        531
+        566
       ],
       "reason": "None is handed on as \"cannot be read\", documented in the signature: tier0_kernel raises its DEGRADED line to WARNING on it and the advisory throttle falls to elapsed seconds. Nothing reads None as a turn."
     },
@@ -1714,7 +1706,7 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        627
+        662
       ],
       "reason": "reset_counter rewrites the counter whole by purpose (a compaction or new session): unreadable old state only costs the prior turn in its log line and the debounce of a second reset on one boundary. The reset itself is the repair of a corrupt counter."
     },
@@ -1722,7 +1714,7 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        675
+        710
       ],
       "reason": "A reset that cannot open or write the counter file leaves the counter as it was, and the post-compact re-ground is not armed. Raising would fail the compaction hook; WARNING, escalated by @trigger, names the caller and session."
     },
@@ -1730,7 +1722,7 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        715
+        750
       ],
       "reason": "None reads as \"never stamped\": consumers then keep their counts for the current window instead of opening a new one. The stamp is rewritten whole at the next reset. WARNING, escalated by @trigger, names it."
     },
@@ -1738,8 +1730,8 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        902,
-        939
+        930,
+        967
       ],
       "reason": "A corrupt counter is never overwritten here: the parse fails before the truncate, so the queue is left as found and only the queued re-ground parts are skipped. WARNING on each, escalated by @trigger, names the session."
     },
@@ -1755,7 +1747,7 @@
       "file": "apps/modules/cadence.py",
       "standard": "silent_catch",
       "lines": [
-        105
+        106
       ],
       "reason": "The read error is handed on as the value; the next lines log it at ERROR and keep the built-in cadence (a raise would refuse every memory write through edit_gate)."
     },

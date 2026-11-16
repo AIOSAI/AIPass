@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.12.4
+# Version: 2.13.0
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-08
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Turn counter for prompt injection cadence — fires loaders every Nth turn.
@@ -19,6 +19,7 @@ import os
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
@@ -172,6 +173,46 @@ def _close_fd(fd) -> None:
         logger.warning("[HOOKS] cadence: fd cleanup failed: %s", exc)
 
 
+def _still_names(fd, path: Path) -> bool:
+    """False when *path* was set aside or replaced while this call waited for the lock on *fd*."""
+    try:
+        return os.stat(path).st_ino == os.fstat(fd.fileno()).st_ino
+    except FileNotFoundError:
+        return False
+
+
+def _parse(content: str) -> tuple[Any, str]:
+    """(the parsed value, "") or (None, why it is no JSON)."""
+    try:
+        return json.loads(content), ""
+    except json.JSONDecodeError as exc:
+        return None, f"not JSON ({exc.msg})"
+
+
+def _set_aside(path: Path, why: str) -> None:
+    """Quarantine under the lock: renamed beside, never unlinked; the temp dir's own cleaning takes it, as the state."""
+    logger.error("[HOOKS] cadence: a damaged state file is set aside, it reads empty: %s", why)
+    aside = path.with_name(f"{path.name}.corrupt-{time.time_ns()}")
+    os.replace(path, aside)
+    logger.info("[HOOKS] cadence: set aside as %s", aside)
+
+
+def _open_state(path: Path):
+    """(the state file flocked, its record). Damage is set aside first, ERROR once, and the fresh file opened in
+    its place, so a write never lands in the evidence."""
+    while True:
+        fd = open(path, "a+", encoding="utf-8")
+        _lock(fd)
+        if _still_names(fd, path):
+            fd.seek(0)
+            content = fd.read()
+            data, why = _parse(content) if content.strip() else ({}, "")
+            if isinstance(data, dict):
+                return fd, data
+            _set_aside(path, why or "not a JSON object")
+        _close_fd(fd)
+
+
 def _mtime_age(fd) -> float:
     """Seconds since file was last modified, via the open fd."""
     try:
@@ -221,12 +262,10 @@ def _read_turn_uncounted(path: Path) -> int:
         return -1
     fd = None
     try:
-        fd = open(path, encoding="utf-8")
-        _lock(fd)
-        content = fd.read()
+        fd, data = _open_state(path)
         _close_fd(fd)
         fd = None
-        stored = json.loads(content).get("turn", -1) if content.strip() else -1
+        stored = data.get("turn", -1)
         return stored if isinstance(stored, int) else -1
     except (OSError, json.JSONDecodeError, AttributeError) as exc:
         _turn_degraded = f"cadence state file {path} could not be read: {exc}"
@@ -257,12 +296,7 @@ def _load_and_increment(hook_data: dict) -> int | None:
     fd = None
 
     try:
-        fd = open(path, "a+", encoding="utf-8")
-        _lock(fd)
-        fd.seek(0)
-        content = fd.read()
-
-        data = json.loads(content) if content.strip() else {}
+        fd, data = _open_state(path)
         stored_turn = data.get("turn", -1)
         stored_token = data.get("token", -1)
 
@@ -527,7 +561,8 @@ def current_turn() -> int | None:
     if path is None or not path.exists():
         return None
     try:
-        data = json.loads(path.read_text(encoding="utf-8") or "{}")
+        fd, data = _open_state(path)
+        _close_fd(fd)
     except (OSError, json.JSONDecodeError) as exc:
         logger.info("[HOOKS] cadence: turn unreadable: %s", exc)
         return None
@@ -781,10 +816,7 @@ def _grounded_by_regroup(hook_data: dict, config: dict) -> bool:
     token = _get_turn_token(hook_data)
     fd = None
     try:
-        fd = open(path, "r+", encoding="utf-8")
-        _lock(fd)
-        content = fd.read()
-        stamp = json.loads(content) if content.strip() else {}
+        fd, stamp = _open_state(path)
         grounded = isinstance(stamp, dict) and _stands_in(stamp, window, token, distance)
         if grounded and stamp.get("used_token") is None:
             stamp["used_token"] = token
@@ -825,11 +857,7 @@ def consume_regroup_pending(hook_data: dict | None = None) -> bool:
 
     fd = None
     try:
-        fd = open(path, "a+", encoding="utf-8")
-        _lock(fd)
-        fd.seek(0)
-        content = fd.read()
-        data = json.loads(content) if content.strip() else {}
+        fd, data = _open_state(path)
         regroup_stamp = data.get("regroup_token")
         pending = bool(regroup_stamp)
 

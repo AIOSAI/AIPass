@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_cadence.py
-# Version: 1.10.2
+# Version: 1.11.0
 # Description: Tests for cadence module (DPLAN-0200): the fire decision; regroup and counter in test_cadence_regroup.py
 # Branch: hooks
 # Created: 2026-06-08
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/cadence.py: the fire decision."""
@@ -978,3 +978,45 @@ class TestShippedDefaults:
 
         assert self._decide(tmp_path, monkeypatch, "tier0", 5, config) is True
         assert self._decide(tmp_path, monkeypatch, "navmap", 5, config) is False
+
+
+class TestDamagedStateIsSetAsideOnce:
+    """Cadence state is read every prompt: damage is set aside under the lock with one ERROR, never one per prompt."""
+
+    @contextlib.contextmanager
+    def _seat(self, tmp_path, content: str):
+        state = tmp_path / "aipass-cadence-test-session.json"
+        state.write_text(content, encoding="utf-8")
+        with (
+            patch(f"{MODULE}._GUARD_DIR", tmp_path),
+            patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
+            patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
+            patch(f"{MODULE}.logger") as log,
+        ):
+            yield state, log
+
+    @pytest.mark.parametrize("damage", ["{corrupt", "[1, 2]"])
+    def test_a_damaged_state_file_is_set_aside_once_and_counting_starts_over(self, tmp_path, damage):
+        with self._seat(tmp_path, damage) as (state, log):
+            first = should_fire("global")
+            _reset_module_globals()
+            should_fire("global")
+
+        assert first is True and log.error.call_count == 1
+        (aside,) = tmp_path.glob("aipass-cadence-test-session.json.corrupt-*")
+        assert aside.read_text(encoding="utf-8") == damage
+        assert json.loads(state.read_text(encoding="utf-8"))["turn"] == 0
+
+    def test_current_turn_sets_a_damaged_file_aside(self, tmp_path):
+        with self._seat(tmp_path, "{corrupt") as (_state, log):
+            assert cadence.current_turn() is None
+
+        assert log.error.call_count == 1
+        assert len(list(tmp_path.glob("*.corrupt-*"))) == 1
+
+    def test_consume_regroup_pending_sets_a_damaged_file_aside(self, tmp_path):
+        with self._seat(tmp_path, "{corrupt") as (_state, log):
+            assert cadence.consume_regroup_pending() is False
+
+        assert log.error.call_count == 1
+        assert len(list(tmp_path.glob("*.corrupt-*"))) == 1
