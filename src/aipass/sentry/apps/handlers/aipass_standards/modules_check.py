@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: modules_check.py
 # Description: Modules Standards Checker Handler
-# Version: 1.5.2
+# Version: 1.6.0
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE, is_bypassed
 from aipass.sentry.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify
 
 AUDIT_SCOPE = "all_files"
@@ -78,20 +78,20 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     # A door is a re-export with no CLI: its own row replaces handle_command; the size and logic rows still stand
     if path.name.startswith("door_"):
-        checks.append(check_door(content, module_path))
+        checks.append(_waive_file_level(check_door(content, module_path), module_path, bypass_rules))
     elif not path.name == "__init__.py":
         handle_cmd_check = check_handle_command(content)
         if handle_cmd_check:
-            checks.append(handle_cmd_check)
+            checks.append(_waive_file_level(handle_cmd_check, module_path, bypass_rules))
 
     size_check = check_file_size(lines, module_path)
-    checks.append(size_check)
+    checks.append(_waive_file_level(size_check, module_path, bypass_rules))
 
-    file_ops_check = check_no_direct_file_ops(lines)
+    file_ops_check = check_no_direct_file_ops(lines, module_path, bypass_rules)
     if file_ops_check:
         checks.append(file_ops_check)
 
-    business_logic_check = check_no_business_logic(content, lines, module_path)
+    business_logic_check = check_no_business_logic(content, lines, module_path, bypass_rules)
     if business_logic_check:
         checks.append(business_logic_check)
 
@@ -112,6 +112,32 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "modules"})
     return {"passed": overall_passed, "checks": checks, "score": score, "standard": "MODULES"}
+
+
+def _waive_file_level(check: Dict, module_path: str, bypass_rules: list | None) -> Dict:
+    """A failing file-level check, passed when a row names FILE_SCOPE under functions; a line row never reaches it."""
+    if check["passed"] or not is_bypassed(module_path, "modules", bypass_rules=bypass_rules, name=FILE_SCOPE):
+        return check
+    return {**check, "passed": True, "message": f"Waived by a {FILE_SCOPE} bypass row: {check['message']}"}
+
+
+def _open_sites(sites: List[tuple], module_path: str, bypass_rules: list | None) -> List[tuple]:
+    """The (line, function, text) sites no bypass row covers, each asked by its own line and function."""
+    return [
+        site
+        for site in sites
+        if not is_bypassed(module_path, "modules", line=site[0], bypass_rules=bypass_rules, name=site[1])
+    ]
+
+
+def _enclosing_function(tree: ast.AST, line: int) -> str:
+    """The innermost function holding ``line``, or FILE_SCOPE for module-level code."""
+    holders = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.lineno <= line <= (node.end_lineno or 0)
+    ]
+    return min(holders, key=lambda n: (n.end_lineno or n.lineno) - n.lineno).name if holders else FILE_SCOPE
 
 
 def _own_branch(module_path: str) -> str:
@@ -255,13 +281,16 @@ def _file_op_hint(func: ast.expr) -> Optional[str]:
     return None
 
 
-def check_no_direct_file_ops(lines: List[str]) -> Optional[Dict]:
-    """Check that module doesn't do direct file operations"""
+def check_no_direct_file_ops(
+    lines: List[str], module_path: str = "", bypass_rules: list | None = None
+) -> Optional[Dict]:
+    """Check that module doesn't do direct file operations; each one is a site a row can waive by line or function."""
     try:
         tree = ast.parse("\n".join(lines))
     except (SyntaxError, ValueError) as exc:
         logger.info("modules: unparseable, file ops not judged: %s", exc)
-        return {"name": "No direct file operations", "passed": False, "message": f"File does not parse: {exc}"}
+        failed = {"name": "No direct file operations", "passed": False, "message": f"File does not parse: {exc}"}
+        return _waive_file_level(failed, module_path, bypass_rules)
 
     # Calls, not text: a string or comment naming .read_text( is no file operation.
     found = []
@@ -271,13 +300,23 @@ def check_no_direct_file_ops(lines: List[str]) -> Optional[Dict]:
         hint = _file_op_hint(node.func)
         if hint:
             found.append((node.lineno, node.col_offset, hint))
-    file_operations = [f"line {ln}: {lines[ln - 1].strip()} ({hint})" for ln, _col, hint in sorted(found)]
+    sites = [
+        (ln, _enclosing_function(tree, ln), f"line {ln}: {lines[ln - 1].strip()} ({hint})")
+        for ln, _col, hint in sorted(found)
+    ]
+    open_sites = _open_sites(sites, module_path, bypass_rules)
 
-    if file_operations:
+    if open_sites:
         return {
             "name": "No direct file operations",
             "passed": False,
-            "message": f"Module has direct file operations: {file_operations[0]}",
+            "message": "Module has direct file operations: " + "; ".join(text for _ln, _fn, text in open_sites),
+        }
+    if sites:
+        return {
+            "name": "No direct file operations",
+            "passed": True,
+            "message": f"Every direct file operation ({len(sites)}) is waived by a scoped bypass row",
         }
 
     return {
@@ -317,7 +356,9 @@ def _scan_candidates(lines: List[str], list_pattern, dict_pattern) -> dict:
     return candidates
 
 
-def check_no_business_logic(content: str, lines: List[str], module_path: str) -> Optional[Dict]:
+def check_no_business_logic(
+    content: str, lines: List[str], module_path: str, bypass_rules: list | None = None
+) -> Optional[Dict]:
     """Check that module doesn't contain hardcoded business logic data"""
     list_pattern = re.compile(r"^([a-z][a-z0-9_]*)\s*=\s*\[")
     dict_pattern = re.compile(r"^([a-z][a-z0-9_]*)\s*=\s*\{")
@@ -375,10 +416,20 @@ def check_no_business_logic(content: str, lines: List[str], module_path: str) ->
         logger.info("Skipped business logic check: parse error in %s", module_path)
         return None
 
-    if violations:
-        v = violations[0]
-        msg = f"Line {v['line']}: '{v['var']}' has hardcoded {v['type']} with {v['count']} elements (move to config)"
+    sites = [
+        (v["line"], FILE_SCOPE, f"Line {v['line']}: '{v['var']}' has hardcoded {v['type']} with {v['count']} elements")
+        for v in violations
+    ]
+    open_sites = _open_sites(sites, module_path, bypass_rules)
+    if open_sites:
+        msg = "; ".join(text for _ln, _fn, text in open_sites) + " (move to config)"
         return {"name": "No business logic", "passed": False, "message": msg}
+    if sites:
+        return {
+            "name": "No business logic",
+            "passed": True,
+            "message": f"Every hardcoded structure ({len(sites)}) is waived",
+        }
 
     return {"name": "No business logic", "passed": True, "message": "No hardcoded data structures detected"}
 
@@ -446,16 +497,19 @@ def check_thin_orchestration(content: str, module_path: str, bypass_rules: list 
 
             non_standard_functions.append({"name": func_name, "line": node.lineno, "lines": func_lines})
 
+    sites = [(f["line"], f["name"], f["name"]) for f in non_standard_functions]
+    open_names = {name for _ln, name, _text in _open_sites(sites, module_path, bypass_rules)}
+    non_standard_functions = [f for f in non_standard_functions if f["name"] in open_names]
+
     if non_standard_functions:
-        func_list = [f"{f['name']} (line {f['line']})" for f in non_standard_functions[:5]]
-        extra = f" +{len(non_standard_functions) - 5} more" if len(non_standard_functions) > 5 else ""
+        func_list = [f"{f['name']} (line {f['line']})" for f in non_standard_functions]
 
         return {
             "name": "Thin orchestration",
             "passed": False,
             "message": (
                 f"Module has {len(non_standard_functions)} implementation function(s) "
-                f"that belong in handlers: {', '.join(func_list)}{extra}"
+                f"that belong in handlers: {', '.join(func_list)}"
             ),
         }
 

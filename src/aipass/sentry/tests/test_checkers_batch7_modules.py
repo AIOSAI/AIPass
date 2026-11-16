@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_modules.py
 # Description: modules_check sub-functions and the door shape (split from test_checkers_batch7.py)
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-10-08
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/modules_check.py."""
@@ -22,6 +22,7 @@ from aipass.sentry.apps.handlers.aipass_standards.modules_check import (
     check_thin_orchestration,
 )
 from aipass.sentry.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE
 from aipass.sentry.tests.support_checkers_batch7 import _lines
 
 pytestmark = pytest.mark.usefixtures("_pin_bypass_log")
@@ -487,3 +488,76 @@ class TestCheckThinOrchestration:
         result = check_thin_orchestration(content, (tmp_path / "module.py").as_posix())
         assert result is not None
         assert result["passed"] is True
+
+
+# ---------------------------------------------------------------------------
+# Scoped bypass rows: one finding per site
+# ---------------------------------------------------------------------------
+
+_TWO_OPS = (
+    "import json\n"
+    "\n"
+    "def handle_command(command: str, args: list) -> bool:\n"
+    "    return True\n"
+    "\n"
+    "def _load(path):\n"
+    "    return json.loads(path.read_text())\n"
+    "\n"
+    "def _save(path, data):\n"
+    "    path.write_text(data)\n"
+)
+_LOAD_LINE, _SAVE_LINE = 7, 10
+
+
+class TestScopedBypassRows:
+    """A modules row naming a line or a function waives that site alone; a whole-file row waives the file."""
+
+    def _check(self, tmp_path, source, **scope):
+        target = tmp_path / "apps" / "modules" / "store.py"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(source, encoding="utf-8")
+        rules = [{"file": "apps/modules/store.py", "standard": "modules", "reason": "test", **scope}] if scope else []
+        result = modules_check.check_module(str(target), bypass_rules=rules)
+        rows = {c["name"]: c for c in result["checks"]}
+        return result, rows
+
+    def test_every_direct_file_operation_is_named_not_only_the_first(self, tmp_path):
+        _result, rows = self._check(tmp_path, _TWO_OPS)
+        message = rows["No direct file operations"]["message"]
+        assert f"line {_LOAD_LINE}:" in message and f"line {_SAVE_LINE}:" in message
+
+    def test_a_line_row_waives_its_operation_and_the_other_still_convicts(self, tmp_path):
+        _result, rows = self._check(tmp_path, _TWO_OPS, lines=[_LOAD_LINE])
+        row = rows["No direct file operations"]
+        assert row["passed"] is False
+        assert f"line {_SAVE_LINE}:" in row["message"] and f"line {_LOAD_LINE}:" not in row["message"]
+
+    def test_line_rows_on_every_operation_pass_the_check(self, tmp_path):
+        result, rows = self._check(tmp_path, _TWO_OPS, lines=[_LOAD_LINE, _SAVE_LINE])
+        assert rows["No direct file operations"]["passed"] is True
+        assert result["score"] == 100
+
+    def test_a_function_row_waives_the_operations_inside_that_function_only(self, tmp_path):
+        _result, rows = self._check(tmp_path, _TWO_OPS, functions=["_load"])
+        row = rows["No direct file operations"]
+        assert row["passed"] is False
+        assert f"line {_SAVE_LINE}:" in row["message"] and f"line {_LOAD_LINE}:" not in row["message"]
+
+    def test_a_whole_file_row_still_waives_the_whole_file(self, tmp_path):
+        result, rows = self._check(tmp_path, _TWO_OPS, lines=None)
+        assert result["score"] == 100 and "Bypassed" in rows
+
+    def test_a_file_level_finding_is_waived_by_the_file_scope_name_and_not_by_a_line(self, tmp_path):
+        oversized = "def handle_command(command: str, args: list) -> bool:\n    return True\n" + "X = 1\n" * 620
+        _result, by_name = self._check(tmp_path, oversized, functions=[FILE_SCOPE])
+        _result, by_line = self._check(tmp_path, oversized, lines=[1])
+        assert by_name["File size"]["passed"] is True
+        assert by_line["File size"]["passed"] is False
+
+    def test_a_function_row_waives_a_long_implementation_function_by_its_name(self, tmp_path):
+        body = "".join(f"    x{i} = {i}\n" for i in range(45))
+        source = "def handle_command(command: str, args: list) -> bool:\n    return True\n\ndef build():\n" + body
+        _result, waived = self._check(tmp_path, source, functions=["build"])
+        _result, plain = self._check(tmp_path, source)
+        assert plain["Thin orchestration"]["passed"] is False
+        assert waived["Thin orchestration"]["passed"] is True

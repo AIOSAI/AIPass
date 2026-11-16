@@ -762,6 +762,14 @@ def test_track_operation_exception():
 
 ---
 
+## Bypass Rows
+
+Each direct file operation, hardcoded structure and long function is its own site, with a line and its enclosing function, and the message names every open site. A row with `"lines": [n]` waives the site on line n; a row with `"functions": ["name"]` waives the sites inside that function. Other sites in the file still convict.
+
+The size, `handle_command` and door findings are file-level: their function name is `<file>`, so a row with `"functions": ["<file>"]` waives them and a line row does not. A row with no `lines` or `functions` waives the whole file.
+
+---
+
 ## Reference Examples
 
 **Simple module (135 lines):** `src/aipass/sentry/apps/modules/cli_standard.py`

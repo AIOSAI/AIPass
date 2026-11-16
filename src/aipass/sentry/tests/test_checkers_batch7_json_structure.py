@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_json_structure.py
 # Description: json_structure_check: declaration-only and bootstrap modules (split from test_checkers_batch7.py)
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/json_structure_check.py."""
@@ -14,6 +14,7 @@
 import pytest
 
 from aipass.sentry.apps.handlers.aipass_standards import json_structure_check
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE
 
 pytestmark = pytest.mark.usefixtures("_pin_bypass_log")
 
@@ -235,3 +236,26 @@ class TestTheBootstrapChainSeesRelativeImports:
 
     def test_an_absolute_import_is_untouched_by_the_resolver(self):
         assert self._resolve("aipass.prax", 0, "aipass.canary.apps") is None
+
+
+class TestScopedBypassRows:
+    """json_structure's findings are file-level: a row waives them by the file scope name, never by a line."""
+
+    def _score(self, tmp_path, **scope):
+        target = tmp_path / "apps" / "handlers" / "work" / "unlogged.py"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text('"""Doc."""\n\n\ndef work():\n    return 1\n', encoding="utf-8")
+        rules = [{"file": "apps/handlers/work/unlogged.py", "standard": "json_structure", "reason": "t", **scope}]
+        return json_structure_check.check_module(str(target), bypass_rules=rules if scope else [])["score"]
+
+    def test_with_no_row_the_unlogged_handler_scores_zero(self, tmp_path):
+        assert self._score(tmp_path) == 0
+
+    def test_a_file_scope_function_row_waives_the_file_level_finding(self, tmp_path):
+        assert self._score(tmp_path, functions=[FILE_SCOPE]) == 100
+
+    def test_a_line_row_waives_nothing_because_the_finding_has_no_line(self, tmp_path):
+        assert self._score(tmp_path, lines=[4]) == 0
+
+    def test_a_whole_file_row_still_waives_the_whole_file(self, tmp_path):
+        assert self._score(tmp_path, lines=None) == 100

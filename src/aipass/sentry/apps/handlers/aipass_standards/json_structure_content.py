@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_structure_content.py
 # Description: JSON Structure Standards Content Handler
-# Version: 3.1.2
+# Version: 3.1.3
 # Created: 2026-03-05
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -132,6 +132,10 @@ def get_json_structure_standards() -> str:
         '  [dim]{"file": "apps/handlers/init/bootstrap.py",[/dim]',
         '  [dim] "standard": "json_structure",[/dim]',
         '  [dim] "reason": "Pure Python bootstrap — no branch imports by design"}[/dim]',
+        "",
+        "  Every json_structure finding is file-level and has no line: a row with",
+        '  [dim]"lines"[/dim] waives nothing. [dim]"functions": ["<file>"][/dim] waives the',
+        "  file-level findings; a row with no scope waives the whole file.",
         "",
         "─" * 70,
         "",

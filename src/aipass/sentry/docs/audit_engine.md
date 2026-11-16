@@ -148,8 +148,9 @@ summary prints `Ignored by the audit list: <pattern> N`, and each artifact branc
 carries the list. It also returns `ignored_tracked`: the removed files that the repository's
 `.gitignore` files do **not** ignore, read with `pathspec` (no git subprocess, negations
 honoured). Anything there prints red, `Ignore list drops tracked source`, because a file git
-tracks is source, and source is judged. The one known gap is git's rule that a file cannot be
-re-included under an excluded parent directory, which `pathspec` does not apply.
+tracks is source, and source is judged. Limit: `pathspec` does not apply git's rule that a
+file cannot be re-included under an excluded parent directory, so such a file prints in that
+red list although git ignores it.
 
 Pyright's filter in `diagnostics_check` reads the same list through `audit_ignore_match`, so
 the two lanes cannot drift.
@@ -177,6 +178,11 @@ it deliberately does not judge.
 and a **required reason**. Checkers call `is_bypassed()` per violation;
 `bypass/utils.matching_rule()` is the single scope-aware matcher. Bypass is an intentional,
 documented deviation — not a way to ignore a rule.
+
+A finding that has no line of its own (a file over the size limit, a missing door) passes the
+name `FILE_SCOPE` (`"<file>"`, in `bypass/utils.py`) as its function, so a row with
+`"functions": ["<file>"]` waives it and a line row stays inert. A row with no scope keys
+waives the whole file.
 
 `bypass/inert.py` derives inert (unreachable) rules from the checker ASTs: a rule that could
 never match anything the checker can produce is noise, and it says so. The audit says it on

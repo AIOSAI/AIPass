@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_structure_check.py
 # Description: JSON Structure Standards Checker Handler
-# Version: 3.4.3
+# Version: 3.5.0
 # Created: 2026-03-05
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -22,7 +22,7 @@ from typing import Dict, List
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.aipass_standards.check_support import parse
 from aipass.sentry.apps.handlers.aipass_standards.json_handler_check import _is_canonical_shim
-from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE, is_bypassed
 from aipass.sentry.apps.handlers.json import json_handler
 
 # APPLIES_TO: a test does not log_operation and should not.
@@ -89,7 +89,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     path_str = str(path)
 
     if "json_handler" in path.name and path.parent.name == "json":
-        checks = _check_json_handler_config(path, content, bypass_rules)
+        checks = [_waive_file_level(c, path_str, bypass_rules) for c in _check_json_handler_config(path, content)]
         passed_count = sum(1 for c in checks if c["passed"])
         total = len(checks)
         score = int((passed_count / total * 100)) if total > 0 else 0
@@ -155,7 +155,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         }
 
     if in_modules or in_handlers:
-        checks = _check_code_wiring(path, content)
+        checks = [_waive_file_level(c, path_str, bypass_rules) for c in _check_code_wiring(path, content)]
         passed_count = sum(1 for c in checks if c["passed"])
         total = len(checks)
         score = int((passed_count / total * 100)) if total > 0 else 0
@@ -477,7 +477,7 @@ def _check_code_wiring(_path: Path, content: str) -> List[Dict]:
     return checks
 
 
-def _check_json_handler_config(_handler_path: Path, content: str, _bypass_rules: list | None = None) -> List[Dict]:
+def _check_json_handler_config(_handler_path: Path, content: str) -> List[Dict]:
     """Check json_handler.py: no Path.home(), relative resolution, no json_templates, no load_template()."""
     checks: List[Dict] = []
 
@@ -654,3 +654,10 @@ def check_branch_info(branch_path: str) -> list[str]:
         f"{Path(branch_path).name}_json/{CUSTOM_CONFIG_DIR}/: {len(files)} operator {noun} "
         f"({', '.join(files)}) — content not audited. {CUSTOM_CONFIG_GUIDE}"
     ]
+
+
+def _waive_file_level(check: Dict, path_str: str, bypass_rules: list | None) -> Dict:
+    """A failing check passed by a row naming FILE_SCOPE under functions: every finding here is file-level."""
+    if check["passed"] or not is_bypassed(path_str, "json_structure", bypass_rules=bypass_rules, name=FILE_SCOPE):
+        return check
+    return {**check, "passed": True, "message": f"Waived by a {FILE_SCOPE} bypass row: {check['message']}"}

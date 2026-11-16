@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: utils.py
 # Description: Shared bypass checking utility for standards checkers
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-27
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Shared bypass checking utility for standards checkers."""
@@ -11,6 +11,8 @@
 from pathlib import Path
 
 from aipass.sentry.apps.handlers.json import json_handler
+
+FILE_SCOPE = "<file>"  # the function name of a file-level finding; a row lists it under functions
 
 
 def _scope_matches(rule: dict, line: int | None, name: str | None) -> bool:
