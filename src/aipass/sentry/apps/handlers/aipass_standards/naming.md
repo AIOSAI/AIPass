@@ -99,7 +99,6 @@ prax/apps/handlers/monitoring/
     module_tracker.py
     event_queue.py
     unified_stream.py
-    telegram_relay.py
 ```
 
 **prax -- registry domain:**

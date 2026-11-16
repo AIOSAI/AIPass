@@ -3,7 +3,7 @@
 # Description: Handler Encapsulation Standards Checker
 # Version: 1.4.2
 # Created: 2026-03-05
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Handler Encapsulation Standards Checker"""
@@ -101,7 +101,7 @@ def extract_branch_from_import(import_line: str) -> Optional[str]:
     if match:
         return match.group(1)
 
-    # Handlers anywhere under a branch's tree are that branch's (aipass.skills.lib.telegram).
+    # Handlers anywhere under a branch's tree are that branch's (aipass.skills.lib.drone_commands).
     match = re.search(r"(?:from|import)\s+aipass\.(\w+)\.(?:\w+\.)*?apps\.handlers", import_line)
     if match:
         return match.group(1)
@@ -456,9 +456,9 @@ def _conviction(violation: Dict) -> str:
 def _target_branch(target: str) -> str:
     """The branch a dotted handlers target belongs to.
 
-    ``aipass.<branch>.`` names it whatever nests below: skills' telegram lives at
-    ``aipass.skills.lib.telegram.apps.handlers`` and is skills' own, where the
-    segment before ``apps`` would answer "telegram".
+    ``aipass.<branch>.`` names it whatever nests below: skills' drone_commands lives at
+    ``aipass.skills.lib.drone_commands.apps.handlers`` and is skills' own, where the
+    segment before ``apps`` would answer "drone_commands".
     """
     parts = target.split(".")
     if parts[0] == "aipass" and len(parts) > 1:
@@ -589,7 +589,7 @@ def _branch_root(module_path: str) -> Optional[Path]:
     """The ``src/aipass/<branch>`` directory above a file, else the nearest package holding ``apps/``, or None.
 
     The second reading is a project branch (``seed/seed``); it comes second so a nested
-    ``aipass.skills.lib.telegram`` still answers skills, not telegram.
+    ``aipass.skills.lib.drone_commands`` still answers skills, not drone_commands.
     """
     parents = Path(module_path).resolve().parents
     for parent in parents:

@@ -3,7 +3,7 @@
 # Description: host_portability_check — arms B and D to H over minimised fleet sites, and its branch score
 # Version: 1.0.0
 # Created: 2026-11-01
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/host_portability_check.py."""
@@ -268,7 +268,7 @@ def test_a_portable_binary_is_never_read(tmp_path):
 
 def test_lib_is_in_the_corpus(tmp_path):
     """skills lib/ -- all seven built-in skills live there and were never scored."""
-    handlers = tmp_path / "lib" / "telegram" / "apps" / "handlers"
+    handlers = tmp_path / "lib" / "screen_lock" / "apps" / "handlers"
     handlers.mkdir(parents=True)
     (handlers / "tmux_manager.py").write_text(
         'import subprocess\n\n\ndef has(name):\n    subprocess.run(["tmux", "has-session", "-t", name])\n',
@@ -279,7 +279,7 @@ def test_lib_is_in_the_corpus(tmp_path):
 
     assert result["score"] == 0
     failing = [c for c in result["checks"] if not c["passed"]]
-    assert failing[0]["violations"][0]["file"] == "lib/telegram/apps/handlers/tmux_manager.py"
+    assert failing[0]["violations"][0]["file"] == "lib/screen_lock/apps/handlers/tmux_manager.py"
 
 
 _LOCATE_CONFIG = """import os

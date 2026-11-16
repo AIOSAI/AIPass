@@ -3,7 +3,7 @@
 # Description: Clear Text Secret Logging Standards Content Handler
 # Version: 1.3.0
 # Created: 2026-10-10
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -81,13 +81,13 @@ def get_clear_text_secret_logging_standards() -> str:
         "  (skills/lib is outside the audit corpus, so api, drone and hooks score under 100).",
         "  The CodeQL flows are among api's: host/tokens.py :324 :370 :438 and auth/secrets.py",
         "  :62 :187 :216, every one built from SECRETS_BASE.",
-        "  Round nine (1.1.0): CodeQL's next row was @skills telegram config.py load_bot_config,",
+        "  Round nine (1.1.0): CodeQL's next row was @skills config.py load_bot_config,",
         "  strays from _get_secret through non_secret_keys - the call seed and the hop convict it.",
         "  Fleet after: 0 rows (the line was already cured); the narrowings each dropped a false row.",
         "  Round ten (1.2.0): @api host/tokens.py, get_secret -> .get('tokens') -> loop ->",
         "  _is_due(record.get('last_used')) -> the last_used %r warning; the pre-cure file convicts at",
         "  :655 only, the cure acquits. Fleet 0 rows before and after, each sub-arm 0 alone.",
-        "  Round eleven (1.3.0): CodeQL's own SARIF path, telegram list_secrets -> handler.py loop ->",
+        "  Round eleven (1.3.0): CodeQL's own SARIF path, skills list_secrets -> handler.py loop ->",
         "  _get_secret -> api get_secret -> auth/secrets.py:83 f'Secret not found: {provider}/{slug}'.",
         "  CodeQL's reach is the MESSAGE only (rounds eight to ten were %s arguments); this rule stays",
         "  stricter for arms 1 and 2. Arm 3 convicts the pre-cure :83 only; the cure acquits; fleet 0.",

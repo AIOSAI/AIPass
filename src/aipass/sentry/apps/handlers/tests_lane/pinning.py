@@ -3,7 +3,7 @@
 # Description: the test files whose source names a repo-relative path, as a string or as Path parts
 # Version: 1.1.0
 # Created: 2026-11-01
-# Modified: 2026-11-06
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -44,8 +44,6 @@ def test_files(root: Path) -> Iterator[Path]:
             if not (path.name.startswith("test_") or path.name.endswith("_test.py")):
                 continue
             if _skipped(path.relative_to(root).parts[:-1]):
-                continue
-            if "telegram" in path.as_posix():
                 continue
             yield path
 

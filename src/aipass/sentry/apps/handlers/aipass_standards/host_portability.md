@@ -235,13 +235,7 @@ Every other branch scores 100.
 ### Round three (2026-09-12, after every FPLAN-0554 owner cure landed)
 
 After adding `lib/` to the corpus: **every branch 100 except skills, 97** — 12
-rows in 3 files, all arm B, all in the telegram skill (off since 2026-08-18):
-
-| File | Rows |
-|---|---|
-| `lib/telegram/apps/handlers/base_bot.py` | tmux :1743 :1749 :1792 :1913 :1918 :1957, systemctl :2358 |
-| `lib/telegram/apps/handlers/bot_factory.py` | tmux :370 :380 :397 |
-| `lib/telegram/apps/handlers/tmux_manager.py` | tmux :58 :80 |
+rows in 3 files, all arm B, all in one skill under `lib/` (tmux 11, systemctl 1).
 
 **Skills cured all 12 the same day, no bypass** (host_portability 97 → 100 from its seat and from mine):
 `tmux_manager.session_exists` was called above the try in three callers, so a missing tmux raised

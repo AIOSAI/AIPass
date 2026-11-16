@@ -199,7 +199,7 @@ judged. The rule only convicts what it can name.
 `aipass.<branch>.tests.support_x` counted as an own-branch PRODUCT name, so
 `patch(LOGGER_PATCH)` convicted when `LOGGER_PATCH` came from a support module and passed when
 the same line bound it in the file: @api duplicated its `PATCH_*` per file to stay green, and
-@hooks wrote three file-wide rows for `test_telegram_response*.py`. Measured over the fleet's
+@hooks wrote three file-wide rows for one family of response tests. Measured over the fleet's
 test files: 101 hits in 5 files before, 11 in 2 after (both `(disabled)` copies in @memory).
 Resolving every constant to its string instead, local and imported alike, would judge
 **714 hits in 40 files** — a hole larger than everything the rule convicts today, and a

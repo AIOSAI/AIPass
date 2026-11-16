@@ -3,7 +3,7 @@
 # Description: modules_check sub-functions and the door shape (split from test_checkers_batch7.py)
 # Version: 1.2.1
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/modules_check.py."""
@@ -143,11 +143,14 @@ class TestADoorReExportsItsOwnHandlersOnly:
 
     @pytest.mark.parametrize(
         ("handlers", "passed"),
-        [("aipass.skills.lib.telegram.apps.handlers.notifier", True), ("aipass.daemon.lib.x.apps.handlers.y", False)],
+        [
+            ("aipass.skills.lib.drone_commands.apps.handlers.notifier", True),
+            ("aipass.daemon.lib.x.apps.handlers.y", False),
+        ],
         ids=["nested_under_its_own_branch", "nested_under_another_branch"],
     )
     def test_a_handlers_package_nested_in_the_branch_tree_is_its_own(self, tmp_path, handlers, passed):
-        """skills' door_notifier re-exports lib/telegram's handlers (10-08) and read 38/39.
+        """A skills door re-exporting a handlers package nested in its own lib/ read 38/39.
 
         The owner is the segment after ``aipass.``, as encapsulation reads it; a
         handlers package nested under another branch's tree is still foreign.
@@ -155,7 +158,7 @@ class TestADoorReExportsItsOwnHandlersOnly:
         door = tmp_path / "aipass" / "skills" / "apps" / "modules" / "door_notifier.py"
         door.parent.mkdir(parents=True)
         door.write_text(
-            f'"""Door: the telegram notifier."""\n\nfrom {handlers} import send\n\n__all__ = ["send"]\n',
+            f'"""Door: the notifier."""\n\nfrom {handlers} import send\n\n__all__ = ["send"]\n',
             encoding="utf-8",
         )
 

@@ -3,7 +3,7 @@
 # Description: fresh_clone - the OPTIONAL_EXTRA species and the primitives it shares with the checker
 # Version: 1.0.0
 # Created: 2026-10-10
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """fresh_clone -- the OPTIONAL_EXTRA species and the primitives it shares.
@@ -27,7 +27,6 @@ OPTIONAL_EXTRA_MODULES: frozenset = frozenset(
         "numpy",  # memory
         "chromadb",  # memory
         "fastembed",  # memory
-        "telethon",  # telegram
         "google",  # drive: google-auth imports as google.auth
         "google_auth_oauthlib",  # drive
         "googleapiclient",  # drive: google-api-python-client

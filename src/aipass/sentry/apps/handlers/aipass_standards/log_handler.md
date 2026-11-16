@@ -58,14 +58,14 @@ logger.error("Connection failed: %s", error)
 
 ## Why This Matters
 
-On 2026-02-26, the entire AIPass command infrastructure crashed because telegram bot logging used plain `FileHandler` instead of `RotatingFileHandler`. The result:
+On 2026-02-26, the entire AIPass command infrastructure crashed because one integration's bot logging used plain `FileHandler` instead of `RotatingFileHandler`. The result:
 
-- **181,566 log lines** accumulated across telegram log files (~100K ERROR lines)
+- **181,566 log lines** accumulated across that integration's log files (~100K ERROR lines)
 - **Error catchup scanner** tried to process 100K errors on every command startup
 - **Python recursion limit hit** at 1000 levels deep, cascading `RecursionError`
 - **Every `drone` command failed** — 30+ second hangs then crash
 
-All other branches using prax's `system_logger` rotated correctly (verified: `.log.1` backups exist). The telegram bots were the only code bypassing prax. (Telegram integration has since been removed from AIPass.)
+All other branches using prax's `system_logger` rotated correctly (verified: `.log.1` backups exist). Those bots were the only code bypassing prax.
 
 ## Checker
 

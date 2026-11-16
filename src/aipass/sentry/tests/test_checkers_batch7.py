@@ -3,7 +3,7 @@
 # Description: Unit tests for encapsulation_check sub-functions (the other checkers moved to test_checkers_batch7_*.py)
 # Version: 1.4.2
 # Created: 2026-04-25
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/encapsulation_check.py and its sibling checkers (batch 7)."""
@@ -56,8 +56,8 @@ class TestExtractBranchFromImport:
         assert result == "sentry"
 
     def test_handlers_nested_under_a_branch_tree_are_that_branchs(self):
-        """daemon's telegram_notifier.py:28 imports skills' lib/telegram handlers (measured 10-08)."""
-        line = "from aipass.skills.lib.telegram.apps.handlers.notifier import ("
+        """A daemon file importing handlers nested in skills' lib/ imports skills."""
+        line = "from aipass.skills.lib.drone_commands.apps.handlers.notifier import ("
         violation = check_cross_branch_imports([line], "daemon/apps/handlers/schedule/notifier_use.py", "daemon")
 
         assert extract_branch_from_import(line) == "skills"
@@ -346,10 +346,10 @@ class TestTestsAreKinToTheirOwnBranchOnly:
         assert result["checks"][0]["message"].startswith("Line ")
 
     def test_a_nested_package_is_judged_by_the_branch_after_aipass(self, tmp_path):
-        """skills' own lib/telegram handlers are kin to skills' tests; the segment before apps is not the branch."""
+        """A branch's own nested lib/ handlers are kin to its tests; the segment before apps is not the branch."""
         body = (
-            "from aipass.hooks.lib.telegram.apps.handlers import notifier\n"
-            'patch("aipass.hooks.lib.telegram.apps.handlers.notifier.send")\n'
+            "from aipass.hooks.lib.chat.apps.handlers import notifier\n"
+            'patch("aipass.hooks.lib.chat.apps.handlers.notifier.send")\n'
         )
         result = encapsulation_check.check_module(self._test_file(tmp_path, body))
         assert result["score"] == 100

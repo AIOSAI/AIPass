@@ -11,8 +11,6 @@
     "src/aipass/hooks/tests/test_edit_gate_trinity.py": {"name": 4},
     "src/aipass/hooks/tests/test_registry_gate.py": {"name": 2},
     "src/aipass/hooks/tests/test_rm_gate.py": {"name": 3},
-    "src/aipass/hooks/tests/test_testwrite_gate.py": {"name": 1},
-    "src/aipass/skills/lib/telegram/TELEGRAM_PORT_MAP.md": {"name": 3, "home_path": 5},
-    "src/aipass/skills/lib/telegram/tests/test_control_verbs.py": {"name": 1}
+    "src/aipass/hooks/tests/test_testwrite_gate.py": {"name": 1}
   }
 }

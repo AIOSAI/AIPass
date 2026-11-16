@@ -52,14 +52,8 @@ a module name held as data in a table. A literal is judged only as an argument
 to an importer or a path maker.
 
 **Not read:** a path to the store assembled at run time from parts that are not
-literals, and a reach through a sibling module (`telegram/notifier.py` reads
+literals, and a reach through a sibling module (`notifier.py` reading
 its token through `config.load_bot_config`; `config.py` is the row).
-
-**Fleet, 2026-10-22 (1,670 production files outside @api):** 5 rows, all the
-retired Telegram relay: `prax/apps/modules/monitor.py:196`, and in
-`skills/lib/telegram/` `apps/handlers/config.py:36`, `bot_factory.py:53`,
-`botfather_client.py:64`, `telethon_auth.py:22`. The four under `lib/` sit
-outside the per-file audit corpus; the checklist names them.
 
 ## Scoring
 
