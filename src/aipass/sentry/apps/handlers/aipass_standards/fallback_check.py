@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: fallback_check.py
 # Description: Fallback Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-11-14
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -56,6 +56,8 @@ TOOL_FINDERS = re.compile(r"^(which|find_spec)$|_(bin|binary|executable)$")
 IMPORT_CALLS = frozenset({"import_module", "__import__", "find_spec", "spec_from_file_location", "exec_module"})
 GATE_WORDS = re.compile(r"check|gate|lint|valid|verif|guard|protect|trust|allow|permit|authori|enforce")
 DISGUISES = re.compile(r"best[ _-]effort|graceful|legacy|compat|fall(?:s|ing)?[ _-]?back", re.IGNORECASE)
+#: "No such process" answers a signal: the state a kill wanted or a probe asked about, never a stand-in.
+SIGNAL_CALLS = frozenset({"kill", "killpg", "_kill", "send_signal"})
 #: Calls that put the failure in front of a person: the handler is loud, not a fallback.
 SHOWN_BY = frozenset({"print", "echo", "error", "fail", "exit", "_exit", "abort"})
 
@@ -217,6 +219,8 @@ def _shape(handler: ast.ExceptHandler, try_node: ast.Try, function: str, lines: 
     if not handler.body or _is_loud(handler):
         return None
     caught = _caught(handler)
+    if caught == {"ProcessLookupError"} and _calls(try_node, SIGNAL_CALLS):
+        return None
     if caught & IMPORT_ERRORS or _calls(try_node, IMPORT_CALLS):
         # A module skipped with only a log line loses its commands: only a bare skip tries the next.
         bare_skip = all(isinstance(stmt, (ast.Continue, ast.Break)) for stmt in handler.body)
@@ -230,7 +234,8 @@ def _shape(handler: ast.ExceptHandler, try_node: ast.Try, function: str, lines: 
         return "unreadable file read as a default"
     if gate:
         return f"check that cannot run reads as passed ({function})"
-    # shortcut: a missing binary also raises FileNotFoundError; a run() beside a loads() reads as absence. Split if one shows.
+    # shortcut: a missing binary also raises FileNotFoundError; a run() beside a loads() reads as absence.
+    # Split if one shows.
     if caught == {"FileNotFoundError"} and _reads_a_file(try_node):
         return None  # absence, not corruption: the documented default for a file that is not there
     # The comment over the try names the fallback as often as the handler does.

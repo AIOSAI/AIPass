@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: logging_allowed.py
 # Description: The files the logging checkers let through: prax's published list, and what prax cannot own
-# Version: 2.1.0
+# Version: 2.1.1
 # Created: 2026-11-15
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """The files the logging checkers let through, by exact path tail under ``src/aipass``.
@@ -44,11 +44,14 @@ def prax_published(name: str) -> Dict[str, str]:
     except (OSError, SyntaxError, UnicodeDecodeError) as exc:
         raise ValueError(f"prax's {name} unreadable at {PRAX_LOGGER}: {exc}") from exc
     for node in tree.body:
-        targets = (
-            node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign) else []
-        )
-        if any(isinstance(t, ast.Name) and t.id == name for t in targets) and node.value is not None:
-            return {str(tail): str(why) for tail, why in ast.literal_eval(node.value)}
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, ast.AnnAssign):
+            targets, value = [node.target], node.value
+        else:
+            continue
+        if any(isinstance(t, ast.Name) and t.id == name for t in targets) and value is not None:
+            return {str(tail): str(why) for tail, why in ast.literal_eval(value)}
     raise ValueError(f"prax's {name} not found in {PRAX_LOGGER}")
 
 

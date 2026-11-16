@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: fallback_content.py
 # Description: Fallback Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-11-14
-# Modified: 2026-11-14
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -28,6 +28,7 @@ def get_fallback_standards() -> str:
         "",
         "[bold cyan]NOT FLAGGED:[/bold cyan] continue/break only, FileNotFoundError alone, a warning-level",
         "  log with none of the first four shapes (silent_catch and logged_fallback judge those).",
+        "  ProcessLookupError alone around a kill/killpg/send_signal: no such process is the answer.",
         "",
         "[bold cyan]REVIEW RULE, NOT A CHECK:[/bold cyan] dict.get default, env-or-default, a helper that",
         "  swallows, a boolean's polarity in a check. Ask: if this default is used, does anyone find out?",

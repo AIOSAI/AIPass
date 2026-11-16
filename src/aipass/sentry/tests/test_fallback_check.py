@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_fallback_check.py
 # Description: fallback_check — a failure answered with a stand-in, one test per shape on a true corpus site
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-11-14
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/fallback_check.py."""
@@ -270,6 +270,35 @@ def stale_files(here, filenames):
 """
 
 
+# daemon/apps/handlers/schedule/command_job.py:138-145 (signal_group)
+GROUP_ALREADY_GONE = """import os
+
+from aipass.prax import logger
+
+
+def signal_group(pid, sig):
+    try:
+        os.killpg(pid, sig)
+    except ProcessLookupError:
+        logger.info("process group %s already gone before signal %s", pid, sig)
+"""
+
+# ai_mail/apps/handlers/dispatch/pid_lock.py:203-209 (check_pid_alive)
+PROBE_ANSWERS_DEAD = """import os
+
+from aipass.prax import logger
+
+
+def check_pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError as exc:
+        logger.warning("PID %s not found: %s", pid, exc)
+        return False
+    return True
+"""
+
+
 def _plant(tmp_path, source, name="site.py"):
     """The path of ``source`` written under apps/."""
     apps = tmp_path / "apps"
@@ -362,6 +391,27 @@ class TestWhatIsNotAFallback:
 
     def test_a_file_not_found_around_no_read_still_flags(self, tmp_path):
         assert _message(tmp_path, VANISHED_DEBUG_SKIP) == (
+            0,
+            f"site.py:9 default with no warning-level log - {checker.CURE}",
+        )
+
+    def test_a_signal_to_a_group_already_gone_passes(self, tmp_path):
+        """@daemon command_job.signal_group: the group exiting is what the kill was for."""
+        assert _message(tmp_path, GROUP_ALREADY_GONE) == (100, "No unwaived fallback")
+
+    def test_a_liveness_probe_that_answers_dead_passes(self, tmp_path):
+        assert _message(tmp_path, PROBE_ANSWERS_DEAD) == (100, "No unwaived fallback")
+
+    def test_a_signal_handler_that_also_swallows_os_error_still_flags(self, tmp_path):
+        assert _message(
+            tmp_path, GROUP_ALREADY_GONE.replace("except ProcessLookupError:", "except (ProcessLookupError, OSError):")
+        ) == (
+            0,
+            f"site.py:9 default with no warning-level log - {checker.CURE}",
+        )
+
+    def test_a_lookup_error_around_no_signal_still_flags(self, tmp_path):
+        assert _message(tmp_path, GROUP_ALREADY_GONE.replace("os.killpg(pid, sig)", "os.getpgid(pid)")) == (
             0,
             f"site.py:9 default with no warning-level log - {checker.CURE}",
         )
