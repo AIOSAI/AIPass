@@ -81,8 +81,7 @@ aipass/
 │   │   ├── settings_backup.py     # backup + receipt before settings writes
 │   │   ├── structure_scan/        # agent placement + pollution detection
 │   │   ├── system_detect/         # OS, shell, Python, RAM, CPU
-│   │   ├── ui/                    # progress bars, spinners, glyphs, headers
-│   │   └── telegram_readiness.py.disabled
+│   │   └── ui/                    # progress bars, spinners, glyphs, headers
 │   ├── integrations/              # placeholder, README only
 │   └── plugins/                   # placeholder
 ├── shared/                        # no branch but prax at import (spawn loads it)
