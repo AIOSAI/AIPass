@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: rm_handler.py
 # Description: Contained safe-delete: in-tree targets move to the local .archive
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2026-06-02
 # Modified: 2026-11-15
 # =============================================
@@ -37,6 +37,10 @@ _BYTECODE_DIR = "__pycache__"
 _BYTECODE_SUFFIX = ".pyc"
 # The owner's ruling: the verified admin seat, and only it, works inside every branch.
 ADMIN_EXEMPTION = "admin"
+# The owner's ruling: a dot name is a settings, identity or system file; moved by accident it can take a seat down.
+DOT_FLAG = "--dot"
+DOT_EXEMPTION = "dot"
+_EXEMPTION_NOTES = {ADMIN_EXEMPTION: "across the sibling fence", DOT_EXEMPTION: f"dot guard lifted by {DOT_FLAG}"}
 SIBLING_NEXT_STEP = " — not yours to remove: mail @devpulse the path and why"
 RECORDED_LINE = "This attempt is recorded in .ai_central/deletions.jsonl."
 
@@ -128,12 +132,39 @@ def check_carveouts(
     return blocked, reason, None
 
 
-def _verified_admin() -> bool:
+def _verified_admin(fence: str = "sibling fence") -> bool:
     """@ai_mail's verified-caller rail, the hooks gates' rail, asked per path; it fails closed and logs why."""
     verdict = repo_door.admin_verdict()
     if not verdict.granted:
-        logger.info("rm: sibling fence holds for %s: not the verified admin seat", verdict.caller)
+        logger.info("rm: %s holds for %s: not the verified admin seat", fence, verdict.caller)
     return verdict.granted
+
+
+def _dot_name(resolved: Path, project_root: Path | None) -> str | None:
+    """*resolved*'s own name when it starts with a dot, a link's own name included; what sits inside one is not."""
+    if project_root is None or not resolved.is_relative_to(project_root) or not resolved.name.startswith("."):
+        return None
+    return resolved.name
+
+
+def _dot_refusal(name: str, lift: bool) -> str | None:
+    """Why a dot target stays, or None when the verified admin lifted the guard with ``--dot``."""
+    admin = _verified_admin("dot guard")
+    if admin and lift:
+        return None
+    reason = f"Protected: {name} is a dot name (a settings, identity or system file), and drone rm does not move it"
+    if admin:
+        return f"{reason} — the verified admin seat moves it with the same command and {DOT_FLAG}, the deliberate form"
+    if lift:
+        reason += f"; {DOT_FLAG} is the verified admin seat's alone"
+    return reason + SIBLING_NEXT_STEP
+
+
+def _seat_note(exemption: str | None) -> str:
+    """The move's note on the guards the verified admin seat lifted, or nothing."""
+    if exemption is None:
+        return ""
+    return " (admin seat, " + ", ".join(_EXEMPTION_NOTES[name] for name in exemption.split("+")) + ")"
 
 
 def check_contained_citizens(resolved: Path, project_root: Path | None, own: Path | None) -> tuple[bool, str]:
@@ -192,8 +223,15 @@ def check_containment(path: Path, roots: list[Path]) -> tuple[bool, str]:
 
 
 def safe_delete(paths: list[str]) -> list[tuple[str, bool, str]]:
-    """Delete *paths* with containment checks; a refused path does not block others."""
-    return _safe_delete_direct(paths)
+    """Delete *paths* with containment checks; a refused path does not block others.
+
+    ``--dot`` in any slot asks to lift the dot guard, which only the verified admin seat may.
+    """
+    lift_dot = DOT_FLAG in paths
+    targets = [path for path in paths if path != DOT_FLAG]
+    if lift_dot and not targets:
+        return [(DOT_FLAG, False, f"{DOT_FLAG} names no path: drone rm {DOT_FLAG} <path>")]
+    return _safe_delete_direct(targets, lift_dot)
 
 
 def _record(outcome: str, path_str: str, resolved: Path | None, reason: str, **fields: Any) -> tuple:
@@ -216,7 +254,7 @@ def _refuse(path_str: str, resolved: Path | None, reason: str, shown: str, **fie
     return path_str, False, _shown(shown, RECORDED_LINE)
 
 
-def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
+def _safe_delete_direct(paths: list[str], lift_dot: bool) -> list[tuple[str, bool, str]]:
     """Delete paths directly (unsandboxed mode — current behavior)."""
     roots = get_allowed_roots()
     if not roots:
@@ -269,6 +307,14 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
             verdict = f"Refused: inside {ARCHIVE_DIR}/ — emptying an archive is the owner's, by hand"
             results.append(_refuse(path_str, resolved, verdict, _shown(verdict, resolved), target=target))
             continue
+
+        dot = _dot_name(resolved, project_root) if _archives(resolved, project_root) else None
+        if dot is not None:
+            refusal = _dot_refusal(dot, lift_dot)
+            if refusal is not None:
+                results.append(_refuse(path_str, resolved, refusal, _shown(refusal, resolved), target=target))
+                continue
+            exemption = DOT_EXEMPTION if exemption is None else f"{exemption}+{DOT_EXEMPTION}"
 
         measurement = deletion_log.measure(absolute)
 
@@ -359,11 +405,10 @@ def _move_to_archive(
         return path_str, False, _shown(message, resolved, RECORDED_LINE)
 
     message = f"Moved: {resolved} -> {destination}" + (f" (symlink to {target})" if target is not None else "")
-    if exemption is not None:
-        message += f" ({exemption} seat, across the sibling fence)"
+    message += _seat_note(exemption)
     fields = {"measurement": measurement, "target": target, "moved_to": destination, "exemption": exemption}
     logger.info(*_record(deletion_log.OUTCOME_MOVED, path_str, resolved, message, **fields))
-    verdict = "Moved to .archive" + (f" ({exemption} seat, across the sibling fence)" if exemption else "") + ":"
+    verdict = "Moved to .archive" + _seat_note(exemption) + ":"
     link = () if target is None else (f"(the link only; it points at {target})",)
     return path_str, True, _shown(verdict, resolved, f"-> {destination}", *link)
 

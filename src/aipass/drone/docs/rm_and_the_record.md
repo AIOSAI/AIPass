@@ -56,7 +56,8 @@ reached the logs either way.
 A record carries: `timestamp`, `lane`, `outcome`, `caller`, `cwd`, `requested` (what was typed),
 `path` (resolved), `reason`, `kind`, `size_bytes`, `entry_count`, `measured`. A move's record has
 outcome `moved` and one key more, `moved_to`, the path it now lives at; the admin seat's crossing
-of the sibling guard adds `exemption: "admin"`. A stale-mode record
+of the sibling guard adds `exemption: "admin"`, its `--dot` lift `exemption: "dot"`, and both
+together `exemption: "admin+dot"`. A stale-mode record
 carries two more, `mode` and `age` (as typed), and its prax line names both; a plain delete's
 record keeps exactly the twelve, byte for byte.
 
@@ -71,13 +72,13 @@ Four things worth knowing:
   how big it was. Directory walks stop at `_MEASURE_ENTRY_CAP` and say so via `measured: "capped"` rather than
   paying an unbounded walk.
 - **Severity is INFO, ERROR only for a break.** A move, a delete and every deliberate refusal
-  (containment, carve-out, sibling, `.archive`, a symlinked `.archive`, stale-mode DIRs) log at
+  (containment, carve-out, sibling, dot name, `.archive`, a symlinked `.archive`, stale-mode DIRs) log at
   INFO: a refusal is the fence doing its job, already shown to the caller and kept in the ledger.
   An operation that was tried and broke (an `OSError`) is outcome `failed` at ERROR. WARNING is kept
   for a check that could not run: the admin rail dark, a kind or folder that could not be read.
 - **Each channel tells the whole story alone.** The ledger's prax line reads
-  `rm ledger: <outcome> <path>[ -> <moved_to>] by <caller>, lane <lane>[, exemption admin] (kind, ...)`;
-  rm's own line reads `rm: <outcome> <path>[ -> <moved_to>] by <caller>[, admin exemption] — <reason>`.
+  `rm ledger: <outcome> <path>[ -> <moved_to>] by <caller>, lane <lane>[, exemption <name>] (kind, ...)`;
+  rm's own line reads `rm: <outcome> <path>[ -> <moved_to>] by <caller>[, <name> exemption] — <reason>`.
   The json service's `deletion_record` entry carries `moved_to` and `exemption` when present, and
   `rm_command` stores every target under `targets`.
 - **The record follows the deletion's project, not the process's.** `deletion_log_path()` takes an
@@ -148,6 +149,35 @@ apply, and the target moves into the `.archive` beside it, in that branch. The r
 - **Still refused for the admin:** every carve-out (judged first), a target inside a `.archive`,
   the sibling's branch root itself (retiring a citizen is @spawn's), and a folder that contains a
   citizen, which is a separate guard below.
+
+---
+
+## Dot names — settings, identity and system files
+
+A dot name is a settings, identity or system file here (`.env`, `.claude`, `.backup`, `.daemon`,
+`.spawn`, `.github`, `.gitignore` and the like), and losing a whole dot folder, even into an
+archive, takes everything in it at once: a seat goes down or a prompt is lost. So an in-tree target
+is refused when its OWN name starts with a dot, file or folder, a dot folder nested in another dot
+folder included. What sits inside a dot folder is ordinary work: a file or a plain folder in
+`.daemon` or `.backup` moves into the `.archive` in that folder like any other. The name judged is
+the resolved path's last part; a target that is itself a link is judged by its own name, so a
+dot-named link to a plain file is refused too.
+
+- **Citizens: always refused.** The refusal names the dot name and the next step: mail @devpulse
+  the path and why. Passing `--dot` does not change that, and the message says `--dot` is the
+  admin's.
+- **The verified admin seat: refused by default too**, with the way through named: the same command
+  with `--dot`, in any slot, which says the move is deliberate. With `--dot` the target moves into
+  the `.archive` beside it, and the record carries the lift (`exemption: "dot"`, or `"admin+dot"`
+  across the sibling fence). The admin is the same rail as above, asked per path, failing closed.
+- **`--dot` lifts nothing else.** The carve-outs (`.git`, `.trinity`, `.aipass`, `.codex`,
+  `.agents`), a target inside a `.archive`, a branch root and a folder holding a citizen stay refused
+  for everyone, with their own reasons, judged before this guard.
+- **Only the target's own name is judged.** There is no downward walk: a plain folder that holds
+  dot files (`.gitkeep`, `.pytest_cache`) moves whole like any folder.
+- **Untouched:** the system temp dir keeps its true delete, bytecode (`__pycache__`, `*.pyc`) is
+  deleted wherever it sits, and `--stale` sweeps its dot-named atomic-write
+  leftovers (`.999558_87.tmp`) without `--dot`: its name, folder and age rules are its fence.
 
 ---
 

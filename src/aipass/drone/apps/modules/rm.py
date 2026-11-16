@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: rm.py
 # Description: Module orchestrator for contained safe-delete: in-tree targets move to .archive
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-06-02
 # Modified: 2026-11-15
 # =============================================
@@ -36,7 +36,7 @@ from aipass.drone.apps.handlers.help_flags import wants_help
 
 DRONE_MODULE = {
     "name": "rm",
-    "version": "1.5.0",
+    "version": "1.6.0",
     "description": "Contained safe-delete: in-tree targets move to .archive, temp is deleted",
 }
 
@@ -148,7 +148,7 @@ def print_introspection() -> None:
 
 def print_help() -> None:
     """Display help (--help flag)."""
-    console.print("Usage: drone rm <path> [<path>...]")
+    console.print("Usage: drone rm [--dot] <path> [<path>...]")
     console.print()
     console.print("Contained safe-delete, within the project root and the system temp dir.")
     console.print("Inside the project nothing is deleted: the target MOVES to")
@@ -169,6 +169,11 @@ def print_help() -> None:
     console.print("  • The verified admin seat alone may work inside other citizens' trees (never")
     console.print("    a branch root, a carve-out or a .archive); unverifiable means refused")
     console.print("  • A project folder that CONTAINS another citizen is refused, naming it")
+    console.print("  • A dot name is a settings, identity or system file: a target whose OWN name")
+    console.print("    starts with a dot, file or folder, is refused. Citizens: always (mail")
+    console.print("    @devpulse the path and why). The verified admin seat moves it with --dot,")
+    console.print("    which says it is deliberate; --dot lifts no carve-out. What sits inside a")
+    console.print("    dot folder moves as normal, and so does a folder that merely holds dot files")
     console.print()
     console.print("[bold]Every move and delete is recorded:[/bold]")
     console.print("  Successes AND refusals land in [cyan]<project>/.ai_central/deletions.jsonl[/cyan]")

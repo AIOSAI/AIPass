@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_rm.py
 # Description: drone rm: containment, carve-outs, the move to .archive, stale sweep
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-06-02
 # Modified: 2026-11-15
 # =============================================
@@ -1301,6 +1301,12 @@ class TestStaleSweep:
         report = _sweep("--stale", "10d", str(stale_tree["api"]))
         assert not stale_tree["stale"].exists()
         assert (report.deleted, report.refusals) == (1, [])
+
+    def test_a_dot_named_stale_tmp_is_deleted_without_dot(self, stale_tree):
+        """The atomic-write leftovers are dot names; the dot guard is the plain lane's, not this sweep's."""
+        leftover = _aged(stale_tree["api"] / "api_json" / ".999558_87.tmp", 11 * _DAY)
+        _sweep("--stale", "10d", str(stale_tree["api"]))
+        assert not leftover.exists()
 
     @pytest.mark.parametrize("survivor", ["young", "not_tmp", "not_json_folder"])
     def test_the_three_skip_rules(self, stale_tree, survivor):
