@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: encapsulation_check.py
 # Description: Handler Encapsulation Standards Checker
-# Version: 1.4.2
+# Version: 1.5.0
 # Created: 2026-03-05
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Handler Encapsulation Standards Checker"""
@@ -28,7 +28,7 @@ READS_BRANCH = True
 # unit test is for, so a test is judged only on another branch's handlers (check_test_file).
 APPLIES_TO = "everywhere"
 
-# Cross-branch/cross-package handler imports are import-statement checks, so a
+# Cross-branch handler imports are import-statement checks, so a
 # violation hiding in a package marker file must not be invisible to the audit
 # the way it would be for content checkers (dead code, naming, etc.).
 INCLUDE_INIT_FILES = True
@@ -110,14 +110,6 @@ def extract_branch_from_import(import_line: str) -> Optional[str]:
     if match:
         return match.group(1)
 
-    return None
-
-
-def extract_handler_package(import_line: str) -> Optional[str]:
-    """Extract the handler package name from an import"""
-    match = re.search(r"apps\.handlers\.(\w+)", import_line)
-    if match:
-        return match.group(1)
     return None
 
 
@@ -329,16 +321,11 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     file_branch = get_branch_from_path(module_path)
     file_branch_name = file_branch.get("name", "").lower() if file_branch else None
-    file_handler_package = get_file_handler_package(module_path)
-    is_handler_file = file_handler_package is not None
+    is_handler_file = get_file_handler_package(module_path) is not None
     is_module_file = "apps/modules/" in _posix(module_path)
 
     cross_branch_check = check_cross_branch_imports(lines, module_path, file_branch_name, bypass_rules)
     checks.append(cross_branch_check)
-
-    if is_handler_file:
-        cross_package_check = check_cross_package_imports(lines, module_path, file_handler_package, bypass_rules)
-        checks.append(cross_package_check)
 
     if not is_handler_file and not is_module_file:
         direct_import_check = check_direct_handler_imports(lines, module_path, bypass_rules)
@@ -415,7 +402,6 @@ def check_cross_branch_imports(
         imported_branch = extract_branch_from_import(code_part)
 
         if imported_branch is None:
-            # Local import (from apps.handlers.X) - will be caught by cross-package check
             continue
 
         if file_branch and imported_branch.lower() == file_branch.lower():
@@ -607,83 +593,6 @@ def _allowed_handler_names(module_path: str) -> frozenset:
     if branch_root is None:
         return _DEFAULT_HANDLERS
     return _DEFAULT_HANDLERS | _infrastructure_handlers(str(branch_root))
-
-
-def check_cross_package_imports(
-    lines: List[str], module_path: str, file_package: str, bypass_rules: list | None = None
-) -> Dict:
-    """Check for cross-package handler imports within same branch"""
-    violations = []
-
-    allowed_handlers = _allowed_handler_names(module_path)
-
-    skipped = _not_import_lines(lines)
-    for i, line in enumerate(lines, 1):
-        stripped = line.strip()
-        if i in skipped or not stripped:
-            continue
-
-        if not ("from " in stripped or "import " in stripped):
-            continue
-
-        if stripped.startswith('"') or stripped.startswith("'"):
-            continue
-        if '"from ' in stripped or "'from " in stripped:
-            continue
-        if '"apps.handlers' in stripped or "'apps.handlers" in stripped:
-            continue
-        if "apps.handlers" in stripped:
-            handler_pos = stripped.find("apps.handlers")
-            before = stripped[:handler_pos]
-            if before.count('"') % 2 == 1 or before.count("'") % 2 == 1:
-                continue
-
-        if stripped.startswith("from ."):
-            continue
-
-        code_part = stripped.split("#")[0] if "#" in stripped else stripped
-
-        if "apps.handlers" not in code_part:
-            continue
-
-        imported_branch = extract_branch_from_import(code_part)
-        if imported_branch is not None:
-            continue
-
-        if is_bypassed(module_path, "encapsulation", line=i, bypass_rules=bypass_rules):
-            continue
-
-        imported_package = extract_handler_package(code_part)
-
-        if imported_package is None:
-            continue
-
-        if imported_package == file_package:
-            continue
-
-        # Whole names: profile_handler is not file_handler.
-        if allowed_handlers & set(re.findall(r"\w+", code_part)):
-            continue
-
-        violations.append(
-            {"line": i, "code": code_part.strip(), "from_package": imported_package, "to_package": file_package}
-        )
-
-    if violations:
-        first = violations[0]
-        return {
-            "name": "Cross-package handler imports",
-            "passed": False,
-            "message": (
-                f"Line {first['line']}: handlers.{first['from_package']} imported from handlers.{first['to_package']}"
-            ),
-        }
-
-    return {
-        "name": "Cross-package handler imports",
-        "passed": True,
-        "message": "No forbidden cross-package handler imports",
-    }
 
 
 def check_direct_handler_imports(lines: List[str], module_path: str, bypass_rules: list | None = None) -> Dict:
