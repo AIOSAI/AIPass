@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: monitoring_filters.py
 # Description: Monitoring Filter Patterns
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2025-11-23
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Monitoring Filter Patterns"""
@@ -29,7 +29,6 @@ MONITOR_IGNORE_PATTERNS = [
     "backup/backups",
     "*/backups",
     "system_snapshot",
-    "versioned_backup",
     "deleted_branches",
     # System logs (prevent feedback loop - log watcher handles these separately)
     "system_logs",

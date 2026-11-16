@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_log_watcher.py
 # Description: Tests for log file monitoring handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-04-03
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/monitoring/log_watcher.py."""
@@ -655,14 +655,6 @@ class TestExtractCommandInfoAdditional:
         line = "standards_checklist Running full standard check on prax"
         result = watcher._extract_command_info(line)
         assert result == {"command": "sentry checklist prax", "caller": None, "target": None}
-
-    def test_backup_versioned(self):
-        """Should detect backup versioned commands."""
-        mod = _import_log_watcher()
-        watcher, _ = _make_watcher(mod)
-        line = "[backup] Starting versioned backup"
-        result = watcher._extract_command_info(line)
-        assert result == {"command": "backup versioned", "caller": None, "target": None}
 
     def test_backup_sync(self):
         """Should detect backup sync commands."""

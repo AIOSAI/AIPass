@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Log File Monitor
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2025-11-23
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """PRAX Log Watcher - Event Queue Integration"""
@@ -238,8 +238,6 @@ class LogFileWatcher(FileSystemEventHandler):
                 "Starting" in log_line or "Running" in log_line or "Complete" in log_line
             ):
                 return {"command": "backup snapshot", "caller": None, "target": None}
-            elif "versioned" in log_line.lower() and ("Starting" in log_line or "Running" in log_line):
-                return {"command": "backup versioned", "caller": None, "target": None}
             elif "sync" in log_line.lower() and ("Starting" in log_line or "Running" in log_line):
                 return {"command": "backup sync", "caller": None, "target": None}
 
