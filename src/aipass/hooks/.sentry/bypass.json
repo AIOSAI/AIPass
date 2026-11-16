@@ -1553,7 +1553,7 @@
       "file": "apps/modules/promote.py",
       "standard": "fallback",
       "lines": [
-        171
+        172
       ],
       "reason": "Fails closed: an answer that does not parse counts as \"not refused\", so check_smoke returns False with the exit code and output, and the promote stops. The failure is the answer."
     },
@@ -1616,7 +1616,7 @@
       "file": "apps/modules/engine.py",
       "standard": "fallback",
       "lines": [
-        208
+        242
       ],
       "reason": "HELD from a raise: the per-session /tmp budget counts are read in dispatch, so a raise would crash every event, gates included. A corrupt copy is reset and later overwritten; the cost is budgeted injectors firing again. WARNING, escalated by @trigger, names it."
     },
@@ -1624,7 +1624,7 @@
       "file": "apps/modules/engine.py",
       "standard": "fallback",
       "lines": [
-        273
+        307
       ],
       "reason": "Fails closed: a fail-closed gate's exit 2 whose stdout does not parse reads as \"exited 2 without a decision\", which _refuse_broken_gate turns into a BLOCK logged at ERROR with a gate_broken row in engine.jsonl."
     },
@@ -1632,8 +1632,8 @@
       "file": "apps/modules/engine.py",
       "standard": "fallback",
       "lines": [
-        470,
-        506
+        504,
+        540
       ],
       "reason": "Sound is cosmetic: a timeout voice or hook chime that cannot play costs only the sound. The event itself is already recorded in engine.jsonl (the timeout row, or the hook's own row), and its output is delivered."
     },
@@ -1641,7 +1641,7 @@
       "file": "apps/modules/engine.py",
       "standard": "fallback",
       "lines": [
-        515
+        549
       ],
       "reason": "Not a default: a hook's exit 2 whose stdout does not parse is treated as a crash, never a block or an allow, and is logged at ERROR \"CRASHED exit=2\" with a crashed row in engine.jsonl. Fail-closed gates were already refused upstream."
     },
@@ -1747,7 +1747,7 @@
       "file": "apps/modules/engine.py",
       "standard": "silent_catch",
       "lines": [
-        319
+        353
       ],
       "reason": "The decode error is handed on as the value; the next lines refuse a PreToolUse payload at ERROR with an engine.jsonl row, and log any other event's at WARNING."
     },

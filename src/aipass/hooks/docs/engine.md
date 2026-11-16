@@ -36,6 +36,24 @@ Any failed check refuses and leaves the live copy untouched. The newest 3 copies
 
 The workflow: edit -> test -> `drone @hooks promote`.
 
+`drone @hooks promote rollback` points `.live-current` back at the newest kept copy older than the live one, after the same bridge smoke passes on it. It refuses, exits 1 and leaves the pointer as it is when nothing was ever promoted, when no older copy is kept, or when the older copy fails its smoke:
+
+```
+check_smoke: ok — <the smoke's detail>
+live: .live-20200102T000000Z (was .live-20200103T000000Z)
+```
+
+## A Raising Handler's Log Lines
+
+A handler that raises (any exception, `SystemExit` included, caught on its worker thread) is logged as two lines. The ERROR line holds its identity alone, so its fingerprint at @trigger never moves with the exception's text or the line number:
+
+```
+ERROR | [HOOKS] handler raised fault[<event>.<hook>.<handler dotted path>.<ExcType>@<file basename>] in <function> line <n>
+INFO  | [HOOKS] handler raised, its text: <handler dotted path> <ExcType>: <text, newlines escaped, cut at 500 chars>
+```
+
+The marker holds no whitespace and no `]` (either is written `_`). A handler that outlives its timeout logs `handler timed out fault[<event>.<hook>.<handler>.HandlerTimeout@<module>.py] after <n>s` at ERROR. `logs/engine.jsonl` keeps the raw exception text in the row's `stderr_preview`. A `KeyboardInterrupt` on the calling thread is never caught.
+
 ## Gates Fail Closed
 
 `apps/handlers/config/gates.py` says, in code and never in config, which hooks are gates and how each fails:
@@ -51,7 +69,7 @@ Each fail-closed gate also refuses the call it guards when it crashes internally
 When the engine cannot load, every PreToolUse in every session of the fleet is refused with `HOOKS BROKEN`, until a person fixes it. No agent can repair it: each agent's tools pass through the same bridge, so the agent can still read prompts and answer, but cannot run a command or edit a file. The repair is the owner's, from a terminal outside any agent session (a plain shell runs no hooks):
 
 1. Read the cause: `tail -5 src/aipass/hooks/logs/bridge.log` (from the repo root). Each line names the exception and the event.
-2. If the line names the promoted hooks copy (a module under `.live-<stamp>`), point back to the previous copy: `ls -d src/aipass/hooks/.live-2*` lists the 3 kept, and `echo .live-<earlier stamp> > src/aipass/hooks/.live-current` serves it on the next hook call.
+2. If the line names the promoted hooks copy (a module under `.live-<stamp>`), point back to the previous copy: `drone @hooks promote rollback`, or by hand, `ls -d src/aipass/hooks/.live-2*` lists the 3 kept, and `echo .live-<earlier stamp> > src/aipass/hooks/.live-current` serves it on the next hook call.
 3. If it names another branch's source (prax most often: the bridges import it live, never from a snapshot), restore that file in the same terminal, with git or by hand.
 4. Prove the gate answers again: `echo '{"tool_name":"Read","tool_input":{"file_path":"README.md"},"cwd":"'"$PWD"'"}' | .venv/bin/python src/aipass/hooks/apps/handlers/bridges/claude.py PreToolUse; echo "exit $?"` prints `exit 0`. A `HOOKS BROKEN` text and `exit 2` means it is still down.
 5. The agents need nothing: their next tool call goes through.

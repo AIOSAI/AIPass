@@ -1,27 +1,31 @@
 # =================== AIPass ====================
 # Name: engine.py
-# Version: 2.6.3
+# Version: 2.7.0
 # Description: Hook engine — unified dispatcher; gates fail closed, injectors skip on error
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-18
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Hook engine — dispatches hook events to handlers, logs via prax + JSONL.
 
 An injector that fails to import, raises or times out is skipped; a GATE (gates.FAIL_CLOSED) doing the
 same is answered with a block and logged at ERROR. Which hooks are gates is code, never config.
+A raising handler logs one ERROR line of identity, fault[<event>.<hook>.<handler>.<ExcType>@<file>], and
+its exception text on the next line at INFO, so the line's fingerprint never moves with the text.
 """
 
 import importlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import traceback
 from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
@@ -41,6 +45,8 @@ HELP_COMMANDS = [
 ]
 
 VERBOSE_LOG_ENV = "AIPASS_HOOKS_VERBOSE_LOG"
+#: A raising handler's text is logged at INFO, escaped to one line and cut here.
+FAULT_TEXT_CAP = 500
 
 
 def _log_detail(message: str, *args) -> None:
@@ -112,13 +118,41 @@ def _import_project_handler(module_path: str, project_src: str):
             sys.path.remove(project_src)
 
 
+def _fault_marker(event: str, hook: str, handler_path: str, kind: str, basename: str) -> str:
+    """fault[<event>.<hook>.<handler>.<kind>@<file>]: the identity trigger fingerprints, whitespace and ] made _."""
+    return "fault[" + re.sub(r"[\s\]]", "_", f"{event}.{hook}.{handler_path}.{kind}@{basename}") + "]"
+
+
+def _fault(event: str, hook: str, handler_path: str, exc: BaseException, start: float) -> dict:
+    """A raising handler: one ERROR line of identity (marker, function, line), its text one INFO line below."""
+    frames = traceback.extract_tb(exc.__traceback__)
+    where = f"in {frames[-1].name} line {frames[-1].lineno}" if frames else "with no frame"
+    basename = Path(frames[-1].filename).name if frames else "unknown"
+    kind = type(exc).__name__
+    logger.error("[HOOKS] handler raised %s %s", _fault_marker(event, hook, handler_path, kind, basename), where)
+    text = str(exc)
+    shown = text.replace("\\", "\\\\").replace("\r", "\\r").replace("\n", "\\n")
+    if len(shown) > FAULT_TEXT_CAP:
+        shown = f"{shown[:FAULT_TEXT_CAP]}... ({len(shown) - FAULT_TEXT_CAP} more chars)"
+    logger.info("[HOOKS] handler raised, its text: %s %s: %s", handler_path, kind, shown)
+    elapsed_ms = (time.monotonic() - start) * 1000
+    return {"exit_code": -1, "stdout": "", "stderr": text, "elapsed_ms": round(elapsed_ms, 1)}
+
+
 def _run_handler(
-    handler_path: str, hook_data: dict, timeout_s: int = 30, namespace: str = "", project_src: str = ""
+    handler_path: str,
+    hook_data: dict,
+    timeout_s: int = 30,
+    namespace: str = "",
+    project_src: str = "",
+    event: str = "",
+    hook: str = "",
 ) -> dict:
     """Call a handler function directly (no subprocess). Module imports handler.
 
     *namespace* and *project_src* are the loader's stamps for a trusted project config (loader._stamp_namespace).
-    A daemon thread joined with a timeout: a hung handler never stalls the event nor blocks exit.
+    *event* and *hook* name the fault marker. A daemon thread joined with a timeout: a hung handler never
+    stalls the event nor blocks exit. A BaseException on this thread (KeyboardInterrupt) is never caught here.
     """
     start = time.monotonic()
     try:
@@ -144,9 +178,9 @@ def _run_handler(
         def _call():
             try:
                 outcome["result"] = handler_func(hook_data)
-            except Exception as exc:
-                logger.info("[HOOKS] handler %s raised on worker thread: %s", handler_path, exc)
-                outcome["error"] = exc  # re-raised on the calling thread below
+            except BaseException as exc:  # a SystemExit here would end only this thread, and leave no "result"
+                logger.debug("[HOOKS] handler %s raised on its worker thread", handler_path)
+                outcome["error"] = exc
 
         worker = threading.Thread(target=_call, daemon=True)
         worker.start()
@@ -154,7 +188,9 @@ def _run_handler(
 
         if worker.is_alive():
             elapsed_ms = (time.monotonic() - start) * 1000
-            logger.error("[HOOKS] handler timeout after %ds: %s", timeout_s, handler_path)
+            module_file = module_path.rsplit(".", 1)[-1] + ".py"
+            marker = _fault_marker(event, hook, handler_path, "HandlerTimeout", module_file)
+            logger.error("[HOOKS] handler timed out %s after %ds", marker, timeout_s)
             return {
                 "exit_code": -1,
                 "stdout": "",
@@ -163,7 +199,7 @@ def _run_handler(
             }
 
         if "error" in outcome:
-            raise outcome["error"]
+            return _fault(event, hook, handler_path, outcome["error"], start)
 
         result = outcome["result"]
         elapsed_ms = (time.monotonic() - start) * 1000
@@ -175,9 +211,7 @@ def _run_handler(
             "elapsed_ms": round(elapsed_ms, 1),
         }
     except Exception as exc:
-        elapsed_ms = (time.monotonic() - start) * 1000
-        logger.error("[HOOKS] handler error %s: %s", handler_path, exc)
-        return {"exit_code": -1, "stdout": "", "stderr": str(exc), "elapsed_ms": round(elapsed_ms, 1)}
+        return _fault(event, hook, handler_path, exc, start)
 
 
 def _matches(matcher: str, value: str) -> bool:
@@ -438,7 +472,7 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
                 if config.get("_handler_namespace")
                 else {}
             )
-            result = _run_handler(handler, parsed, timeout_s=hook_timeout, **own)
+            result = _run_handler(handler, parsed, timeout_s=hook_timeout, event=event_type, hook=hook_name, **own)
         else:
             result = _run_hook(command, stdin_data, timeout_s=hook_timeout)
 

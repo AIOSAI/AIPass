@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_engine.py
-# Version: 2.4.1
+# Version: 2.5.0
 # Description: Tests for hook engine dispatch logic: the dispatcher core; contracts and safeguards in two siblings
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/engine.py: the dispatcher core and the hook dispatch it drives."""
@@ -845,3 +845,91 @@ class TestRunEvent:
         config = {"hooks_enabled": True, "UserPromptSubmit": {"temporal": self._HOUSE}}
         with patch("aipass.hooks.apps.handlers.config.loader.resolve_config", return_value=config):
             assert run_event("UserPromptSubmit:project", "{}") == ("", 0)
+
+
+_FAULT_HANDLER = "aipass.hooks.apps.handlers.fake.handle"
+
+
+def _raiser(filename: str, line: int, exc: BaseException):
+    """A handler whose raise sits at *line* of a file named *filename*: the frame the fault line must name."""
+    code = "\n" * (line - 2) + "def handle(_data):\n    raise EXC\n"
+    scope = {"EXC": exc}
+    exec(compile(code, filename, "exec"), scope)
+    return scope["handle"]
+
+
+def _fault_lines(handle, mock_logger, hook: str = "h", timeout: int = 5) -> tuple[list[str], list[str], tuple]:
+    """Dispatch one UserPromptSubmit handler; answer (ERROR lines, INFO lines, dispatch result) as logged."""
+    module = MagicMock()
+    module.handle = handle
+    hook_def = {"enabled": True, "handler": _FAULT_HANDLER, "matcher": "", "timeout": timeout}
+    with (
+        patch("aipass.hooks.apps.modules.engine._log"),
+        patch("aipass.hooks.apps.modules.engine._import_handler_module", return_value=module),
+        patch("aipass.hooks.apps.sound.speak"),
+    ):
+        result = dispatch("UserPromptSubmit", "{}", {"hooks_enabled": True, "UserPromptSubmit": {hook: hook_def}})
+    render = lambda calls: [c.args[0] % c.args[1:] for c in calls]  # noqa: E731
+    return render(mock_logger.error.call_args_list), render(mock_logger.info.call_args_list), result
+
+
+class TestTheFaultLine:
+    """A raising handler is one ERROR line with one fault[KEY] marker, its text one INFO line below."""
+
+    def test_the_error_line_carries_one_marker_and_no_exception_text(self, tmp_path, mock_logger):
+        handle = _raiser(str(tmp_path / "cadence.py"), 7, ValueError("secret detail"))
+        errors, infos, result = _fault_lines(handle, mock_logger)
+        key = f"UserPromptSubmit.h.{_FAULT_HANDLER}.ValueError@cadence.py"
+        (line,) = [e for e in errors if "fault[" in e]
+        assert line.count("fault[") == 1 and f"fault[{key}]" in line
+        assert "handle line 7" in line
+        assert "secret detail" not in "\n".join(errors)
+        assert [i for i in infos if "secret detail" in i]
+        assert result == ("", 0)
+
+    def test_the_same_fault_on_lines_7_8_and_104_renders_the_same_marker(self, tmp_path, mock_logger):
+        markers = []
+        for line in (7, 8, 104):
+            mock_logger.reset_mock()
+            errors, _, _ = _fault_lines(_raiser(str(tmp_path / "cadence.py"), line, ValueError("x")), mock_logger)
+            (fault,) = [e for e in errors if "fault[" in e]
+            assert f"line {line}" in fault
+            start = fault.index("fault[")
+            markers.append(fault[start : fault.index("]", start) + 1])
+        assert len(set(markers)) == 1 and markers[0].endswith("ValueError@cadence.py]")
+
+    def test_a_newline_in_the_exception_never_splits_a_line(self, tmp_path, mock_logger):
+        handle = _raiser(str(tmp_path / "cadence.py"), 7, ValueError("first\nsecond | third"))
+        errors, infos, _ = _fault_lines(handle, mock_logger)
+        (detail,) = [i for i in infos if "first" in i]
+        assert "\n" not in "".join(errors) and "\n" not in detail
+        assert "first\\nsecond | third" in detail
+
+    def test_a_handler_raising_system_exit_keeps_its_own_error(self, tmp_path, mock_logger):
+        handle = _raiser(str(tmp_path / "gate.py"), 9, SystemExit(3))
+        errors, infos, result = _fault_lines(handle, mock_logger)
+        assert [e for e in errors if f"fault[UserPromptSubmit.h.{_FAULT_HANDLER}.SystemExit@gate.py]" in e]
+        assert "'result'" not in "\n".join(errors + infos)
+        assert result == ("", 0)
+
+    def test_the_event_and_hook_name_reach_the_marker(self, tmp_path, mock_logger):
+        errors, _, _ = _fault_lines(_raiser(str(tmp_path / "a.py"), 3, KeyError("k")), mock_logger, hook="navmap")
+        assert [e for e in errors if f"fault[UserPromptSubmit.navmap.{_FAULT_HANDLER}.KeyError@a.py]" in e]
+
+    def test_a_timeout_line_carries_the_marker_with_a_fixed_type(self, mock_logger):
+        import threading
+
+        released = threading.Event()
+        errors, _, _ = _fault_lines(lambda _d: released.wait(10), mock_logger, timeout=1)
+        released.set()
+        assert [e for e in errors if f"fault[UserPromptSubmit.h.{_FAULT_HANDLER}.HandlerTimeout@fake.py]" in e]
+
+    def test_a_keyboard_interrupt_on_the_calling_thread_is_never_swallowed(self, mock_logger):
+        hook_def = {"enabled": True, "handler": _FAULT_HANDLER, "matcher": ""}
+        with (
+            patch("aipass.hooks.apps.modules.engine._log") as log,
+            patch("aipass.hooks.apps.modules.engine._import_handler_module", side_effect=KeyboardInterrupt),
+        ):
+            with pytest.raises(KeyboardInterrupt):
+                dispatch("UserPromptSubmit", "{}", {"hooks_enabled": True, "UserPromptSubmit": {"h": hook_def}})
+        assert "complete" not in [c.args[0].get("action") for c in log.call_args_list]

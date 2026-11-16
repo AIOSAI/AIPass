@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_engine_safeguards.py
 # Description: The hook engine's safeguards: trust, timeouts, one document, the ledger, fail-closed gates, promote
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-10-08
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/engine.py: trust, timeouts, the ledger and the fail-closed gates."""
@@ -464,7 +464,9 @@ class TestDispatchHandlerTimeout:
         ):
             mock_run.return_value = {"exit_code": 0, "stdout": "ok", "stderr": "", "elapsed_ms": 5}
             dispatch("UserPromptSubmit", "{}", config)
-        mock_run.assert_called_once_with("aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=5)
+        mock_run.assert_called_once_with(
+            "aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=5, event="UserPromptSubmit", hook="slow_handler"
+        )
 
     def test_handler_default_timeout_is_30_when_unset(self, mock_logger):
         config = {
@@ -482,7 +484,13 @@ class TestDispatchHandlerTimeout:
         ):
             mock_run.return_value = {"exit_code": 0, "stdout": "ok", "stderr": "", "elapsed_ms": 5}
             dispatch("UserPromptSubmit", "{}", config)
-        mock_run.assert_called_once_with("aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=30)
+        mock_run.assert_called_once_with(
+            "aipass.hooks.apps.handlers.fake.handle",
+            {},
+            timeout_s=30,
+            event="UserPromptSubmit",
+            hook="no_timeout_handler",
+        )
 
     def test_inner_timeout_above_30_reaches_the_join(self, mock_logger):
         """A hooks.json value >30 must survive to worker.join, not be clamped.
@@ -506,7 +514,9 @@ class TestDispatchHandlerTimeout:
         ):
             mock_run.return_value = {"exit_code": 0, "stdout": "ok", "stderr": "", "elapsed_ms": 5}
             dispatch("UserPromptSubmit", "{}", config)
-        mock_run.assert_called_once_with("aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=90)
+        mock_run.assert_called_once_with(
+            "aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=90, event="UserPromptSubmit", hook="slow_handler"
+        )
 
     def test_timeout_logs_speaks_and_lets_dispatch_continue(self, mock_logger):
         config = {
@@ -682,7 +692,7 @@ def _post_tool_use(stdouts: dict, event: str = "PostToolUse") -> str:
     for name in stdouts:
         config[event][name] = {"enabled": True, "handler": handlers[name], "matcher": ""}
 
-    def run(handler, _data, timeout_s=30):
+    def run(handler, _data, timeout_s=30, **_named):
         name = next(n for n in stdouts if handlers[n] == handler)
         return {"exit_code": 0, "stdout": stdouts[name], "stderr": "", "elapsed_ms": 1}
 
@@ -1218,6 +1228,44 @@ class TestPromote:
             ".live-20200103T000000Z",
             live,
         ]
+
+    def _promoted(self, tmp_path: Path, live: str) -> Path:
+        root = self._branch(tmp_path)
+        for old in (".live-20200101T000000Z", ".live-20200102T000000Z", ".live-20200103T000000Z"):
+            (root / old).mkdir()
+        promote.point_at(root, live)
+        return root
+
+    def test_rollback_points_at_the_newest_older_copy_after_its_smoke(self, tmp_path, mock_logger):
+        root = self._promoted(tmp_path, ".live-20200103T000000Z")
+        with patch.object(promote, "check_smoke", return_value=(True, "ok")) as smoke:
+            ok, report = promote.rollback(root)
+        assert ok is True
+        assert promote.live_name(root) == ".live-20200102T000000Z"
+        smoke.assert_called_once_with(root, ".live-20200102T000000Z")
+        assert "was .live-20200103T000000Z" in report[-1]
+
+    def test_rollback_refuses_when_no_older_copy_is_retained(self, tmp_path, mock_logger):
+        root = self._promoted(tmp_path, ".live-20200101T000000Z")
+        with patch.object(promote, "check_smoke", return_value=(True, "ok")) as smoke:
+            ok, report = promote.rollback(root)
+        assert ok is False and "no retained copy older than .live-20200101T000000Z" in report[-1]
+        assert promote.live_name(root) == ".live-20200101T000000Z"
+        smoke.assert_not_called()
+
+    def test_rollback_refuses_when_the_older_copy_fails_its_smoke(self, tmp_path, mock_logger):
+        root = self._promoted(tmp_path, ".live-20200103T000000Z")
+        with patch.object(promote, "check_smoke", return_value=(False, "raw rm was not refused")):
+            ok, report = promote.rollback(root)
+        assert ok is False and "raw rm was not refused" in report[-1]
+        assert promote.live_name(root) == ".live-20200103T000000Z"
+
+    def test_the_rollback_verb_with_nothing_promoted_exits_1_and_says_why(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(promote, "BRANCH_ROOT", self._branch(tmp_path))
+        with pytest.raises(SystemExit) as refused:
+            promote.handle_command("promote", ["rollback"])
+        assert refused.value.code == 1
+        assert "nothing was ever promoted" in capsys.readouterr().err
 
     def test_the_bridge_and_promote_spell_the_pointer_alike(self):
         mount = _load_by_path("mount_under_test", _BRIDGE.parent / "mount.py")
