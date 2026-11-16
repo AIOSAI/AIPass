@@ -489,9 +489,9 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "logged_fallback",
       "lines": [
-        582,
-        819,
-        875
+        588,
+        825,
+        881
       ],
       "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 592: the todos advisory text, never a verdict. 829 _seat_trinity and 885 _read_pending: the tripwire, which reports after the call and decides nothing."
     },
@@ -921,7 +921,7 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "fallback",
       "lines": [
-        673
+        679
       ],
       "reason": "Advisory only: the section-count note never blocks, and the caps that do block are judged by _evaluate_limits under the fail-closed refusal. Raising here would turn a dark config door into a refused memory write. It logs at WARNING, which @trigger escalates."
     },
@@ -929,7 +929,7 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "fallback",
       "lines": [
-        774
+        780
       ],
       "reason": "The gate writes nothing: a memory file already unparseable on disk, met by an edit that parses, is the agent's repair, judged as a new file. Refusing it would lock a broken memory file forever. WARNING names the file, and @trigger escalates it."
     },
@@ -937,7 +937,7 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "fallback",
       "lines": [
-        873
+        879
       ],
       "reason": "The hook's own per-session /tmp snapshot of in-flight Bash calls; a corrupt copy holds only stale stats, and starting fresh costs at most one unwatched call. Raising would darken the tripwire for the whole session. Logged at WARNING, which @trigger escalates."
     },
@@ -1001,7 +1001,7 @@
       "file": "apps/handlers/security/rm_gate.py",
       "standard": "fallback",
       "lines": [
-        122
+        125
       ],
       "reason": "Fails closed: an unimportable admin_seat returns (None, False), so no seat is exempted and every delete refusal stands. The refusal is the answer; WARNING names the dark admin lane."
     },

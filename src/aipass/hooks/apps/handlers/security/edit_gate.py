@@ -209,7 +209,13 @@ def _check_bash_ownership(cwd: str, caller: Any, targets: list[tuple[Path, str]]
     for target, how in targets:
         reason = wo.ownership_refusal(caller, wo.project_of(target), cwd, target, how)
         if reason:
-            logger.warning("[HOOKS] edit_gate: scripted write refused, not the seat's: %s via %s", target, how)
+            seat = wo.branch_at(caller, Path(cwd), wo.package_of(Path(cwd)))
+            logger.warning(
+                "[HOOKS] edit_gate: scripted write refused, not the seat's: @%s -> %s via %s",
+                seat.name if seat else "unnamed",
+                target,
+                how,
+            )
             return _refuse(reason)
     return None
 

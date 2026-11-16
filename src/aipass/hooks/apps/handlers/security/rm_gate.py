@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: rm_gate.py
-# Version: 3.3.0
+# Version: 3.4.0
 # Description: Refuses raw rm, other deletes off the admin seat, and drone rm outside the caller's branch (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
@@ -93,6 +93,9 @@ _DRONE = "drone"
 
 _ADMIN_SEAT = "aipass.hooks.apps.modules.admin_seat"
 
+# drone rm's help form alone runs nothing, so every seat may read it.
+_HELP_FORMS = (("--help",), ("-h",))
+
 # The shell may still expand these, so the path drone rm receives is not the word the gate reads.
 _SHELL_EXPANDS = frozenset("$`*?[]{}~")
 
@@ -140,6 +143,19 @@ def _record(cmd: str, cwd: str, caller: str | None, lanes: dict[str, int]) -> No
             )
 
 
+def _record_move(cmd: str, cwd: str, caller: str | None, count: int, target: str, reason: str) -> None:
+    """Write down every refused drone rm: a move refused before drone ran, with the target and the reason."""
+    for _ in range(count):
+        logger.info(
+            "[HOOKS] rm_gate: MOVE refused | lane=drone rm | branch=%s | cwd=%s | target=%s | reason=%s | cmd=%s",
+            caller or "unnamed",
+            cwd,
+            target or "-",
+            reason,
+            cmd,
+        )
+
+
 def _classify(cmd: str, cwd: str) -> tuple[int, list, list[str], list[str]]:
     """(raw rm, the drone rm invocations, other deletes, what could not be read) across every program *cmd* runs."""
     reader = _reader()
@@ -160,7 +176,9 @@ def _classify(cmd: str, cwd: str) -> tuple[int, list, list[str], list[str]]:
 def _target(arg: str, runs_in: str) -> Path:
     """*arg* resolved as drone rm resolves it, a link judged where it lives; raises when it cannot be."""
     if arg.startswith("-"):
-        raise ValueError(f"{arg}: an option, and only @devpulse may pass options to drone rm")
+        raise ValueError(
+            f"{arg}: an option, and only @devpulse may pass options to drone rm; a file: write it as ./{arg}"
+        )
     if _SHELL_EXPANDS & set(arg):
         raise ValueError(f"{arg}: the shell still expands it, so the path it names is unknown here")
     path = Path(arg)
@@ -173,23 +191,27 @@ def _target(arg: str, runs_in: str) -> Path:
     return path.resolve(strict=True)
 
 
-def _not_movable(drones: list, cwd: str) -> str | None:
-    """Why a drone rm target is not this seat's to move, or None when each is inside its branch or the temp dir.
+def _not_movable(drones: list, cwd: str) -> tuple[str, str] | None:
+    """(why, resolved target or "") for a drone rm target not this seat's to move; None when each one is.
 
     Raises when a target cannot be resolved.
     """
     root = importlib.import_module(_ADMIN_SEAT).branch_root(cwd)
     places = [place for place in (root, system_temp()) if place is not None]
     for inv in drones:
+        if inv.argv[2:] in _HELP_FORMS:
+            continue
         if len(inv.argv) < 3:
-            return "drone rm names no path."
+            return "drone rm names no path.", ""
         for arg in inv.argv[2:]:
             target = _target(arg, inv.cwd)
+            if target == root:
+                return f"{target} is your own branch root; a branch is retired by @spawn, not by drone rm.", str(target)
             if not any(target != place and target.is_relative_to(place) for place in places):
                 where = (
                     f"outside your own branch ({root})" if root else "in no branch of yours (no passport above the cwd)"
                 )
-                return f"{target} is {where} and the system temp dir."
+                return f"{target} is {where} and the system temp dir.", str(target)
     return None
 
 
@@ -236,25 +258,27 @@ def handle(hook_data: dict) -> dict:
         caller, admin = _seat(cwd)
         if not raw and admin:
             return _BLOCK_ALLOW
-        why = ""
+        why, moved = "", ""
         if drones and not raw and not others:
             try:
-                why = (
-                    f"it also runs what the gates cannot read: {'; '.join(unread)}."
+                verdict = (
+                    (f"it also runs what the gates cannot read: {'; '.join(unread)}.", "")
                     if unread
                     else _not_movable(drones, cwd)
                 )
             except (OSError, RuntimeError, ValueError) as exc:  # an unresolvable target is refused, never waved through
                 logger.info("[HOOKS] rm_gate: drone rm target unresolvable, refusing: %s", exc)
-                why = f"a target cannot be resolved: {exc}."
-            if why is None:
+                verdict = (f"a target cannot be resolved: {exc}.", "")
+            if verdict is None:
                 return _BLOCK_ALLOW
+            why, moved = verdict
         if not raw and not drones and not others:
             named = f"@{caller}" if caller else UNNAMED_CALLER.format(cwd=cwd or "(no cwd)")
             _record(cmd, cwd, caller, {"unread program": len(unread)})
             return _block(UNREAD_REFUSED.format(what="; ".join(dict.fromkeys(unread)), caller=named))
 
-        _record(cmd, cwd, caller, {"raw rm": raw, "drone rm": len(drones), "delete verb": len(others)})
+        _record(cmd, cwd, caller, {"raw rm": raw, "delete verb": len(others)})
+        _record_move(cmd, cwd, caller, len(drones), moved, why or "refused with the delete beside it in this command")
         return _block(_refusal(raw, others, admin, caller, cwd, why))
 
     except Exception as exc:  # fail closed on the Bash call this gate guards

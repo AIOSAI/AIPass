@@ -166,10 +166,12 @@ agent how to switch a gate off.
   nearest passport above the session cwd, so a `cd` in the command does not change whose branch it
   is) or the system temp dir. Targets resolve the way drone resolves them: against the directory the
   command runs in, symlinks resolved, a link judged where it lives. Refused, naming the path: a
-  target elsewhere (repo root files, `.github`, another branch, a project), the branch root or the
-  temp dir itself, a path that does not exist, a word the shell still expands (`$ * ? [ ] { } ~` or
-  a backtick), a relative path after a `cd` the reader could not follow, no target, any option
-  (`--stale`, `--help`, `-rf`), or a command that also runs what the reader cannot read.
+  target elsewhere (repo root files, `.github`, another branch, a project), the temp dir itself, the
+  branch root (a branch is retired by @spawn), a path that does not exist, a word the shell still
+  expands (`$ * ? [ ] { } ~` or a backtick), a relative path after a `cd` the reader could not
+  follow, no target, any option (`--stale`, `-rf`; a file whose name starts with a dash is written
+  `./-name`), or a command that also runs what the reader cannot read. `drone rm --help` or
+  `drone rm -h`, alone, passes for every seat: drone answers it with help and acts on nothing.
 - **Every other delete** is refused off the admin seat with the same text: `rmdir`, `unlink`,
   `shred` and their kin wherever a program runs (shell_reader names it, however it is spelled),
   `find -delete`, and an interpreter's delete (`os.remove`, `shutil.rmtree`, `Path.unlink`; node
@@ -195,8 +197,10 @@ Outside your own branch? Mail @devpulse with the path and why:
 This refused attempt is recorded.
 ```
 
-Every refused attempt is one INFO line per deleting clause
-(`DELETE refused | lane=… | branch=… | cwd=… | cmd=…`). Service code that runs `drone rm` as a
+Every refused attempt is one INFO line per deleting clause in `logs/rm_gate.log`:
+`DELETE refused | lane=… | branch=… | cwd=… | cmd=…` for a delete, and for a refused `drone rm`, a move
+refused before drone ran, `MOVE refused | lane=drone rm | branch=… | cwd=… | target=<resolved> |
+reason=… | cmd=…` (`target=-` when the target could not be resolved). Service code that runs `drone rm` as a
 subprocess never passes through a hook.
 
 ---

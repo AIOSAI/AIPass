@@ -448,11 +448,13 @@ class TestScriptedLaneCatches:
 
     # Own files only, on this lane too: the project boundary alone would let hooks sed another branch.
 
-    def test_sed_into_another_branch(self, registered_projects: dict):
+    def test_sed_into_another_branch(self, registered_projects: dict, caplog):
         target = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
         result = _run(registered_projects["hooks"], command=f"sed -i s/a/b/ {target}")
         assert _blocked(result)
         assert "Cross-branch write blocked (sed -i): 'hooks' cannot write to 'memory'" in _reason(result)
+        logged = [r.getMessage() for r in caplog.records if "scripted write refused, not the seat's" in r.getMessage()]
+        assert logged and logged[0].startswith("[HOOKS] edit_gate: scripted write refused, not the seat's: @hooks -> ")
 
     def test_sed_w_into_another_branch(self, registered_projects: dict):
         target = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()

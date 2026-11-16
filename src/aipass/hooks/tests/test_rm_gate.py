@@ -529,9 +529,10 @@ class TestTheLockdown:
             self._run("rm a.txt", canary, grant=False)
             self._run("drone rm b.txt", canary, grant=False)
 
-        records = [r.getMessage() for r in caplog.records if "DELETE" in r.getMessage()]
+        records = [r.getMessage() for r in caplog.records if " refused | lane=" in r.getMessage()]
         assert len(records) == 2
-        assert all("refused" in r and "branch=canary" in r for r in records)
+        assert all("branch=canary" in r for r in records)
+        assert "DELETE refused | lane=raw rm" in records[0] and "MOVE refused | lane=drone rm" in records[1]
 
 
 class TestDroneRmInsideTheOwnBranch:
@@ -613,8 +614,20 @@ class TestDroneRmInsideTheOwnBranch:
 
     def test_the_branch_root_and_the_temp_dir_themselves_are_refused(self, tmp_path, system_temp_apart):
         canary, _ = self._tree(tmp_path)
-        self._refused("drone rm .", str(canary))
+        reason = self._refused("drone rm .", str(canary))
+        assert f"Refused: {canary} is your own branch root; a branch is retired by @spawn, not by drone rm." in reason
         self._refused(f"drone rm {system_temp_apart}", str(canary))
+
+    @pytest.mark.parametrize("command", ("drone rm --help", "drone rm -h"))
+    def test_the_help_form_alone_passes_for_every_seat(self, tmp_path, command):
+        canary, _ = self._tree(tmp_path)
+        assert self._run(command, str(canary)) == {"stdout": "", "exit_code": 0}
+
+    def test_a_file_named_like_an_option_is_refused_and_shown_the_way_out(self, tmp_path):
+        canary, _ = self._tree(tmp_path)
+        (canary / "-dash.txt").write_text("d", encoding="utf-8")
+        assert "write it as ./-dash.txt" in self._refused("drone rm -dash.txt", str(canary))
+        assert self._run("drone rm ./-dash.txt", str(canary))["exit_code"] == 0
 
     @pytest.mark.parametrize(
         "command",
@@ -628,7 +641,8 @@ class TestDroneRmInsideTheOwnBranch:
             "drone rm",
             "drone rm -rf notes.txt",
             "drone rm --stale 1d build",
-            "drone rm --help",
+            "drone rm --help notes.txt",
+            "drone rm -h -rf",
             "drone rm notes.txt; $UNSET_PROGRAM x",
         ),
     )
@@ -670,8 +684,10 @@ class TestDroneRmInsideTheOwnBranch:
         with caplog.at_level(logging.INFO):
             self._run("drone rm notes.txt", str(canary))
             self._run("drone rm ../README.md", str(canary))
-        records = [r.getMessage() for r in caplog.records if "DELETE" in r.getMessage()]
-        assert len(records) == 1 and "lane=drone rm" in records[0]
+        records = [r.getMessage() for r in caplog.records if " refused | lane=" in r.getMessage()]
+        assert len(records) == 1 and "MOVE refused | lane=drone rm | branch=canary" in records[0]
+        assert f"| target={tmp_path / 'README.md'} |" in records[0]
+        assert f"| reason={tmp_path / 'README.md'} is outside your own branch" in records[0]
 
 
 class TestEveryDeleteVerb:
