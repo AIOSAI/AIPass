@@ -239,8 +239,7 @@ class TestTheChildReportsInItsReply:
     def test_a_reply_with_no_json_names_it_and_carries_stderr(self):
         reason = chroma_subprocess.embedder_reason(_FakeCompleted("", 1, "Traceback: segfault in onnx"))
 
-        assert "no JSON reply on stdout" in reason
-        assert "Traceback: segfault in onnx" in reason
+        assert reason == "no JSON reply on stdout (it was empty); stderr: Traceback: segfault in onnx"
 
     def test_an_empty_stderr_is_said_to_be_empty(self):
         reason = chroma_subprocess.embedder_reason(_FakeCompleted("garbage", 1, ""))

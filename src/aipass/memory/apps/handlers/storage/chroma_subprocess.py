@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: chroma_subprocess.py
 # Description: ChromaDB Subprocess Handler
-# Version: 1.8.0
+# Version: 1.8.1
 # Created: 2025-11-27
 # Modified: 2026-11-15
 # =============================================
@@ -94,10 +94,13 @@ def embedder_reason(completed) -> str:
 
     Every caller of embed_subprocess.py reads its refusal through this one function.
     """
+    stderr = (completed.stderr or "").strip() or "empty"
+    if not (completed.stdout or "").strip():
+        return f"no JSON reply on stdout (it was empty); stderr: {stderr}"
     try:
         reply = json.loads(completed.stdout)
     except (json.JSONDecodeError, TypeError, ValueError) as exc:
-        return f"no JSON reply on stdout ({exc}); stderr: {(completed.stderr or '').strip() or 'empty'}"
+        return f"no JSON reply on stdout ({exc}); stderr: {stderr}"
     if isinstance(reply, dict) and reply.get("error"):
         return str(reply["error"])
     return (completed.stderr or "").strip() or "no reason given"
