@@ -3,7 +3,7 @@
 # Description: Tests for the host API's backup door — runs, cancels, jobs and status (DPLAN-0411, DPLAN-0412)
 # Version: 1.2.0
 # Created: 2026-10-16
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/host/backup.py."""
@@ -46,7 +46,6 @@ STATUS = {
     "runs": 64,
     "lanes": {
         "snapshot": {"last": "2026-10-16T07:09:50+00:00", "files": 15414},
-        "versioned": {"last": None, "files": None},
         "drive_sync": {"last": None, "files": None},
     },
     "drive": {"tracked_files": 12},
@@ -164,7 +163,7 @@ class TestStartRun:
 
     @pytest.mark.parametrize(
         ("lane", "flags", "limit"),
-        [("snapshot", ["--quiet"], 1800), ("versioned", ["--quiet"], 1800), ("all", ["--quiet"], 86400)],
+        [("snapshot", ["--quiet"], 1800), ("all", ["--quiet"], 86400)],
     )
     def test_each_limited_lane_runs_its_contract_argv_under_its_own_limit(
         self, door: Any, starter: Starter, alarms: Alarms, seated: Path, lane: str, flags: List[str], limit: int
@@ -221,7 +220,7 @@ class TestStartRun:
     def test_a_limit_whose_stop_cannot_be_routed_is_logged_never_raised(
         self, door: Any, starter: Starter, alarms: Alarms, backup_log: Any
     ) -> None:
-        job = host_backup.start_run("AIPASS", "versioned")
+        job = host_backup.start_run("AIPASS", "snapshot")
         starter.run_all()
         refusal = drone.RoutingError("Branch not found: @backup")
         door.route_command.side_effect = refusal
@@ -231,7 +230,7 @@ class TestStartRun:
         backup_log.error.assert_called_once()
         message, lane, job_id, error = backup_log.error.call_args.args
         assert "could not be stopped at its limit" in message
-        assert (lane, job_id, error) == ("versioned", job["job"], refusal)
+        assert (lane, job_id, error) == ("snapshot", job["job"], refusal)
         assert backup_log.error.call_args.kwargs == {"exc_info": refusal}
 
     def test_a_second_run_of_the_same_lane_is_refused_with_the_contract_sentence(
@@ -246,10 +245,10 @@ class TestStartRun:
         assert len(starter.pending) == 1
 
     def test_the_seat_in_another_case_is_the_same_slot(self, door: Any) -> None:
-        host_backup.start_run("AIPASS", "versioned")
+        host_backup.start_run("AIPASS", "snapshot")
 
         with pytest.raises(host_backup.VerbRefused):
-            host_backup.start_run("aipass", "versioned")
+            host_backup.start_run("aipass", "snapshot")
 
     def test_different_lanes_on_one_project_overlap(self, door: Any, starter: Starter) -> None:
         snapshot = host_backup.start_run("AIPASS", "snapshot")
@@ -266,14 +265,14 @@ class TestStartRun:
 
         assert again["state"] == "running"
 
-    @pytest.mark.parametrize("lane", ["", "nightly", "SNAPSHOT"])
+    @pytest.mark.parametrize("lane", ["", "nightly", "SNAPSHOT", "versioned"])
     def test_a_missing_or_unknown_lane_is_refused_before_anything_runs(
         self, door: Any, starter: Starter, lane: str
     ) -> None:
         with pytest.raises(host_backup.VerbRefused) as refused:
             host_backup.start_run("AIPASS", lane)
 
-        assert "snapshot, versioned, all, drive_sync" in str(refused.value)
+        assert "snapshot, all, drive_sync" in str(refused.value)
         assert starter.pending == []
 
     def test_a_missing_project_is_refused(self, door: Any, starter: Starter) -> None:
@@ -378,12 +377,12 @@ class TestStopRun:
         with pytest.raises(host_backup.VerbUnavailable):
             host_backup.stop_run("AIPASS", "snapshot")
 
-    @pytest.mark.parametrize("lane", ["", "nightly"])
+    @pytest.mark.parametrize("lane", ["", "nightly", "versioned"])
     def test_a_missing_or_unknown_lane_is_refused_before_backup_is_asked(self, door: Any, lane: str) -> None:
         with pytest.raises(host_backup.VerbRefused) as refused:
             host_backup.stop_run("AIPASS", lane)
 
-        assert "snapshot, versioned, all, drive_sync" in str(refused.value)
+        assert "snapshot, all, drive_sync" in str(refused.value)
         door.route_command.assert_not_called()
 
     def test_a_missing_project_is_refused(self, door: Any) -> None:
@@ -553,7 +552,7 @@ class TestReadStatus:
 
     def test_running_lists_only_this_projects_in_flight_jobs(self, door: Any, starter: Starter, census: Path) -> None:
         door.route_command.return_value = _result(json.dumps(STATUS))
-        finished = host_backup.start_run("AIPASS", "versioned")
+        finished = host_backup.start_run("AIPASS", "all")
         starter.run_all()
         running = host_backup.start_run("AIPASS", "snapshot")
         host_backup.start_run("BAUD", "snapshot")
@@ -583,7 +582,7 @@ class TestReadStatus:
         since = "2026-10-16T07:30:00+00:00"
         entries = [
             {"verb": "all", "lane": "snapshot", "pid": 4242, "started_at": since, "progress": None},
-            {"verb": "all", "lane": "versioned", "pid": 4242, "started_at": since, "progress": progress},
+            {"verb": "all", "lane": "drive_sync", "pid": 4242, "started_at": since, "progress": progress},
             {"verb": "drive_sync", "lane": "drive_sync", "pid": 175450, "started_at": since, "progress": None},
         ]
         door.route_command.return_value = _result(json.dumps({**STATUS, "running": entries}))

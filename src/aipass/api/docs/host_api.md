@@ -90,7 +90,7 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `POST /v1/verbs/kill` | operate | `{branch, project}` → `baud --end-room`. Returns `room` and `ended` |
 | `POST /v1/verbs/lock` | operate | Empty body. Proxied to `@skills`' screen_lock. Never gated |
 | `POST /v1/verbs/new-project` | operate | `{name, template?}` → `aipass new` + its agent. 200 `{ok, name, project, target, template, agent, agent_home, detail}`; 400 `project_name_refused`/`template_refused`/`project_refused`, 409 `project_exists`, 503 `project_door_failed` |
-| `POST /v1/backup/run` | operate | `{project, lane}` → **202** the running job. Lanes `snapshot`, `versioned`, `all`, `drive_sync`. Same lane already running: **400**. See [host_surfaces.md](host_surfaces.md) |
+| `POST /v1/backup/run` | operate | `{project, lane}` → **202** the running job. Lanes `snapshot`, `all`, `drive_sync`. Same lane already running: **400**. See [host_surfaces.md](host_surfaces.md) |
 | `POST /v1/backup/cancel` | operate | `{project, lane}` → `drone @backup stop <root> <lane>`. **200** `{project, lane, stopped, message}`, stop's line. Nothing running: **404** `not_running`, @backup's first stdout line; none: **503**, stderr logged |
 | `GET /v1/backup/job?id=` | read | One job, `running`/`done`/`stopped` (exit 130)/`failed`, `summary` the output's tail. Forgotten: **404** `job_unknown` |
 | `GET /v1/backup/status?project=&sizes=` | read | `drone @backup status --json` passed through; each `running` entry gains `job` (this server's id, else `null`). No `--json` on this machine: **503** |

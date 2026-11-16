@@ -278,7 +278,7 @@ The run answers **202** with the job at once and runs the lane on a worker threa
 time (a second is a 400 naming the first); different lanes overlap and
 @backup's own locks decide the rest. `summary` is the last 600 characters of the output,
 verbatim. A job ends `done` (exit 0), `stopped` (130) or `failed` (anything else).
-snapshot and versioned get 30 min, all a day; drive_sync has no limit (a Drive
+snapshot gets 30 min, all a day; drive_sync has no limit (a Drive
 rebuild is hours; cancel ends it). At a limit the server asks @backup to `stop` the
 lane, which exits 130 and clears its running file; drone's hang guard backs it up. A run that never reached @backup is a 503 and opens no job; one that died behind
 the door is a `failed` job with drone's sentence in `error`.

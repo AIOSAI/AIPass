@@ -3,7 +3,7 @@
 # Description: Host API Backup Handler — the backup door: start and stop a lane, read a job, read the store
 # Version: 1.2.0
 # Created: 2026-10-16
-# Modified: 2026-10-22
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -30,13 +30,12 @@ BACKUP = "@backup"
 # drive_sync has no --quiet; passing one would be an argument it refuses.
 LANES: Dict[str, List[str]] = {
     "snapshot": ["--quiet"],
-    "versioned": ["--quiet"],
     "all": ["--quiet"],
     "drive_sync": [],
 }
 
 # drive_sync has no limit by the owner's ruling: a rebuild is hours, its own stop ends it early.
-RUN_LIMIT_SECONDS: Dict[str, Optional[int]] = {"snapshot": 1800, "versioned": 1800, "all": 86400, "drive_sync": None}
+RUN_LIMIT_SECONDS: Dict[str, Optional[int]] = {"snapshot": 1800, "all": 86400, "drive_sync": None}
 
 # shortcut: drone's router has no no-deadline mode, so an unlimited lane gets ten years; use drone's when it has one.
 UNLIMITED_SECONDS = 10 * 365 * 86400
@@ -277,7 +276,7 @@ def _root_of(project: str) -> Path:
 
 
 def _check_lane(lane: str) -> None:
-    """Refuse anything but one of the four lanes."""
+    """Refuse anything but one of the three lanes."""
     if lane not in LANES:
         named = f"Unknown lane {lane!r}" if lane else "A lane is required"
         raise VerbRefused(f"{named} — the backup door runs {', '.join(LANES)}")
