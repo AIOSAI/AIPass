@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_structure_check.py
 # Description: JSON Structure Standards Checker Handler
-# Version: 3.4.2
+# Version: 3.4.3
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -144,7 +144,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
                     "passed": True,
                     "message": (
                         "Pre-logging bootstrap module — reached from the logging chain's own "
-                        "imports and holds no aipass import of any kind, so json_handler cannot "
+                        "imports and holds no aipass import but prax's trail door, so json_handler cannot "
                         "be imported here without a cycle (not applicable)"
                     ),
                     "declined": True,
@@ -178,11 +178,9 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
 
 def _declares_no_callable_code(content: str) -> bool:
-    """True when a module defines no function or method ANYWHERE.
+    """True when a module defines no function or method ANYWHERE: pure declarations perform no operations to log.
 
-    "Every module must log operations" is about modules that PERFORM operations; pure declarations perform
-    none, and both cures (a module-level log_operation, which writes at pytest COLLECTION, or a function added
-    only to call it) are worse. ONE method anywhere puts the module back in scope; an unparseable file is not exempt.
+    ONE method anywhere puts the module back in scope; an unparseable file is not exempt.
     """
     try:
         tree = ast.parse(content)
@@ -192,9 +190,11 @@ def _declares_no_callable_code(content: str) -> bool:
     return not any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) for node in ast.walk(tree))
 
 
-#: How many modules the bootstrap walk will visit before it gives up. The whole
-#: fleet's logging chain measures ~100; this is a runaway guard, not a budget.
+#: A runaway guard on the bootstrap walk, not a budget: the fleet's logging chain measures ~150.
 _BOOTSTRAP_WALK_CAP = 2000
+
+#: Prax's door two (its LOGGER_DOORS), the logger made for modules beneath json_handler: importing it is no cycle.
+_TRAIL_DOOR = "aipass.prax.apps.handlers.logging.trail"
 
 
 def resolve_relative(module_name: str | None, level: int, package: str | None) -> str | None:
@@ -214,11 +214,9 @@ def resolve_relative(module_name: str | None, level: int, package: str | None) -
 
 
 def _aipass_imports(content: str, package: str | None = None) -> list[str]:
-    """Every ``aipass.*`` module name this source imports, at any nesting depth.
+    """Every ``aipass.*`` module name this source imports, function-level included: the dependency is taken.
 
-    Function-level imports count: a module reaching aipass only from inside a function has still taken the
-    dependency. Relative imports count when ``package`` is supplied; None keeps the absolute-only behaviour
-    the "holds no aipass import" clause wants for a file it cannot place.
+    Relative imports count only when ``package`` is supplied; clause 1 passes None for a file it cannot place.
     """
     try:
         tree = ast.parse(content)
@@ -279,10 +277,8 @@ def _module_name(path: Path, source_root: Path) -> str | None:
 def _bootstrap_chain(source_root_str: str) -> frozenset:
     """Every module the logging substrate imports, transitively.
 
-    Seeded from the system logger and every branch's json_handler, the two things this standard tells a
-    module to import: anything they reach cannot import them back without a cycle. Ancestor packages are
-    deliberately absent (walking them exempted helpers that have a working logger). Statically walked, so a
-    dynamic importlib hop leaves the set SHORT, the safe direction: an over-long set would hand out exemptions.
+    Seeded from the system logger and every branch's json_handler: anything they reach cannot import them back
+    without a cycle. Static, so a dynamic importlib hop leaves the set SHORT, the safe direction.
     """
     source_root = Path(source_root_str)
     branches = [d.name for d in source_root.iterdir() if (d / "apps").is_dir()]
@@ -316,7 +312,7 @@ def _bootstrap_chain(source_root_str: str) -> frozenset:
 def _is_prelogging_bootstrap(path: Path, content: str) -> bool:
     """True for a module that sits BENEATH the logging system it would have to call.
 
-    Two clauses, both measured: (1) the module holds no aipass import of any kind, and (2) the logging
+    Two clauses, both measured: (1) the module holds no aipass import but prax's trail door, and (2) the logging
     substrate's own imports reach it. Either alone exempts too much; the pair names modules where wiring
     log_operation() would put a file write on every branch's import path, firing during pytest COLLECTION.
     """
@@ -326,7 +322,7 @@ def _is_prelogging_bootstrap(path: Path, content: str) -> bool:
         # An unreadable file is not a bootstrap module: [] from _aipass_imports() would buy the exemption.
         logger.info("json_structure: unparseable, so not eligible for the bootstrap exemption: %s", exc)
         return False
-    if _aipass_imports(content):
+    if any(name != _TRAIL_DOOR and not name.startswith(_TRAIL_DOOR + ".") for name in _aipass_imports(content)):
         return False
     source_root = _aipass_source_root(path)
     if source_root is None:

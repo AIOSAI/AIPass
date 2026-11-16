@@ -471,8 +471,8 @@
     {
       "file": "apps/handlers/aipass_standards/json_structure_check.py",
       "standard": "logged_fallback",
-      "lines": [328, 346],
-      "reason": "The checker is wrong on these lines (fleet green leg 14; re-pinned +3 10-08, resolve_relative's docstring grew): each failure answer is the STRICT answer. An unparseable file is not eligible for the bootstrap exemption (441, logged). A path outside the source root has no branch root (459): that is the true answer, and its one caller, _seam_logging, then finds no seam and grants nothing."
+      "lines": [324, 342],
+      "reason": "The checker is wrong on these lines (fleet green leg 14; re-pinned -4 11-15, three docstrings trimmed): each failure answer is the STRICT answer. An unparseable file is not eligible for the bootstrap exemption (441, logged). A path outside the source root has no branch root (459): that is the true answer, and its one caller, _seam_logging, then finds no seam and grants nothing."
     },
     {
       "file": "apps/handlers/aipass_standards/ruff_check.py",

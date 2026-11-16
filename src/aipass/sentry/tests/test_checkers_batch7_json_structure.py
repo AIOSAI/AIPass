@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_json_structure.py
 # Description: json_structure_check: declaration-only and bootstrap modules (split from test_checkers_batch7.py)
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-10-08
 # Modified: 2026-11-15
 # =============================================
@@ -92,7 +92,7 @@ class TestJsonStructureExemptsPreLoggingBootstrapModules:
         return root
 
     def _check(self, path):
-        """check_module grants the bootstrap exemption. Mutant: exemption bypassed in json_structure_check.py — killed."""
+        """check_module grants the bootstrap exemption. Mutant: exemption bypassed — killed."""
         message = json_structure_check.check_module(str(path))["checks"][0]["message"]
         return message.startswith("Pre-logging bootstrap module")
 
@@ -126,6 +126,30 @@ class TestJsonStructureExemptsPreLoggingBootstrapModules:
             "def find_root():\n"
             "    from aipass.prax.apps.handlers.json import json_handler\n"
             "    return Path(__file__).parent\n",
+            encoding="utf-8",
+        )
+        assert self._check(boot) is False
+
+    def test_a_module_importing_only_the_trail_door_keeps_the_exemption(self, tmp_path):
+        """Prax's trail is the logger built for modules beneath json_handler (prax ba4fd567)."""
+        root = self._universe(tmp_path)
+        boot = root / "prax" / "apps" / "handlers" / "boot.py"
+        boot.write_text(
+            "from pathlib import Path\n"
+            "from aipass.prax.apps.handlers.logging.trail import PraxTrail\n\n"
+            "def find_root():\n    return Path(__file__).parent\n",
+            encoding="utf-8",
+        )
+        assert self._check(boot) is True
+
+    def test_the_trail_door_beside_any_other_aipass_import_is_not_exempt(self, tmp_path):
+        root = self._universe(tmp_path)
+        boot = root / "prax" / "apps" / "handlers" / "boot.py"
+        boot.write_text(
+            "from pathlib import Path\n"
+            "from aipass.prax.apps.handlers.logging.trail import PraxTrail\n"
+            "from aipass.prax.apps.handlers.json import json_handler\n\n"
+            "def find_root():\n    return Path(__file__).parent\n",
             encoding="utf-8",
         )
         assert self._check(boot) is False

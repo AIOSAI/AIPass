@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_structure_content.py
 # Description: JSON Structure Standards Content Handler
-# Version: 3.1.1
+# Version: 3.1.2
 # Created: 2026-03-05
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -255,7 +255,8 @@ def get_json_structure_standards() -> str:
         "     [dim]and a diagnostic that needs the logger it is emitted from is a[/dim]",
         "     [dim]second crash wearing a diagnostic's clothes (@memory).[/dim]",
         "  [yellow]![/yellow]  BOTH clauses are measured by the checker, neither is declared:",
-        "     [dim]no aipass import ANYWHERE (function-level counts), AND the logging[/dim]",
+        "     [dim]no aipass import ANYWHERE (function-level counts) but prax's trail[/dim]",
+        "     [dim]door, the logger built for this layer, AND the logging[/dim]",
         "     [dim]chain's own imports reach the module. Measured on 2026-08-31: 79[/dim]",
         "     [dim]fleet modules import nothing from aipass; 9 are in the chain. One[/dim]",
         "     [dim]clause alone would exempt either all 79 or ai_mail's whole dispatch[/dim]",
