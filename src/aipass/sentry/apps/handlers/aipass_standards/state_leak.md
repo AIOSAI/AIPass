@@ -120,7 +120,7 @@ test_stop.py:259 stop_flag.catch_sigterm() writes the product's own state and no
 The specimen is PR 792's CI red (Linux run 38999228669):
 `backup/apps/handlers/state/stop_flag.py` keeps `_STATE` and declares `reset_stop_state()`;
 `test_stop.py` fires the installed SIGTERM handler inside `catch_sigterm` and nothing lowers the
-flag, so under `xdist --dist loadscope` the next versioned class on that worker copies nothing.
+flag, so under `xdist --dist loadscope` the next copy test on that worker copies nothing.
 The file at `fdc1b4a2~1` is convicted at line 259; with the `clean_stop_state` autouse fixture
 `fdc1b4a2` added to `tests/conftest.py`, it is acquitted.
 
@@ -136,7 +136,7 @@ The file at `fdc1b4a2~1` is convicted at line 259; with the `clean_stop_state` a
 | the reset in the test's own `finally` | acquitted | `test_a_reset_in_the_tests_own_finally_acquits_it` |
 | a module container with no public `reset*` | never charged | `test_a_product_global_with_no_declared_reset_is_never_charged` |
 | a `reset*` that writes no module-level container | never charged | `test_a_reset_that_writes_no_module_container_declares_nothing` |
-| a test that only READS the state (`test_versioned_engine.py`) | **known miss** | `test_a_test_that_only_reads_the_flag_is_a_known_miss` |
+| a test that only READS the state (`test_snapshot_fidelity.py`) | **known miss** | `test_a_test_that_only_reads_the_flag_is_a_known_miss` |
 
 **Fleet standing, 2026-10-16, 940 test files: 0 hits.** Three product modules declare a reset:
 `backup/.../state/stop_flag.py` (`reset_stop_state`), `cli/apps/modules/display.py`
@@ -145,8 +145,8 @@ sites call one of their writers (api 51 in 3 files, cli 28 in 2, commons 2 in 1,
 counted with the reset credit switched off); every one is acquitted by an autouse fixture in its
 branch's `conftest.py` that calls the reset. Shape (d) is scored with the other three.
 
-**The reader side is a known miss.** `test_versioned_engine.py` is the file that went red, and it
-calls `copy_versioned`, which reads `stop_requested()` from another module. Seeing it needs a
+**The reader side is a known miss.** `test_snapshot_fidelity.py` is the reader's shape: it
+calls `copy_snapshot`, which reads `stop_requested()` from another module. Seeing it needs a
 call graph across modules; the rule convicts the writer only. Imports inside a function, and a
 writer reached from another module (`entry.main()` → a lane → `catch_sigterm`), are missed for
 the same reason.

@@ -55,9 +55,6 @@ Measured 2026-09-22 over 565 test files. **17 files, 43 hits, 4.0s.**
 Every hit is scored. The dispatch's ruling is "score all", and there is no legitimate form:
 both shapes above have a cure that is strictly better.
 
-Evidence lands: `test_versioned_engine.py` 89, 110, 126, 240, 315, 441 — @backup's
-baseline/diff suite, which is exactly the mtime shape.
-
 ---
 
 ## Why it cannot be satisfied by accident

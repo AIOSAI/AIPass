@@ -3,7 +3,7 @@
 # Description: CI ratchet — the owner's first name and a person's home path never regrow in the tracked tree
 # Version: 1.0.0
 # Created: 2026-09-19
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """The name ratchet — the public tree never names its owner (DPLAN-0350).
@@ -18,7 +18,7 @@ line is masked: a public repo's CI log is public too.
 
 Never opened (an exemption is that file, not its family; tests read this list off the doc):
 ``EXEMPT_PATHS`` by whole path: ``.claude/CLAUDE.md``, ``.claude/AGENTS.md``, ``.claude/hooks/*.jsonl``,
-``.claude/hooks/*.log``, ``.claude/settings.json``, ``src/aipass/skills/tools/suspend/*``,
+``.claude/hooks/*.log``, ``.claude/settings.json``,
 ``src/aipass/sentry/tests/test_checkers_batch10.py`` (``hardcoded_path``'s own inputs);
 ``EXEMPT_NAMES`` by leaf at any depth: ``CHANGELOG.md``, ``*PLAN-*.md`` (history).
 
@@ -57,7 +57,6 @@ EXEMPT_PATHS: Tuple[str, ...] = (
     ".claude/hooks/*.log",
     ".claude/settings.json",
     "src/aipass/sentry/tests/test_checkers_batch10.py",
-    "src/aipass/skills/tools/suspend/*",
 )
 
 #: File names, fnmatch-matched against the last path segment at any depth.

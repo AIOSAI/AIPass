@@ -3,7 +3,7 @@
 # Description: sleep_in_test_check — crack class N, a test that waits instead of asserting
 # Version: 1.0.2
 # Created: 2026-09-22
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/sleep_in_test_check.py."""
@@ -46,7 +46,7 @@ class TestTheModelFilePasses:
 
 
 class TestThePlantedSpecimen:
-    """test_versioned_engine.py 89/110/126/240/315/441 — @backup's mtime nudges."""
+    """The mtime nudge: a short sleep between two writes so the second reads as newer."""
 
     def test_the_mtime_nudge_is_convicted(self):
         """0.01s does not move an mtime on a one-second-granularity filesystem."""

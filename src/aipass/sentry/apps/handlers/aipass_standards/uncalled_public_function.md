@@ -113,15 +113,10 @@ monkeypatches are real, and `discarded_patch` already examined them and found th
 they are recorders that are asserted — but they are not the whole suite's relationship to
 that function.
 
-**`apps/handlers/diff/generator.py generate_diff_content`** is offered conditionally, "if
-`generator.py` is within the subject of a backup test file". It is not.
-`test_versioned_engine.py` declares `apps/handlers/copy/versioned.py` and
-`apps/modules/restore.py`, and no @backup test file names `generator.py`. The rule does not
-see it — correct, and also a hole: a module nothing declares as a subject is invisible to O
-no matter how untested it is.
+**A module no test file declares as its subject** is not seen. That is correct, and also a
+hole: such a module is invisible to O no matter how untested it is.
 
-**`apps/modules/restore.py`'s bare-basename fallback** is a coverage gap inside a function,
-not a function. O does not see it and should not, exactly as the dispatch said.
+**A coverage gap inside a function** is not a function. O does not see it and should not.
 
 ---
 

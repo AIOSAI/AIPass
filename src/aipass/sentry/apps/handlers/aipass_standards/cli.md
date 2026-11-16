@@ -380,12 +380,12 @@ parser = argparse.ArgumentParser(
     epilog="""
 EXAMPLES:
   python backup.py snapshot
-  python backup.py versioned --note "Before changes"
+  python backup.py drive_sync --note "Before changes"
     """
 )
 
 # Positional arguments
-parser.add_argument('mode', choices=['snapshot', 'versioned', 'all'])
+parser.add_argument('mode', choices=['snapshot', 'drive_sync', 'all'])
 
 # Optional arguments
 parser.add_argument('--note', type=str, help='Backup note')
@@ -471,7 +471,7 @@ parser.add_argument('--dry-run', action='store_true')
 
 **Choices (constrained values):**
 ```python
-parser.add_argument('mode', choices=['snapshot', 'versioned', 'all'])
+parser.add_argument('mode', choices=['snapshot', 'drive_sync', 'all'])
 parser.add_argument('--level', choices=['debug', 'info', 'warning'])
 ```
 
@@ -755,12 +755,11 @@ python delete_plan.py 0042 --yes
 ```bash
 # Mode selection
 python backup_cli.py snapshot
-python backup_cli.py versioned --note "Before changes"
+python backup_cli.py drive_sync --note "Before changes"
 
-# Special commands
-python backup_cli.py --list-modes
-python backup_cli.py --diff "file.py"
-python backup_cli.py --diff "file.py" --v1 20241101 --v2 20241102
+# Flags on a command
+python backup_cli.py status --json
+python backup_cli.py prune --apply
 ```
 
 ### Argument Design Checklist

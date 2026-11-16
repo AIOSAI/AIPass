@@ -3,7 +3,7 @@
 # Description: Tests for hardcoded_path, developer_home, startup_budget, the ratchets, router_assert, oversize_test_file
 # Version: 1.6.0
 # Created: 2026-06-18
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/hardcoded_path_check.py and batch-10 checkers."""
@@ -922,7 +922,7 @@ class TestRatchetScope:
             ".claude/hooks/engine_test.log",
             ".claude/settings.json",
             "src/aipass/sentry/tests/test_checkers_batch10.py",
-            "src/aipass/skills/tools/suspend/deep/run.py",
+            ".claude/hooks/deep/engine.jsonl",
         ]
 
         result = _names(tmp_path, {rel: f"{NAME}\n" for rel in exempt})
@@ -938,7 +938,7 @@ class TestRatchetScope:
             "AGENTS.md",
             "src/aipass/probe/.claude/settings.json",
             "src/aipass/sentry/tests/test_checkers_batch11.py",
-            "src/aipass/skills/tools/suspended.md",
+            ".claude/hooks_old/engine.jsonl",
             "docs/PLAN.md",
             "docs/CHANGELOG.md.txt",
         ]

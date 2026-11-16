@@ -3,7 +3,7 @@
 # Description: Inbox ID validator — scans all inbox.json files for non-8-hex ids
 # Version: 1.1.4
 # Created: 2026-04-21
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Inbox ID validator for the drone @sentry audit inbox-ids command.
@@ -32,7 +32,7 @@ from aipass.sentry.apps.modules import CommandRefused
 _HEX8_RE = re.compile(r"^[0-9a-f]{8}$")
 
 # Trees whose inboxes are snapshots, not live mail: deleted-branch archives
-# and @backup's versioned store. A bad id in either is nobody's to fix.
+# and @backup's stores, the retired versioned one included. A bad id in either is nobody's to fix.
 _DEAD_TREE_DIRS = frozenset({".backup", ".archive"})
 
 # Environments and VCS internals hold no mailbox, and walking them dominates the scan.
@@ -42,7 +42,7 @@ _PRUNED_DIRS = frozenset({".git", ".venv", "venv", "node_modules", "site-package
 def _is_live_inbox(inbox_path: Path) -> bool:
     """Return True if *inbox_path* is a live inbox a branch can actually act on.
 
-    A directory named `inbox.json` is how @backup's versioned store holds a file: not an inbox.
+    A directory named `inbox.json` is how the retired versioned store under .backup keeps a file: not an inbox.
     """
     if _DEAD_TREE_DIRS.intersection(inbox_path.parts):
         return False
