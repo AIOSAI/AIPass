@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: error_registry.py
 # Description: Structured error tracking and registry for Medic v2
-# Version: 2.9.0
+# Version: 2.10.0
 # Created: 2026-02-13
 # Modified: 2026-11-16
 # =============================================
@@ -31,15 +31,6 @@ CB_STATE_FILE = TRIGGER_ROOT / "trigger_json" / "trigger_cb_state.json"
 VALID_STATUSES = ("new", "investigating", "suppressed", "resolved")
 VALID_SEVERITIES = ("low", "medium", "high", "critical")
 VALID_FIX_STATUSES = ("none", "pending_fix", "fix_requested", "fix_confirmed")
-
-# User errors (bad commands, wrong args), not system failures: auto-suppressed on report.
-_USER_ERROR_PATTERNS: re.Pattern = re.compile(
-    r"unknown command|invalid argument|unrecognized|"
-    r"missing required argument|usage:|no such command|"
-    r"not a valid command|unrecognized option|"
-    r"unknown option|too few arguments|too many arguments",
-    re.IGNORECASE,
-)
 
 # A line's own identity: fault[KEY], KEY holding no whitespace and no closing bracket. Hooks pins this text.
 FAULT_MARKER: re.Pattern = re.compile(r"fault\[([^\s\]]+)\]")
@@ -420,9 +411,7 @@ def report(error_type: str, message: str, component: str, log_path: str = "", se
     normalized = normalize_message(message)
     fingerprint = compute_fingerprint(error_type, normalized, component)
 
-    # A marked line is a fault by declaration, never a user's typo.
-    is_user_error = not FAULT_MARKER.search(message) and bool(_USER_ERROR_PATTERNS.search(message))
-
+    # No guessing intent from words: a rejected command logs at INFO, so every line here is a fault.
     with json_file_lock(REGISTRY_FILE):
         registry = _load_registry()
         now = datetime.now().isoformat()
@@ -433,18 +422,15 @@ def report(error_type: str, message: str, component: str, log_path: str = "", se
             entry["last_seen"] = now
             if log_path:
                 entry["log_path"] = log_path
-            if is_user_error and entry.get("status") != "suppressed":
-                entry["status"] = "suppressed"
-                entry["suppress_reason"] = "user_error"
+            # The retired phrase filter's guess, never an operator's call; kept suppressed until now so purge spares it.
+            if entry.get("status") == "suppressed" and entry.get("suppress_reason") == "user_error":
+                entry["status"] = "new"
             _save_registry(registry)
             result = dict(entry)
             result["is_new"] = False
             json_handler.log_operation("error_registered", {"fingerprint": fingerprint[:12], "count": entry["count"]})
             return result
         else:
-            initial_status = "suppressed" if is_user_error else "new"
-            initial_suppress_reason = "user_error" if is_user_error else ""
-
             event = ErrorEvent(
                 fingerprint=fingerprint,
                 error_type=error_type,
@@ -453,11 +439,10 @@ def report(error_type: str, message: str, component: str, log_path: str = "", se
                 component=component,
                 severity=severity,
                 count=1,
-                status=initial_status,
+                status="new",
                 first_seen=now,
                 last_seen=now,
                 log_path=log_path,
-                suppress_reason=initial_suppress_reason,
                 source_fix_status="none",
             )
             entry_dict = asdict(event)

@@ -15,7 +15,9 @@ SHA1 fingerprinting for error deduplication. Tracks: fingerprint, branch, error 
 
     fault\[([^\s\]]+)\]
 
-KEY holds no whitespace and no closing bracket. A marked message normalizes to the marker text alone, so its fingerprint is `sha1(level:fault[KEY]:component)`: the free text after it rides in the mail and is never hashed. A marked message skips the user-error phrase test, because the emitter declared a fault. An unmarked message keeps the normalizer as it is (paths, `line N`, timestamps, UUIDs, hashes, `:NN` ports, 3+ digit ids) and the phrase test. The hooks engine's handler-failure line carries a marker.
+KEY holds no whitespace and no closing bracket. A marked message normalizes to the marker text alone, so its fingerprint is `sha1(level:fault[KEY]:component)`: the free text after it rides in the mail and is never hashed. An unmarked message keeps the normalizer as it is (paths, `line N`, timestamps, UUIDs, hashes, `:NN` ports, 3+ digit ids). The hooks engine's handler-failure line carries a marker.
+
+**No phrase classifies a line.** A command that rejects bad input (an unknown command, a misspelling, a missing or wrong argument) worked: it tells whoever typed it and logs at INFO, so it never reaches the registry. A line at ERROR or WARNING is a fault, whatever words it holds, and dispatches like any other. A row an earlier phrase guess suppressed keeps `suppress_reason: user_error` as its record and stays suppressed, which the 30-day purge spares, until its next occurrence: that report sets it back to `new` and it dispatches. An operator's suppression is untouched.
 
 **Circuit breaker: counts would-be mails, never log lines.** One gate, `dispatch_gate(recipient, fingerprint, note)`, called by medic and by the CI red lane at the point a mail would go: after suppression, backoff and the recipient checks. A storm of one fault therefore reaches it once per backoff step; per-fingerprint backoff bounds that fault's mail. The rules:
 

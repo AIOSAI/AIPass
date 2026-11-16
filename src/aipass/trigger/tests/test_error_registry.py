@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_error_registry.py
 # Description: Unit tests for the error_registry handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-24
 # Modified: 2026-11-16
 # =============================================
@@ -764,18 +764,54 @@ def test_update_source_fix_status_missing_fingerprint(tmp_path: Path) -> None:
     assert success is False
 
 
-def test_user_error_auto_suppressed(tmp_path: Path) -> None:
-    """Errors matching user-error patterns are auto-suppressed on report."""
+def test_a_line_with_every_rejection_phrase_is_a_new_error_never_suppressed(tmp_path: Path) -> None:
+    _seed_registry(tmp_path)
+    er = _import_registry()
+    phrases = (
+        "unknown command, invalid argument, unrecognized, missing required argument, usage:, no such command, "
+        "not a valid command, unrecognized option, unknown option, too few arguments, too many arguments"
+    )
+
+    first = er.report("ERROR", phrases, "CLI")
+    again = er.report("ERROR", phrases, "CLI")
+
+    assert (first["status"], first["suppress_reason"]) == ("new", "")
+    assert (again["count"], again["status"], again["suppress_reason"]) == (2, "new", "")
+
+
+def test_a_usage_line_is_a_normal_error_and_dispatches(tmp_path: Path) -> None:
+    """The api 429 row was hidden by its word usage:."""
     _seed_registry(tmp_path)
     er = _import_registry()
 
-    result = er.report(
-        error_type="CommandError",
-        message="unknown command: foobar",
-        component="CLI",
+    row = er.report("WARNING", "[host_api] usage: oauth/usage answered 429, backing off 60 s", "API")
+
+    assert (row["is_new"], row["status"]) == (True, "new")
+    assert er.should_dispatch(row["fingerprint"]) is True
+
+
+def test_an_old_phrase_suppressed_row_dispatches_on_its_next_occurrence_and_an_operator_suppress_holds(
+    tmp_path: Path,
+) -> None:
+    message = "[host_api] usage: oauth/usage answered 429, backing off 60 s"
+    guessed = er.compute_fingerprint("WARNING", er.normalize_message(message), "API")
+    chosen = er.compute_fingerprint("ERROR", er.normalize_message("bind refused"), "API")
+    base = {"count": 484, "first_seen": "2026-11-07T21:45:00", "last_seen": "2026-11-16T00:23:40"}
+    base["status"] = "suppressed"
+    _seed_registry(
+        tmp_path,
+        {
+            guessed: {**base, "fingerprint": guessed, "message": message, "suppress_reason": "user_error"},
+            chosen: {**base, "fingerprint": chosen, "message": "bind refused", "suppress_reason": "boot race"},
+        },
     )
-    assert result["status"] == "suppressed"
-    assert result["suppress_reason"] == "user_error"
+
+    revived = er.report("WARNING", message, "API")
+    held = er.report("ERROR", "bind refused", "API")
+
+    assert (revived["count"], revived["status"], revived["suppress_reason"]) == (485, "new", "user_error")
+    assert er.should_dispatch(guessed) is True
+    assert (held["status"], er.should_dispatch(chosen)) == ("suppressed", False)
 
 
 def test_non_user_error_not_suppressed(tmp_path: Path) -> None:
@@ -1135,7 +1171,7 @@ def test_a_failed_probe_reopens_with_double_cooldown(tmp_path: Path) -> None:
     assert (status["state"], status["cooldown_seconds"], status["opened_at"]) == ("open", 600, t)
 
 
-def test_a_marked_fault_is_one_row_whatever_its_tail_and_never_a_user_error(tmp_path: Path) -> None:
+def test_a_marked_fault_is_one_row_whatever_its_tail_and_an_unmarked_line_is_its_own_new_row(tmp_path: Path) -> None:
     _seed_registry(tmp_path)
     er = _import_registry()
     marked = "handler error fault[UserPromptSubmit.h.navmap.handle.KeyError@navmap.py]"
@@ -1149,7 +1185,8 @@ def test_a_marked_fault_is_one_row_whatever_its_tail_and_never_a_user_error(tmp_
 
     assert len({row["fingerprint"] for row in rows}) == 1
     assert (rows[-1]["count"], rows[-1]["status"]) == (3, "new")
-    assert (unmarked["status"], unmarked["suppress_reason"]) == ("suppressed", "user_error")
+    assert unmarked["fingerprint"] != rows[0]["fingerprint"]
+    assert (unmarked["status"], unmarked["suppress_reason"]) == ("new", "")
 
 
 def test_an_unmarked_line_keeps_todays_normalizer() -> None:
