@@ -143,7 +143,9 @@ redirect into it is refused whatever the program. git and gh answer to this gate
 Who may write them is the admin grant alone; there is no name list. Paths are matched with `\` read
 as `/` and case-insensitively, and by FILE as well as by name: an existing file with more than one
 link is compared by (device, inode) against every protected file, so a hard link in a seat's own
-directory is protected under its second name too. An external project's own `hooks.json` is not listed: trust decides
+directory is protected under its second name too. A target or protected file that is absent has no second
+name; one whose stat fails for any other cause (a path through a plain file, an unreadable directory) is
+refused, because the gate cannot tell which file it is. An external project's own `hooks.json` is not listed: trust decides
 whether it runs.
 
 **Why it is on:** agents reflexively reach for raw git, which causes state chaos in a multi-agent

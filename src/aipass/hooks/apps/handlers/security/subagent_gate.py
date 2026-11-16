@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: subagent_gate.py
-# Version: 1.0.4
+# Version: 1.0.5
 # Description: Checks modified Python files against sentry standards on SubagentStop
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-22
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Checks modified Python files against sentry standards and blocks on violations.
@@ -65,12 +65,12 @@ def _get_cwd_branch(cwd: str, repo_root: Path) -> str | None:
         logger.info("[HOOKS] subagent_gate: CWD %s not inside src/<package>", cwd)
         return None
     src = repo_root / "src" / package
-    try:
-        rel = Path(cwd).resolve().relative_to(src)
-        return rel.parts[0] if rel.parts else None
-    except ValueError:
+    here = Path(cwd).resolve()
+    if not here.is_relative_to(src):
         logger.info("[HOOKS] subagent_gate: CWD %s not inside %s", cwd, src)
         return None
+    rel = here.relative_to(src)
+    return rel.parts[0] if rel.parts else None
 
 
 def _get_modified_py_files(cwd: str, repo_root: Path) -> list[str]:

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_session_boot_doors.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: Tests for session boot's resume doors: the session pointer and the dispatched-job guard
 # Branch: hooks
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_boot.py: the session-pointer doors and the dispatch guard."""
@@ -178,6 +178,25 @@ class TestSessionPointerDoors:
         pointer = sp.read_pointer(Path(tmp_path))
         assert pointer is not None and pointer["session_id"] == picked
         assert pointer["set_by"] == "session_boot"
+
+    def test_a_choice_int_reads_but_that_is_no_plain_number_opens_nothing(self, tmp_path, monkeypatch, fake_projects):
+        make_transcript(fake_projects, tmp_path, "only", "Only chat", 5)
+        set_home(monkeypatch, tmp_path / "home")
+        live = [
+            {"pid": 1234, "sessionId": "held", "cwd": str(tmp_path), "kind": "interactive"},
+            {"pid": 5678, "sessionId": "other", "cwd": str(tmp_path), "kind": "bg"},
+        ]
+        for choice in ("+1", "1_0", "²"):
+            with (
+                patch.dict("os.environ", home_env(tmp_path / "home"), clear=True),
+                patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
+                patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
+                patch.object(session_boot, "_find_live_sessions", return_value=live),
+                patch.object(session_boot, "_read_choice", return_value=choice),
+                patch.object(session_boot, "_exec_in_tmux") as mock_exec,
+            ):
+                assert session_boot.boot(cwd=str(tmp_path)) == {"exit_code": 1, "error": "unknown choice"}
+            mock_exec.assert_not_called()
 
     def test_fresh_never_writes_outside_the_boot_cwd(self, tmp_path, monkeypatch):
         """The defect that wrote a REAL pointer into the live hooks branch

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_subagent_gate.py
-# Version: 1.0.4
+# Version: 1.0.5
 # Description: Tests for subagent_gate security handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-14
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/security/subagent_gate.py."""
@@ -223,6 +223,15 @@ class TestSubagentGateExternalProject:
         result, calls = _stop_in(repo, branch / "apps", " M src/aipass/hooks/apps/bad.py\n")
         assert Path(calls[0][1]["cwd"]) == branch
         assert "bad.py:" in json.loads(result["stdout"])["reason"]
+
+    def test_a_cwd_under_another_trees_src_is_out_of_scope_not_an_error(self, tmp_path):
+        repo = _repo_with(tmp_path, "AIPass", "src/aipass/hooks/bad.py")
+        elsewhere = tmp_path / "other" / "src" / "aipass" / "hooks"
+        elsewhere.mkdir(parents=True)
+        with patch("aipass.hooks.apps.handlers.security.subagent_gate.logger") as log:
+            result, calls = _stop_in(repo, elsewhere, " M src/aipass/hooks/bad.py\n")
+        assert result == {"stdout": "", "exit_code": 0} and calls == []
+        assert [c.args[0] for c in log.info.call_args_list] == ["[HOOKS] subagent_gate: CWD %s not inside %s"]
 
     def test_get_package_from_cwd_external(self, tmp_path):
         """Outside any src/<package>/<branch> the gate reads no status and allows."""

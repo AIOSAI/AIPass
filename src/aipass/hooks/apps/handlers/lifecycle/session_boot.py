@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: session_boot.py
-# Version: 4.6.3
+# Version: 4.6.4
 # Description: Boot wrapper — attach-first menu, resumes by pointer (0448), steps aside while dispatched (0449)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-06-30
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Boot wrapper for Claude Code sessions.
@@ -748,12 +748,9 @@ def _menu_multi(
     if choice in ("exit", "q", "quit"):
         return {"exit_code": 0, "action": "quit"}
 
-    try:
-        idx = int(choice) - 1
-        if 0 <= idx < len(transcripts):
-            return _open_chat(transcripts[idx], live, branch, claude_bin, defaults, extra_args, cwd=branch_cwd)
-    except (ValueError, IndexError):
-        logger.info("[SESSION_BOOT] Invalid menu choice: %r", choice)
+    if choice.isdecimal() and 0 <= int(choice) - 1 < len(transcripts):
+        return _open_chat(transcripts[int(choice) - 1], live, branch, claude_bin, defaults, extra_args, cwd=branch_cwd)
+    logger.info("[SESSION_BOOT] Invalid menu choice: %r", choice)
 
     sys.stderr.write("  Pick a number, Enter, 'n', or 'c'. Exiting.\n")
     return {"exit_code": 1, "error": "unknown choice"}
@@ -884,7 +881,8 @@ def _menu_dispatched(
 ) -> dict:
     """An agent is WORKING in this branch — resume steps aside (FPLAN-0449).
 
-    A second claude on one session id takes its background-task state and the job dies; the presence gate cannot stop that.
+    A second claude on one session id takes its background-task state and the job dies;
+    the presence gate cannot stop that.
     """
     branch_cwd = cwd or str(Path.cwd())
     age = ""

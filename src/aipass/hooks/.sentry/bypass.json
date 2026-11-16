@@ -504,14 +504,6 @@
       "reason": "_interactive's False on an unreadable Codex rollout is the docstring's answer: the pointer is left as is, because a headless pointer would reopen an empty chat. A resume target, guards no write; logged at INFO."
     },
     {
-      "file": "apps/handlers/security/subagent_gate.py",
-      "standard": "logged_fallback",
-      "lines": [
-        73
-      ],
-      "reason": "Fleet green leg 5: _get_cwd_branch, a cwd outside src/<pkg>/<branch> has no branch to check. SubagentStop guards no write, and a block there traps the sub-agent in a stop loop (documented in the module)."
-    },
-    {
       "file": "apps/modules/testgate_policy.py",
       "standard": "logged_fallback",
       "lines": [
@@ -519,14 +511,6 @@
         73
       ],
       "reason": "Fleet green leg 5: find_policy_file's None is answered by load_policy with _missing(), a fail-closed Policy that refuses every new test file. Nothing is allowed on doubt."
-    },
-    {
-      "file": "apps/modules/engine_closure.py",
-      "standard": "logged_fallback",
-      "lines": [
-        168
-      ],
-      "reason": "Fleet green leg 5, item 2: None is 'ruff could not run' and the success path never returns it (a list, [] when clean); the docstring names it. The edit is allowed and logged because two layers stand behind this one (the promoted copy, the fail-closed engine), and refusing every edit to 119 closure files on a missing linter would lock out the repair too."
     },
     {
       "file": "apps/modules/diagnostics_state.py",
@@ -641,7 +625,7 @@
         117,
         186,
         330,
-        866
+        863
       ],
       "reason": "Fleet green leg 5: boot display (tmux name, age, pinned CLI version) and the dispatch-lock read for the boot banner. Guards no write."
     },
@@ -742,8 +726,8 @@
       "standard": "stdlib_patch",
       "lines": [
         117,
-        201,
-        291
+        220,
+        310
       ],
       "reason": "Moved from test_session_boot.py by the 2026-10-08 split; that file's execvp row's ruling: fleet green leg 11, ruling (c) without trial, hooks' decision of leg 8: patch(f\"{_MOD}.os.execvp\"). The far side is a real exec: os.execvp replaces the test process with tmux, claude or drone, so no run may reach it. Every public door of session_boot (boot(), main()) ends in that exec, so no door is safe; and no seam may stand on an exec, because on 10-05 (leg 7) a def-time seam let string-form patches miss and one run exec'd real tmux. The patch is the only guard, held at call time."
     },
@@ -932,14 +916,6 @@
         904
       ],
       "reason": "The hook's own per-session /tmp snapshot of in-flight Bash calls; a corrupt copy holds only stale stats, and starting fresh costs at most one unwatched call. Raising would darken the tripwire for the whole session. Logged at WARNING, which @trigger escalates."
-    },
-    {
-      "file": "apps/handlers/security/subagent_gate.py",
-      "standard": "fallback",
-      "lines": [
-        71
-      ],
-      "reason": "A cwd outside src/<package>/<branch> is out of this gate's scope, not a failure: there is no branch whose files it could scope, so it checks none, as for a session with no repo. Nothing stands in for an answer."
     },
     {
       "file": "apps/handlers/security/subagent_gate.py",
@@ -1193,7 +1169,7 @@
       "lines": [
         184,
         597,
-        897
+        895
       ],
       "reason": "Display only: an unreadable start time, transcript mtime or lock timestamp drops the age from a boot-menu line. No choice or decision rests on the age."
     },
@@ -1204,14 +1180,6 @@
         244
       ],
       "reason": "The failure is handed on as text: a PID already gone returns \"PID n: already dead\", which the boot menu prints to the user. That is the answer, not a stand-in."
-    },
-    {
-      "file": "apps/handlers/lifecycle/session_boot.py",
-      "standard": "fallback",
-      "lines": [
-        755
-      ],
-      "reason": "An unknown menu choice falls straight to the shown \"Pick a number, Enter, 'n', or 'c'. Exiting.\" line and exit 1, so the user sees it. Nothing stands in for the choice."
     },
     {
       "file": "apps/handlers/config/ledger_store.py",
@@ -1310,7 +1278,7 @@
       "lines": [
         247
       ],
-      "reason": "An absent session pointer is a defined state (0.0 = never written); the run compares the stamp before and after, so a pointer that appears reads as moved. No failure is hidden by it."
+      "reason": "An absent session pointer is a defined state (0.0 = never written); the run compares the stamp before and after, so a pointer that appears reads as moved. Only FileNotFoundError is caught: any other stat failure raises out of the run. Kept because the checker's absence pass needs a read call and stat is none."
     },
     {
       "file": "apps/sound.py",
@@ -1336,7 +1304,7 @@
       "lines": [
         136
       ],
-      "reason": "Absence, not failure: a target with no file yet has exactly one name, the one being written, so it cannot be a second name for a protected file. The name lane has already judged it."
+      "reason": "Absence, not failure: a target with no file yet has exactly one name, the one being written, so it cannot be a second name for a protected file. The name lane has already judged it. Only FileNotFoundError is caught: any other stat failure raises and git_gate refuses the call."
     },
     {
       "file": "apps/modules/protected_paths.py",
@@ -1344,7 +1312,7 @@
       "lines": [
         144
       ],
-      "reason": "An anchor removed between the listing and its stat has no inode left to share, so it cannot be the target's other name; the loop checks the remaining anchors. Nothing is defaulted."
+      "reason": "An anchor removed between the listing and its stat has no inode left to share, so it cannot be the target's other name; the loop checks the remaining anchors. Nothing is defaulted. Only FileNotFoundError is caught: any other stat failure raises and git_gate refuses the call."
     },
     {
       "file": "apps/modules/release_notice.py",
@@ -1401,25 +1369,17 @@
       "file": "apps/modules/engine_closure.py",
       "standard": "fallback",
       "lines": [
-        58
+        73
       ],
-      "reason": "An unreadable hooks.json narrows the crash pre-check to the engine's own root modules; it never widens what an edit may do. Raising would refuse every .py edit in the fleet. WARNING, escalated by @trigger, names the file, and the engine itself answers a broken config with its loud banner."
+      "reason": "An unreadable hooks.json narrows the crash pre-check to the engine's own root modules; it never widens what an edit may do. Raising would refuse every .py edit in the fleet. One fixed ERROR line (CONFIG_HOLE_LOG) reaches medic, the path and cause follow at INFO, and the engine itself answers a broken config with its loud banner."
     },
     {
       "file": "apps/modules/engine_closure.py",
       "standard": "fallback",
       "lines": [
-        100
+        116
       ],
-      "reason": "A closure file that cannot be parsed has its own imports left unfollowed; the file itself is still in the closure and still pre-checked by ruff when edited. WARNING, escalated by @trigger, names it."
-    },
-    {
-      "file": "apps/modules/engine_closure.py",
-      "standard": "fallback",
-      "lines": [
-        166
-      ],
-      "reason": "Defence in depth by design: sessions run the promoted .live copy, never the edited source, and drone @hooks promote's smoke run refuses a candidate that crashes. A ruff that cannot answer lets the edit land with a WARNING, escalated by @trigger, naming the file."
+      "reason": "A closure file that cannot be parsed has its own imports left unfollowed; the file itself is still in the closure and still pre-checked by ruff when edited. One fixed ERROR line (PARSE_HOLE_LOG) reaches medic, the path and cause follow at INFO."
     },
     {
       "file": "apps/modules/promote.py",

@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_edit_gate.py
-# Version: 1.12.0
+# Version: 1.13.0
 # Description: Tests for edit_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
@@ -1464,6 +1464,39 @@ class TestTheEngineClosureIsNotLeftCrashing:
 
     def test_the_same_edit_outside_the_closure_is_not_this_gates_business(self, engine_home):
         assert _name_before_import(engine_home["out"], engine_home["seat"])["exit_code"] == 0
+
+    def test_a_clean_closure_write_ruff_cannot_check_is_refused_and_names_the_fix(self, engine_home, monkeypatch):
+        asked: list = []
+        monkeypatch.setattr(engine_closure, "_ruff", asked.append)
+        write = {"file_path": str(engine_home["in"]), "content": "X = 1\n"}
+        result = handle({"tool_name": "Write", "tool_input": write, "cwd": engine_home["seat"]})
+        reason = json.loads(result["stdout"])["reason"]
+        assert result["exit_code"] == 2 and asked == [None]
+        assert "ruff could not check this edit (no ruff found)" in reason and "-m pip install ruff" in reason
+        outside = {"file_path": str(engine_home["out"]), "content": "X = 1\n"}
+        assert handle({"tool_name": "Write", "tool_input": outside, "cwd": engine_home["seat"]})["exit_code"] == 0
+
+    def test_a_failing_ruff_is_dark_too_and_its_error_line_names_no_file(self, engine_home, monkeypatch, tmp_path):
+        broken = tmp_path / "ruff"
+        broken.write_text("#!/bin/sh\necho boom >&2\nexit 2\n", encoding="utf-8")
+        broken.chmod(0o755)
+        monkeypatch.setattr(engine_closure, "_ruff", lambda _given: str(broken))
+        with patch.object(engine_closure, "logger") as log:
+            result = _name_before_import(engine_home["in"], engine_home["seat"])
+        assert result["exit_code"] == 2
+        assert "ruff could not check this edit (boom)" in json.loads(result["stdout"])["reason"]
+        assert [c.args for c in log.error.call_args_list] == [(engine_closure.RUFF_DARK_LOG,)]
+
+    def test_each_measurement_hole_is_one_stable_error_line_and_shrinks_the_closure(self, engine_home):
+        home = Path(engine_home["seat"]).parents[2]
+        # Gate first: once hooks.json is torn, gate.py is no longer reached at all.
+        torn = {Path(engine_home["seat"]) / "apps" / "handlers" / "gate.py": engine_closure.PARSE_HOLE_LOG}
+        torn[home / ".aipass" / "hooks.json"] = engine_closure.CONFIG_HOLE_LOG
+        for path, line in torn.items():
+            path.write_text("{torn\ndef (:\n", encoding="utf-8")
+            with patch.object(engine_closure, "logger") as log:
+                assert engine_home["in"].resolve() not in engine_closure.closure(home)
+            assert [c.args for c in log.error.call_args_list] == [(line,)]
 
     def test_closure_help_is_answered_and_the_list_does_not_run(self, capsys):
         """`closure list --help` describes the verb and lists nothing (fleet green leg 8: the door reads --help)."""

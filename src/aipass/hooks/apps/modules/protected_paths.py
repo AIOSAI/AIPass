@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: protected_paths.py
-# Version: 2.3.2
+# Version: 2.3.3
 # Description: The files that switch the gates themselves — written by the admin seat alone (git_gate)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-30
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Which files decide whether the gates run, and so must never be an agent's to write (DPLAN-0356 item 1).
@@ -133,7 +133,7 @@ def _by_identity(target: Path) -> str | None:
     info = None
     try:
         info = os.stat(target)
-    except OSError as exc:  # a file that does not exist yet has one name: the one being written
+    except FileNotFoundError as exc:  # a file that does not exist yet has one name: the one being written
         logger.debug("[HOOKS] protected_paths: no file at %s: %s", target, exc)
     if info is None or info.st_nlink < 2:
         return None
@@ -141,7 +141,7 @@ def _by_identity(target: Path) -> str | None:
     for anchor in anchors():
         try:
             theirs = os.stat(anchor)
-        except OSError as exc:  # gone since it was listed: no second name to share
+        except FileNotFoundError as exc:  # gone since it was listed: no second name to share
             logger.debug("[HOOKS] protected_paths: anchor gone %s: %s", anchor, exc)
             continue
         if (theirs.st_dev, theirs.st_ino) == mine:

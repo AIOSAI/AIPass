@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_git_gate.py
-# Version: 5.6.0
+# Version: 5.7.0
 # Description: Tests for git_gate: raw git, gh and the secrets store refused for every seat; protected writes
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/security/git_gate.py."""
@@ -805,6 +805,20 @@ class TestAProtectedFileIsProtectedUnderEveryName:
             f"python3 -c \"import os; os.link('{_word(trust_home)}', 'mine.json')\"",
         ):
             _assert_blocked(_canary_bash(command, seat))
+
+    def test_a_target_whose_stat_fails_for_any_cause_but_absence_is_refused(self, tmp_path, trust_home):
+        seat = Path(_seat(tmp_path, "canary"))
+        (seat / "plain.txt").write_text("x", encoding="utf-8")
+        _assert_allowed(_edit(str(seat / "new.json"), str(seat), grant=False, tool="Write"))
+        _assert_blocked(_edit(str(seat / "plain.txt" / "child.json"), str(seat), grant=False, tool="Write"))
+
+    def test_an_anchor_gone_is_skipped_and_one_whose_stat_fails_otherwise_refuses(self, tmp_path, trust_home):
+        seat = Path(_seat(tmp_path, "canary"))
+        (seat / "a.json").write_text("{}", encoding="utf-8")
+        os.link(seat / "a.json", seat / "b.json")
+        for anchor, verdict in ((seat / "gone.json", _assert_allowed), (seat / "a.json" / "x", _assert_blocked)):
+            with patch.object(protected_paths, "anchors", return_value=[anchor]):
+                verdict(_edit(str(seat / "b.json"), str(seat), grant=False, tool="Write"))
 
     def test_the_admin_seat_still_links_it(self, tmp_path, trust_home):
         with patch(_RAIL, return_value=True):

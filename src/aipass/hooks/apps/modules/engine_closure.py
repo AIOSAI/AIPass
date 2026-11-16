@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: engine_closure.py
-# Version: 1.1.1
+# Version: 1.2.0
 # Description: The hook engine's import closure, and the edit check that keeps a NameError out of it
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-04
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Which files the hook engine imports, and a refusal for an edit that would crash one of them.
@@ -49,6 +49,21 @@ REFUSED = (
     "edit as its first use, then retry."
 )
 
+RUFF_DARK = (
+    "{name} is imported by the hook engine, and ruff could not check this edit ({why}).\n"
+    "An unchecked crash there refuses every tool for every seat. Install ruff beside the interpreter the hooks "
+    "run on ({python} -m pip install ruff), then retry."
+)
+
+# One fixed text per fault, so medic fingerprints it once; the path and cause follow at INFO.
+RUFF_DARK_LOG = "[HOOKS] engine_closure: ruff did not answer, closure edits are refused until it does"
+CONFIG_HOLE_LOG = "[HOOKS] engine_closure: hooks.json unreadable, the closure is the engine's own roots only"
+PARSE_HOLE_LOG = "[HOOKS] engine_closure: a closure file did not parse, its imports are not followed"
+
+
+class RuffDark(Exception):
+    """ruff could not run or answer; the message says why."""
+
 
 def _wired_handlers(home: Path) -> list[str]:
     """The module of every handler the root hooks.json wires (``aipass.x.y.handle`` -> ``aipass.x.y``)."""
@@ -56,7 +71,8 @@ def _wired_handlers(home: Path) -> list[str]:
     try:
         data = json.loads(config.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        logger.warning("[HOOKS] engine_closure: %s unreadable, closure from the engine's own roots: %s", config, exc)
+        logger.error(CONFIG_HOLE_LOG)
+        logger.info("[HOOKS] engine_closure: %s: %s", config, exc)
         data = {}
     found: list[str] = []
     stack: list[object] = [data]
@@ -98,7 +114,8 @@ def _imports(path: Path, package: str) -> list[str]:
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     except (OSError, SyntaxError, ValueError) as exc:
-        logger.warning("[HOOKS] engine_closure: %s not parsed, its imports are not followed: %s", path, exc)
+        logger.error(PARSE_HOLE_LOG)
+        logger.info("[HOOKS] engine_closure: %s not parsed: %s", path, exc)
         return []
     names: list[str] = []
     for node in _top_level(tree.body):
@@ -141,15 +158,14 @@ def _ruff(ruff: str | None) -> str | None:
     return str(beside) if beside.is_file() else shutil.which("ruff")
 
 
-def crash_hits(path: Path, text: str, ruff: str | None = None) -> list[str] | None:
+def crash_hits(path: Path, text: str, ruff: str | None = None) -> list[str]:
     """F821 and syntax errors in *text* as ruff reads it for *path*: one line per hit, [] when clean.
 
-    None when ruff could not run (logged): the promoted copy and fail-closed engine still stand behind.
+    Raises RuffDark when ruff cannot run or answer: an unchecked closure edit is never read as clean.
     """
     exe = _ruff(ruff)
     if not exe:
-        logger.warning("[HOOKS] engine_closure: no ruff found, %s is not pre-checked", path)
-        return None
+        raise RuffDark("no ruff found")
     command = [exe, "check", "--isolated", "--no-cache", "--select", CRASH_RULES, "--output-format", "json"]
     try:
         run = subprocess.run(
@@ -164,8 +180,7 @@ def crash_hits(path: Path, text: str, ruff: str | None = None) -> list[str] | No
             raise ValueError(run.stderr.strip() or f"ruff exited {run.returncode}")
         found = json.loads(run.stdout)
     except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
-        logger.warning("[HOOKS] engine_closure: ruff did not answer for %s: %s", path, exc)
-        return None
+        raise RuffDark(str(exc)) from exc
     return [f"  L{hit['location']['row']}: {hit.get('code') or 'syntax'} {hit['message']}" for hit in found]
 
 
@@ -182,7 +197,12 @@ def crash_refusal(path: Path, tool_name: str, tool_input: dict, after_text, home
         text = after_text(tool_name, tool_input, target.read_text(encoding="utf-8")) if target.is_file() else None
     if text is None:
         return None
-    hits = crash_hits(target, text)
+    try:
+        hits = crash_hits(target, text)
+    except RuffDark as exc:
+        logger.error(RUFF_DARK_LOG)
+        logger.info("[HOOKS] engine_closure: ruff did not answer for %s: %s", target, exc)
+        return RUFF_DARK.format(name=target.name, why=exc, python=sys.executable)
     if not hits:
         return None
     logger.warning("[HOOKS] engine_closure: refused an edit leaving %s crashing at import", target)

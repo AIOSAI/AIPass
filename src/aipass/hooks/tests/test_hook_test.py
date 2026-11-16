@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_hook_test.py
-# Version: 1.4.0
+# Version: 1.5.0
 # Description: Tests for the portable hook test runner
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-10
-# Modified: 2026-11-14
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/hook_test.py and the parity and smoke handlers it drives."""
@@ -19,6 +19,7 @@ import json
 import os
 import sqlite3
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import patch
 
@@ -454,6 +455,14 @@ class TestParity:
         assert claude["env"]["AIPASS_SESSION_TYPE"] == "dispatched"
         assert not [key for key in claude["env"] if key.startswith("CLAUDE")]
 
+    def test_a_pointer_that_cannot_be_read_raises_and_is_not_read_as_never_written(self, monkeypatch, tmp_path):
+        FakeClis(monkeypatch, tmp_path, {})
+        branch = tmp_path / "canary"
+        branch.mkdir()
+        (branch / ".ai_mail.local").write_text("", encoding="utf-8")
+        with pytest.raises(NotADirectoryError):
+            runner.run_session("claude", "hi", branch)
+
     def test_lane_a_sends_one_probe_mail_to_the_branch_before_the_sessions(self, monkeypatch, tmp_path):
         fake = FakeClis(monkeypatch, tmp_path, {})
         with pytest.raises(SystemExit):
@@ -533,7 +542,7 @@ class FakeSmokeClis:
         self.stderr = ""
         self.session = True
         self.limited: set[str] = set()
-        self.during = None
+        self.during: Callable[[Path], None] | None = None
         monkeypatch.setenv("HOME", str(self.home))
         monkeypatch.delenv("OPENCODE_DB", raising=False)
         monkeypatch.delenv("OPENCODE_CONFIG_DIR", raising=False)
@@ -564,7 +573,7 @@ class FakeSmokeClis:
             return subprocess.CompletedProcess(argv, 1, "", self.stderr)
         hook = temporal.handle({"prompt": kwargs["input"]})["stdout"] if self.hook_ran else "Temporal: no hook"
         # The model's reply carries the ack even when no hook ran: only the hook's own row may count.
-        reply = "ok smoke-ack:" + temporal.SMOKE_NONCE.search(kwargs["input"]).group(1)
+        reply = "ok smoke-ack:" + temporal.SMOKE_NONCE.findall(kwargs["input"])[0]
         getattr(self, f"_{provider}")(hook, reply, kwargs["input"])
         if provider == "opencode" and argv[argv.index("-m") + 1] in self.limited:
             refusal = {"type": "error", "sessionID": "ses_oc", "error": {"type": "provider.free-limit"}}

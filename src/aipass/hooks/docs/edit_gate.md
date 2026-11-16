@@ -96,6 +96,8 @@ The shell lane applies the same rules to what `bash_writes` can see. Inside one 
 
 **A source-read gate is open for the seconds an edit is half-applied.** The live gate imports this file per event, so while a symbol is mid-move across several edits a real event can hit a `NameError` and fail OPEN. Move code in one Edit per symbol.
 
+**An edit to the engine's own imports is linted before it lands.** `engine_closure` lists every file the hook engine imports (`drone @hooks closure list`), and an Edit, Write or MultiEdit to one is run through ruff (`F821` and syntax) first; a hit is refused with its lines. When ruff cannot run or answer (not installed beside the hooks' interpreter, a timeout, an error exit), the edit is refused too, with the cause and the install command, and one fixed ERROR line reaches medic. An unreadable `hooks.json` or a closure file that does not parse narrows the closure, never widens what an edit may do, and logs its own fixed ERROR line; the path follows at INFO.
+
 ## The admin exemption — one seat reaches outwards
 
 The cross-project fence stands for every agent, and **@devpulse is the sole exemption**: only the
