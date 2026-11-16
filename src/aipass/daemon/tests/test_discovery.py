@@ -129,9 +129,13 @@ class TestValidateJob:
 
     def test_all_valid_schedule_types(self, one_branch):
         # The floor: _validate_job reads the same set, so emptying it would leave the list below empty and green.
-        assert len(VALID_SCHEDULE_TYPES) == 5, f"expected five schedule types, got {sorted(VALID_SCHEDULE_TYPES)}"
+        assert len(VALID_SCHEDULE_TYPES) == 7, f"expected seven schedule types, got {sorted(VALID_SCHEDULE_TYPES)}"
         stypes = sorted(VALID_SCHEDULE_TYPES)
-        jobs = [{"id": f"t-{stype}", "schedule": {"type": stype}, "prompt": "do stuff"} for stype in stypes]
+        required = {"weekly": {"weekday": "monday"}, "monthly": {"day": 1}}
+        jobs = [
+            {"id": f"t-{stype}", "schedule": {"type": stype, **required.get(stype, {})}, "prompt": "do stuff"}
+            for stype in stypes
+        ]
         assert discovered_ids(one_branch, *jobs) == ["keep"] + [f"t-{stype}" for stype in stypes]
 
     @pytest.mark.parametrize("interval", ["60", None, "abc", 0, -5, True, float("nan"), float("inf")])
@@ -997,6 +1001,15 @@ class TestTimeValidation:
             {"type": "hourly", "time": "half"},
             {"type": "hourly", "time": 75},
             {"type": "hourly", "time": True},
+            {"type": "weekly", "weekday": "monday", "time": "25:00"},
+            {"type": "weekly", "weekday": "funday", "time": "05:00"},
+            {"type": "weekly", "time": "05:00"},
+            {"type": "monthly", "day": 0, "time": "05:00"},
+            {"type": "monthly", "day": 32, "time": "05:00"},
+            {"type": "monthly", "day": "1", "time": "05:00"},
+            {"type": "monthly", "day": True, "time": "05:00"},
+            {"type": "monthly", "time": "05:00"},
+            {"type": "monthly", "day": 1, "time": "5am"},
         ],
     )
     def test_an_unreadable_time_is_refused_and_named(self, schedule, one_branch, caplog):
@@ -1013,6 +1026,8 @@ class TestTimeValidation:
             {"type": "rotation", "time": "23:59"},
             {"type": "hourly", "time": "30"},
             {"type": "hourly", "time": 0},
+            {"type": "weekly", "weekday": "sunday", "time": "05:00"},
+            {"type": "monthly", "day": 31, "time": "05:00"},
         ],
     )
     def test_a_readable_time_is_accepted(self, schedule, one_branch):

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: discovery.py
 # Description: Decentralized .daemon/ schedule file discovery
-# Version: 2.6.1
+# Version: 2.7.0
 # Created: 2026-06-15
 # Modified: 2026-11-15
 # =============================================
@@ -22,6 +22,7 @@ from aipass.daemon.apps.handlers.json import json_handler
 # @memory's PUBLIC fleet gateway: its handlers/ are private and fail the cross-branch checklist.
 from aipass.memory.apps.modules import fleet
 from aipass.daemon.apps.handlers.schedule import command_job
+from aipass.daemon.apps.handlers.schedule.runstate import WEEKDAYS
 
 _REPO_ROOT = Path(__file__).resolve().parents[6]  # up to repo root
 _REGISTRY_FILE = _REPO_ROOT / "AIPASS_REGISTRY.json"
@@ -41,7 +42,7 @@ REQUIRED_JOB_KEYS = {"id", "schedule"}
 
 # A job carries exactly one: prompt wakes the owner, command runs a drone verb and wakes nobody.
 JOB_ACTION_KEYS = ("prompt", "command")
-VALID_SCHEDULE_TYPES = {"daily", "hourly", "interval", "once", "rotation"}
+VALID_SCHEDULE_TYPES = {"daily", "hourly", "interval", "once", "rotation", "weekly", "monthly"}
 # The providers ai_mail's wake_branch runs; an absent wake.provider leaves its default (claude).
 VALID_WAKE_PROVIDERS = ("claude", "codex", "opencode")
 
@@ -174,7 +175,7 @@ def _time_problem(schedule: dict) -> str:
         return ""
     raw = schedule["time"]
     sched_type = schedule.get("type")
-    if sched_type in ("daily", "rotation"):
+    if sched_type in ("daily", "rotation", "weekly", "monthly"):
         match = _CLOCK_TIME.fullmatch(raw) if isinstance(raw, str) else None
         if not match or int(match[1]) > 23 or int(match[2]) > 59:
             return f'time {raw!r} is not a clock time "HH:MM"'
@@ -184,6 +185,18 @@ def _time_problem(schedule: dict) -> str:
             minute = int(raw)
         if minute is None or not 0 <= minute <= 59:
             return f"time {raw!r} is not a minute past the hour, 0-59"
+    return ""
+
+
+def _day_problem(schedule: dict) -> str:
+    """'' when a weekly job names a weekday and a monthly job a day 1-31, else why not. Required, no default."""
+    sched_type = schedule.get("type")
+    if sched_type == "weekly" and schedule.get("weekday") not in WEEKDAYS:
+        return f"weekday {schedule.get('weekday')!r} is not one of {', '.join(WEEKDAYS)}"
+    if sched_type == "monthly":
+        day = schedule.get("day")
+        if isinstance(day, bool) or not isinstance(day, int) or not 1 <= day <= 31:
+            return f"day {day!r} is not a day of the month, 1-31"
     return ""
 
 
@@ -234,7 +247,7 @@ def _validate_job(job: dict, file_path: Path, refusals: Optional[list] = None) -
                 interval,
             )
 
-    problem = _time_problem(schedule)
+    problem = _time_problem(schedule) or _day_problem(schedule)
     if problem:
         return _refused(refusals, "[discovery] Job '%s' refused in %s: %s", job.get("id"), file_path, problem)
 

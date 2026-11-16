@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: runstate.py
 # Description: Daemon runstate tracking and due-logic for decentralized scheduler
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2026-06-15
 # Modified: 2026-11-15
 # =============================================
@@ -10,8 +10,9 @@
 Daemon runstate — tracks last_run/next_run per job and evaluates due-ness.
 """
 
+import calendar
 import json
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import AbstractSet, Optional
 
@@ -124,8 +125,29 @@ def _target_minutes(schedule: dict) -> Optional[int]:
     return target_h * 60 + target_m
 
 
+# A weekly job's weekday, spelled as date.weekday() counts: monday is 0.
+WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+
+def _runs_on(schedule: dict, day: date) -> bool:
+    """Is *day* one of the job's days? Every day unless weekly or monthly.
+
+    A monthly day past the month's end means its last day, so a monthly job never skips a month.
+    """
+    sched_type = schedule.get("type")
+    if sched_type == "weekly":
+        return schedule.get("weekday") == WEEKDAYS[day.weekday()]
+    if sched_type == "monthly":
+        wanted = schedule.get("day")
+        if isinstance(wanted, bool) or not isinstance(wanted, int):
+            logger.warning("[runstate] Monthly day %r is not a day of the month, never due", wanted)
+            return False
+        return min(wanted, calendar.monthrange(day.year, day.month)[1]) == day.day
+    return True
+
+
 def _is_daily_due(schedule: dict, last_run: Optional[str], now: datetime) -> bool:
-    """Check if a daily job is due (within +/-15 min window)."""
+    """Check if a daily, weekly or monthly job is due (within +/-15 min window, on one of its days)."""
     target_minutes = _target_minutes(schedule)
     if target_minutes is None:
         return False
@@ -133,6 +155,9 @@ def _is_daily_due(schedule: dict, last_run: Optional[str], now: datetime) -> boo
     target = _nearest_target(now, midnight + timedelta(minutes=target_minutes), timedelta(days=1))
     window = timedelta(minutes=WINDOW_MINUTES)
     if abs(now - target) > window:
+        return False
+    # The target's date, not now's: a window wrapping midnight belongs to the day its target falls on.
+    if not _runs_on(schedule, target.date()):
         return False
     return not _ran_since(last_run, target - window)
 
@@ -202,7 +227,7 @@ RECOVERY_LANE_LIVE = False
 
 _DAILY_TYPES = frozenset({"daily", "rotation"})
 
-_WINDOWED_TYPES = frozenset({"daily", "rotation", "hourly"})
+_WINDOWED_TYPES = frozenset({"daily", "rotation", "hourly", "weekly", "monthly"})
 
 # Runstate key: the date whose miss was already reported, so MISSED logs once per job per day.
 MISSED_MARKER = "missed_logged_for"
@@ -223,6 +248,9 @@ def window_closed_unrun(schedule: dict, last_run: Optional[str], now: datetime) 
         return False
 
     if now.hour * 60 + now.minute <= close_minutes:
+        return False
+
+    if not _runs_on(schedule, now.date()):
         return False
 
     midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -491,6 +519,10 @@ def is_job_due(job: dict, runstate: dict, now: Optional[datetime] = None) -> boo
         "hourly": lambda: (
             _is_hourly_due(schedule, since_success, now) or _is_catch_up_due(schedule, since_success, now)
         ),
+        "weekly": lambda: _is_daily_due(schedule, since_success, now) or _is_catch_up_due(schedule, since_success, now),
+        "monthly": lambda: (
+            _is_daily_due(schedule, since_success, now) or _is_catch_up_due(schedule, since_success, now)
+        ),
         "interval": lambda: _is_interval_due(schedule, last_run, now),
         "once": lambda: _is_once_due(schedule, completed, now),
     }
@@ -509,7 +541,7 @@ def _calc_next_run(schedule: dict, last_run_ts: str) -> Optional[str]:
     """
     sched_type = schedule.get("type", "")
 
-    if sched_type in ("daily", "rotation"):
+    if sched_type in ("daily", "rotation", "weekly", "monthly"):
         target_time = schedule.get("time", "00:00")
         try:
             target_h, target_m = map(int, target_time.split(":"))
@@ -522,7 +554,14 @@ def _calc_next_run(schedule: dict, last_run_ts: str) -> Optional[str]:
             logger.info("[runstate] calc_next_run daily last_run parse failed: %s", e)
             return None
         today_target = last_dt.replace(hour=target_h, minute=target_m, second=0, microsecond=0)
-        return (_fired_occurrence(last_dt, today_target, timedelta(days=1)) + timedelta(days=1)).isoformat()
+        candidate = _fired_occurrence(last_dt, today_target, timedelta(days=1)) + timedelta(days=1)
+        # 31 days always reach a weekly or monthly day; past them the day is unreadable.
+        for _ in range(31):
+            if _runs_on(schedule, candidate.date()):
+                return candidate.isoformat()
+            candidate += timedelta(days=1)
+        logger.info("[runstate] calc_next_run: no day in 31 matches %r", schedule)
+        return None
 
     if sched_type == "hourly":
         target_m_str = schedule.get("time", "0")

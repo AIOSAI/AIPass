@@ -221,7 +221,10 @@ class TestQueueJsonSchema:
         assert interval_entry["type"] == "interval"
 
     def test_schedule_human_formats(self, interval_job, monkeypatch, capsys):
-        """schedule_human renders each type; rotation reads daily, as `rotation` says. Mutant killed: hourly drops its colon."""
+        """schedule_human renders each type; rotation reads daily, as `rotation` says.
+
+        Mutant killed: hourly drops its colon.
+        """
         schedules = {
             "once": {"type": "once", "due_date": "2026-07-02"},
             "daily": {"type": "daily", "time": "04:00"},
@@ -229,6 +232,8 @@ class TestQueueJsonSchema:
             "hourly": {"type": "hourly", "time": "30"},
             "two-hours": {"type": "interval", "interval_minutes": 120},
             "half-hour": {"type": "interval", "interval_minutes": 30},
+            "weekly": {"type": "weekly", "weekday": "monday", "time": "05:00"},
+            "monthly": {"type": "monthly", "day": 31, "time": "05:00"},
         }
         jobs = [dict(interval_job, id=job_id, schedule=schedule) for job_id, schedule in schedules.items()]
         rendered = {
@@ -241,6 +246,8 @@ class TestQueueJsonSchema:
             "hourly": "hourly @ :30",
             "two-hours": "every 2h",
             "half-hour": "every 30m",
+            "weekly": "weekly @ monday 05:00",
+            "monthly": "monthly @ day 31 05:00",
         }
 
     def test_a_disabled_job_shows_no_next_run(self, interval_job, monkeypatch, capsys):

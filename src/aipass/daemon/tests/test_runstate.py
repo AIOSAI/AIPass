@@ -309,6 +309,61 @@ class TestRotationDue:
         assert datetime.fromisoformat(next_run) > datetime.now()
 
 
+# 2026-11-16 is a Monday.
+MONDAY_5AM = datetime(2026, 11, 16, 5, 0)
+WEEKLY = {"type": "weekly", "weekday": "monday", "time": "05:00", "catch_up": False}
+MONTHLY = {"type": "monthly", "day": 31, "time": "05:00", "catch_up": False}
+
+
+class TestWeeklyDue:
+    def test_due_in_the_window_on_its_weekday_and_on_no_other_day(self):
+        assert due(WEEKLY, MONDAY_5AM) is True
+        assert [d for d in range(1, 7) if due(WEEKLY, MONDAY_5AM + timedelta(days=d))] == []
+
+    def test_a_changed_weekday_fires_on_the_new_day_not_the_old_phase(self):
+        ran_monday = (MONDAY_5AM + timedelta(minutes=2)).isoformat()
+        moved = dict(WEEKLY, weekday="wednesday")
+        assert due(moved, MONDAY_5AM + timedelta(days=2)) is True
+        assert due(moved, MONDAY_5AM + timedelta(days=2), last_run=ran_monday) is True
+        assert due(moved, MONDAY_5AM + timedelta(days=7), last_run=ran_monday) is False
+
+    def test_a_changed_time_fires_at_the_new_time_not_the_old(self):
+        ran_last_week = (MONDAY_5AM - timedelta(days=7)).isoformat()
+        moved = dict(WEEKLY, time="18:00")
+        assert due(moved, MONDAY_5AM.replace(hour=18), last_run=ran_last_week) is True
+        assert due(moved, MONDAY_5AM, last_run=ran_last_week) is False
+
+    def test_a_window_wrapping_midnight_belongs_to_its_weekday(self):
+        just_after_midnight = dict(WEEKLY, time="00:05")
+        assert due(just_after_midnight, datetime(2026, 11, 15, 23, 55)) is True
+        assert due(just_after_midnight, datetime(2026, 11, 16, 23, 55)) is False
+
+
+class TestMonthlyDue:
+    def test_once_a_month_on_its_day(self):
+        december = [d for d in range(1, 32) if due(MONTHLY, datetime(2026, 12, d, 5, 0))]
+        assert december == [31]
+
+    def test_a_day_past_the_months_end_runs_on_its_last_day(self):
+        november = [d for d in range(1, 31) if due(MONTHLY, datetime(2026, 11, d, 5, 0))]
+        assert november == [30]
+        assert due(MONTHLY, datetime(2027, 2, 28, 5, 0)) is True
+        assert due(dict(MONTHLY, day=29), datetime(2028, 2, 29, 5, 0)) is True
+        assert due(dict(MONTHLY, day=29), datetime(2028, 2, 28, 5, 0)) is False
+
+
+class TestWeeklyAndMonthlyMissedWindow:
+    def test_a_closed_window_is_missed_on_its_day_and_on_no_other(self):
+        job = {"owner": "@x", "id": "j", "enabled": True, "schedule": WEEKLY, "prompt": "p"}
+        assert missed_window(job, {"jobs": {}}, MONDAY_5AM.replace(hour=9)) is True
+        assert missed_window(job, {"jobs": {}}, MONDAY_5AM.replace(hour=9) + timedelta(days=1)) is False
+
+    def test_catch_up_fires_late_on_its_day_and_on_no_other(self):
+        catching_up = dict(MONTHLY, catch_up=True)
+        assert due(catching_up, datetime(2026, 11, 30, 9, 0)) is True
+        assert due(catching_up, datetime(2026, 12, 1, 9, 0)) is False
+
+
 class TestUpdateRunstate:
     def test_creates_entry(self):
         runstate = {"jobs": {}}
@@ -678,6 +733,7 @@ class TestUnreadableTimesAreLogged:
         job["schedule"][recovery.CATCH_UP_MAX_AGE_FIELD] = 24
         with caplog.at_level("WARNING"):
             entry = recovery.queue_catch_up({}, job, ["not-a-time"], {"cause": "boot"}, now=datetime(2026, 11, 15))
+        assert entry is not None
         assert entry["missed"] == ["not-a-time"]
         assert "[recovery] missed window 'not-a-time' for @a/j unreadable" in caplog.text
 

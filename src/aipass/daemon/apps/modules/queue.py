@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: queue.py
 # Description: Unified job queue view (drone @daemon queue)
-# Version: 1.3.2
+# Version: 1.4.0
 # Created: 2026-06-25
 # Modified: 2026-11-15
 # =============================================
@@ -67,6 +67,10 @@ def _schedule_human(job: dict) -> str:
     # A rotation fires once a day; TYPE already names it, and `rotation` says "daily @" too.
     if sched_type in ("daily", "rotation"):
         return f"daily @ {sched.get('time', '??:??')}"
+    if sched_type == "weekly":
+        return f"weekly @ {sched.get('weekday', '?')} {sched.get('time', '??:??')}"
+    if sched_type == "monthly":
+        return f"monthly @ day {sched.get('day', '?')} {sched.get('time', '??:??')}"
     if sched_type == "hourly":
         m = sched.get("time", "0")
         return f"hourly @ :{int(m):02d}"
