@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_compact.py
-# Version: 1.0.3
+# Version: 1.1.0
 # Description: Tests for compact lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/lifecycle/compact.py."""
@@ -19,8 +19,9 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.hooks.apps.handlers.lifecycle import compact
 from aipass.hooks.apps.handlers.lifecycle.compact import handle
-from aipass.hooks.apps.modules import cadence
+from aipass.hooks.apps.modules import cadence, context_window
 
 
 @pytest.fixture(autouse=True)
@@ -88,3 +89,13 @@ class TestCompactHandler:
             result = handle({})
 
         assert result["exit_code"] == 0
+
+
+class TestARaiseIsTheEnginesFault:
+    def test_an_unexpected_raise_is_one_engine_fault_line_and_compaction_goes_on(self, engine_fault, tmp_path):
+        handler = f"{compact.__name__}.handle"
+        with patch.object(context_window, "find_branch_dir", side_effect=RuntimeError("boom")):
+            faults, (stdout, code) = engine_fault("PreCompact", "pre_compact", handler, {"cwd": str(tmp_path)})
+
+        assert code != 2 and stdout == ""
+        assert len(faults) == 1 and f"fault[PreCompact.pre_compact.{handler}.RuntimeError@" in faults[0]

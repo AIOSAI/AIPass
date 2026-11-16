@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: pre_compact_prep.py
-# Version: 1.6.2
+# Version: 1.6.3
 # Description: Stamps a mechanical AUTO-COMPACT SNAPSHOT into the compacting branch's memory (PreCompact)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-20
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Mechanical /prep AT compact time (DPLAN-0253).
@@ -247,32 +247,27 @@ def _stamp_locked(local_path: Path, summary: str, cap: int) -> bool:
 
 
 def handle(hook_data: dict) -> dict:
-    """Stamp a mechanical AUTO-COMPACT SNAPSHOT into the compacting branch's memory."""
-    try:
-        cwd = hook_data.get("cwd", "") or str(Path.cwd())
-        context_window = importlib.import_module("aipass.hooks.apps.modules.context_window")
-        branch_dir = context_window.find_branch_dir(cwd)
-        if branch_dir is None:
-            logger.info("[HOOKS] pre_compact_prep: no branch dir resolved from cwd=%s", cwd)
-            return {"stdout": "", "exit_code": 0}
-
-        repo_root = _find_repo_root(branch_dir)
-        cap = _summary_cap(branch_dir.name)
-        snapshot = _build_snapshot(hook_data, branch_dir, repo_root)
-
-        stamped = _stamp_session_entry(branch_dir, snapshot, cap)
-        # Full path, not just the name: the test runner aims this handler at a
-        # throwaway skeleton named after the real branch, so "branch=hooks"
-        # alone cannot tell a probe stamp from a real one.
-        logger.info(
-            "[HOOKS] pre_compact_prep: snapshot stamped=%s branch=%s at=%s",
-            stamped,
-            branch_dir.name,
-            branch_dir,
-        )
-
-        return {"stdout": snapshot, "exit_code": 0, "sound": "pre compact prep"}
-
-    except Exception as exc:
-        logger.error("[HOOKS] pre_compact_prep: unexpected error: %s", exc)
+    """Stamp a mechanical AUTO-COMPACT SNAPSHOT into the compacting branch's memory. A raise is the engine's."""
+    cwd = hook_data.get("cwd", "") or str(Path.cwd())
+    context_window = importlib.import_module("aipass.hooks.apps.modules.context_window")
+    branch_dir = context_window.find_branch_dir(cwd)
+    if branch_dir is None:
+        logger.info("[HOOKS] pre_compact_prep: no branch dir resolved from cwd=%s", cwd)
         return {"stdout": "", "exit_code": 0}
+
+    repo_root = _find_repo_root(branch_dir)
+    cap = _summary_cap(branch_dir.name)
+    snapshot = _build_snapshot(hook_data, branch_dir, repo_root)
+
+    stamped = _stamp_session_entry(branch_dir, snapshot, cap)
+    # Full path, not just the name: the test runner aims this handler at a
+    # throwaway skeleton named after the real branch, so "branch=hooks"
+    # alone cannot tell a probe stamp from a real one.
+    logger.info(
+        "[HOOKS] pre_compact_prep: snapshot stamped=%s branch=%s at=%s",
+        stamped,
+        branch_dir.name,
+        branch_dir,
+    )
+
+    return {"stdout": snapshot, "exit_code": 0, "sound": "pre compact prep"}

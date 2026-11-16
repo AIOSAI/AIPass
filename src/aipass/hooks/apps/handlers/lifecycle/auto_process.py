@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: auto_process.py
-# Version: 1.3.2
+# Version: 1.3.3
 # Description: Kicks @memory's auto-process once per session and on pre-compact (TDPLAN-0005)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-06-06
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Kicks @memory's auto_process in a detached child; the work leaves the prompt lane.
@@ -45,10 +45,7 @@ def _mark_session_ran() -> None:
 
 
 def handle(hook_data: dict) -> dict:
-    """Kick @memory's detached auto-process run and return. Never does the work inline.
-
-    The guard means "kicked once this session": a refusal counts, only a failed kick retries.
-    """
+    """Kick @memory's detached auto-process, never inline. A refusal marks the guard; a failed kick or raise retries."""
     _ = hook_data
 
     if _already_ran_this_session():
@@ -59,23 +56,18 @@ def handle(hook_data: dict) -> dict:
         logger.info("[HOOKS] auto_process: probe run — spawn suppressed")
         return {"stdout": "", "exit_code": 0}
 
-    try:
-        module = importlib.import_module("aipass.memory.apps.modules.door_auto_process")
-        result = module.spawn_background()
+    module = importlib.import_module("aipass.memory.apps.modules.door_auto_process")
+    result = module.spawn_background()
 
-        if not result.get("success"):
-            logger.error("[HOOKS] auto_process: spawn failed: %s", result.get("error"))
-            return {"stdout": "", "exit_code": 1}
-
-        _mark_session_ran()
-
-        if result.get("skipped"):
-            logger.info("[HOOKS] auto_process: not spawned: %s", result.get("reason"))
-            return {"stdout": "", "exit_code": 0}
-
-        logger.info("[HOOKS] auto_process: spawned pid %s", result.get("pid"))
-        return {"stdout": "", "exit_code": 0, "sound": "auto process"}
-
-    except Exception as exc:
-        logger.error("[HOOKS] auto_process: error: %s", exc)
+    if not result.get("success"):
+        logger.error("[HOOKS] auto_process: spawn failed: %s", result.get("error"))
         return {"stdout": "", "exit_code": 1}
+
+    _mark_session_ran()
+
+    if result.get("skipped"):
+        logger.info("[HOOKS] auto_process: not spawned: %s", result.get("reason"))
+        return {"stdout": "", "exit_code": 0}
+
+    logger.info("[HOOKS] auto_process: spawned pid %s", result.get("pid"))
+    return {"stdout": "", "exit_code": 0, "sound": "auto process"}

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: conftest.py
-# Version: 2.10.0
+# Version: 2.11.0
 # Description: Shared pytest fixtures for hooks tests
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Shared pytest fixtures for hooks tests.
@@ -34,7 +34,7 @@ from aipass.hooks.apps import sound
 from aipass.hooks.apps.handlers.config import diagnostics, loader, trust_registry
 from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.handlers.lifecycle import session_boot
-from aipass.hooks.apps.modules import cadence, cc_transcripts
+from aipass.hooks.apps.modules import cadence, cc_transcripts, engine
 from aipass.hooks.apps.modules import diagnostics_state as ds
 
 collect_ignore_glob = [".archive/*"]
@@ -211,6 +211,20 @@ def mock_logger():
     """Mock the prax system logger."""
     with patch("aipass.hooks.apps.modules.engine.logger") as mock:
         yield mock
+
+
+@pytest.fixture
+def engine_fault(mock_logger, _no_real_trust_banners):
+    """Run one real handler through engine.dispatch: answer (its fault[...] ERROR lines, the dispatch result)."""
+
+    def run(event: str, hook: str, handler: str, hook_data: dict) -> tuple[list[str], tuple[str, int]]:
+        hook_def = {"enabled": True, "handler": handler, "matcher": "", "timeout": 10}
+        with patch.object(sound, "speak"):
+            result = engine.dispatch(event, json.dumps(hook_data), {"hooks_enabled": True, event: {hook: hook_def}})
+        lines = [c.args[0] % c.args[1:] for c in mock_logger.error.call_args_list]
+        return [line for line in lines if "fault[" in line], result
+
+    return run
 
 
 @pytest.fixture

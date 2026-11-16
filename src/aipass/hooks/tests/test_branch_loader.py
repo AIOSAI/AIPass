@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_branch_loader.py
-# Version: 1.2.2
+# Version: 1.3.0
 # Description: Tests for branch_loader prompt handler (injection caps since 1.1.0)
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/prompt/branch_loader.py."""
@@ -235,3 +235,16 @@ def test_the_branch_prompt_is_withheld_when_cadence_raises(tmp_path, caplog):
 
     assert result == {"stdout": "", "exit_code": 0}
     assert "branch_loader DEGRADED loader=branch" in caplog.text
+
+
+def test_a_raising_load_is_one_engine_fault_line_and_the_prompt_goes_on(engine_fault, monkeypatch, tmp_path):
+    def boom(_hook_data):
+        raise OSError("prompt unreadable")
+
+    monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", lambda loader_name, *_a, **_k: loader_name == "branch")
+    monkeypatch.setattr("aipass.hooks.apps.modules.grounding_content.load_branch", boom)
+    handler = f"{handle.__module__}.handle"
+    faults, (stdout, code) = engine_fault("UserPromptSubmit", "branch_prompt", handler, {"cwd": str(tmp_path)})
+
+    assert code != 2 and stdout == ""
+    assert len(faults) == 1 and f"fault[UserPromptSubmit.branch_prompt.{handler}.OSError@" in faults[0]

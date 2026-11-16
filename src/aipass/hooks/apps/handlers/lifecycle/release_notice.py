@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: release_notice.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: Tells a project manager a newer AIPass is installed (SessionStart, DPLAN-0335)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-09-09
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """SessionStart door for the manager-only AIPass release notice.
@@ -14,8 +14,6 @@ Skips resume (its context already carries the block) and compact (post_compact_r
 """
 
 import importlib
-
-from aipass.prax.apps.modules.logger import system_logger as logger
 
 _SKIP_SOURCES = frozenset({"resume", "compact"})
 
@@ -32,12 +30,7 @@ def handle(hook_data: dict) -> dict:
     if source in _SKIP_SOURCES:
         return {"stdout": "", "exit_code": 0}
 
-    try:
-        content = load_content(hook_data)
-    except Exception as exc:
-        logger.error("[HOOKS] release_notice: unexpected error: %s", exc)
-        return {"stdout": "", "exit_code": 0}
-
+    content = load_content(hook_data)
     if not content:
         return {"stdout": "", "exit_code": 0}
     return {"stdout": content, "exit_code": 0, "sound": "release notice"}

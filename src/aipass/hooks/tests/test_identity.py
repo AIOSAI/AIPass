@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_identity.py
-# Version: 1.3.3
+# Version: 1.4.0
 # Description: Tests for identity prompt handler (cadence-gated 1.1.0, char budget enforced 1.2.0)
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-14
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/prompt/identity.py."""
@@ -213,18 +213,18 @@ class TestIdentityHandler:
         assert result["stdout"] == ""
         assert "sound" not in result
 
-    def test_corrupt_passport_json(self, tmp_path):
-
+    def test_a_corrupt_passport_is_one_engine_fault_line_and_the_prompt_goes_on(self, engine_fault, tmp_path):
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
         passport = trinity / "passport.json"
         passport.write_text("{broken json", encoding="utf-8")
 
-        result = handle({"cwd": str(tmp_path)})
+        handler = f"{handle.__module__}.handle"
+        faults, (stdout, code) = engine_fault("UserPromptSubmit", "identity_injector", handler, {"cwd": str(tmp_path)})
 
-        assert result["exit_code"] == 0
-        assert result["stdout"] == ""
-        assert "sound" not in result
+        assert code != 2 and stdout == ""
+        assert len(faults) == 1
+        assert f"fault[UserPromptSubmit.identity_injector.{handler}.JSONDecodeError@" in faults[0]
 
 
 class TestPrinciplesLayoutFallback:

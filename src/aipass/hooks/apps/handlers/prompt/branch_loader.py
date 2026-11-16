@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: branch_loader.py
-# Version: 1.2.1
+# Version: 1.2.2
 # Description: Loads branch-specific prompt + private integrations (UserPromptSubmit)
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-05-22
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Loads .aipass/aipass_local_prompt.md and private integration prompts for injection."""
@@ -39,12 +39,7 @@ def handle(hook_data: dict) -> dict:
         )
         return {"stdout": "", "exit_code": 0}
 
-    try:
-        content = load_content(hook_data)
-        if not content:
-            return {"stdout": "", "exit_code": 0}
-        return {"stdout": content, "exit_code": 0, "sound": "branch prompt"}
-
-    except Exception as exc:
-        logger.error("[HOOKS] branch_loader: unexpected error: %s", exc)
+    content = load_content(hook_data)
+    if not content:
         return {"stdout": "", "exit_code": 0}
+    return {"stdout": content, "exit_code": 0, "sound": "branch prompt"}

@@ -499,7 +499,7 @@
       "file": "apps/handlers/lifecycle/session_start.py",
       "standard": "logged_fallback",
       "lines": [
-        73
+        67
       ],
       "reason": "_interactive's False on an unreadable Codex rollout is the docstring's answer: the pointer is left as is, because a headless pointer would reopen an empty chat. A resume target, guards no write; logged at INFO."
     },
@@ -886,14 +886,6 @@
       "reason": "Fail-closed admin check: an unimportable or raising verified-caller rail returns False, so every gate refuses the admin exemption; the refusal is the answer, and the WARNING line in the prax system log tells a dark rail from a plain no."
     },
     {
-      "file": "apps/handlers/lifecycle/auto_fix.py",
-      "standard": "fallback",
-      "lines": [
-        602
-      ],
-      "reason": "PostToolUse advisory, not a gate: the edit has already landed, so a crashed diagnostics pass has no decision to stand in for. It logs at ERROR, which @trigger's log watcher escalates, and the agent simply gets no diagnostics for that one edit."
-    },
-    {
       "file": "apps/handlers/config/loader.py",
       "standard": "fallback",
       "lines": [
@@ -1058,22 +1050,6 @@
       "reason": "The snapshot is still stamped, truncated at the default cap instead of the branch's own; raising here would lose the whole snapshot at compaction. WARNING, which @trigger escalates, names the dark @memory door."
     },
     {
-      "file": "apps/handlers/lifecycle/pre_compact_prep.py",
-      "standard": "fallback",
-      "lines": [
-        276
-      ],
-      "reason": "PreCompact injector, not a gate: an unexpected error skips the snapshot and compaction proceeds. It logs at ERROR, which @trigger escalates, the same record the engine would write had it raised."
-    },
-    {
-      "file": "apps/handlers/lifecycle/auto_process.py",
-      "standard": "fallback",
-      "lines": [
-        79
-      ],
-      "reason": "UserPromptSubmit and PreCompact kicker, not a gate: a failed kick of @memory's auto-process returns exit 1, which the engine records in engine.jsonl, and logs at ERROR, which @trigger escalates. The guard is left unset, so the next prompt retries."
-    },
-    {
       "file": "apps/handlers/lifecycle/compact.py",
       "standard": "fallback",
       "lines": [
@@ -1098,14 +1074,6 @@
       "reason": "The injection still runs when the grounding receipt cannot be set pending; the cost is one compaction the receipt verb does not track. It logs at ERROR, which @trigger escalates."
     },
     {
-      "file": "apps/handlers/lifecycle/compact.py",
-      "standard": "fallback",
-      "lines": [
-        128
-      ],
-      "reason": "Injector, not a gate: an unexpected error skips the post-compact block and the session goes on. It logs at ERROR, which @trigger escalates, the same record the engine would write had it raised."
-    },
-    {
       "file": "apps/handlers/lifecycle/post_compact_regrounding.py",
       "standard": "fallback",
       "lines": [
@@ -1114,44 +1082,12 @@
       "reason": "The re-ground still ships without its release-notice head; raising would lose the whole grounding for the sake of one notice. WARNING, which @trigger escalates, names the failure."
     },
     {
-      "file": "apps/handlers/lifecycle/post_compact_regrounding.py",
-      "standard": "fallback",
-      "lines": [
-        224
-      ],
-      "reason": "Injector, not a gate: an unexpected error skips this part of the re-ground and the tool call goes on. It logs at ERROR, which @trigger escalates, the same record the engine would write had it raised."
-    },
-    {
-      "file": "apps/handlers/lifecycle/session_start.py",
-      "standard": "fallback",
-      "lines": [
-        39
-      ],
-      "reason": "SessionStart bookkeeping, not a gate: a failed cadence reset costs a cadence counted from the last session, never the session itself. It logs at ERROR, which @trigger escalates."
-    },
-    {
-      "file": "apps/handlers/lifecycle/session_start.py",
-      "standard": "fallback",
-      "lines": [
-        99
-      ],
-      "reason": "A missed resume pointer costs one resume landing on the older session, never the session itself. It logs at ERROR, which @trigger escalates, naming the branch."
-    },
-    {
       "file": "apps/handlers/prompt/branch_loader.py",
       "standard": "fallback",
       "lines": [
         32
       ],
       "reason": "Injector, withheld by design (DPLAN-0347): a cadence that cannot answer withholds this loader, and tier0_kernel's banner tells the agent on every turn that navmap, branch and identity are WITHHELD and why. The WARNING here is escalated by @trigger."
-    },
-    {
-      "file": "apps/handlers/prompt/branch_loader.py",
-      "standard": "fallback",
-      "lines": [
-        48
-      ],
-      "reason": "Injector, not a gate: a grounding block that fails to load is skipped for this prompt and the prompt goes on. It logs at ERROR, which @trigger escalates, the same record the engine would write had it raised."
     },
     {
       "file": "apps/handlers/prompt/navmap.py",
@@ -1162,28 +1098,12 @@
       "reason": "Injector, withheld by design (DPLAN-0347): a cadence that cannot answer withholds this loader, and tier0_kernel's banner tells the agent on every turn that navmap, branch and identity are WITHHELD and why. The WARNING here is escalated by @trigger."
     },
     {
-      "file": "apps/handlers/prompt/navmap.py",
-      "standard": "fallback",
-      "lines": [
-        54
-      ],
-      "reason": "Injector, not a gate: a grounding block that fails to load is skipped for this prompt and the prompt goes on. It logs at ERROR, which @trigger escalates, the same record the engine would write had it raised."
-    },
-    {
       "file": "apps/handlers/prompt/identity.py",
       "standard": "fallback",
       "lines": [
         32
       ],
       "reason": "Injector, withheld by design (DPLAN-0347): a cadence that cannot answer withholds this loader, and tier0_kernel's banner tells the agent on every turn that navmap, branch and identity are WITHHELD and why. The WARNING here is escalated by @trigger."
-    },
-    {
-      "file": "apps/handlers/prompt/identity.py",
-      "standard": "fallback",
-      "lines": [
-        47
-      ],
-      "reason": "Injector, not a gate: a grounding block that fails to load is skipped for this prompt and the prompt goes on. It logs at ERROR, which @trigger escalates, the same record the engine would write had it raised."
     },
     {
       "file": "apps/handlers/prompt/tier0_kernel.py",
@@ -1272,14 +1192,6 @@
         91
       ],
       "reason": "Fails toward showing: a cadence that cannot answer announces any new mail instead of hiding it, so the agent still hears of it. WARNING, which @trigger escalates, names the broken cadence."
-    },
-    {
-      "file": "apps/handlers/lifecycle/release_notice.py",
-      "standard": "fallback",
-      "lines": [
-        37
-      ],
-      "reason": "Injector, not a gate: a notice that fails to build is skipped for this session start and the session goes on. It logs at ERROR, which @trigger escalates, the same record the engine would write had it raised."
     },
     {
       "file": "apps/handlers/lifecycle/rollover.py",

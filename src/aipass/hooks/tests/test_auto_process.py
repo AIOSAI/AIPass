@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_auto_process.py
-# Version: 1.3.6
+# Version: 1.4.0
 # Description: Tests for auto_process lifecycle handler (TDPLAN-0005, DPLAN-0294 phase 1b)
 # Branch: hooks
 # Created: 2026-06-06
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/lifecycle/auto_process.py."""
@@ -143,31 +143,29 @@ class TestAutoProcessHandler:
         assert "pool=" not in caplog.text
         assert "rollover=" not in caplog.text
 
-    def test_import_error_surfaces_with_exit_code_1(self, caplog):
+    def test_an_import_failure_raises_to_the_engine_with_the_stdlib_text(self):
         with patch(f"{MODULE}._already_ran_this_session", return_value=False):
             with _served(None):
                 # Ask the interpreter what a None entry raises; its wording is the stdlib's.
                 with pytest.raises(ImportError) as raised:
                     importlib.import_module(_MEMORY_AUTO_PROCESS)
-                with caplog.at_level(logging.ERROR):
-                    result = handle({})
+                with pytest.raises(ImportError) as from_handle:
+                    handle({})
 
-        assert result["exit_code"] == 1
-        assert result["stdout"] == ""
-        assert str(raised.value) in caplog.text
+        assert str(from_handle.value) == str(raised.value)
 
-    def test_runtime_error_surfaces_with_exit_code_1(self, caplog):
+    def test_a_raising_spawn_is_one_engine_fault_line_and_the_prompt_goes_on(self, engine_fault):
         """spawn_background() promises never to raise — crash isolation does not take promises."""
         mock_module = MagicMock()
         mock_module.spawn_background.side_effect = RuntimeError("fork failed")
 
         with patch(f"{MODULE}._already_ran_this_session", return_value=False):
             with _served(mock_module):
-                with caplog.at_level(logging.ERROR):
-                    result = handle({})
+                faults, (stdout, code) = engine_fault("UserPromptSubmit", "auto_process", f"{MODULE}.handle", {})
 
-        assert result["exit_code"] == 1
-        assert "fork failed" in caplog.text
+        assert code != 2 and stdout == ""
+        assert len(faults) == 1 and f"fault[UserPromptSubmit.auto_process.{MODULE}.handle.RuntimeError@" in faults[0]
+        mock_module.spawn_background.assert_called_once_with()
 
     def test_fires_on_precompact_event_key(self):
         """Verify auto_process is wired in hooks.json under PreCompact."""
@@ -273,7 +271,7 @@ class TestSessionGuard:
     def test_does_not_mark_session_on_error(self):
         with patch(f"{MODULE}._mark_session_ran") as mock_mark:
             with patch(f"{MODULE}._already_ran_this_session", return_value=False):
-                with _served(None):
+                with _served(None), pytest.raises(ImportError):
                     handle({})
 
         mock_mark.assert_not_called()

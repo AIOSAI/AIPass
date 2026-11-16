@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_pre_compact_prep.py
-# Version: 1.6.0
+# Version: 1.7.0
 # Description: Tests for pre_compact_prep lifecycle handler
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-11-14
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/lifecycle/pre_compact_prep.py."""
@@ -214,11 +214,13 @@ class TestHandle:
         data = json.loads((branch_dir / ".trinity" / "local.json").read_text(encoding="utf-8"))
         assert len(data["sessions"][0]["summary"]) == 300
 
-    def test_never_raises_on_unexpected_error(self, tmp_path):
-        with patch("aipass.hooks.apps.modules.context_window.find_branch_dir", side_effect=RuntimeError("boom")):
-            result = handle({"cwd": str(tmp_path)})
+    def test_an_unexpected_raise_is_one_engine_fault_line_and_compaction_goes_on(self, engine_fault, tmp_path):
+        handler = f"{pre_compact_prep.__name__}.handle"
+        with patch.object(context_window, "find_branch_dir", side_effect=RuntimeError("boom")):
+            faults, (stdout, code) = engine_fault("PreCompact", "pre_compact_prep", handler, {"cwd": str(tmp_path)})
 
-        assert result == {"stdout": "", "exit_code": 0}
+        assert code != 2 and stdout == ""
+        assert len(faults) == 1 and f"fault[PreCompact.pre_compact_prep.{handler}.RuntimeError@" in faults[0]
 
 
 def _snapshot(branch_dir, repo_root=None) -> str:

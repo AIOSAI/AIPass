@@ -1,17 +1,16 @@
 # =================== AIPass ====================
 # Name: session_start.py
-# Version: 1.5.1
+# Version: 1.5.2
 # Description: Resets cadence counter on new chat / clear; injects the culture file; writes the session pointer
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-07
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """SessionStart: resets the cadence counter, injects the culture file, writes the session pointer.
 
-The cadence reset re-fires loaders at turn 0. It skips resume (context carries grounding) and
-compact (PreCompact reset already; twice re-arms the regroup token).
+The reset skips resume (context carries grounding) and compact (PreCompact reset; twice re-arms the regroup).
 """
 
 import importlib
@@ -32,14 +31,9 @@ def handle(hook_data: dict) -> dict:
         logger.info("[HOOKS] session_start: skipped cadence reset (source=%s)", source)
         return {"stdout": "", "exit_code": 0}
 
-    try:
-        cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
-        cadence.reset_counter(hook_data=hook_data, caller="session_start")
-        logger.info("[HOOKS] session_start: cadence reset (source=%s)", source)
-    except Exception as exc:
-        logger.error("[HOOKS] session_start: cadence reset failed: %s", exc)
-        return {"stdout": "", "exit_code": 0}
-
+    cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
+    cadence.reset_counter(hook_data=hook_data, caller="session_start")
+    logger.info("[HOOKS] session_start: cadence reset (source=%s)", source)
     return {"stdout": "", "exit_code": 0, "sound": "cadence reset"}
 
 
@@ -93,11 +87,7 @@ def handle_session_pointer(hook_data: dict) -> dict:
     if not _interactive(provider, hook_data):
         logger.info("[HOOKS] session_start: headless %s session %s, pointer left as is", provider, session_id)
         return {"stdout": "", "exit_code": 0}
-    try:
-        door = importlib.import_module("aipass.ai_mail.apps.modules.door_session_pointer")
-        written = door.write_pointer(branch, session_id, "session-start", provider=provider)
-    except Exception as exc:  # a missed pointer costs a resume, never the session
-        logger.error("[HOOKS] session_start: session pointer not written for %s: %s", branch, exc)
-        return {"stdout": "", "exit_code": 0}
+    door = importlib.import_module("aipass.ai_mail.apps.modules.door_session_pointer")
+    written = door.write_pointer(branch, session_id, "session-start", provider=provider)
     logger.info("[HOOKS] session_start: pointer %s -> %s (%s) written=%s", branch, session_id, provider, written)
     return {"stdout": "", "exit_code": 0}

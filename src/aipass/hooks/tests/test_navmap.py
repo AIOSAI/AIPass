@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_navmap.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Tests for navmap prompt handler and its edit-time cap warning
 # Branch: hooks
 # Created: 2026-06-18
-# Modified: 2026-11-10
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/prompt/navmap.py."""
@@ -119,6 +119,18 @@ class TestNavmapHandler:
                 result = handle({})
 
         assert result == {"stdout": "", "exit_code": 0}
+
+    def test_a_raising_load_is_one_engine_fault_line_and_the_prompt_goes_on(self, engine_fault, monkeypatch):
+        def boom(_hook_data):
+            raise OSError("navmap unreadable")
+
+        monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", lambda loader_name, *_a, **_k: loader_name == "navmap")
+        monkeypatch.setattr("aipass.hooks.apps.modules.grounding_content.load_navmap", boom)
+        handler = f"{handle.__module__}.handle"
+        faults, (stdout, code) = engine_fault("UserPromptSubmit", "navmap", handler, {})
+
+        assert code != 2 and stdout == ""
+        assert len(faults) == 1 and f"fault[UserPromptSubmit.navmap.{handler}.OSError@" in faults[0]
 
     def test_external_project_gets_own_file(self, tmp_path, monkeypatch):
         project = tmp_path / "my-project"

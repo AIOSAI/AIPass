@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_post_compact_regrounding.py
-# Version: 1.2.4
+# Version: 1.3.0
 # Description: Tests for post_compact_regrounding lifecycle handler (DPLAN-0276)
 # Branch: hooks
 # Created: 2026-08-01
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/lifecycle/post_compact_regrounding.py."""
@@ -141,6 +141,25 @@ class TestPostCompactRegrounding:
         with patch("aipass.hooks.apps.modules.cadence.consume_regroup_pending", side_effect=RuntimeError("boom")):
             with pytest.raises(RuntimeError, match="boom"):
                 post_compact_regrounding.handle({"cwd": str(tmp_path)})
+
+    def test_a_raise_while_packing_is_one_engine_fault_line_and_the_tool_call_goes_on(self, engine_fault, tmp_path):
+        handler = f"{post_compact_regrounding.__name__}.handle"
+        with (
+            patch("aipass.hooks.apps.modules.cadence.consume_regroup_pending", return_value=True),
+            patch("aipass.hooks.apps.modules.cadence.log_regroup_fire", side_effect=RuntimeError("boom")),
+            patch("aipass.hooks.apps.modules.grounding_content.load_kernel", return_value="KERNEL"),
+            patch("aipass.hooks.apps.modules.grounding_content.load_navmap", return_value=""),
+            patch("aipass.hooks.apps.modules.grounding_content.load_branch", return_value=""),
+            patch("aipass.hooks.apps.modules.grounding_content.load_identity", return_value=""),
+            patch(f"{_RN}.build_notice", return_value=""),
+        ):
+            faults, (stdout, code) = engine_fault(
+                "PostToolUse", "post_compact_regrounding", handler, {"cwd": str(tmp_path)}
+            )
+
+        assert code != 2 and stdout == ""
+        assert len(faults) == 1
+        assert f"fault[PostToolUse.post_compact_regrounding.{handler}.RuntimeError@" in faults[0]
 
     def test_end_to_end_replays_incident_multiple_resets_one_fire(self, tmp_path):
         """No mocking of cadence: several PreCompact resets fire back-to-back
@@ -584,10 +603,15 @@ class TestReleaseNoticeSessionStartDoor:
         the same block twice for one compaction."""
         assert self._handle(_make_project(tmp_path / "proj"), "compact") == {"stdout": "", "exit_code": 0}
 
-    def test_a_raising_module_never_escapes_into_session_start(self, tmp_path):
+    def test_a_raising_module_is_one_engine_fault_line_and_the_session_starts(self, engine_fault, tmp_path):
+        handler = f"{door.__name__}.handle"
+        with patch.object(release_notice, "build_notice", side_effect=RuntimeError("boom")):
+            faults, (stdout, code) = engine_fault(
+                "SessionStart", "release_notice", handler, {"cwd": str(tmp_path), "source": "startup"}
+            )
 
-        with patch.object(door, "load_content", side_effect=RuntimeError("boom")):
-            assert door.handle({"cwd": str(tmp_path), "source": "startup"}) == {"stdout": "", "exit_code": 0}
+        assert code != 2 and stdout == ""
+        assert len(faults) == 1 and f"fault[SessionStart.release_notice.{handler}.RuntimeError@" in faults[0]
 
 
 class TestReleaseNoticeCompactDoor:

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_auto_fix.py
-# Version: 1.5.0
+# Version: 1.6.0
 # Description: Tests for auto_fix lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/lifecycle/auto_fix.py."""
@@ -280,6 +280,18 @@ class TestAutoFixJson:
         parsed = json.loads(result["stdout"])
         assert "EMOJI CORRUPTION" in parsed["hookSpecificOutput"]["additionalContext"]
         assert result.get("sound") == "auto fix diagnostics"
+
+
+class TestARaiseIsTheEnginesFault:
+    def test_a_raising_check_is_one_engine_fault_line_and_the_edit_goes_on(self, engine_fault, monkeypatch, tmp_path):
+        def boom(_path):
+            raise RuntimeError("check fell over")
+
+        monkeypatch.setattr(auto_fix, "_run_json_checks", boom)
+        data = {"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "a.json")}}
+        faults, (stdout, code) = engine_fault("PostToolUse", "auto_fix", f"{auto_fix.__name__}.handle", data)
+        assert code != 2 and stdout == ""
+        assert len(faults) == 1 and f"fault[PostToolUse.auto_fix.{auto_fix.__name__}.handle.RuntimeError@" in faults[0]
 
 
 class TestAutoFixSubprocessChecks:
