@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_aipass_standards.py
 # Description: Unit tests for handlers/aipass_standards/
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-03-24
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/naming_check.py and its json, host and calendar siblings."""
@@ -1092,3 +1092,56 @@ def test_host_coupled_oracle_scores_by_clean_test_file_share(tmp_path):
 
     assert (result["standard"], result["score"], result["passed"]) == ("HOST_COUPLED_ORACLE", 50, False)
     assert {row["file"] for row in result["checks"][0]["violations"]} == {"tests/test_proc.py"}
+
+
+_TWO_BAD_FUNCTIONS = '"""Doc."""\n\ndef badOne():\n    return 1\n\n\ndef badTwo():\n    return 2\n'
+
+
+def _naming(tmp_path, source: str, name: str = "thing.py", **scope) -> dict:
+    """naming_check.check_module on apps/modules/<name> under one naming row of the given scope (none: no row)."""
+    target = tmp_path / "apps" / "modules" / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(source, encoding="utf-8")
+    rules = [{"file": f"apps/modules/{name}", "standard": "naming", "reason": "t", **scope}] if scope else []
+    result = naming_check.check_module(str(target), bypass_rules=rules)
+    return {"score": result["score"], **{check["name"]: check for check in result["checks"]}}
+
+
+def test_naming_names_every_bad_function_with_its_line(tmp_path):
+    """Mutant: the message names only the first site in naming_check.py — killed."""
+    verdict = _naming(tmp_path, _TWO_BAD_FUNCTIONS)
+    assert verdict["Function naming"]["passed"] is False
+    assert verdict["Function naming"]["message"] == "Non-snake_case functions: badOne (line 3), badTwo (line 7)"
+
+
+def test_naming_a_line_row_waives_its_function_and_the_other_still_convicts(tmp_path):
+    """Mutant: the per-site ask drops line= in naming_check.py — killed."""
+    verdict = _naming(tmp_path, _TWO_BAD_FUNCTIONS, lines=[3])
+    assert verdict["Function naming"]["message"] == "Non-snake_case functions: badTwo (line 7)"
+
+
+def test_naming_a_function_row_waives_the_names_it_lists_only(tmp_path):
+    """Mutant: the per-site ask drops name= in naming_check.py — killed."""
+    one = _naming(tmp_path, _TWO_BAD_FUNCTIONS, functions=["badOne"])
+    both = _naming(tmp_path, _TWO_BAD_FUNCTIONS, functions=["badOne", "badTwo"])
+    assert one["Function naming"]["message"] == "Non-snake_case functions: badTwo (line 7)"
+    assert (both["Function naming"]["passed"], both["score"]) == (True, 100)
+
+
+def test_naming_a_whole_file_row_still_waives_the_whole_file(tmp_path):
+    assert _naming(tmp_path, _TWO_BAD_FUNCTIONS, lines=None)["score"] == 100
+
+
+def test_naming_constants_and_classes_are_sites_too(tmp_path):
+    """Mutant: one waived site waives every site in naming_check.py — killed."""
+    source = '"""Doc."""\nbad_one = 5\nbad_two = 6\n\n\nclass bad_cls:\n    pass\n'
+    verdict = _naming(tmp_path, source, lines=[2, 6])
+    assert verdict["Constant naming"]["message"] == "Non-UPPER_CASE constants: bad_two (line 3)"
+    assert verdict["Class naming"]["passed"] is True
+
+
+def test_naming_a_bad_file_name_is_waived_by_the_file_scope_name_not_a_line(tmp_path):
+    """Mutant: the file-level waiver drops name=FILE_SCOPE in naming_check.py — killed."""
+    by_scope = _naming(tmp_path, '"""Doc."""\n', "BadName.py", functions=[_bypass_utils.FILE_SCOPE])
+    by_line = _naming(tmp_path, '"""Doc."""\n', "BadName.py", lines=[1])
+    assert (by_scope["score"], by_line["score"]) == (100, 0)

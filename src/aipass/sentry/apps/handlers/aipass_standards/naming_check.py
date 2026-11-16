@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: naming_check.py
 # Description: Naming Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Dict, Optional
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE, is_bypassed
 from aipass.sentry.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify, hash_lines
 
 # APPLIES_TO: snake_case and column-0 constants are the house style everywhere.
@@ -76,18 +76,17 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "NAMING",
         }
 
-    file_naming_check = check_file_naming(module_path, path)
-    checks.append(file_naming_check)
+    checks.append(_waive_file_level(check_file_naming(module_path, path), module_path, bypass_rules))
 
-    function_naming_check = check_function_naming(content)
+    function_naming_check = check_function_naming(content, module_path, bypass_rules)
     if function_naming_check:
         checks.append(function_naming_check)
 
-    constant_naming_check = check_constant_naming(content)
+    constant_naming_check = check_constant_naming(content, module_path, bypass_rules)
     if constant_naming_check:
         checks.append(constant_naming_check)
 
-    class_naming_check = check_class_naming(content)
+    class_naming_check = check_class_naming(content, module_path, bypass_rules)
     if class_naming_check:
         checks.append(class_naming_check)
 
@@ -178,31 +177,29 @@ def _protocol_name(func_name: str) -> bool:
     return isinstance(node, type) and issubclass(node, ast.AST)
 
 
-def check_function_naming(content: str) -> Optional[Dict]:
-    """Check function naming conventions"""
+def check_function_naming(content: str, module_path: str = "", bypass_rules: list | None = None) -> Optional[Dict]:
+    """Check function naming conventions; each bad name is a site at its def line."""
     function_pattern = r"^\s*(?:async\s+)?def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\("
-    functions = re.findall(function_pattern, content, re.MULTILINE)
+    matches = list(re.finditer(function_pattern, content, re.MULTILINE))
+    functions = [match.group(1) for match in matches]
 
     if not functions:
         return None  # No functions to check
 
     bad_functions = []
-    for func_name in functions:
+    for match in matches:
+        func_name = match.group(1)
         if func_name.startswith("__") and func_name.endswith("__"):
             continue
         if _protocol_name(func_name):
             continue
 
         if not re.match(r"^[a-z_][a-z0-9_]*$", func_name):
-            bad_functions.append(func_name)
+            bad_functions.append((content.count("\n", 0, match.start(1)) + 1, func_name))
 
-    if bad_functions:
-        suffix = "..." if len(bad_functions) > 3 else ""
-        return {
-            "name": "Function naming",
-            "passed": False,
-            "message": f"Non-snake_case functions: {', '.join(bad_functions[:3])}{suffix}",
-        }
+    failing = _named_sites("Function naming", "Non-snake_case functions", bad_functions, module_path, bypass_rules)
+    if failing:
+        return failing
 
     return {
         "name": "Function naming",
@@ -223,8 +220,8 @@ PYTEST_CONTRACT_GLOBALS = frozenset(
 )
 
 
-def check_constant_naming(content: str) -> Optional[Dict]:
-    """Check constant naming conventions"""
+def check_constant_naming(content: str, module_path: str = "", bypass_rules: list | None = None) -> Optional[Dict]:
+    """Check constant naming conventions; each bad name is a site at its assignment line."""
     imported_names = set()
     for line in content.split("\n"):
         stripped = line.strip()
@@ -289,17 +286,14 @@ def check_constant_naming(content: str) -> Optional[Dict]:
         constants.append(const_name)
 
         if not const_name.isupper():
-            bad_constants.append(const_name)
+            bad_constants.append((lineno, const_name))
 
     if not constants:
         return None  # No constants found
 
-    if bad_constants:
-        return {
-            "name": "Constant naming",
-            "passed": False,
-            "message": f"Non-UPPER_CASE constants: {', '.join(bad_constants[:3])}",
-        }
+    failing = _named_sites("Constant naming", "Non-UPPER_CASE constants", bad_constants, module_path, bypass_rules)
+    if failing:
+        return failing
 
     return {
         "name": "Constant naming",
@@ -308,25 +302,50 @@ def check_constant_naming(content: str) -> Optional[Dict]:
     }
 
 
-def check_class_naming(content: str) -> Optional[Dict]:
-    """Check class naming conventions"""
+def check_class_naming(content: str, module_path: str = "", bypass_rules: list | None = None) -> Optional[Dict]:
+    """Check class naming conventions; each bad name is a site at its class line."""
     class_pattern = r"^\s*class\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*[\(:]"
-    classes = re.findall(class_pattern, content, re.MULTILINE)
+    matches = list(re.finditer(class_pattern, content, re.MULTILINE))
 
-    if not classes:
+    if not matches:
         return None  # No classes to check
 
     bad_classes = []
-    for class_name in classes:
+    for match in matches:
         # Check for PascalCase (PEP 8 sanctions a single leading underscore for internal classes)
-        if not re.match(r"^_?[A-Z][a-zA-Z0-9]*$", class_name):
-            bad_classes.append(class_name)
+        if not re.match(r"^_?[A-Z][a-zA-Z0-9]*$", match.group(1)):
+            bad_classes.append((content.count("\n", 0, match.start(1)) + 1, match.group(1)))
 
-    if bad_classes:
-        return {
-            "name": "Class naming",
-            "passed": False,
-            "message": f"Non-PascalCase classes: {', '.join(bad_classes[:3])}",
-        }
+    failing = _named_sites("Class naming", "Non-PascalCase classes", bad_classes, module_path, bypass_rules)
+    if failing:
+        return failing
 
-    return {"name": "Class naming", "passed": True, "message": f"{len(classes)} classes checked - all PascalCase"}
+    return {"name": "Class naming", "passed": True, "message": f"{len(matches)} classes checked - all PascalCase"}
+
+
+def _named_sites(check: str, label: str, sites: list, module_path: str, bypass_rules: list | None) -> Optional[Dict]:
+    """The failing verdict naming every site no row waives, a pass when rows waive them all, else None.
+
+    The name itself is the site: a row waives it by ``functions: [name]`` or by its line.
+    """
+    if not sites:
+        return None
+    open_sites = [
+        (line, name)
+        for line, name in sites
+        if not is_bypassed(module_path, "naming", line=line, bypass_rules=bypass_rules, name=name)
+    ]
+    if not open_sites:
+        return {"name": check, "passed": True, "message": f"{label}: all {len(sites)} waived by scoped bypass rows"}
+    return {
+        "name": check,
+        "passed": False,
+        "message": f"{label}: " + ", ".join(f"{name} (line {line})" for line, name in open_sites),
+    }
+
+
+def _waive_file_level(check: Dict, module_path: str, bypass_rules: list | None) -> Dict:
+    """A failing file-level check passed by a row naming FILE_SCOPE under functions."""
+    if check["passed"] or not is_bypassed(module_path, "naming", bypass_rules=bypass_rules, name=FILE_SCOPE):
+        return check
+    return {**check, "passed": True, "message": f"Waived by a {FILE_SCOPE} bypass row: {check['message']}"}

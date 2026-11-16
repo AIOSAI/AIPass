@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch8.py
 # Description: Unit tests for handlers, log_handler, log_level, log_structure, meta, naming, permission_flags
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-04-25
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/handlers_check.py and six sibling checkers (batch 8)."""
@@ -904,7 +904,7 @@ def test_function_naming_a_lookalike_of_a_protocol_name_still_fails(name):
     result = check_function_naming(f"def {name}(self):\n    pass\n")
 
     assert result is not None
-    assert result["message"] == f"Non-snake_case functions: {name}"
+    assert result["message"] == f"Non-snake_case functions: {name} (line 1)"
 
 
 def test_constant_naming_upper():
@@ -1142,7 +1142,7 @@ def test_error_not_user_input_reads_a_triple_quoted_literal_in_code(tmp_path):
 def test_constant_naming_reads_the_line_opening_a_triple_quoted_literal():
     result = check_constant_naming('bad_name = """\nbody\n"""\n')
     assert result is not None
-    assert result["message"] == "Non-UPPER_CASE constants: bad_name"
+    assert result["message"] == "Non-UPPER_CASE constants: bad_name (line 1)"
 
 
 def test_constant_naming_never_reads_a_literal_body_as_an_assignment():
@@ -1154,4 +1154,4 @@ def test_constant_naming_never_reads_a_literal_body_as_an_assignment():
 def test_constant_naming_reads_code_after_a_docstring_holding_the_other_delimiter():
     result = check_constant_naming("'''\n\"\"\"\n'''\nlower_x = 1\n")
     assert result is not None
-    assert result["message"] == "Non-UPPER_CASE constants: lower_x"
+    assert result["message"] == "Non-UPPER_CASE constants: lower_x (line 4)"

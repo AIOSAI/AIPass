@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_introspection.py
 # Description: introspection_check sub-functions (split from test_checkers_batch7.py)
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/introspection_check.py."""
@@ -16,6 +16,8 @@ import ast
 
 import pytest
 
+from aipass.sentry.apps.handlers.aipass_standards import introspection_check
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE
 from aipass.sentry.apps.handlers.aipass_standards.introspection_check import (
     check_content_references,
     check_correct_dispatch,
@@ -438,3 +440,85 @@ class TestCheckIntrospectionRichFormatting:
         tree = ast.parse(content)
         result = check_introspection_rich_formatting(tree, "test.py")
         assert result is None
+
+
+class TestScopedBypassRows:
+    """Content references and dispatch blocks are sites (line, function); every other finding is file-level."""
+
+    _MODULE = (
+        '"""Doc."""\n'
+        "\n"
+        "\n"
+        "def print_introspection():\n"
+        '    console.print("[bold]Run:[/bold] python3 a.py")\n'
+        "\n"
+        "\n"
+        "def print_help():\n"
+        '    console.print("[bold]Help:[/bold] python3 b.py")\n'
+        "\n"
+        "\n"
+        "def handle_command(command, args):\n"
+        '    if "--help" in args:\n'
+        "        print_help()\n"
+        "        return True\n"
+        "    return False\n"
+    )
+    _ENTRY = (
+        '"""Doc."""\n'
+        "\n"
+        "\n"
+        "def main():\n"
+        "    if not args:\n"
+        "        print_help()\n"
+        "    if '--help' in args:\n"
+        "        print_introspection()\n"
+    )
+
+    @staticmethod
+    def _verdicts(tmp_path, relative: str, source: str, **scope) -> dict:
+        """check_module on <tmp>/<relative> under one introspection row of the given scope (none: no row)."""
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(source, encoding="utf-8")
+        rules = [{"file": relative, "standard": "introspection", "reason": "t", **scope}] if scope else []
+        result = introspection_check.check_module(str(target), bypass_rules=rules)
+        return {"score": result["score"], **{check["name"]: check for check in result["checks"]}}
+
+    def test_every_python3_reference_is_named_with_its_function_and_line(self, tmp_path):
+        verdict = self._verdicts(tmp_path, "apps/modules/thing.py", self._MODULE)
+        assert "print_introspection() line 5, print_help() line 9" in verdict["Content references"]["message"]
+
+    def test_a_line_row_waives_its_reference_and_the_other_still_convicts(self, tmp_path):
+        """Mutant: the content-reference ask drops line= — killed."""
+        verdict = self._verdicts(tmp_path, "apps/modules/thing.py", self._MODULE, lines=[5])
+        assert verdict["Content references"]["passed"] is False
+        assert "print_help() line 9" in verdict["Content references"]["message"]
+        assert "print_introspection()" not in verdict["Content references"]["message"]
+
+    def test_a_function_row_waives_the_references_inside_that_function_only(self, tmp_path):
+        """Mutant: the content-reference ask drops name= — killed."""
+        verdict = self._verdicts(tmp_path, "apps/modules/thing.py", self._MODULE, functions=["print_help"])
+        assert "print_introspection() line 5" in verdict["Content references"]["message"]
+        assert "print_help()" not in verdict["Content references"]["message"]
+
+    def test_a_whole_file_row_still_waives_the_whole_file(self, tmp_path):
+        assert self._verdicts(tmp_path, "apps/modules/thing.py", self._MODULE, lines=None)["score"] == 100
+
+    def test_a_file_level_finding_is_waived_by_the_file_scope_name_and_not_by_a_line(self, tmp_path):
+        """Mutant: the file-level waiver drops name=FILE_SCOPE — killed."""
+        by_scope = self._verdicts(tmp_path, "apps/modules/thing.py", self._MODULE, functions=[FILE_SCOPE])
+        by_line = self._verdicts(tmp_path, "apps/modules/thing.py", self._MODULE, lines=[1])
+        assert by_line["handle_command no-args gate"]["passed"] is False
+        assert by_scope["handle_command no-args gate"]["passed"] is True
+        assert by_scope["Content references"]["passed"] is False
+
+    def test_every_wrong_dispatch_block_is_a_site(self, tmp_path):
+        """Mutant: the dispatch check stops at the first block — killed."""
+        verdict = self._verdicts(tmp_path, "apps/thing.py", self._ENTRY, lines=[5])
+        assert verdict["Correct dispatch"]["passed"] is False
+        assert "(line 7)" in verdict["Correct dispatch"]["message"]
+        assert "(line 5)" not in verdict["Correct dispatch"]["message"]
+
+    def test_a_function_row_on_main_waives_its_dispatch_blocks(self, tmp_path):
+        """Mutant: the dispatch ask drops name= — killed."""
+        assert self._verdicts(tmp_path, "apps/thing.py", self._ENTRY, functions=["main"])["Correct dispatch"]["passed"]
