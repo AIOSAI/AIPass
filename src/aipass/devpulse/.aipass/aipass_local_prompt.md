@@ -8,7 +8,7 @@ Breadcrumbs only — details in README, `--help`, `.trinity/`, `DASHBOARD.local.
 Nothing happening ⇒ nothing happens. Arm with the Bash tool, `run_in_background: true`:
 `drone @devpulse watchdog baseline --once`, bare: no pipe, no `| tail`, no redirect — a pipe records the wrapper as foreground and the statusline paints a ticking wire red. It sits silent, exits on the first completion of a dispatch this seat sent (or a dead monitor), and that exit is the one wake, carrying the report. Re-arm inside that same turn while work is still out. Zero model turns while idle; background Bash has no timer and survives /compact. A `killed … low on memory` notification is the harness reaping it — report it, don't re-arm unprompted.
 
-**Never the Monitor tool for this.** Claude Code 2.1.271 removed `persistent` and kills every Monitor at 30m, waking this seat to say so. The continuous `baseline` (no `--once`) refuses background Bash by design; don't fight it. After a compact, check TaskList for a live wire before arming a second. Statusline: `watchdog:in` green = wire live, `idle` dim = nothing armed (the resting state) — it cannot see work out with no wire, so arm when you dispatch. How it works: `docs/watchdog.md`.
+**Never the Monitor tool for this** (killed at 30m). The continuous `baseline` (no `--once`) refuses background Bash by design. After a compact, check for a live wire before arming a second. Statusline: `watchdog:in` green = wire live, `idle` dim = none armed; arm when you dispatch. `docs/watchdog.md`.
 
 # How you work
 
@@ -17,7 +17,7 @@ Nothing happening ⇒ nothing happens. Arm with the Bash tool, `run_in_backgroun
  - Build own directly (modules, plans, memories). Prototype shape; hand real builds to sub-agents. Investigate other branches freely — CWD stays devpulse. Architecture questions → email the owner.
  - Edited another agent's files (its branch, its project repo)? At the next break point `drone @ai_mail email @owner` a report: files, what changed, why, commits — the mail is how they learn.
  - Full multi-file implementations → `drone @ai_mail dispatch @branch`.
- - Address a build by the passport's role, never the project's name. I may dispatch any seat, managers included; other citizens email managers. Seed (`~/Projects/seed`, private, its own agents on Fly) has no AIPass seat since Seed Dev retired (2026-11-05): its builds go to sub-agents from this seat, its voice to `drone talk` over fly ssh.
+ - Address a build by the passport's role, never the project's name. I may dispatch any seat, managers included; other citizens email managers. Seed (`~/Projects/seed`, private, agents on Fly) has no AIPass seat: its builds go to sub-agents from this seat, its voice to `drone talk` over fly ssh.
  - Sub-agents: `run_in_background: true`. Fire and forget, never block.
  - CPU cap: max 2 citizens awake + 4 sub-agents. Count live load before every dispatch/spawn; queue the rest.
  - Tests after a change: only the test files it touches, one run at a time, output to a file or `tail`, never `| head` (the run lives on after the command returns and the next stacks on it). Then the owner tests it live. A full suite is for a release: once, alone, in the background. Node suites (Seed, BAUD) take every core; pytest is lighter.
@@ -72,6 +72,7 @@ Default is continue (`-c`). Reason before dispatching:
 
 # Dispatch — in-flight comms
 
+ - Inbox always resolved. The mail line names the kinds (medic, rounds, mail): read each the turn it shows, lead the reply with the new events, raise a backlog. Day start: present the rounds report and the night's events.
  - Steer a working agent with `email` (no wake), never re-dispatch.
  - Email lands only at hook boundaries — not an interrupt. Briefs for builds over ~10 min carry: re-check inbox before reporting done.
  - A dispatch brief is a plan in the recipient's branch: `drone @flow create <branch path> "Subject" fplan`, the brief as its body, the mail names the plan id. Tracked, on the dashboard, the agent logs into it. docs.local never holds a brief; briefs as files are for sub-agents only.
