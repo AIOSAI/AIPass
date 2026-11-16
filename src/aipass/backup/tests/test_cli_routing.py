@@ -299,7 +299,7 @@ STANDALONE_ENTRY_MODULES = [
     ),
     pytest.param(register, "resolve_caller_path", lambda p: [str(p)], lambda p: call(str(p)), id="register"),
     pytest.param(share, "run_share", lambda p: [str(p)], lambda p: call(str(p), public=False), id="share"),
-    pytest.param(snapshot, "run_snapshot", lambda p: [str(p)], lambda p: call(str(p)), id="snapshot"),
+    pytest.param(snapshot, "run_snapshot", lambda p: [str(p)], lambda p: call(str(p), show_panels=True), id="snapshot"),
     pytest.param(status, "resolve_caller_path", lambda p: [str(p)], lambda p: call(str(p)), id="status"),
 ]
 
@@ -559,3 +559,84 @@ class TestHelpNeverExecutes:
             assert entry.main() == 0
 
         fake_module.handle_command.assert_called_once_with("snapshot", [project])
+
+
+class TestStrayArgumentsAreRefused:
+    """The run verbs refuse a word they do not take, naming it; nothing runs."""
+
+    PROJECT = "<project>"
+    STRAY_ARGV = [
+        ["snapshot", PROJECT, "--bogus"],
+        ["snapshot", PROJECT, "extra"],
+        ["all", PROJECT, "--bogus"],
+        ["all", PROJECT, "extra"],
+        ["all", "--registered", "--quiet", "--bogus"],
+        ["drive_sync", PROJECT, "--bogus"],
+        ["drive_sync", PROJECT, "--note"],
+        ["backup", PROJECT, "--bogus"],
+    ]
+
+    @pytest.fixture
+    def ran(self, monkeypatch: pytest.MonkeyPatch) -> list:
+        """Every run function past the parsers, recorded instead of run."""
+        calls: list = []
+        for mod, name in (
+            (snapshot, "run_snapshot"),
+            (all_module, "run_all"),
+            (all_module, "run_registered"),
+            (drive_sync, "run_drive_sync"),
+        ):
+            monkeypatch.setattr(mod, name, lambda *a, _n=name, **k: calls.append((_n, a, k)))
+        return calls
+
+    def _main(self, argv: list[str], tmp_path: Path) -> int:
+        argv = [str(tmp_path) if arg == self.PROJECT else arg for arg in argv]
+        with patch("sys.argv", ["backup"] + argv):
+            return entry.main()
+
+    @pytest.mark.parametrize("argv", STRAY_ARGV)
+    def test_a_stray_word_is_named_on_stderr_and_nothing_runs(
+        self, argv: list[str], ran: list, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Each run verb names the word it does not take and runs nothing."""
+        code = self._main(argv, tmp_path)
+        assert code == 2
+
+        err = capsys.readouterr().err
+        assert argv[-1] in err
+        assert "Try:" in err
+        assert ran == []
+
+    def test_the_nightly_all_registered_quiet_still_runs_quiet(self, ran: list, tmp_path: Path) -> None:
+        """The daemon's nightly command is pinned: all --registered --quiet."""
+        code = self._main(["all", "--registered", "--quiet"], tmp_path)
+        assert code == 0
+
+        assert ran == [("run_registered", (), {"show_panels": False})]
+
+    def test_the_api_doors_snapshot_quiet_runs_without_panels(self, ran: list, tmp_path: Path) -> None:
+        """The api host door calls snapshot <root> --quiet; --quiet is taken, and honoured."""
+        code = self._main(["snapshot", self.PROJECT, "--quiet"], tmp_path)
+        assert code == 0
+
+        assert ran == [("run_snapshot", (str(tmp_path),), {"show_panels": False})]
+
+    def test_the_api_doors_all_quiet_and_drive_sync_flags_still_run(self, ran: list, tmp_path: Path) -> None:
+        """all <root> --quiet and drive_sync with its three flags reach their run functions."""
+        code = self._main(["all", self.PROJECT, "--quiet"], tmp_path)
+        assert code == 0
+        argv = ["drive_sync", self.PROJECT, "--force", "--note", "n", "--project", "p"]
+        code = self._main(argv, tmp_path)
+        assert code == 0
+
+        assert ran == [
+            ("run_all", (str(tmp_path),), {"show_panels": False}),
+            ("run_drive_sync", (str(tmp_path),), {"project_name": "p", "note": "n", "force": True}),
+        ]
+
+    def test_the_legacy_backup_all_form_still_runs_all(self, ran: list, tmp_path: Path) -> None:
+        """backup <root> --all keeps routing to the all verb."""
+        code = self._main(["backup", self.PROJECT, "--all"], tmp_path)
+        assert code == 0
+
+        assert ran == [("run_all", (str(tmp_path),), {"show_panels": True})]

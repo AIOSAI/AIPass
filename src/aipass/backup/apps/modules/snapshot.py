@@ -46,6 +46,7 @@ from aipass.backup.apps.modules.stop import report_stopped
 
 MODULE_NAME = "snapshot"
 PRIMARY_COMMAND = "snapshot"
+USAGE = "snapshot <project_path|@name> [--quiet]"
 
 
 def print_introspection():
@@ -293,8 +294,13 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
+    stray = [arg for arg in args[1:] if arg != "--quiet"]
+    if args[0].startswith("-") or stray:
+        error(f"snapshot does not take: {(stray or args)[0]}", suggestion=USAGE)
+        return True
+
     project_root = str(resolve_caller_path(args[0]))
-    run_snapshot(project_root)
+    run_snapshot(project_root, show_panels="--quiet" not in args)
     return True
 
 

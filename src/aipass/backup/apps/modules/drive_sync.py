@@ -19,7 +19,7 @@ from pathlib import Path
 from rich.progress import Progress
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, mark_command_failed
+from aipass.cli.apps.modules import console, error, mark_command_failed
 
 from aipass.backup.apps.handlers.ignore.patterns import load_spec
 from aipass.backup.apps.handlers.ignore.whitelist import load_whitelist
@@ -39,6 +39,7 @@ from aipass.backup.apps.modules.stop import report_stopped
 
 MODULE_NAME = "drive_sync"
 PRIMARY_COMMAND = "drive_sync"
+USAGE = "drive_sync <project_path|@name> [--force] [--note <text>] [--project <name>]"
 
 
 def print_introspection():
@@ -53,7 +54,7 @@ def print_help():
     """Display help for this module."""
     print_introspection()
     console.print()
-    console.print("Usage: drive_sync <project_root> \\[options]")
+    console.print(f"Usage: {USAGE}", markup=False)
     console.print("  Uploads the snapshot store, whatever the project's drive_sync setting says.")
     console.print("  --force       Force re-upload of all files")
     console.print("  --project     Override project name")
@@ -369,21 +370,25 @@ def handle_command(command: str, args: list) -> bool:
         print_help()
         return True
 
-    project_root = str(resolve_caller_path(args[0]))
-    force = "--force" in args
-    note = ""
-    project_name = ""
-
-    for i, arg in enumerate(args):
-        if arg == "--note" and i + 1 < len(args):
-            note = args[i + 1]
-        if arg == "--project" and i + 1 < len(args):
-            project_name = args[i + 1]
+    force = False
+    values = {"--note": "", "--project": ""}
+    stray: list[str] = []
+    rest = iter(args[1:])
+    for arg in rest:
+        if arg == "--force":
+            force = True
+        elif arg in values and (value := next(rest, None)) is not None:
+            values[arg] = value
+        else:
+            stray.append(arg)
+    if args[0].startswith("-") or stray:
+        error(f"drive_sync does not take: {(stray or args)[0]}", suggestion=USAGE)
+        return True
 
     run_drive_sync(
-        project_root,
-        project_name=project_name,
-        note=note,
+        str(resolve_caller_path(args[0])),
+        project_name=values["--project"],
+        note=values["--note"],
         force=force,
     )
     return True

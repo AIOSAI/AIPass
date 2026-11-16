@@ -36,7 +36,7 @@ reference lists verbs and this page lists their options.
 |---|---|---|
 | `register` | `--name <name>` | Register under a short name, so `@name` resolves to the path |
 | `register` | `--remove <name>` | Drop a registered project from the registry; its `.backup/` store and files stay where they are |
-| `all` | `--quiet` | Suppress the Rich panels; the run itself is unchanged |
+| `snapshot`, `all` | `--quiet` | Suppress the Rich panels; the run itself is unchanged |
 | `all` | `--registered` | Run the cycle for every registered project, in registry order (below) |
 | `drive_sync` | `--force` | Re-upload files the tracker already recorded |
 | `drive_sync` | `--project <name>` | Sync a registered project by name |
@@ -46,6 +46,10 @@ reference lists verbs and this page lists their options.
 | `status` | `--json` | Print one JSON object on stdout and nothing else: the backup door's status contract (below) |
 | `status` | `--sizes` | With `--json` only: add `store.snapshots_bytes` (walks the snapshot store) |
 | `prune` | `--apply` | Delete what the listing names; without it nothing is deleted |
+
+`snapshot`, `all` and `drive_sync` take one project and only the flags above:
+any other word, or a valued flag with no value, is named on stderr with the
+usage, the exit is 2, and nothing runs.
 
 ## `all` and the Drive step
 
@@ -160,8 +164,9 @@ The documented form is `<verb> <project>`: the verb first, the project second.
 There is also a legacy form, `backup <project|@name>`, which runs `snapshot` by
 default and accepts `--all` to pick another lane
 (`apps/backup.py`, in `main()`). It resolves registered names the same way the
-verbs do. Nothing in the tree calls it, and no test exercises it — it is documented here because it is live, not because
-it is recommended. Use the verbs.
+verbs do, and passes the rest to the verb, which refuses a stray word as above.
+Nothing in the tree calls the legacy form; it is documented here because it is
+live, not because it is recommended. Use the verbs.
 
 `--version` and `-V` both print the entry point's version; `help` on its own
 behaves like `--help`.

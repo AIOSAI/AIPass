@@ -36,6 +36,7 @@ from aipass.backup.apps.modules.stop import report_stopped
 
 MODULE_NAME = "all"
 PRIMARY_COMMAND = "all"
+USAGE = "all <project_path|@name> [--quiet] | all --registered [--quiet]"
 REGISTERED_FLAG = "--registered"
 
 
@@ -45,7 +46,7 @@ def print_introspection():
     console.print(f"  Primary command: [yellow]{PRIMARY_COMMAND}[/yellow]")
     console.print("  Status: Phase 4 -- shared scan + drive sync")
     console.print("  Orchestration: scan -> snapshot -> drive (when drive_sync is on)")
-    console.print("  Usage: all <project_path|@name> [--quiet] | all --registered [--quiet]")
+    console.print(f"  Usage: {USAGE}", markup=False)
 
 
 def print_help():
@@ -240,16 +241,23 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     show_panels = "--quiet" not in args
+    stray = [arg for arg in args if arg.startswith("-") and arg not in (REGISTERED_FLAG, "--quiet")]
+    if stray:
+        error(f"all does not take: {stray[0]}", suggestion=USAGE)
+        return True
 
+    named = [arg for arg in args if not arg.startswith("-")]
     if REGISTERED_FLAG in args:
-        named = [arg for arg in args if not arg.startswith("--")]
         if named:
             error(f"all --registered runs every registered project; drop the project argument: {named[0]}")
             return True
         run_registered(show_panels=show_panels)
         return True
 
-    run_all(str(resolve_caller_path(args[0])), show_panels=show_panels)
+    if len(named) != 1:
+        error(f"all takes one project: {' '.join(args)}", suggestion=USAGE)
+        return True
+    run_all(str(resolve_caller_path(named[0])), show_panels=show_panels)
     return True
 
 
