@@ -3,7 +3,7 @@
 # Description: Entry point for drone @cli — sentry-compliant module discovery and routing
 # Version: 2.3.3
 # Created: 2026-03-08
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -42,14 +42,11 @@ def discover_modules() -> List[Any]:
         if file_path.name.startswith("_"):
             continue
 
-        try:
-            # Import by dotted name, never from the file: a second copy of display.py
-            # keeps its own failure flag, which resolve_exit never reads.
-            module = importlib.import_module(f"aipass.cli.apps.modules.{file_path.stem}")
-            if hasattr(module, "handle_command"):
-                modules.append(module)
-        except Exception as e:
-            logger.error(f"[CLI] Failed to load module {file_path.stem}: {e}")
+        # Import by dotted name, never from the file: a second copy of display.py
+        # keeps its own failure flag, which resolve_exit never reads.
+        module = importlib.import_module(f"aipass.cli.apps.modules.{file_path.stem}")
+        if hasattr(module, "handle_command"):
+            modules.append(module)
 
     return modules
 
