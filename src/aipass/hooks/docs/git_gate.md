@@ -159,8 +159,9 @@ agent how to switch a gate off.
 
 - **Raw `rm`**, recursive or not, is refused for every seat, the admin seat included — `find -exec rm`
   and `xargs rm` are raw rm. Every seat is taught `drone rm <path>`.
-- **`drone rm`** moves an in-tree target into the `.archive/` beside it; the system temp dir,
-  `__pycache__` and `*.pyc` it deletes. The admin seat runs it on any path. Off that seat it runs
+- **`drone rm`** moves an in-tree target into the `.archive/` beside it; files in the system temp
+  dir and Python bytecode (`__pycache__`, `*.pyc`) are truly deleted. The admin seat runs it on any
+  path, inside any branch. Off that seat it runs
   only when every target resolves strictly inside the caller's own branch (the directory of the
   nearest passport above the session cwd, so a `cd` in the command does not change whose branch it
   is) or the system temp dir. Targets resolve the way drone resolves them: against the directory the
@@ -179,14 +180,14 @@ agent how to switch a gate off.
   check — is named in `bash_writes.NOT_CAUGHT`.
 - `mv`, renaming and `mkdir` are never deletes. `git rm` answers to `git_gate`.
 
-A refused `drone rm` names the path and why, and points to @devpulse. Every other refusal off the
+A refused `drone rm` names the path and why in one sentence, and points to @devpulse. No rm gate refusal cites a plan id: each states its rule. Every other refusal off the
 admin seat (raw `rm` and every other delete lane) ends with `_DONT_DELETE`, which teaches `drone rm`,
 verbatim:
 
 ```
 You do not delete. To have a file gone, use drone rm inside your own branch:
   drone rm <path>     # moves it into the .archive/ beside it
-That .archive/ is the user's folder: not your concern, never a place to store anything, and it can be emptied at any moment.
+drone rm puts the file there for the user; you never put anything there yourself. That .archive/ is the user's folder: not your concern, and it can be emptied at any moment.
 
 Outside your own branch? Mail @devpulse with the path and why:
   drone @ai_mail email @devpulse "Delete request" "<path>: <why>"

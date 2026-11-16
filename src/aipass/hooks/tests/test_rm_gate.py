@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_rm_gate.py
-# Version: 3.4.0
+# Version: 3.5.0
 # Description: Tests for rm_gate security handler, the DPLAN-0356 lockdown since 2.0.0
 # Branch: hooks
 # Created: 2026-06-02
@@ -16,6 +16,7 @@
 
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from unittest.mock import patch
@@ -484,6 +485,7 @@ class TestTheLockdown:
 
         assert "@canary" in reason and "drone rm <path>" in reason and "inside your own branch" in reason
         assert "user's folder" in reason and "emptied at any moment" in reason and "@devpulse" in reason
+        assert "you never put anything there yourself" in reason
 
     def test_a_recursive_rm_from_canary_is_refused_the_same_way(self, tmp_path):
         reason = self._reason(self._run("rm -rf build", _seat(tmp_path, "canary"), grant=False))
@@ -493,7 +495,7 @@ class TestTheLockdown:
     def test_drone_rm_from_canary_is_refused(self, tmp_path):
         reason = self._reason(self._run("drone rm notes.txt", _seat(tmp_path, "canary"), grant=False))
 
-        assert "@canary" in reason and "admin" in reason
+        assert "@canary" in reason and "@devpulse alone may" in reason and "are truly deleted" in reason
 
     def test_drone_rm_from_the_verified_admin_seat_is_allowed(self, tmp_path):
         result = self._run("drone rm notes.txt", _seat(tmp_path, "devpulse"), grant=True)
@@ -572,6 +574,22 @@ class TestDroneRmInsideTheOwnBranch:
         canary, _ = self._tree(tmp_path)
         reason = self._refused("drone rm ../README.md", str(canary))
         assert str(tmp_path / "README.md") in reason and "@devpulse" in reason and "@canary" in reason
+        refused_line = reason.split("Refused: ", 1)[1].split("\n", 1)[0]
+        assert (
+            refused_line == f"{tmp_path / 'README.md'} is outside your own branch ({canary}) and the system temp dir."
+        )
+
+    def test_no_refusal_names_a_plan_id(self, tmp_path):
+        canary, _ = self._tree(tmp_path)
+        for command, grant in (
+            ("rm notes.txt", False),
+            ("rm notes.txt", True),
+            ("unlink notes.txt", False),
+            ("drone rm ../README.md", False),
+            ("$UNSET_PROGRAM x", False),
+        ):
+            reason = json.loads(self._run(command, str(canary), grant=grant)["stdout"])["reason"]
+            assert not re.search(r"[A-Z]PLAN-\d", reason), command
 
     def test_a_sibling_branchs_file_is_refused_however_it_is_reached(self, tmp_path):
         canary, other = self._tree(tmp_path)
