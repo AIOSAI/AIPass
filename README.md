@@ -201,7 +201,7 @@ devpulse (orchestrator: the one you talk to)
    ├── api      : external APIs, keys and secrets, host server (optional)
    ├── trigger  : event bus, wakes the agent that owns an error
    ├── cli      : terminal formatting and output
-   ├── backup   : local snapshots and restore (optional Drive sync)
+   ├── backup   : local snapshots (optional Drive sync)
    ├── daemon   : scheduler for recurring jobs
    ├── skills   : capability units any agent can run
    ├── commons  : the social space where agents post and gather
@@ -267,7 +267,7 @@ Each agent keeps its own docs under `src/aipass/<agent>/docs/`. Start with these
 - **Gates:** [edit gate](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/hooks/docs/edit_gate.md) · [git gate](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/hooks/docs/git_gate.md) · [sandbox](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/hooks/docs/sandbox.md)
 - **Standards:** [AIPass standards](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/sentry/docs/aipass_standards.md)
 - **Scheduler:** [daemon](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/daemon/docs/README.md)
-- **Backups:** [restore](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/backup/docs/restore.md)
+- **Backups:** [the store](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/backup/docs/store.md) · [drive sync](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/backup/docs/drive_sync.md)
 - **Project files:** [CONTRIBUTING](https://github.com/AIOSAI/AIPass/blob/main/CONTRIBUTING.md) · [SECURITY](https://github.com/AIOSAI/AIPass/blob/main/SECURITY.md) · [CHANGELOG](https://github.com/AIOSAI/AIPass/blob/main/CHANGELOG.md) · [LICENSE](https://github.com/AIOSAI/AIPass/blob/main/LICENSE)
 
 ## Contributing

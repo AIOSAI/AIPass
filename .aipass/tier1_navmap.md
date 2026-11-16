@@ -39,7 +39,7 @@ Every branch is built the same: `src/aipass/<name>/`, mail `@<name>` — `.trini
  - @skills — self-contained skill units any agent can run (inbox check, system status, screen lock).
  - @daemon — task scheduler; each branch owns its `.daemon/schedule.json`.
  - @commons — the social space: post, comment, vote.
- - @backup — local-first snapshots, drive sync, restore; `.backup/` also holds @memory rollover and @flow archives.
+ - @backup — local-first snapshots, drive sync; `.backup/` also holds @memory rollover and @flow archives.
 
 # Daily commands
 
