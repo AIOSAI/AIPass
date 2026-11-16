@@ -117,18 +117,10 @@ testpaths = ["tests", "src"]
 # docs.local and dropbox are untracked scratch and inbound relays; the test files
 # they hold are snapshots, never a suite, and they import nothing on the path.
 norecursedirs = ["templates", "*.egg-info", ".*", "__pycache__", "my-project", "docs.local", "dropbox"]
-# Telegram is retired (the owner, 2026-09-14; out of the tree 2026-10-22). The
-# skill lib sits untracked in projects/telegram; what stayed in the tree is
-# renamed (disabled). Every file or directory whose name carries "telegram" is
-# left out of collection: prax's relay test, the disabled daemon notifier and
-# hooks response. CodeQL carries the same exclusion in
-# .github/workflows/security.yml; sentry's audit reads a .sentryignore in
-# daemon, prax and hooks.
-addopts = ["--ignore-glob=*telegram*"]
 
 [tool.coverage.run]
 source = ["src/aipass"]
-omit = ["*/tests/*", "*/templates/*", "*telegram*"]
+omit = ["*/tests/*", "*/templates/*"]
 
 [tool.coverage.report]
 show_missing = true
