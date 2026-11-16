@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: backup_route.py
-# Description: Host API Backup Routes — the backup door's four routes, hung on the app
-# Version: 1.1.1
+# Description: Host API Backup Routes — the backup door's six routes, hung on the app
+# Version: 1.2.0
 # Created: 2026-10-16
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 # pyright: reportMissingImports=false, reportInvalidTypeForm=false, reportOptionalCall=false
 # The suppressions cover the optional-dependency placeholders, as in server.py:
@@ -12,7 +12,7 @@
 
 """
 Host API Backup Routes
-Here and not in server.py, which sits at its 1500-line cap. Reference: docs/host_surfaces.md"""
+Here and not in server.py, which sits at its 1500-line cap. Reference: docs/host_backup.md"""
 
 from typing import Any, Callable, Dict, Tuple
 
@@ -30,7 +30,7 @@ except ImportError as e:
 
 
 def register(app: Any, deny: Callable[..., Any], require_scope: Callable[[str], Any]) -> None:
-    """Add the four backup routes to *app*."""
+    """Add the six backup routes to *app*."""
 
     def _answered(outcome: Tuple[int, Dict[str, Any]]) -> Dict[str, Any]:
         status, body = outcome
@@ -76,5 +76,24 @@ def register(app: Any, deny: Callable[..., Any], require_scope: Callable[[str], 
     ) -> dict:
         """@backup's status for a project, its running list with this server's job ids."""
         return _answered(host_backup.answer(host_backup.read_status, project, sizes))
+
+    # def, not async: @backup's schedule reads @daemon's queue through drone.
+    @app.get("/v1/backup/schedule")
+    def backup_schedule(
+        project: str = "",
+        record: dict = Depends(require_scope("read")),
+    ) -> dict:
+        """@backup's schedule --json for a project, keys unchanged."""
+        return _answered(host_backup.answer(host_backup.read_schedule, project))
+
+    @app.post("/v1/backup/schedule")
+    def backup_schedule_set(
+        payload: dict = Body(default={}),
+        record: dict = Depends(require_scope("operate")),
+    ) -> dict:
+        """Set frequency and time, then on or off; 200 with the schedule read back."""
+        project = str(payload.get("project") or "")
+        fields = [payload.get(key) for key in ("on", "frequency", "time", "weekday", "day")]
+        return _answered(host_backup.answer(host_backup.set_schedule, project, *fields))
 
     json_handler.log_operation("host_api_backup_routes_registered", {"lanes": list(host_backup.LANES)})

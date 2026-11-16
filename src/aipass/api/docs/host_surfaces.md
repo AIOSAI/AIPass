@@ -1,8 +1,8 @@
 [<- Back to the README](../README.md)
 
-# The host surfaces — scopes, verbs, the face, the fleet, the terminal, uploads and backup
+# The host surfaces — scopes, verbs, the face, the fleet, the terminal and uploads
 
-**Branch** api · **Code** `apps/handlers/host/` (`verbs.py`, `face.py`, `fleet.py`, `attach.py`, `pump.py`, `uploads.py`, `backup.py`)
+**Branch** api · **Code** `apps/handlers/host/` (`verbs.py`, `face.py`, `fleet.py`, `attach.py`, `pump.py`, `uploads.py`)
 
 ---
 
@@ -249,43 +249,7 @@ at route-registration time without it, so the import is guarded and the route re
 either way — answering 503 with the install hint, a 404 on a route that should exist reading
 as "wrong URL".
 
-**The backup door proxies @backup and owns no backup.** `POST /v1/backup/run`,
-`POST /v1/backup/cancel`, `GET /v1/backup/job` and `GET /v1/backup/status` (`backup.py`,
-hung on the app by `backup_route.py`) reach `drone @backup` through drone's router and
-nothing else: a run is `drone @backup <lane> <root>` (`--quiet` on every lane but
-`drive_sync`, which has no such flag); a cancel is `drone @backup stop <root> <lane>`;
-status is `drone @backup status <root> --json [--sizes]`, passed through with `project`
-and `root` added.
-The root comes from the read lane's resolver (the seat or a census name), never a `@name`.
-A status answer that is not one JSON object is a 503; the Rich panel is never scraped.
-
-**A job is `{job, project, lane, state, started_at}`**; a finished one adds `finished_at`,
-`exit` (`null` when the lane never answered), `summary` and `error`. Refusals ride the
-`{error: {code, message}}` envelope: **400 `verb_refused`** (no or unknown lane or
-project, the lane already running) says its sentence; **503 `verb_unavailable`** gives a
-fixed sentence and a `ref` into this host's log.
-
-**`running` is @backup's list** (its running files: terminal and daemon runs too), entry
-for entry, each with `job`: this server's id for a run it started there under the entry's
-`verb`, else `null`. No `running` key (older @backup): this server's in-flight jobs and one
-log line. Not a list of objects: 503.
-
-**Cancel never touches the job table.** `stop` runs on the request thread (60 s timeout,
-over @backup's 30 s wait); the job closes when its lane exits.
-
-**Start and poll, because a lane outlives a request.**
-The run answers **202** with the job at once and runs the lane on a worker thread; the phone polls the job every few seconds. One job per project and lane at a
-time (a second is a 400 naming the first); different lanes overlap and
-@backup's own locks decide the rest. `summary` is the last 600 characters of the output,
-verbatim. A job ends `done` (exit 0), `stopped` (130) or `failed` (anything else).
-snapshot gets 30 min, all a day; drive_sync has no limit (a Drive
-rebuild is hours; cancel ends it). At a limit the server asks @backup to `stop` the
-lane, which exits 130 and clears its running file; drone's hang guard backs it up. A run that never reached @backup is a 503 and opens no job; one that died behind
-the door is a `failed` job with drone's sentence in `error`.
-
-**A restart forgets every job.** Jobs live in the server's memory, and a finished one is
-dropped after an hour. A forgotten id is **404 `job_unknown`**, and the phone then reads
-`/v1/backup/status`, whose answer comes from @backup's store and survives everything.
+The backup door has a page of its own: [host_backup.md](host_backup.md).
 
 Requires the optional `[host]` extra (`fastapi`, `uvicorn`); commands fail with install
 instructions if it is absent.

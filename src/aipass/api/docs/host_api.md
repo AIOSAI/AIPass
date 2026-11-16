@@ -90,10 +90,12 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `POST /v1/verbs/kill` | operate | `{branch, project}` → `baud --end-room`. Returns `room` and `ended` |
 | `POST /v1/verbs/lock` | operate | Empty body. Proxied to `@skills`' screen_lock. Never gated |
 | `POST /v1/verbs/new-project` | operate | `{name, template?}` → `aipass new` + its agent. 200 `{ok, name, project, target, template, agent, agent_home, detail}`; 400 `project_name_refused`/`template_refused`/`project_refused`, 409 `project_exists`, 503 `project_door_failed` |
-| `POST /v1/backup/run` | operate | `{project, lane}` → **202** the running job. Lanes `snapshot`, `all`, `drive_sync`. Same lane already running: **400**. See [host_surfaces.md](host_surfaces.md) |
-| `POST /v1/backup/cancel` | operate | `{project, lane}` → `drone @backup stop <root> <lane>`. **200** `{project, lane, stopped, message}`, stop's line. Nothing running: **404** `not_running`, @backup's first stdout line; none: **503**, stderr logged |
-| `GET /v1/backup/job?id=` | read | One job, `running`/`done`/`stopped` (exit 130)/`failed`, `summary` the output's tail. Forgotten: **404** `job_unknown` |
-| `GET /v1/backup/status?project=&sizes=` | read | `drone @backup status --json` passed through; each `running` entry gains `job` (this server's id, else `null`). No `--json` on this machine: **503** |
+| `POST /v1/backup/run` | operate | `{project, lane}` → **202** the running job. Lanes `snapshot`, `all`, `drive_sync`. Same lane running: **400**. See [host_backup.md](host_backup.md) |
+| `POST /v1/backup/cancel` | operate | `{project, lane}` → **200** `{project, lane, stopped, message}`. Nothing running: **404** `not_running` |
+| `GET /v1/backup/job?id=` | read | One job: `running`/`done`/`stopped`/`failed`. Forgotten: **404** `job_unknown` |
+| `GET /v1/backup/status?project=&sizes=` | read | `drone @backup status --json` passed through; each `running` entry gains `job`. No `--json`: **503** |
+| `GET /v1/backup/schedule?project=` | read | `drone @backup schedule --json` passed through, keys unchanged |
+| `POST /v1/backup/schedule` | operate | `{project, frequency?, time?, on?}` → **200** the schedule read back. A bad body or @backup refusing: **400** `verb_refused` |
 | `GET /v1/agent-settings?branch=&project=` | read | One branch's three owned claude settings; an absent key reads `null`. `project` names a census project's citizen, absent = the seat |
 | `POST /v1/agent-settings` | operate | `{branch, project?, patch}`. Three-state: absent touches nothing, `null` removes, a value sets; the file keeps its mode |
 | `GET /v1/baud-settings` | read | BAUD's own document for the seat, whole and opaque |
