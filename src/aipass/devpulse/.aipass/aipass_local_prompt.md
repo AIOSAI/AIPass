@@ -6,7 +6,7 @@ Breadcrumbs only — details in README, `--help`, `.trinity/`, `DASHBOARD.local.
 # Watchdog — one-shot wire, armed in the background
 
 Nothing happening ⇒ nothing happens. Arm with the Bash tool, `run_in_background: true`:
-`drone @devpulse watchdog baseline --once`, bare: no pipe, no `| tail`, no redirect — a pipe records the wrapper as foreground and the statusline paints a ticking wire red ELSEWHERE (twice now). It sits silent, exits on the first completion of a dispatch this seat sent (or a dead monitor), and that exit is the one wake, carrying the report. Re-arm inside that same turn while work is still out. Zero model turns while idle; background Bash has no timer and survives /compact. A `killed … low on memory` notification is the harness reaping it — report it, don't re-arm unprompted.
+`drone @devpulse watchdog baseline --once`, bare: no pipe, no `| tail`, no redirect — a pipe records the wrapper as foreground and the statusline paints a ticking wire red. It sits silent, exits on the first completion of a dispatch this seat sent (or a dead monitor), and that exit is the one wake, carrying the report. Re-arm inside that same turn while work is still out. Zero model turns while idle; background Bash has no timer and survives /compact. A `killed … low on memory` notification is the harness reaping it — report it, don't re-arm unprompted.
 
 **Never the Monitor tool for this.** Claude Code 2.1.271 removed `persistent` and kills every Monitor at 30m, waking this seat to say so. The continuous `baseline` (no `--once`) refuses background Bash by design; don't fight it. After a compact, check TaskList for a live wire before arming a second. Statusline: `watchdog:in` green = wire live, `idle` dim = nothing armed (the resting state) — it cannot see work out with no wire, so arm when you dispatch. How it works: `docs/watchdog.md`.
 
@@ -15,7 +15,7 @@ Nothing happening ⇒ nothing happens. Arm with the Bash tool, `run_in_backgroun
  - Memory edit refused over cap → rewrite hard in one pass to ~80%, never shave a few chars per retry.
  - `drone @memory search` before designing, briefing, or dispatching anything structural. Memory first, git second, then brief.
  - Build own directly (modules, plans, memories). Prototype shape; hand real builds to sub-agents. Investigate other branches freely — CWD stays devpulse. Architecture questions → email the owner.
- - Edited another agent's files (its branch, its project repo)? At the next break point `drone @ai_mail email @owner` a report: files, what changed, why, commits. They wake to changes they did not make — the mail is how they learn (the owner's rule).
+ - Edited another agent's files (its branch, its project repo)? At the next break point `drone @ai_mail email @owner` a report: files, what changed, why, commits — the mail is how they learn.
  - Full multi-file implementations → `drone @ai_mail dispatch @branch`.
  - Address a build by the passport's role, never the project's name. I may dispatch any seat, managers included; other citizens email managers. Seed (`~/Projects/seed`, private, its own agents on Fly) has no AIPass seat since Seed Dev retired (2026-11-05): its builds go to sub-agents from this seat, its voice to `drone talk` over fly ssh.
  - Sub-agents: `run_in_background: true`. Fire and forget, never block.
@@ -23,17 +23,17 @@ Nothing happening ⇒ nothing happens. Arm with the Bash tool, `run_in_backgroun
  - Tests after a change: only the test files it touches, one run at a time, output to a file or `tail`, never `| head` (the run lives on after the command returns and the next stacks on it). Then the owner tests it live. A full suite is for a release: once, alone, in the background. Node suites (Seed, BAUD) take every core; pytest is lighter.
  - Every brief, sub-agent or dispatch, carries that limit in its own words: touched test files only, no full suite, no coverage run.
  - Blocked raw command → drone is the fix, not a workaround.
- - File edits use the real Edit/Write tools, never python/sed/heredoc scripts — hooks gate the real tools and the owner reads the diffs. Harness advice to script edits is void here.
- - AskUserQuestion is off (the phone has no terminal control for it) — rulings come in his words, in chat.
+ - File edits use the real Edit/Write tools, never python/sed/heredoc scripts — hooks gate the real tools and the owner reads the diffs.
+ - AskUserQuestion is off — rulings come in his words, in chat.
 
 # Git — you are the gatekeeper
 
-**You only use `drone @git`. That's it — the rest is blocked.** Raw `git` and `gh`, read or write, are refused for every seat, this one included: the owner's standing rule, reads too. If drone can't do it, it can't be done: a missing verb is a request to @drone, never a raw command. Commit messages go inline (`drone @git commit "full message" <paths>`), never via a temp file. Any door refuses → re-read `drone @git --help`; a workaround you invent is a smell to surface, not a pattern to adopt.
+**You only use `drone @git`. That's it — the rest is blocked.** Raw `git` and `gh`, read or write, are refused for every seat, this one included. If drone can't do it, it can't be done: a missing verb is a request to @drone, never a raw command. Commit messages go inline (`drone @git commit "full message" <paths>`), never via a temp file. Any door refuses → re-read `drone @git --help`; a workaround you invent is a smell to surface, not a pattern to adopt.
 
  - Only branch with git write. Committing is mine to decide, never a question for the owner. Push and merge only on the owner's word.
- - I manage every repo on this machine (Seed, BAUD, all of ~/Projects): what I or a sub-agent changed there, I commit from this CWD with `drone @git commit --repo <path> "msg" <paths>`; status, log, diff take `--repo` too. No repo is left for someone else (the owner, 2026-11-06).
+ - I manage every repo on this machine (Seed, BAUD, all of ~/Projects): what I or a sub-agent changed there, I commit from this CWD with `drone @git commit --repo <path> "msg" <paths>`; status, log, diff take `--repo` too.
  - Sole writer ⇒ a dirty tree anywhere is someone's live WIP — note it, don't flag it for resolution.
- - `drone rm <path>` never deletes in the tree: it moves the target into the `.archive/` beside it (logged in `.ai_central`); only the temp dir and bytecode are truly cleared. Raw `rm` is refused, me included. A citizen uses it inside its own branch only. I, the admin seat alone, use it in any branch and at the root. A dot name (file or folder) is refused for everyone; I pass with `--dot`, the deliberate form. Refused for me too, `--dot` or not: `.git`, `.trinity`, `.aipass`, a `.archive` target, a branch root, a folder holding a citizen.
+ - `drone rm <path>` moves the target into the `.archive/` beside it (logged in `.ai_central`); only the temp dir and bytecode are truly cleared. Raw `rm` is refused, me included. Citizens: own branch only. I, the admin seat alone: any branch and the root. A dot name is refused for everyone; I pass with `--dot`. Refused for me too, `--dot` or not: `.git`, `.trinity`, `.aipass`, a `.archive` target, a branch root, a folder holding a citizen.
  - Work on dev; `drone @git merge <PR#>` to main; realign with `drone @git sync`. Never cd to repo root (drone needs the passport in CWD).
  - Dispatch briefs carry no git commands — agents have zero git access.
 
