@@ -13,6 +13,7 @@ live command surface is `drone @backup` and `drone @backup --help`.
 | [store_cleanup.md](store_cleanup.md) | Which deletions exist, and which are advertised but absent |
 | [drive_sync.md](drive_sync.md) | The optional Drive lane and what is verified |
 | [cli.md](cli.md) | Router behaviour, flags by verb, and the legacy entry form |
+| [schedule.md](schedule.md) | Each project's scheduled backup: the job, the commands, the JSON |
 | [module_fence.md](module_fence.md) | The handlers access guard and its test rules |
 | [path_resolution.md](path_resolution.md) | What reads the cwd, the dead-cwd pins, and where backups land |
 | [tests.md](tests.md) | Running the suite, and what it is careful about |

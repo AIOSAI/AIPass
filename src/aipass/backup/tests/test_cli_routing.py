@@ -32,6 +32,7 @@ from aipass.backup.apps.modules import (
     drive_stats,
     drive_sync,
     register,
+    schedule,
     settings,
     share,
     snapshot,
@@ -48,6 +49,7 @@ SIMPLE_MODULES = [
     pytest.param(drive_stats, id="drive_stats"),
     pytest.param(drive_clear, id="drive_clear"),
     pytest.param(settings, id="settings"),
+    pytest.param(schedule, id="schedule"),
 ]
 
 #: The verb past each help gate, spied so a gate that stops screening fails instead of doing the work.
@@ -239,7 +241,7 @@ class TestPrintHelp:
 
         # First word only: the 'all' row's description also names 'snapshot'.
         listed_verbs = [row.split()[0] for row in commands]
-        for mod in (snapshot, all_module, register, status, settings):
+        for mod in (snapshot, all_module, register, status, settings, schedule):
             verb = mod.PRIMARY_COMMAND
             assert verb in listed_verbs, f"COMMANDS block has no row for {verb}"
 
@@ -298,6 +300,7 @@ STANDALONE_ENTRY_MODULES = [
         id="drive_sync",
     ),
     pytest.param(register, "resolve_caller_path", lambda p: [str(p)], lambda p: call(str(p)), id="register"),
+    pytest.param(schedule, "resolve_project", lambda p: [str(p)], lambda p: call(str(p)), id="schedule"),
     pytest.param(share, "run_share", lambda p: [str(p)], lambda p: call(str(p), public=False), id="share"),
     pytest.param(snapshot, "run_snapshot", lambda p: [str(p)], lambda p: call(str(p), show_panels=True), id="snapshot"),
     pytest.param(status, "resolve_caller_path", lambda p: [str(p)], lambda p: call(str(p)), id="status"),

@@ -15,7 +15,7 @@ You are BACKUP — project-owned, local-first backups for any directory on this 
  - Run ceiling: measure the filtered set before copying, refuse loudly on breach.
  - Drive sync: optional, off by default, the only lane that leaves the machine.
 
-Not mine: compression, encryption. @daemon fires the nightly `all --registered` (05:00) from `.daemon/schedule.json`.
+Not mine: compression, encryption. @daemon fires each project's `backup-<name>` job (`all @name --quiet`) from `.daemon/schedule.json`; `schedule` writes it.
 
 # Where things are
 
@@ -31,6 +31,7 @@ apps/
 │   ├── drive_sync.py      # uploads the SNAPSHOT store to Drive, floor held back
 │   ├── prune.py           # lists (--apply deletes) stored copies the ignore spec matches
 │   ├── register.py        # registration + @name resolution
+│   ├── schedule.py        # per-project scheduled backup: read (--json), daily HH:MM, on|off
 │   ├── settings.py        # drive_sync on|off per project; anything else refuses
 │   ├── share.py           # single-file upload + share link
 │   ├── snapshot.py        # full mirror
@@ -47,6 +48,7 @@ apps/
     ├── project/           # config, registry, setup
     ├── report/            # result formatting
     ├── scan/              # walk, filter, run ceiling
+    ├── schedule/          # the per-project @daemon job in .daemon/schedule.json
     ├── state/             # changelog, metadata, timestamps, running files, stop flag, lane pid guard
     └── ui/                # settings window (archived under ui/.archive/)
 ```

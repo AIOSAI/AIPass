@@ -69,7 +69,8 @@ still runs. After the last project it prints one line each:
 
 and exits non-zero when any project failed, naming them on stderr. A project
 path or `@name` given together with `--registered` is refused and nothing runs;
-so is an empty registry. This is the line the nightly daemon job runs.
+so is an empty registry. Scheduled runs are per project, `all @name --quiet`;
+see [schedule](schedule.md).
 
 ## `settings`
 

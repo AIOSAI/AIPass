@@ -35,9 +35,9 @@ drone @backup status @myapp                            # what is stored, and whe
 The backups belong to the project, not to this branch: the store and the ignore
 file live in the target project's own root, so a project keeps its backups when
 this branch is not around. There is no compression and no encryption. The
-schedule is not this branch's either: @daemon fires `all --registered` at 05:00
-each night from this branch's `.daemon/schedule.json`, and any other backup
-happens when something asks for one.
+schedule is per project: `schedule` sets a registered project's daily time and
+turns it on or off, and @daemon fires that project's `all` from this branch's
+`.daemon/schedule.json`. Any other backup happens when something asks for one.
 
 ---
 
@@ -113,6 +113,7 @@ Depth lives in [docs/](docs/), one page per lane or handler group:
 | [store_cleanup.md](docs/store_cleanup.md) | Deletions that exist, and ones that do not |
 | [drive_sync.md](docs/drive_sync.md) | The Drive lane, and what is verified |
 | [cli.md](docs/cli.md) | Router behaviour, flags by verb, legacy entry form |
+| [schedule.md](docs/schedule.md) | Each project's scheduled backup, and its JSON |
 | [module_fence.md](docs/module_fence.md) | The handlers access guard |
 | [path_resolution.md](docs/path_resolution.md) | What reads the cwd, and where backups land |
 | [tests.md](docs/tests.md) | Running the suite |
