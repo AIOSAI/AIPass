@@ -31,7 +31,7 @@ apps/
 │   ├── drive_sync.py      # uploads the SNAPSHOT store to Drive, floor held back
 │   ├── prune.py           # lists (--apply deletes) stored copies the ignore spec matches
 │   ├── register.py        # registration + @name resolution
-│   ├── schedule.py        # per-project scheduled backup: read (--json), daily HH:MM, on|off
+│   ├── schedule.py        # per-project scheduled backup: read (--json), daily/weekly/monthly, on|off
 │   ├── settings.py        # drive_sync on|off per project; anything else refuses
 │   ├── share.py           # single-file upload + share link
 │   ├── snapshot.py        # full mirror

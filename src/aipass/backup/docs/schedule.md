@@ -18,17 +18,26 @@ setting, so it is true per project.
 ```
 drone @backup schedule <project|@name>              # plain lines
 drone @backup schedule <project|@name> --json       # one JSON object on stdout
-drone @backup schedule <project|@name> daily HH:MM  # every day at that 24-hour time
-drone @backup schedule <project|@name> on|off       # run it, or keep it and never run it
+drone @backup schedule <project|@name> daily HH:MM               # every day
+drone @backup schedule <project|@name> weekly WEEKDAY HH:MM      # monday..sunday
+drone @backup schedule <project|@name> monthly DAY HH:MM         # 1-31
+drone @backup schedule <project|@name> on|off                    # run it, or keep it and never run it
 ```
 
-The project must be registered: the job names it as `@name`. A new schedule is
-written by `daily HH:MM` and starts off; `on` is its own command. `on` or `off`
-with no schedule yet is refused. A time that is not a 24-hour `HH:MM`, any
-other word, `weekly` and `monthly` are refused on stderr, exit 2, nothing
-written. @daemon's schedule has daily, hourly, interval, once and rotation
-types and no weekly or monthly one; an interval of a week loses its weekday
-when the schedule changes, so weekly and monthly wait for @daemon types.
+The project must be registered: the job names it as `@name`. A new schedule
+starts off; `on` is its own command, and changing when a schedule runs keeps
+its on or off. `on` or `off` with no schedule yet is refused. `HH:MM` is
+24-hour with two digits each; `WEEKDAY` is a lowercase full English day name;
+`DAY` is a whole number 1 to 31 without a leading zero. A monthly day past the
+month's end runs on its last day (31 runs on 30 November and 28 or 29
+February), so no month is skipped. Anything else is refused on stderr, exit 2,
+nothing written.
+
+The job's `schedule` is @daemon's own shape:
+`{"type": "daily", "time": "05:00"}`,
+`{"type": "weekly", "weekday": "monday", "time": "05:00"}` or
+`{"type": "monthly", "day": 31, "time": "05:00"}`. Each fires in @daemon's
++/-15 minute window on a day it runs.
 
 ## `--json`
 
@@ -42,10 +51,13 @@ when the schedule changes, so weekly and monthly wait for @daemon types.
 
 - `scheduled` is false when the project has no job; then `on` is false and
   `frequency`, `time` and `next_run` are null.
-- `frequency` is `"daily"`; `weekday` and `day` are always null.
+- `frequency` is `"daily"`, `"weekly"` or `"monthly"`. `weekday` is the day
+  name for weekly and null otherwise; `day` is the number for monthly and null
+  otherwise.
 - `last_run`, `last_status` and `last_error` are @daemon's queue row for the
   job (`drone @daemon queue --json`), null before its first run.
-- `next_run` is the next local `HH:MM`, null when off.
+- `next_run` is the first run after now on a day the schedule runs, local,
+  null when off.
 - An unreadable schedule file, a job in a shape this verb does not write, an
   unreadable project config, @daemon unreachable or @daemon refusing the job:
   an error on stderr, exit 2, no JSON.
@@ -58,3 +70,8 @@ whole snapshot store. `notify` mails @devpulse on start and finish.
 and waits for the next day. Jobs due on the same tick fire one after another
 in file order, so a short project placed first does not wait behind a long
 upload.
+
+`register --remove <name>` removes the project's job before its registry
+entry, so no job is left to fail each night. A schedule file that cannot be
+read or written stops the removal with an error, and the project stays
+registered.

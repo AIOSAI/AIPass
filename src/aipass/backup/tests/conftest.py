@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: conftest.py
 # Description: Backup test configuration -- the json seam, Google seal, console pin and module-attribute resync
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-06-12
 # Modified: 2026-11-15
 # =============================================
@@ -14,6 +14,7 @@ import tempfile
 if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
+import json
 import logging
 import sys
 import types
@@ -26,6 +27,8 @@ import pytest
 from aipass.backup.apps.handlers.drive import client as drive_client
 from aipass.backup.apps.handlers.drive import upload as drive_upload
 from aipass.backup.apps.handlers.json import json_handler
+from aipass.backup.apps.handlers.project import registry
+from aipass.backup.apps.handlers.schedule import jobs
 from aipass.backup.apps.handlers.state import stop_flag
 from aipass.ai_mail.apps.modules import door_verified_caller
 from aipass.cli.apps.modules import display
@@ -88,6 +91,35 @@ def mock_infrastructure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     sandbox = json_handler.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
     return sandbox
+
+
+@pytest.fixture(autouse=True)
+def schedule_file(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Every test's schedule file is temp, beside tmp_path, never in it: tmp_path is often a project root."""
+    path = tmp_path_factory.mktemp("daemon") / "schedule.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "branch": "@backup",
+                "jobs": [
+                    {"id": "wake-test", "enabled": False, "schedule": {"type": "interval", "interval_minutes": 5}}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(jobs, "SCHEDULE_PATH", path)
+    return path
+
+
+@pytest.fixture
+def tmp_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point the project registry at a file under tmp_path, never the branch's real one."""
+    path = tmp_path / "registry" / "project_registry.json"
+    path.parent.mkdir()
+    monkeypatch.setattr(registry, "REGISTRY_PATH", path)
+    return path
 
 
 @pytest.fixture(autouse=True)

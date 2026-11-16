@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_drive_pipeline.py
 # Description: Tests for the Drive sync pipeline -- every Google edge sealed, zero live calls
-# Version: 3.1.3
+# Version: 3.1.4
 # Created: 2026-06-12
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/drive_sync.py and the apps/handlers/drive/ pipeline it drives."""
@@ -1066,7 +1066,7 @@ class TestDriveSync:
 
         printed = capsys.readouterr().out
         assert ran == []
-        assert "Usage: drive_sync <project_root> [options]" in printed
+        assert f"Usage: {drive_sync.USAGE}" in printed
         assert "--force" in printed
 
     def test_note_and_project_reach_the_upload_instead_of_the_defaults(

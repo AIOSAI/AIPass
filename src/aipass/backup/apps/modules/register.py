@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: register.py
 # Description: Register module — adds a project to backup and creates .backup/
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-17
-# Modified: 2026-10-21
+# Modified: 2026-11-15
 # =============================================
 
 """Register Module — register a project for backup and scaffold its .backup/."""
@@ -19,6 +19,7 @@ from aipass.backup.apps.handlers.path.caller import resolve_caller_path
 from aipass.backup.apps.handlers.project.registry import lookup_project as _lookup_project
 from aipass.backup.apps.handlers.project.registry import register_project, unregister_project
 from aipass.backup.apps.handlers.project.setup import create_backup_dir
+from aipass.backup.apps.handlers.schedule.jobs import ScheduleError, remove_job
 
 
 def resolve_project(target: str) -> str | None:
@@ -62,6 +63,25 @@ def print_help():
     print_introspection()
 
 
+def remove_project(name: str) -> None:
+    """Unregister ``name``, its scheduled backup job first; any refusal is an error on stderr."""
+    if _lookup_project(name) is None:
+        error(f"No registered project named '{name}'")
+        return
+    # The job goes first: a job left for an unregistered project would fail every night.
+    try:
+        job_removed = remove_job(name)
+    except ScheduleError as exc:
+        error(f"Not removed: the scheduled backup job could not be removed: {exc}")
+        return
+    if not unregister_project(name):
+        error(f"Failed to write the project registry removing '{name}'")
+        return
+    logger.info(f"[backup] Removed project '{name}' from the registry")
+    job_line = "; its scheduled backup job removed" if job_removed else ""
+    console.print(f"[green]Removed:[/green] {name} (its .backup/ store is left in place{job_line})")
+
+
 def handle_command(command: str, args: list) -> bool:
     """Handle the register command. Returns True if handled."""
     if command != PRIMARY_COMMAND:
@@ -81,14 +101,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if args[0] == "--remove":
-        name = args[1] if len(args) > 1 else ""
-        if _lookup_project(name) is None:
-            error(f"No registered project named '{name}'")
-        elif not unregister_project(name):
-            error(f"Failed to write the project registry removing '{name}'")
-        else:
-            logger.info(f"[backup] Removed project '{name}' from the registry")
-            console.print(f"[green]Removed:[/green] {name} (its .backup/ store is left in place)")
+        remove_project(args[1] if len(args) > 1 else "")
         return True
 
     project_path = str(resolve_caller_path(args[0]))

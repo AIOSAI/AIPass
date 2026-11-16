@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_caller_path.py
 # Description: Tests for caller-CWD path resolution across user-facing commands
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-08
 # Modified: 2026-11-15
 # =============================================
@@ -284,7 +284,7 @@ class TestEveryLaneUsesCallerCwd:
     @pytest.mark.parametrize(
         ("module", "runner", "args", "expected"),
         [
-            (snapshot, "run_snapshot", ["."], lambda root: call(root)),
+            (snapshot, "run_snapshot", ["."], lambda root: call(root, show_panels=True)),
             (all_mod, "run_all", ["."], lambda root: call(root, show_panels=True)),
             (drive_sync, "run_drive_sync", ["."], lambda root: call(root, project_name="", note="", force=False)),
             (drive_stats, "run_drive_stats", ["."], lambda root: call(root)),

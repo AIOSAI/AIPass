@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_all.py
 # Description: Tests for the all cycle's Drive switch, its Drive step's headroom refusal and the --registered run
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-10-16
 # Modified: 2026-11-15
 # =============================================
@@ -57,15 +57,6 @@ def drive_runs(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
     monkeypatch.setattr(drive_sync, "run_drive_sync", _record)
     return runs
-
-
-@pytest.fixture
-def tmp_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Point the project registry at a file under tmp_path, never the branch's real one."""
-    path = tmp_path / "registry" / "project_registry.json"
-    path.parent.mkdir()
-    monkeypatch.setattr(registry, "REGISTRY_PATH", path)
-    return path
 
 
 def _project(root: Path, files: int = 2, drive_sync_on: bool | None = None) -> Path:

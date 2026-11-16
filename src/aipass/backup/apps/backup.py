@@ -67,7 +67,9 @@ def print_help() -> None:
     console.print("  [green]status[/green]       Show backup info and recent history")
     console.print("  [green]prune[/green]        List stored copies the ignore spec now matches; --apply deletes them")
     console.print("  [green]settings[/green]     Turn a project's drive_sync on or off (the one live setting)")
-    console.print("  [green]schedule[/green]     Read or set a registered project's scheduled backup (daily, on/off)")
+    console.print(
+        "  [green]schedule[/green]     Read or set a registered project's scheduled backup (daily, weekly, monthly; on/off)"
+    )
     console.print("  [green]drive_sync[/green]   Upload the snapshot store to the remote drive, whatever the setting")
     console.print("  [green]drive_check[/green]  Test the remote drive connection")
     console.print("  [green]drive_stats[/green]  Drive usage statistics")
@@ -92,7 +94,9 @@ def print_help() -> None:
     console.print("  [green]--apply[/green]           prune: delete what the listing names (without it, nothing goes)")
     console.print()
     console.print("  [dim]settings takes one key: drive_sync on|off <project_path|@name>.[/dim]")
-    console.print("  [dim]schedule takes words, not flags: on, off, daily HH:MM; --json reads it.[/dim]")
+    console.print(
+        "  [dim]schedule takes words: on, off, daily HH:MM, weekly WEEKDAY HH:MM, monthly DAY HH:MM; --json reads it.[/dim]"
+    )
     console.print("  [dim]stop takes an optional lane word: snapshot, drive_sync or all.[/dim]")
     console.print()
     console.print("-" * 70)
