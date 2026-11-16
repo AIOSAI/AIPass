@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_host_verbs.py
 # Description: Tests for the host API verb lane — wake, kill, lock (FPLAN-0411 Phase 3)
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-14
-# Modified: 2026-11-14
+# Modified: 2026-11-16
 # =============================================
 
-"""Tests for apps/handlers/host/verbs.py and agent_route.py: wake, kill, lock, typing and model switches in a room."""
+"""Tests for apps/handlers/host/verbs.py and agent_route.py: wake, kill, lock, keys, model switches, feed notices."""
 
 # D0: every verb proxies the branch that owns the mechanism; the source-reading checks below are crude on purpose.
 
@@ -23,6 +23,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.api.apps.handlers.host import agent_chat as host_agent_chat
+from aipass.api.apps.handlers.host import agent_notices as host_agent_notices
 from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
@@ -1176,3 +1177,142 @@ class TestTheModelSwitchRefusals:
         response = api.post(MODEL, json={"model": "opus"}, headers={"Authorization": f"Bearer {raw}"})
 
         assert (response.status_code, fake.sends) == (403, [])
+
+
+# =============================================
+# AGENT FEED NOTICES — handlers/host/agent_chat.py, agent_transcript.py, agent_notices.py
+# =============================================
+
+FEED = "/v1/agent/AIPASS/devpulse/feed"
+
+
+def _mail(feed: Path, mail_id: str, ts: str, **extra: Any) -> None:
+    """Append one @ai_mail feed line for a mail delivered to devpulse in aipass."""
+    line = {"mail_id": mail_id, "recipient": "devpulse", "project": "aipass", "mail_kind": "mail", "ts": ts}
+    line.update(kind="mail", title="API -> DEVPULSE", body=f"{mail_id} landed\npreview", source="api")
+    line.update(extra)
+    _append(feed, line)
+
+
+def _append(path: Path, *rows: dict) -> Path:
+    """Append transcript, engine-log or feed rows, one JSON object a line."""
+    with path.open("a", encoding="utf-8") as fh:
+        fh.writelines(json.dumps(row) + "\n" for row in rows)
+    return path
+
+
+def _at(stamp: str, kind: str, text: str) -> dict:
+    """One Claude Code session row with its own timestamp."""
+    return {"type": kind, "timestamp": stamp, "message": {"role": kind, "content": text}}
+
+
+@pytest.fixture
+def mailed_seat(room: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """devpulse's Claude transcript under a tmp HOME, and one feed read of it."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    api, token, _ = room
+    path = tmp_path / ".claude" / "projects" / "-srv-aipass-devpulse" / "s-1.jsonl"
+    path.parent.mkdir(parents=True)
+
+    def read(since: Any = None) -> Any:
+        return api.get(FEED, params={} if since is None else {"since": since}, headers=token)
+
+    return path, read
+
+
+def _texts(read: Any, since: Any = None) -> list:
+    """The feed's lines after *since*."""
+    return read(since).json()["lines"]
+
+
+@fastapi_required
+class TestTheFeedCarriesMailNotices:
+    """GET /v1/agent/<p>/<n>/feed: the seat's delivered mail from the notification feed, as notice lines."""
+
+    def test_the_seats_mail_lands_between_the_rows_around_it_and_no_one_elses_does(
+        self, mailed_seat: Any, notice_feed: Path
+    ) -> None:
+        path, read = mailed_seat
+        first = _at("2026-11-04T10:00:00Z", "user", "go")
+        _append(path, first, _at("2026-11-04T10:05:00Z", "assistant", "done"))
+        _mail(notice_feed, "m1", "2026-11-04T10:02:00+00:00", mail_kind="medic")
+        _mail(notice_feed, "m2", "2026-11-04T10:02:30+00:00", recipient="hooks")
+        _mail(notice_feed, "m3", "2026-11-04T10:02:40+00:00", project="baud")
+        _mail(notice_feed, "m4", "2026-11-04T10:02:50+00:00", mail_kind="notice")
+        _mail(notice_feed, "m5", "2026-11-04T10:02:55+00:00", kind="wake")
+        _mail(notice_feed, "m6", "2026-11-04T10:03:00+00:00", mail_kind="later_kind")
+
+        lines = _texts(read)
+
+        assert lines[1] == {
+            "n": 1,
+            "role": "notice",
+            "kind": "medic",
+            "text": "@api: m1 landed",
+            "time": "2026-11-04T10:02:00+00:00",
+            "mail_id": "m1",
+        }
+        assert [(line["role"], line.get("mail_id"), line.get("kind")) for line in lines] == [
+            ("user", None, None),
+            ("notice", "m1", "medic"),
+            ("notice", "m6", "later_kind"),
+            ("agent", None, None),
+        ]
+        assert lines[3]["n"] == len(json.dumps(first)) + 1
+
+    def test_a_tail_notice_waits_while_the_agent_works_and_comes_once_after_a_late_stamped_row(
+        self, mailed_seat: Any, notice_feed: Path
+    ) -> None:
+        path, read = mailed_seat
+        _append(path, _at("2026-11-04T10:00:00Z", "user", "go"))
+        _mail(notice_feed, "m1", "2026-11-04T10:01:00+00:00")
+        polls = [_texts(read)]
+        # A reply is stamped when it starts: this one began before the mail and was written after it.
+        _append(path, _at("2026-11-04T10:00:30Z", "assistant", "late"))
+        polls.append(_texts(read, polls[-1][-1]["n"]))
+        _append(path, _at("2026-11-04T10:02:00Z", "assistant", "after"))
+        polls.append(_texts(read, polls[-1][-1]["n"]))
+        polls.append(_texts(read, polls[-1][-1]["n"]))
+
+        assert [[line["text"] for line in poll] for poll in polls] == [
+            ["go"],
+            ["late"],
+            ["@api: m1 landed", "after"],
+            [],
+        ]
+
+    def test_a_quiet_agent_gets_each_tail_notice_once_in_order(
+        self, mailed_seat: Any, notice_feed: Path, engine_log: Path
+    ) -> None:
+        path, read = mailed_seat
+        _append(path, _at("2026-11-04T10:00:00Z", "user", "go"))
+        _append(engine_log, {"ts": 1.0, "event": "Stop", "session_id": "s-1"})
+        _mail(notice_feed, "m1", "2026-11-04T10:01:00+00:00")
+        polls = [_texts(read)]
+        _mail(notice_feed, "m2", "2026-11-04T10:02:00+00:00")
+        polls.append(_texts(read, polls[-1][-1]["n"]))
+        polls.append(_texts(read, polls[-1][-1]["n"]))
+        _append(path, _at("2026-11-04T10:03:00Z", "user", "next"))
+        polls.append(_texts(read, polls[-2][-1]["n"]))
+
+        assert [[line["text"] for line in poll] for poll in polls] == [
+            ["go", "@api: m1 landed"],
+            ["@api: m2 landed"],
+            [],
+            ["next"],
+        ]
+        assert polls[1][0]["n"] == polls[0][1]["n"] + 1
+
+    def test_a_missing_notification_feed_is_logged_once_and_the_feed_goes_on_without_notices(
+        self, mailed_seat: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path, read = mailed_seat
+        log = MagicMock()
+        monkeypatch.setattr(host_agent_notices, "logger", log)
+        monkeypatch.setattr(host_agent_notices, "feed_path", lambda: tmp_path / "absent.jsonl")
+        _append(path, _at("2026-11-04T10:00:00Z", "user", "go"))
+
+        bodies = [read(), read()]
+
+        assert [(r.status_code, [line["text"] for line in r.json()["lines"]]) for r in bodies] == [(200, ["go"])] * 2
+        assert log.error.call_count == 1

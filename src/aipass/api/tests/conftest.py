@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for api tests
-# Version: 2.5.1
+# Version: 2.6.0
 # Created: 2026-03-05
-# Modified: 2026-11-14
+# Modified: 2026-11-16
 # Category: api/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -55,6 +55,7 @@ _json_mod = importlib.import_module(_JSON_MOD_PATH)
 
 # Plain imports: none needs the [host] extra, and a catch-all would silently switch off its reset fixture.
 from aipass.api.apps.handlers.host import agent_chat as _agent_chat
+from aipass.api.apps.handlers.host import agent_notices as _agent_notices
 from aipass.api.apps.handlers.host import attach as _attach
 from aipass.api.apps.handlers.host import fleet as _fleet
 from aipass.api.apps.handlers.host import refusals as _refusals
@@ -376,6 +377,16 @@ def engine_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """The hooks engine log agent_chat reads, moved into tmp_path: the live one is the whole fleet's."""
     path = tmp_path / "engine.jsonl"
     monkeypatch.setattr(_agent_chat, "engine_log", lambda: path)
+    return path
+
+
+@pytest.fixture(autouse=True)
+def notice_feed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The notification feed agent feeds take notices from, moved into tmp_path and empty: the live one is the fleet's."""
+    path = tmp_path / "agent_notifications.jsonl"
+    path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(_agent_notices, "feed_path", lambda: path)
+    monkeypatch.setattr(_agent_notices, "_cache", {"key": None, "events": []})
     return path
 
 

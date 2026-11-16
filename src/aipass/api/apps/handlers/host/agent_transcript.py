@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: agent_transcript.py
 # Description: Host API Agent Transcript — find a live agent's session file and read it as chat lines
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-11-04
-# Modified: 2026-11-10
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
+from aipass.api.apps.handlers.host import agent_notices
 
 TAIL_BYTES = 4 * 1024 * 1024  # tool results (file reads, images) make rows big: 512 KB held only a few turns
 MODEL_TAIL_BYTES = 1024 * 1024  # assistant rows are small; the big rows are tool results, which carry no model
@@ -375,15 +376,19 @@ def _call_ids(row: Dict[str, Any]) -> List[str]:
     return [str(p.get("id")) for p in parts if isinstance(p, dict) and p.get("type") == "tool_use"]
 
 
-def read_feed(path: Path, since: Optional[int] = None) -> List[dict]:
+def read_feed(
+    path: Path, since: Optional[int] = None, notices: Optional[List[dict]] = None, quiet: bool = True
+) -> List[dict]:
     """The transcript's lines after *since* (all in the tail when None), the last FEED_ROWS of them.
+
+    *notices* (feed lines) are placed among them by agent_notices.place; *quiet* is false while the agent works.
 
     A changed line the poller already holds without its change comes again once its result row is past *since*.
 
     A line's n is the byte offset of its row in the file plus the line's index within that row: stable while the
     file grows, so a poller keeps its place; it starts again near 0 in a new session's file.
     """
-    rows: List[Tuple[int, Dict[str, Any]]] = []
+    rows: List[Tuple[int, int, Dict[str, Any]]] = []
     results: Dict[str, Any] = {}  # a call's result row comes after it: read them all before any line is made
     landed: Dict[str, int] = {}  # where each result row sits: a poller past the call but not the result has no change
     for offset, chunk in tail_rows(path, TAIL_BYTES):
@@ -395,21 +400,27 @@ def read_feed(path: Path, since: Optional[int] = None) -> List[dict]:
             logger.warning("[host_api] skipped a bad transcript line in %s: %s", path.name, exc)
             continue
         if isinstance(row, dict):
-            rows.append((offset, row))
+            rows.append((offset, len(chunk), row))
             known = len(results)
             tool_results(row, results)
             if len(results) > known:
                 landed[next(reversed(results))] = offset
     lines: List[dict] = []
     model = None  # Codex's, from the last turn_context row read
-    for offset, row in rows:
+    spans = []
+    for offset, length, row in rows:
         if row.get("type") == "turn_context":
             model = display_model((row.get("payload") or {}).get("model"))
         # A result written after the poller's place: its call's line goes again, now with its change, under the same n.
         late = since is not None and any(landed.get(call, 0) > since for call in _call_ids(row))
-        for index, line in enumerate(to_lines(row, model, results)):
+        made = to_lines(row, model, results)
+        spans.append((offset, length, len(made), row.get("timestamp")))
+        for index, line in enumerate(made):
             if since is None or offset + index > since or (late and "change" in line):
                 lines.append({"n": offset + index, **line})
+    if notices:
+        placed = agent_notices.place(spans, notices, quiet)
+        lines = sorted(lines + [line for line in placed if since is None or line["n"] > since], key=lambda x: x["n"])
     json_handler.log_operation("host_api_agent_transcript_read", {"lines": len(lines), "since": since})
     return lines[-FEED_ROWS:]
 

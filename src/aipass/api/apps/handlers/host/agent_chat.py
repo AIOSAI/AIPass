@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: agent_chat.py
 # Description: Host API Agent Chat — a live agent's lookup, state, feed, and typing into its BAUD room
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-11-04
-# Modified: 2026-11-05
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -23,6 +23,7 @@ import aipass
 
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
+from aipass.api.apps.handlers.host import agent_notices
 from aipass.api.apps.handlers.host import agent_transcript as transcript
 from aipass.api.apps.handlers.host import fleet as host_fleet
 
@@ -188,17 +189,20 @@ def add_live_state(envelope: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def feed(project: str, name: str, since: Optional[int] = None) -> Dict[str, Any]:
-    """One live agent's feed: {lines, busy, waiting, session}; AgentUnknown or TranscriptUnavailable when unread."""
+    """One live agent's feed: {lines, busy, waiting, session}, its mail among the lines as notices.
+
+    AgentUnknown or TranscriptUnavailable when unread."""
     row = find_agent(project, name)
     path = transcript.transcript_path(row)
     if path is None:
         # shortcut: Claude and Codex only; OpenCode's db needs its own reader.
         raise TranscriptUnavailable("not_written" if row.get("provider") == "codex" else "unsupported_provider")
+    state, tool = agent_state(row, engine_rows() or [])
+    notices = agent_notices.seat_notices(project, name)
     try:
-        lines = transcript.read_feed(path, since)
+        lines = transcript.read_feed(path, since, notices, quiet=state != STATE_WORKING)
     except FileNotFoundError as exc:
         raise TranscriptUnavailable("missing") from exc
-    state, tool = agent_state(row, engine_rows() or [])
     json_handler.log_operation("host_api_agent_feed", {"agent": name, "project": project, "lines": len(lines)})
     return {
         "lines": lines,
