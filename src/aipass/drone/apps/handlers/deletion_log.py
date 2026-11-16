@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: deletion_log.py
 # Description: Durable record of every delete and archive-move drone performs
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-08-14
 # Modified: 2026-11-15
 # =============================================
@@ -214,11 +214,12 @@ def record_deletion(
     age: str | None = None,
     target: Path | str | None = None,
     moved_to: Path | str | None = None,
+    exemption: str | None = None,
 ) -> dict:
     """Write one deletion record to both channels and return it.
 
     ``caller``/``project_root``: the broker passes its HMAC-authenticated requester and served repo.
-    ``mode``/``age``/``target``/``moved_to`` add keys only when given; a plain delete keeps its twelve.
+    ``mode``/``age``/``target``/``moved_to``/``exemption`` add keys only when given; a plain delete keeps twelve.
     Never raises: losing the log must not turn into losing the delete.
     """
     cwd = caller_cwd()
@@ -243,6 +244,8 @@ def record_deletion(
         record["target"] = str(target)
     if moved_to is not None:
         record["moved_to"] = str(moved_to)
+    if exemption is not None:
+        record["exemption"] = exemption
 
     logger.info(
         "deletion record: %s %s%s by %s — %s (%s, size=%s, entries=%s)%s",

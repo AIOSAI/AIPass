@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: rm.py
 # Description: Module orchestrator for contained safe-delete: in-tree targets move to .archive
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-06-02
 # Modified: 2026-11-15
 # =============================================
@@ -36,7 +36,7 @@ from aipass.drone.apps.handlers.help_flags import wants_help
 
 DRONE_MODULE = {
     "name": "rm",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "description": "Contained safe-delete: in-tree targets move to .archive, temp is deleted",
 }
 
@@ -153,6 +153,8 @@ def print_help() -> None:
     console.print("  • A target inside a .archive is refused: emptying one is the owner's")
     console.print("  • A failed move fails loudly and moves nothing; a symlinked .archive refuses")
     console.print("  • Carve-outs: .git, .trinity, .aipass, .codex, .agents, other citizens' trees")
+    console.print("  • The verified admin seat alone may work inside other citizens' trees (never")
+    console.print("    a branch root, a carve-out or a .archive); unverifiable means refused")
     console.print("  • A project folder that CONTAINS another citizen is refused, naming it")
     console.print()
     console.print("[bold]Every move and delete is recorded:[/bold]")

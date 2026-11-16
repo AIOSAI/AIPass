@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_no_cwd_sweep.py
 # Description: Every location-inference site survives a deleted working directory
-# Version: 1.0.6
+# Version: 1.0.7
 # Created: 2026-08-31
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/router_handler.py caller_cwd and every site that infers a location from the cwd."""
@@ -117,7 +117,9 @@ class TestTheDeleteLaneSurvives:
     def test_the_current_branch_is_unknown(self, no_cwd, tmp_path):
         """Mutant killed: _current_branch_root walking a cwd it does not have; no branch is the caller's own."""
         (tmp_path / "somebranch" / ".trinity").mkdir(parents=True)
-        blocked, reason = rm_handler.check_carveouts((tmp_path / "somebranch" / "build").resolve(), tmp_path.resolve())
+        blocked, reason, _exemption = rm_handler.check_carveouts(
+            (tmp_path / "somebranch" / "build").resolve(), tmp_path.resolve()
+        )
         assert blocked is True
         assert "sibling branch somebranch/" in reason
 

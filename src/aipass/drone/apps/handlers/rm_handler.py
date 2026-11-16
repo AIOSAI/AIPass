@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: rm_handler.py
 # Description: Contained safe-delete: in-tree targets move to the local .archive
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-06-02
 # Modified: 2026-11-15
 # =============================================
@@ -24,6 +24,7 @@ from pathlib import Path
 
 from aipass.prax import logger
 from aipass.drone.apps.handlers import deletion_log
+from aipass.drone.apps.handlers.git import repo_door
 from aipass.drone.apps.handlers.router_handler import caller_cwd, find_project_root
 from aipass.drone.apps.handlers.json import json_handler
 
@@ -33,6 +34,8 @@ ARCHIVE_DIR = ".archive"
 # Interpreter output, rebuilt on the next import: archiving it keeps nothing worth having.
 _BYTECODE_DIR = "__pycache__"
 _BYTECODE_SUFFIX = ".pyc"
+# The owner's ruling: the verified admin seat, and only it, works inside every branch.
+ADMIN_EXEMPTION = "admin"
 
 
 def get_allowed_roots() -> list[Path]:
@@ -91,22 +94,38 @@ def check_protected_dirs(resolved: Path) -> tuple[bool, str]:
     return False, ""
 
 
-def check_carveouts(resolved: Path, project_root: Path | None) -> tuple[bool, str]:
-    """Refuse deletion of protected paths even inside allowed roots. Returns ``(blocked, reason)``."""
+def check_carveouts(
+    resolved: Path, project_root: Path | None, *, admin_may_cross: bool = False
+) -> tuple[bool, str, str | None]:
+    """Refuse protected paths even inside allowed roots; one exemption, the verified admin in a sibling's tree.
+
+    The branch root itself stays refused (retiring a citizen is @spawn's), and so does every
+    carve-out, which is judged first. Returns ``(blocked, reason, exemption used or None)``.
+    """
     blocked, reason = check_protected_dirs(resolved)
     if blocked:
-        return blocked, reason
+        return blocked, reason, None
 
     own = _current_branch_root(project_root)
     if project_root is not None:
         target_branch_root = _find_branch_root(resolved, project_root)
         if target_branch_root is not None and target_branch_root != own:
-            return True, f"Protected: path is inside sibling branch {target_branch_root.name}/"
+            if admin_may_cross and resolved != target_branch_root and _verified_admin():
+                return False, "", ADMIN_EXEMPTION
+            return True, f"Protected: path is inside sibling branch {target_branch_root.name}/", None
 
     blocked, reason = check_contained_citizens(resolved, project_root, own)
     if not blocked and own is not None and own.is_relative_to(resolved):
-        return True, f"Protected: path is your own branch {own.name}/ or holds it"
-    return blocked, reason
+        return True, f"Protected: path is your own branch {own.name}/ or holds it", None
+    return blocked, reason, None
+
+
+def _verified_admin() -> bool:
+    """@ai_mail's verified-caller rail, the hooks gates' rail, asked per path; it fails closed and logs why."""
+    verdict = repo_door.admin_verdict()
+    if not verdict.granted:
+        logger.info("rm: sibling fence holds for %s: %s", verdict.caller, verdict.refusal)
+    return verdict.granted
 
 
 def check_contained_citizens(resolved: Path, project_root: Path | None, own: Path | None) -> tuple[bool, str]:
@@ -241,7 +260,7 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
             )
             continue
 
-        blocked, carveout_reason = check_carveouts(resolved, project_root)
+        blocked, carveout_reason, exemption = check_carveouts(resolved, project_root, admin_may_cross=True)
         if blocked:
             results.append((path_str, False, carveout_reason))
             logger.warning(
@@ -277,7 +296,7 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
         measurement = deletion_log.measure(absolute)
 
         if _archives(resolved, project_root):
-            results.append(_move_to_archive(path_str, resolved, measurement, target))
+            results.append(_move_to_archive(path_str, resolved, measurement, target, exemption))
             continue
 
         try:
@@ -299,6 +318,7 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
                 reason=message,
                 measurement=measurement,
                 target=target,
+                exemption=exemption,
             )
         except Exception as exc:
             message = f"Delete failed: {exc}"
@@ -340,8 +360,10 @@ def _archive_destination(archive: Path, name: str) -> Path:
     return candidate
 
 
-def _move_to_archive(path_str: str, resolved: Path, measurement: dict, target: Path | None) -> tuple[str, bool, str]:
-    """Rename *resolved* into the ``.archive`` beside it and record the outcome.
+def _move_to_archive(
+    path_str: str, resolved: Path, measurement: dict, target: Path | None, exemption: str | None
+) -> tuple[str, bool, str]:
+    """Rename *resolved* into the ``.archive`` beside it and record the outcome, and any *exemption* used.
 
     One ``os.rename``, never a copy: it moves whole or not at all, and a cross-device target fails.
     A symlinked ``.archive`` is refused, as it would carry the target out of the tree.
@@ -366,10 +388,13 @@ def _move_to_archive(path_str: str, resolved: Path, measurement: dict, target: P
             reason=message,
             measurement=measurement,
             target=target,
+            exemption=exemption,
         )
         return path_str, False, message
 
     message = f"Moved: {resolved} -> {destination}" + (f" (symlink to {target})" if target is not None else "")
+    if exemption is not None:
+        message += f" ({exemption} seat, across the sibling fence)"
     logger.info("rm: moved %s to %s", resolved, destination)
     deletion_log.record_deletion(
         lane=deletion_log.LANE_RM,
@@ -380,6 +405,7 @@ def _move_to_archive(path_str: str, resolved: Path, measurement: dict, target: P
         measurement=measurement,
         target=target,
         moved_to=destination,
+        exemption=exemption,
     )
     return path_str, True, message
 

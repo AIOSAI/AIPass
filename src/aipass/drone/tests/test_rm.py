@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_rm.py
 # Description: drone rm: containment, carve-outs, the move to .archive, stale sweep
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-06-02
 # Modified: 2026-11-15
 # =============================================
@@ -16,6 +16,7 @@
 import json
 import os
 import shutil
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -23,6 +24,7 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.ai_mail.apps.modules import door_verified_caller as rail
 from aipass.drone.apps import drone as drone_cli
 from aipass.drone.apps.handlers import rm_handler
 from aipass.drone.apps.handlers.rm_handler import (
@@ -359,7 +361,7 @@ class TestCarveouts:
         git_dir = project_dir / ".git"
         git_dir.mkdir()
         resolved = git_dir.resolve()
-        blocked, reason = check_carveouts(resolved, project_dir.resolve())
+        blocked, reason, _exemption = check_carveouts(resolved, project_dir.resolve())
         assert blocked is True
         assert ".git" in reason
 
@@ -368,7 +370,7 @@ class TestCarveouts:
         git_dir = project_dir / ".git" / "objects"
         git_dir.mkdir(parents=True)
         resolved = git_dir.resolve()
-        blocked, reason = check_carveouts(resolved, project_dir.resolve())
+        blocked, reason, _exemption = check_carveouts(resolved, project_dir.resolve())
         assert blocked is True
         assert ".git" in reason
 
@@ -376,7 +378,7 @@ class TestCarveouts:
         trinity = project_dir / ".trinity"
         trinity.mkdir()
         resolved = trinity.resolve()
-        blocked, reason = check_carveouts(resolved, project_dir.resolve())
+        blocked, reason, _exemption = check_carveouts(resolved, project_dir.resolve())
         assert blocked is True
         assert ".trinity" in reason
 
@@ -385,7 +387,7 @@ class TestCarveouts:
         passport.parent.mkdir(parents=True)
         passport.write_text("{}", encoding="utf-8")
         resolved = passport.resolve()
-        blocked, reason = check_carveouts(resolved, project_dir.resolve())
+        blocked, reason, _exemption = check_carveouts(resolved, project_dir.resolve())
         assert blocked is True
         assert ".trinity" in reason
 
@@ -393,7 +395,7 @@ class TestCarveouts:
         aipass_dir = project_dir / ".aipass"
         aipass_dir.mkdir()
         resolved = aipass_dir.resolve()
-        blocked, reason = check_carveouts(resolved, project_dir.resolve())
+        blocked, reason, _exemption = check_carveouts(resolved, project_dir.resolve())
         assert blocked is True
         assert ".aipass" in reason
 
@@ -401,7 +403,7 @@ class TestCarveouts:
         codex = project_dir / ".codex"
         codex.mkdir()
         resolved = codex.resolve()
-        blocked, reason = check_carveouts(resolved, project_dir.resolve())
+        blocked, reason, _exemption = check_carveouts(resolved, project_dir.resolve())
         assert blocked is True
         assert ".codex" in reason
 
@@ -409,7 +411,7 @@ class TestCarveouts:
         agents = project_dir / ".agents"
         agents.mkdir()
         resolved = agents.resolve()
-        blocked, reason = check_carveouts(resolved, project_dir.resolve())
+        blocked, reason, _exemption = check_carveouts(resolved, project_dir.resolve())
         assert blocked is True
         assert ".agents" in reason
 
@@ -418,7 +420,7 @@ class TestCarveouts:
         build = project_dir / "build"
         build.mkdir()
         resolved = build.resolve()
-        blocked, _reason = check_carveouts(resolved, project_dir.resolve())
+        blocked, _reason, _exemption = check_carveouts(resolved, project_dir.resolve())
         assert blocked is False
 
     def test_refuse_sibling_branch(self, project_with_branches, monkeypatch):
@@ -427,7 +429,7 @@ class TestCarveouts:
         monkeypatch.chdir(drone_dir)
         target = project_with_branches / "src" / "aipass" / "api"
         resolved = target.resolve()
-        blocked, reason = check_carveouts(resolved, project_with_branches.resolve())
+        blocked, reason, _exemption = check_carveouts(resolved, project_with_branches.resolve())
         assert blocked is True
         assert "sibling branch" in reason
         assert "api" in reason
@@ -439,7 +441,7 @@ class TestCarveouts:
         target = drone_dir / "build"
         target.mkdir()
         resolved = target.resolve()
-        blocked, _reason = check_carveouts(resolved, project_with_branches.resolve())
+        blocked, _reason, _exemption = check_carveouts(resolved, project_with_branches.resolve())
         assert blocked is False
 
     def test_refuse_all_branches_when_outside(self, project_with_branches, monkeypatch):
@@ -448,7 +450,7 @@ class TestCarveouts:
         for branch in ("drone", "api", "flow"):
             target = project_with_branches / "src" / "aipass" / branch
             resolved = target.resolve()
-            blocked, _reason = check_carveouts(resolved, project_with_branches.resolve())
+            blocked, _reason, _exemption = check_carveouts(resolved, project_with_branches.resolve())
             assert blocked is True, f"Expected {branch} to be blocked"
 
     def test_git_file_worktree_pointer(self, project_dir):
@@ -458,7 +460,7 @@ class TestCarveouts:
         git_file = project_dir / ".git"
         git_file.write_text(f"gitdir: {real_git}", encoding="utf-8")
         resolved = git_file.resolve()
-        blocked, reason = check_carveouts(resolved, project_dir.resolve())
+        blocked, reason, _exemption = check_carveouts(resolved, project_dir.resolve())
         assert blocked is True
         assert ".git" in reason
 
@@ -496,7 +498,7 @@ class TestTemplateSkeletonIsNotACitizen:
         """@devpulse's report: the refusal named a thing that is not a citizen."""
         monkeypatch.chdir(project_with_template / "src" / "aipass" / "drone")
         stray = project_with_template / "src" / "aipass" / "spawn" / "templates" / "aipass_framework" / ".pytest_cache"
-        blocked, reason = check_carveouts(stray.resolve(), project_with_template.resolve())
+        blocked, reason, _exemption = check_carveouts(stray.resolve(), project_with_template.resolve())
         assert blocked is True
         assert "spawn" in reason
         assert "aipass_framework" not in reason
@@ -506,7 +508,7 @@ class TestTemplateSkeletonIsNotACitizen:
         spawn = project_with_template / "src" / "aipass" / "spawn"
         monkeypatch.chdir(spawn)
         stray = spawn / "templates" / "aipass_framework" / ".pytest_cache"
-        blocked, reason = check_carveouts(stray.resolve(), project_with_template.resolve())
+        blocked, reason, _exemption = check_carveouts(stray.resolve(), project_with_template.resolve())
         assert blocked is False, f"spawn refused inside its own tree: {reason}"
 
     def test_standing_in_a_template_is_standing_in_the_citizen(self, project_with_template, monkeypatch):
@@ -516,7 +518,7 @@ class TestTemplateSkeletonIsNotACitizen:
         spawn = project_with_template / "src" / "aipass" / "spawn"
         monkeypatch.chdir(spawn / "templates" / "aipass_framework")
         outside_the_skeleton = spawn / "build"
-        blocked, reason = check_carveouts(outside_the_skeleton.resolve(), project_with_template.resolve())
+        blocked, reason, _exemption = check_carveouts(outside_the_skeleton.resolve(), project_with_template.resolve())
         assert blocked is False, f"a caller standing in spawn's template was refused spawn's own tree: {reason}"
 
     def test_ordinary_branch_path_is_unchanged(self, project_with_template, monkeypatch):
@@ -525,7 +527,7 @@ class TestTemplateSkeletonIsNotACitizen:
         Mutant killed: _find_branch_root answering None (a normal branch stopped mapping to itself)."""
         monkeypatch.chdir(project_with_template / "src" / "aipass" / "spawn")
         target = project_with_template / "src" / "aipass" / "drone" / "build"
-        blocked, reason = check_carveouts(target.resolve(), project_with_template.resolve())
+        blocked, reason, _exemption = check_carveouts(target.resolve(), project_with_template.resolve())
         assert blocked is True
         assert "sibling branch drone/" in reason
 
@@ -533,7 +535,7 @@ class TestTemplateSkeletonIsNotACitizen:
         """Outermost-wins must not accidentally unprotect anything."""
         monkeypatch.chdir(project_with_template / "src" / "aipass" / "drone")
         target = project_with_template / "src" / "aipass" / "spawn"
-        blocked, reason = check_carveouts(target.resolve(), project_with_template.resolve())
+        blocked, reason, _exemption = check_carveouts(target.resolve(), project_with_template.resolve())
         assert blocked is True
         assert "spawn" in reason
 
@@ -809,6 +811,106 @@ class TestEdgeCases:
     def test_empty_paths_list(self):
         results = safe_delete([])
         assert results == []
+
+
+def _rail_answers(monkeypatch, verdict):
+    """Stand in for @ai_mail's verified-caller rail (another branch's edge): True, False, or an exception to raise."""
+
+    def answer():
+        if isinstance(verdict, Exception):
+            raise verdict
+        return verdict
+
+    monkeypatch.setattr(rail, "is_verified_admin_caller", answer)
+    monkeypatch.setattr(rail, "resolve_verified_caller", lambda: "@devpulse" if verdict is True else "@drone")
+
+
+@pytest.fixture()
+def at_drone_beside_api(project_with_branches, monkeypatch):
+    """Standing in @drone; @api is the sibling whose tree the admin may enter."""
+    monkeypatch.chdir(project_with_branches / "src" / "aipass" / "drone")
+    return project_with_branches / "src" / "aipass" / "api"
+
+
+class TestTheVerifiedAdminCrossesTheSiblingFence:
+    def test_the_admin_moves_a_sibling_file_into_that_branchs_archive_and_the_record_says_so(
+        self, at_drone_beside_api, monkeypatch, tmp_path
+    ):
+        _rail_answers(monkeypatch, True)
+        target = at_drone_beside_api / "README.md"
+
+        ((_, ok, message),) = safe_delete([str(target)])
+
+        assert ok is True, message
+        assert not target.exists()
+        assert (at_drone_beside_api / ".archive" / "README.md").read_text(encoding="utf-8") == "# api"
+        (record,) = _ledger(tmp_path)
+        assert (record["outcome"], record["exemption"]) == ("moved", "admin")
+
+    def test_a_caller_the_rail_says_is_not_admin_is_still_refused(self, at_drone_beside_api, monkeypatch, tmp_path):
+        _rail_answers(monkeypatch, False)
+        target = at_drone_beside_api / "README.md"
+
+        ((_, ok, message),) = safe_delete([str(target)])
+
+        assert ok is False
+        assert "sibling branch api/" in message
+        assert target.exists()
+        (record,) = _ledger(tmp_path)
+        assert "exemption" not in record
+
+    def test_a_raising_rail_fails_closed(self, at_drone_beside_api, monkeypatch):
+        _rail_answers(monkeypatch, RuntimeError("passport unreadable"))
+        target = at_drone_beside_api / "README.md"
+
+        ((_, ok, message),) = safe_delete([str(target)])
+
+        assert ok is False
+        assert "sibling branch api/" in message
+        assert target.exists()
+
+    def test_an_unimportable_rail_fails_closed(self, at_drone_beside_api, monkeypatch):
+        # Both: `from package import name` reads the package attribute before sys.modules.
+        monkeypatch.setitem(sys.modules, rail.__name__, None)
+        monkeypatch.delattr(sys.modules[rail.__name__.rpartition(".")[0]], "door_verified_caller")
+        target = at_drone_beside_api / "README.md"
+
+        ((_, ok, _),) = safe_delete([str(target)])
+
+        assert ok is False
+        assert target.exists()
+
+    @pytest.mark.parametrize(
+        ("relative", "refusal"),
+        [
+            ((".trinity",), "inside .trinity/"),
+            ((".archive", "old.md"), "inside .archive/"),
+            ((), "sibling branch api/"),
+        ],
+    )
+    def test_the_admin_is_still_refused_a_carveout_an_archive_and_the_branch_itself(
+        self, at_drone_beside_api, monkeypatch, relative, refusal
+    ):
+        _rail_answers(monkeypatch, True)
+        (at_drone_beside_api / ".archive").mkdir()
+        (at_drone_beside_api / ".archive" / "old.md").write_text("old", encoding="utf-8")
+        target = at_drone_beside_api.joinpath(*relative)
+
+        ((_, ok, message),) = safe_delete([str(target)])
+
+        assert ok is False
+        assert refusal in message
+        assert target.exists()
+
+    def test_the_admin_is_still_refused_a_folder_that_holds_citizens(self, at_drone_beside_api, monkeypatch):
+        _rail_answers(monkeypatch, True)
+        fleet = at_drone_beside_api.parent
+
+        ((_, ok, message),) = safe_delete([str(fleet)])
+
+        assert ok is False
+        assert "contains citizen" in message
+        assert (at_drone_beside_api / ".trinity").is_dir()
 
 
 @pytest.fixture()
