@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: close_ops.py
 # Description: Plan Closure Implementation Handler
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-03-08
 # Modified: 2026-11-15
 # =============================================
@@ -35,6 +35,7 @@ from aipass.flow.apps.handlers.plan.close_helpers import (
     _cleanup_orphaned_plan,
 )
 from aipass.flow.apps.handlers.plan.project_scope import archive_dir_for
+from aipass.flow.apps.handlers.plan.authority import authority_refusal, caller_address
 
 MODULE_NAME = "close_plan"
 
@@ -44,6 +45,7 @@ _UNSET = object()
 # Kept apart so out-of-scope rows (the fence) never hide inside excluded types (a choice).
 HELD_TYPE = "type"
 HELD_SCOPE = "scope"
+HELD_OWNER = "owner"
 
 
 def _caller_project_default() -> Any:
@@ -150,6 +152,7 @@ def close_plan_impl(
     close_all_plans_fn: Any = None,
     archive_plan_fn: Any = None,
     trigger_fire_fn: Any = None,
+    authority_refusal_fn: Any = authority_refusal,
 ) -> Dict[str, Any]:
     """
     Implement plan closure workflow
@@ -219,6 +222,15 @@ def close_plan_impl(
         plan_label = plan_file.stem if plan_file.name else f"PLAN-{plan_key}"
 
         plan_prefix = _extract_prefix(plan_label) or "FPLAN"
+
+        refusal = authority_refusal_fn(plan_file, plan_info)
+        if refusal:
+            return {
+                "success": False,
+                "messages": [{"type": "error_text", "text": refusal}],
+                "plan_key": plan_key,
+                "cancelled": False,
+            }
 
         if dry_run:
             location = plan_info.get("location", "unknown")
@@ -465,7 +477,7 @@ def close_plan_impl(
                 logger.warning(f"[{MODULE_NAME}] Self-heal verification failed: {e}")
                 messages.append({"type": "warning", "text": f"  Verification error: {e}"})
 
-        json_handler.log_operation("plan_closed", {"plan_key": plan_key, "success": True})
+        json_handler.log_operation("plan_closed", {"plan_key": plan_key, "caller": caller_address(), "success": True})
         return {
             "success": True,
             "messages": messages,
@@ -504,6 +516,7 @@ def close_all_plans_impl(
     update_dashboard_local: Any = None,
     push_to_plans_central: Any = None,
     push_flow_to_branch_dashboard: Any = None,
+    authority_refusal_fn: Any = authority_refusal,
 ) -> Dict[str, Any]:
     """
     Close every open plan that belongs to the CALLER'S project
@@ -568,6 +581,10 @@ def close_all_plans_impl(
                 held.append((plan_id, HELD_SCOPE, _scope_reason(row_project), plan_info))
                 continue
 
+            if authority_refusal_fn(Path(plan_info.get("file_path") or location), plan_info):
+                held.append((plan_id, HELD_OWNER, "another branch's plan", plan_info))
+                continue
+
             prefix = plan_id.split("-", 1)[0]
             if prefix in excluded_prefixes:
                 held.append((plan_id, HELD_TYPE, f"type {prefix} excluded", plan_info))
@@ -576,7 +593,8 @@ def close_all_plans_impl(
             resolved.append((plan_id, plan_info))
 
         held_by_type = sum(1 for _id, category, _reason, _info in held if category == HELD_TYPE)
-        held_out_of_scope = len(held) - held_by_type
+        held_by_owner = sum(1 for _id, category, _reason, _info in held if category == HELD_OWNER)
+        held_out_of_scope = len(held) - held_by_type - held_by_owner
 
         def _refusal_text(plan_num: str, plan_info: Dict[str, Any]) -> str:
             return (
@@ -593,6 +611,7 @@ def close_all_plans_impl(
                 "in_scope": len(resolved),
                 "held_by_type": held_by_type,
                 "held_out_of_scope": held_out_of_scope,
+                "held_by_owner": held_by_owner,
                 "refused": len(unresolved),
                 "excluded_types": sorted(excluded_prefixes),
             }

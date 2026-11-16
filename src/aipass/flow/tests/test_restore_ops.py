@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_restore_ops.py
 # Description: Tests for restore_ops handler -- plan restore business logic, and validator
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-29
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/plan/restore_ops.py and apps/handlers/plan/validator.py."""
@@ -19,6 +19,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.flow.apps.handlers.plan import authority
 from aipass.flow.apps.handlers.plan.restore_ops import (
     find_backup_copy,
     recover_plan_from_backup,
@@ -962,3 +963,39 @@ class TestRestoreOfANormallyClosedPlan:
         assert any(m.get("error_type") == "file_missing" for m in result["messages"])
         blob = " ".join(str(m.get("text", "")) for m in result["messages"])
         assert "Archive lookup" in blob and "no archived copy" in blob
+
+
+class TestRestoreAnswersToThePlansOwners:
+    def _setup(self, tmp_path, monkeypatch, caller: str):
+        branch = tmp_path / "beta"
+        (branch / ".trinity").mkdir(parents=True)
+        (branch / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+        row = {"status": "closed", "file_path": str(branch / "FPLAN-0001.md"), "location": str(branch)}
+        monkeypatch.setattr(authority, "resolve_verified_caller", lambda: caller)
+        restore_file = MagicMock(return_value=(branch / "FPLAN-0001.md", "copied"))
+        deps = _make_deps(load_registry=MagicMock(return_value={"plans": {"0001": row}}))
+        return row, restore_file, deps
+
+    def test_another_branch_is_refused_and_nothing_is_copied_back(self, tmp_path, monkeypatch):
+        row, restore_file, deps = self._setup(tmp_path, monkeypatch, "@alpha")
+
+        result = restore_plan_impl(plan_num="1", restore_file_from_backup_fn=restore_file, **deps)
+
+        assert result["success"] is False
+        assert "sits in @beta" in result["messages"][-1]["details"]
+        restore_file.assert_not_called()
+        deps["save_registry"].assert_not_called()
+        assert row["status"] == "closed"
+
+    def test_the_holder_restores_and_the_log_names_it(self, tmp_path, monkeypatch, mock_json_handler):
+        _row, restore_file, deps = self._setup(tmp_path, monkeypatch, "@beta")
+
+        with patch("aipass.trigger.apps.modules.core.trigger"):
+            result = restore_plan_impl(plan_num="1", restore_file_from_backup_fn=restore_file, **deps)
+
+        assert result["success"] is True
+        restore_file.assert_called_once()
+        mock_json_handler.assert_any_call(
+            "plan_restored",
+            {"plan_key": "0001", "location": str(tmp_path / "beta"), "caller": "@beta", "success": True},
+        )

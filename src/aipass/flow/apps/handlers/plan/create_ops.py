@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: create_ops.py
 # Description: Plan Creation Implementation Handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-08
 # Modified: 2026-11-15
 # =============================================
@@ -221,7 +221,13 @@ def create_plan_impl(
 
         json_handler.log_operation(
             "plan_created",
-            {"plan_number": NEXT_NUM, "location": RELATIVE_LOCATION, "template": template_type, "success": True},
+            {
+                "plan_number": NEXT_NUM,
+                "location": RELATIVE_LOCATION,
+                "template": template_type,
+                "created_by": registry["plans"][formatted_num].get("created_by", ""),
+                "success": True,
+            },
         )
         return True, NEXT_NUM, RELATIVE_LOCATION, template_type, "", messages
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
-# Description: Shared fixtures for flow tests - log redirect, console pin, command-state reset
-# Version: 1.4.0
+# Description: Shared fixtures for flow tests - log redirect, console pin, command-state reset, caller rail
+# Version: 1.5.0
 # Created: 2026-03-05
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Shared pytest fixtures for flow tests"""
@@ -36,6 +36,7 @@ import aipass.flow.apps.handlers.plan.close_helpers  # noqa: F401
 import aipass.flow.apps.handlers.plan.restore_ops  # noqa: F401
 import aipass.flow.apps.modules.aggregate_central  # noqa: F401
 import aipass.flow.apps.modules.registry_monitor  # noqa: F401
+from aipass.flow.apps.handlers.plan import authority
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -89,6 +90,15 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
     sandbox = json_handler_module.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
     return sandbox
+
+
+@pytest.fixture(autouse=True)
+def verified_caller(monkeypatch):
+    """The ai_mail rail is another branch: every test is @devpulse, the admin seat, unless it patches the caller."""
+    monkeypatch.setattr(authority, "resolve_verified_caller", lambda: "@devpulse")
+    monkeypatch.setattr(
+        authority, "is_verified_admin_caller", lambda: authority.resolve_verified_caller() == "@devpulse"
+    )
 
 
 @pytest.fixture

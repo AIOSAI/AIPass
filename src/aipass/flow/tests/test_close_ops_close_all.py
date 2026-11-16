@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_close_ops_close_all.py
 # Description: Tests for close_all_plans_impl, split from test_close_ops.py (oversize, leg 12)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-06
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for close_all_plans_impl in apps/handlers/plan/close_ops.py and the typed IDs it hands on."""
@@ -13,6 +13,7 @@
 
 from unittest.mock import MagicMock, patch
 
+from aipass.flow.apps.handlers.plan import authority
 from aipass.flow.apps.handlers.plan.close_ops import close_all_plans_impl
 from aipass.flow.apps.handlers.plan.registry_routing import canonical_plan_id
 from aipass.flow.tests.support_close_ops import _closed_ids, _held_ids, _scope
@@ -387,3 +388,34 @@ class TestExcludeTypeHoldsTypeBack:
         close_all(**_scope(tmp_path), get_open_plans=MagicMock(return_value=open_plans), close_plan_fn=mock_close)
         assert _closed_ids(mock_close) == ["APLAN-0004"]
         mock_bg.assert_called_once_with()
+
+
+class TestCloseAllHoldsAnotherBranchsPlans:
+    def test_a_foreign_branch_row_is_held_and_counted_not_closed(self, tmp_path, monkeypatch):
+        for name in ("alpha", "beta"):
+            (tmp_path / name / ".trinity").mkdir(parents=True)
+            (tmp_path / name / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(authority, "resolve_verified_caller", lambda: "@alpha")
+        own = {
+            "subject": "mine",
+            "location": str(tmp_path / "alpha"),
+            "file_path": str(tmp_path / "alpha" / "FPLAN-0001_m.md"),
+        }
+        foreign = {
+            "subject": "theirs",
+            "location": str(tmp_path / "beta"),
+            "file_path": str(tmp_path / "beta" / "FPLAN-0002_t.md"),
+        }
+        mock_close = MagicMock(return_value={"success": True, "messages": []})
+
+        with patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner") as runner:
+            result = close_all_plans_impl(
+                **_scope(tmp_path),
+                get_open_plans=MagicMock(return_value=[("1", own), ("2", foreign)]),
+                close_plan_fn=mock_close,
+            )
+
+        assert _closed_ids(mock_close) == ["FPLAN-1"]
+        runner.assert_called_once()
+        summary = next(m for m in result["messages"] if m.get("type") == "close_all_scope")
+        assert summary["held_by_owner"] == 1 and summary["held_out_of_scope"] == 0

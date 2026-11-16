@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_plan_handlers.py
 # Description: Tests for apps/handlers/plan/create_ops.py and sibling plan handlers
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-04-05
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/plan/create_ops.py and sibling plan handlers."""
@@ -20,6 +20,7 @@ import pytest
 
 from aipass.flow.apps.handlers.plan.create_ops import slugify_subject, create_plan_impl
 from aipass.flow.apps.handlers.plan.create_file import create_plan_file
+from aipass.flow.apps.handlers.plan import authority
 from aipass.flow.apps.handlers.plan.build_registry_entry import build_plan_registry_entry
 from aipass.flow.apps.handlers.plan.calculate_relative_path import calculate_relative_location
 from aipass.flow.apps.handlers.plan.resolve_location import resolve_plan_location
@@ -129,6 +130,13 @@ class TestBuildPlanRegistryEntry:
         assert entry["file_path"] == str(plan_file)
         assert entry["template_type"] == "default"
 
+    def test_the_row_records_the_verified_caller_as_creator(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(authority, "resolve_verified_caller", lambda: "@alpha")
+
+        entry = build_plan_registry_entry(1, tmp_path, "alpha", "brief", tmp_path / "FPLAN-0001.md", "default")
+
+        assert entry["created_by"] == "@alpha"
+
     def test_created_timestamp_is_iso_utc(self, tmp_path: Path):
         before = datetime.now(timezone.utc)
         entry = build_plan_registry_entry(
@@ -153,7 +161,16 @@ class TestBuildPlanRegistryEntry:
             plan_file=tmp_path / "p.md",
             template_type="master",
         )
-        required_keys = {"location", "relative_path", "created", "subject", "status", "file_path", "template_type"}
+        required_keys = {
+            "location",
+            "relative_path",
+            "created",
+            "subject",
+            "status",
+            "file_path",
+            "template_type",
+            "created_by",
+        }
         assert required_keys == set(entry.keys())
 
 
@@ -414,6 +431,17 @@ class TestCreatePlanImpl:
         deps["create_plan_file"].assert_called_once()
         deps["save_registry"].assert_called()
         bus.fire.assert_called_once_with("plan_created", plan_number=1, location="plans", subject="Widget feature")
+
+    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
+    def test_the_create_log_names_the_creator(self, mock_jh, bus):
+        deps = self._make_deps(build_plan_registry_entry=MagicMock(return_value={"created_by": "@alpha"}))
+
+        assert create_plan_impl(location="plans", subject="brief", template_type="default", **deps)[0] is True
+
+        mock_jh.log_operation.assert_any_call(
+            "plan_created",
+            {"plan_number": 1, "location": "plans", "template": "default", "created_by": "@alpha", "success": True},
+        )
 
     @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
     def test_a_number_a_row_holds_is_never_issued_again(self, mock_jh, bus):

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: close_plan.py
 # Description: PLAN closure module with registry cleanup
-# Version: 3.7.0
+# Version: 3.8.0
 # Created: 2025-11-25
 # Modified: 2026-11-15
 # =============================================
@@ -122,6 +122,7 @@ def _display_messages(messages: List[Dict[str, Any]]):
                     f"  [dim]held back by type ({', '.join(msg['excluded_types'])}):[/dim] {msg['held_by_type']}"
                 )
             console.print(f"  [dim]held back, another project:[/dim] {msg['held_out_of_scope']}")
+            console.print(f"  [dim]held back, another branch's plan:[/dim] {msg.get('held_by_owner', 0)}")
             if msg.get("refused"):
                 error(f"  refused (untyped registry row): {msg['refused']}")
             console.print()

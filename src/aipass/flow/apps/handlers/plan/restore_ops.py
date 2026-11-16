@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: restore_ops.py
 # Description: Plan Restore Implementation Handler
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-03-08
 # Modified: 2026-11-15
 # =============================================
@@ -20,6 +20,7 @@ from aipass.prax import logger
 
 from aipass.flow.apps.handlers.json import json_handler
 from aipass.flow.apps.handlers.plan.project_scope import archive_dir_for
+from aipass.flow.apps.handlers.plan.authority import authority_refusal, caller_address
 from aipass.flow.apps.handlers.plan.registry_routing import (
     _extract_prefix,
     _resolve_registry_file,
@@ -219,6 +220,7 @@ def restore_plan_impl(
     scan_plan_files: Any = None,
     update_dashboard_local: Any = None,
     push_to_plans_central: Any = None,
+    authority_refusal_fn: Any = authority_refusal,
 ) -> Dict[str, Any]:
     """Implement plan restore workflow
     Returns a dict with keys success, messages, plan_key, restored_location.
@@ -303,6 +305,11 @@ def restore_plan_impl(
                 "restored_location": "",
             }
 
+        refusal = authority_refusal_fn(plan_file, plan_info, "restore")
+        if refusal:
+            messages.append({"type": "error", "error_type": "general", "plan_key": plan_key, "details": refusal})
+            return {"success": False, "messages": messages, "plan_key": plan_key, "restored_location": ""}
+
         # A normally-closed plan's file is never at its registered path: close archives it.
         if not plan_file.exists():
             recovered_path, recovery_msg = restore_file_from_backup_fn(plan_info, plan_key)
@@ -373,7 +380,8 @@ def restore_plan_impl(
         trigger.fire("plan_restored", plan_number=plan_key, location=restored_location)
 
         json_handler.log_operation(
-            "plan_restored", {"plan_key": plan_key, "location": restored_location, "success": True}
+            "plan_restored",
+            {"plan_key": plan_key, "location": restored_location, "caller": caller_address(), "success": True},
         )
         return {
             "success": True,

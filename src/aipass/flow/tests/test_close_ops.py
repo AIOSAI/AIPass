@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_close_ops.py
 # Description: Tests for close_ops handler — plan closure business logic
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-29
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/plan/close_ops.py and its close_helpers, append_closed_plan and registry_routing modules."""
@@ -17,6 +17,7 @@ from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
+from aipass.flow.apps.handlers.plan import authority
 from aipass.flow.apps.handlers.plan.close_ops import (
     close_all_plans_impl,
     close_plan_impl,
@@ -684,3 +685,99 @@ class TestClosePlanImplValueError:
         result = close_plan_impl(plan_num="abc", **deps)
         assert result["success"] is False
         assert result["messages"][0]["text"] == "invalid_number"
+
+
+class TestACloseAnswersToThePlansOwners:
+    """A plan is closed by the branch holding it, its created_by citizen, or the verified admin seat."""
+
+    @staticmethod
+    def _seat(tmp_path, name: str) -> Path:
+        branch = tmp_path / name
+        (branch / ".trinity").mkdir(parents=True)
+        (branch / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+        return branch
+
+    def _setup(self, tmp_path, monkeypatch, caller: str, admin=False, created_by=None):
+        beta = self._seat(tmp_path, "beta")
+        self._seat(tmp_path, "alpha")
+        plan = beta / "FPLAN-0001_brief_2026-11-15.md"
+        plan.write_text("# FPLAN-0001: brief\nnotes\n", encoding="utf-8")
+        row = {"status": "open", "subject": "brief", "location": str(beta), "file_path": str(plan)}
+        if created_by is not None:
+            row["created_by"] = created_by
+        monkeypatch.setattr(authority, "resolve_verified_caller", lambda: caller)
+        monkeypatch.setattr(authority, "is_verified_admin_caller", admin if callable(admin) else lambda: admin)
+        return plan, row
+
+    @staticmethod
+    def _close(row: dict, deps: dict, dry_run: bool = False) -> dict:
+        deps["load_registry"].return_value = {"plans": {"1": row}}
+        with (
+            patch("aipass.flow.apps.handlers.plan.close_ops._resolve_registry_file", return_value=None),
+            patch("aipass.flow.apps.handlers.plan.close_ops._find_plan_across_registries", return_value=None),
+            patch("aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True),
+        ):
+            return close_plan_impl(plan_num="1", spawn_background=False, dry_run=dry_run, **deps)
+
+    def test_another_branch_is_refused_with_the_next_step_and_nothing_moves(self, tmp_path, monkeypatch):
+        plan, row = self._setup(tmp_path, monkeypatch, "@alpha")
+        deps = _make_deps()
+
+        result = self._close(row, deps)
+
+        assert result["success"] is False
+        text = result["messages"][0]["text"]
+        assert "sits in @beta" in text and "you are @alpha" in text
+        assert 'drone @ai_mail email @beta "close FPLAN-0001_brief_2026-11-15"' in text
+        deps["archive_plan_fn"].assert_not_called()
+        deps["save_registry"].assert_not_called()
+        assert plan.exists() and row["status"] == "open"
+
+    def test_a_dry_run_by_another_branch_is_refused_too(self, tmp_path, monkeypatch):
+        _plan, row = self._setup(tmp_path, monkeypatch, "@alpha")
+
+        result = self._close(row, _make_deps(), dry_run=True)
+
+        assert result["success"] is False
+
+    @pytest.mark.parametrize(
+        "caller, admin, created_by",
+        [("@beta", False, None), ("@alpha", False, "@alpha"), ("@devpulse", True, None)],
+        ids=["holder", "creator", "admin"],
+    )
+    def test_the_holder_the_creator_and_the_admin_close_it(self, tmp_path, monkeypatch, caller, admin, created_by):
+        _plan, row = self._setup(tmp_path, monkeypatch, caller, admin, created_by)
+        deps = _make_deps()
+
+        result = self._close(row, deps)
+
+        assert result["success"] is True
+        deps["archive_plan_fn"].assert_called_once()
+
+    def test_a_raising_admin_verifier_refuses(self, tmp_path, monkeypatch):
+        def boom():
+            raise RuntimeError("key unreadable")
+
+        _plan, row = self._setup(tmp_path, monkeypatch, "@devpulse", admin=boom)
+        deps = _make_deps()
+
+        assert self._close(row, deps)["success"] is False
+        deps["archive_plan_fn"].assert_not_called()
+
+    def test_an_unverified_caller_never_matches_an_unrecorded_creator(self, tmp_path, monkeypatch):
+        _plan, row = self._setup(tmp_path, monkeypatch, "", created_by="")
+        row["file_path"] = str(tmp_path / "loose" / "FPLAN-0001_brief_2026-11-15.md")
+        deps = _make_deps()
+
+        result = self._close(row, deps)
+
+        assert result["success"] is False
+        assert "sits in no branch" in result["messages"][0]["text"]
+        deps["save_registry"].assert_not_called()
+
+    def test_the_close_log_names_the_caller(self, tmp_path, monkeypatch, mock_json_handler):
+        _plan, row = self._setup(tmp_path, monkeypatch, "@beta")
+
+        assert self._close(row, _make_deps())["success"] is True
+
+        mock_json_handler.assert_any_call("plan_closed", {"plan_key": "1", "caller": "@beta", "success": True})
