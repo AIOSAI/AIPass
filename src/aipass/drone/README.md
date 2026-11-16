@@ -29,8 +29,9 @@ drone @git status                 # Read-only git, available to every branch
   merged in, so the same command works from a repo that is not this one.
 - **Owns git.** Read verbs for every branch, write verbs for the project's registry-declared owner,
   a door for repositories that are not AIPass, and one audit line per use of it.
-- **Deletes, and records it.** `drone rm` is the only sanctioned delete path in the fleet, and
-  every delete and every refusal lands in an audit store and in the logs.
+- **Deletes, and records it.** `drone rm` is the only sanctioned delete path in the fleet. Inside
+  the project it moves the target to the `.archive` beside it; every move, delete and refusal
+  lands in an audit store and in the logs.
 - **Discovers.** Commands are read from the branches themselves, so the inventory is generated
   rather than written down.
 

@@ -124,7 +124,7 @@ def print_help() -> None:
     table.add_row("remove <name>", "Remove a custom command")
     table.add_row(
         "rm [--stale AGE] <path>...",
-        "Contained safe-delete; --stale sweeps old *_json temps (drone rm --help)",
+        "Moves in-tree targets to .archive; --stale sweeps old *_json temps (drone rm --help)",
     )
     table.add_row(
         "@target ... --drone-timeout <n>",

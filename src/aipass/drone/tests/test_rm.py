@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rm.py
-# Description: drone rm contained safe-delete: containment, carve-outs, stale sweep
-# Version: 1.0.5
+# Description: drone rm: containment, carve-outs, the move to .archive, stale sweep
+# Version: 1.1.0
 # Created: 2026-06-02
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/rm.py and the rm_handler containment it drives."""
@@ -675,14 +675,18 @@ class TestASymlinkIsJudgedWhereItLives:
         assert "sibling branch flow/" in message
         assert link.is_symlink()
 
-    def test_a_link_in_my_branch_is_reported_as_the_link_and_its_target(self, aipass_dir, monkeypatch, tmp_path):
+    def test_a_link_in_my_branch_moves_as_the_link_and_is_reported_with_its_target(
+        self, aipass_dir, monkeypatch, tmp_path
+    ):
         monkeypatch.chdir(aipass_dir / "drone")
         link = aipass_dir / "drone" / "api_link"
         link.symlink_to(aipass_dir / "api", target_is_directory=True)
         ((_path, ok, message),) = safe_delete([str(link)])
-        assert message == f"Deleted: {link} (symlink to {aipass_dir / 'api'})"
+        moved = aipass_dir / "drone" / ".archive" / "api_link"
+        assert message == f"Moved: {link} -> {moved} (symlink to {aipass_dir / 'api'})"
         assert ok is True
         assert not link.is_symlink()
+        assert moved.is_symlink()
         assert (aipass_dir / "api" / ".trinity").is_dir()
         (record,) = _ledger(tmp_path)
         assert (record["path"], record.get("target")) == (str(link), str(aipass_dir / "api"))
@@ -805,6 +809,116 @@ class TestEdgeCases:
     def test_empty_paths_list(self):
         results = safe_delete([])
         assert results == []
+
+
+@pytest.fixture()
+def in_project(project_dir, monkeypatch):
+    """Stand in the fake project, so it is the tree drone rm archives inside."""
+    monkeypatch.chdir(project_dir)
+    return project_dir
+
+
+class TestAnInTreeTargetMovesToTheLocalArchive:
+    def test_a_file_moves_into_the_archive_beside_it_and_the_record_says_where(self, in_project, tmp_path):
+        target = in_project / "notes" / "draft.md"
+        target.parent.mkdir()
+        target.write_text("keep me", encoding="utf-8")
+
+        ((_, ok, message),) = safe_delete([str(target)])
+
+        moved = in_project / "notes" / ".archive" / "draft.md"
+        assert ok is True
+        assert not target.exists()
+        assert moved.read_text(encoding="utf-8") == "keep me"
+        assert str(moved) in message
+        (record,) = _ledger(tmp_path)
+        assert (record["outcome"], record["path"], record["moved_to"]) == ("moved", str(target), str(moved))
+
+    def test_a_directory_moves_whole(self, in_project):
+        target = in_project / "scratch"
+        (target / "deep").mkdir(parents=True)
+        (target / "deep" / "a.txt").write_text("a", encoding="utf-8")
+
+        ((_, ok, _),) = safe_delete([str(target)])
+
+        assert ok is True
+        assert not target.exists()
+        assert (in_project / ".archive" / "scratch" / "deep" / "a.txt").read_text(encoding="utf-8") == "a"
+
+    def test_a_name_already_archived_keeps_both_and_overwrites_nothing(self, in_project):
+        archive = in_project / ".archive"
+        archive.mkdir()
+        (archive / "plan.md").write_text("first", encoding="utf-8")
+        target = in_project / "plan.md"
+        target.write_text("second", encoding="utf-8")
+
+        ((_, ok, _),) = safe_delete([str(target)])
+
+        assert ok is True
+        assert (archive / "plan.md").read_text(encoding="utf-8") == "first"
+        (stamped,) = [p for p in archive.iterdir() if p.name != "plan.md"]
+        assert stamped.name.startswith("plan.md.")
+        assert stamped.read_text(encoding="utf-8") == "second"
+
+    @pytest.mark.parametrize("inside", [False, True])
+    def test_a_target_in_an_archive_is_refused_and_stays(self, in_project, tmp_path, inside):
+        archive = in_project / ".archive"
+        archive.mkdir()
+        (archive / "old.md").write_text("old", encoding="utf-8")
+        target = archive / "old.md" if inside else archive
+
+        ((_, ok, message),) = safe_delete([str(target)])
+
+        assert ok is False
+        assert ".archive" in message
+        assert (archive / "old.md").read_text(encoding="utf-8") == "old"
+        (record,) = _ledger(tmp_path)
+        assert record["outcome"] == "refused"
+
+    @pytest.mark.parametrize("name", ["__pycache__", "mod.cpython-312.pyc"])
+    def test_bytecode_is_truly_deleted_and_no_archive_is_made(self, in_project, tmp_path, name):
+        target = in_project / "pkg" / name
+        target.parent.mkdir()
+        if name == "__pycache__":
+            target.mkdir()
+            (target / "m.pyc").write_bytes(b"\0")
+        else:
+            target.write_bytes(b"\0")
+
+        ((_, ok, _),) = safe_delete([str(target)])
+
+        assert ok is True
+        assert not target.exists()
+        assert not (in_project / "pkg" / ".archive").exists()
+        (record,) = _ledger(tmp_path)
+        assert record["outcome"] == "deleted"
+
+    def test_a_temp_dir_target_outside_the_project_is_truly_deleted(self, in_project, tmp_path_factory, tmp_path):
+        target = tmp_path_factory.mktemp("scratch") / "junk.txt"
+        target.write_text("x", encoding="utf-8")
+
+        ((_, ok, _),) = safe_delete([str(target)])
+
+        assert ok is True
+        assert not target.exists()
+        assert not (target.parent / ".archive").exists()
+        (record,) = _ledger(tmp_path)
+        assert record["outcome"] == "deleted"
+
+    def test_an_archive_that_is_a_symlink_fails_loudly_and_nothing_moves(self, in_project, tmp_path_factory, tmp_path):
+        elsewhere = tmp_path_factory.mktemp("elsewhere")
+        (in_project / ".archive").symlink_to(elsewhere, target_is_directory=True)
+        target = in_project / "keep.md"
+        target.write_text("here", encoding="utf-8")
+
+        ((_, ok, message),) = safe_delete([str(target)])
+
+        assert ok is False
+        assert "symlink" in message
+        assert target.read_text(encoding="utf-8") == "here"
+        assert list(elsewhere.iterdir()) == []
+        (record,) = _ledger(tmp_path)
+        assert record["outcome"] == "failed"
 
 
 class TestRmModule:
@@ -1121,14 +1235,14 @@ class TestStaleRecord:
         assert record["requested"] == str(stale_tree["api"])
         assert record["size_bytes"] == 3
 
-    def test_a_plain_delete_keeps_its_twelve_keys(self, project_dir, monkeypatch, tmp_path):
-        """Without --stale the record is byte-for-byte what it was: no mode key."""
+    def test_a_plain_move_keeps_its_twelve_keys_plus_where_it_went(self, project_dir, monkeypatch, tmp_path):
+        """Without --stale there is no mode key; a move adds moved_to and nothing else."""
         monkeypatch.chdir(project_dir)
         target = project_dir / "build.log"
         target.write_text("x", encoding="utf-8")
         safe_delete([str(target)])
         (record,) = _ledger(tmp_path)
-        assert set(record) == _PLAIN_RECORD_KEYS
+        assert set(record) == _PLAIN_RECORD_KEYS | {"moved_to"}
 
 
 class TestStaleSummary:

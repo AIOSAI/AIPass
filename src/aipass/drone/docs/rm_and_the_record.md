@@ -1,13 +1,38 @@
 [<- Back to the README](../README.md)
 
-# `rm` and the record — every delete leaves one
+# `rm` and the record — every move and delete leaves one
 
 **Branch** drone · **Code** `apps/modules/rm.py`, `apps/handlers/rm_handler.py`,
 `apps/handlers/deletion_log.py`
 
 `drone rm` is the fleet's only sanctioned delete path — raw recursive `rm` is gate-blocked — which
 makes it the choke point where the record belongs: if something deletes, there is a record of it.
-The rules and the flags are `drone rm --help`.
+Inside the project it deletes nothing; the target moves to the `.archive` beside it. The rules and
+the flags are `drone rm --help`.
+
+---
+
+## Inside the project, a move
+
+A target under the project root moves to `<its folder>/.archive/<its name>`, the `.archive` made if
+absent. From the caller's side it is gone and out of the way; nothing is lost.
+
+- **One `os.rename`, never a copy.** It moves whole or not at all: a directory goes whole, and a
+  target on another device fails with the error rather than a half-done copy. A failure is recorded
+  `failed` and logged at ERROR.
+- **Nothing is overwritten.** A name already in that `.archive` keeps both: the new one is
+  `<name>.<YYYYmmdd-HHMMSS>`, with `-2`, `-3` added if that is taken too.
+- **A target inside a `.archive`, or the `.archive` itself, is refused.** Emptying an archive is the
+  owner's, by hand.
+- **A symlinked `.archive` is refused**, because the rename would carry the target out of the tree.
+- **A symlink target moves as the link**; what it points at is untouched.
+- **The fences are the same** as for a delete: carve-outs, sibling branches, a folder holding a
+  citizen. A move is judged before it runs, exactly as a delete was.
+
+True deletes stay where an archive keeps nothing worth having, each named in `rm_handler.py`: a
+target outside the project (the system temp dir), `__pycache__` and `*.pyc` (rebuilt on the next
+import), and stale mode. The broker lane (`apps/handlers/broker/daemon.py`) still deletes; `drone
+rm` never routes through it.
 
 ---
 
@@ -23,7 +48,8 @@ still proceeds — losing the log must not turn into losing the delete, and the 
 reached the logs either way.
 
 A record carries: `timestamp`, `lane`, `outcome`, `caller`, `cwd`, `requested` (what was typed),
-`path` (resolved), `reason`, `kind`, `size_bytes`, `entry_count`, `measured`. A stale-mode record
+`path` (resolved), `reason`, `kind`, `size_bytes`, `entry_count`, `measured`. A move's record has
+outcome `moved` and one key more, `moved_to`, the path it now lives at. A stale-mode record
 carries two more, `mode` and `age` (as typed), and its prax line names both; a plain delete's
 record keeps exactly the twelve, byte for byte.
 
@@ -32,8 +58,8 @@ Four things worth knowing:
 - **Refusals are records too.** A blocked delete leaves no other trace of what was attempted, which
   is exactly what makes it worth finding later. Refused paths are deliberately *not* measured — the
   guard just said that tree is off-limits, so nothing goes and reads inside it.
-- **Measurement happens before the delete.** After `rmtree` there is nothing left to ask how big it
-  was. Directory walks stop at `_MEASURE_ENTRY_CAP` and say so via `measured: "capped"` rather than
+- **Measurement happens before the move or delete.** After a delete there is nothing left to ask
+  how big it was. Directory walks stop at `_MEASURE_ENTRY_CAP` and say so via `measured: "capped"` rather than
   paying an unbounded walk.
 - **Severity is INFO on both channels.** A deletion through the sanctioned path is
   chosen behaviour, not a fault. The guards keep their own WARNING when they refuse — that is the

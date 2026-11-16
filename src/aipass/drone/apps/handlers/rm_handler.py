@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rm_handler.py
-# Description: Contained safe-delete handler
-# Version: 1.4.5
+# Description: Contained safe-delete: in-tree targets move to the local .archive
+# Version: 1.5.0
 # Created: 2026-06-02
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Contained safe-delete handler.
@@ -28,6 +28,11 @@ from aipass.drone.apps.handlers.router_handler import caller_cwd, find_project_r
 from aipass.drone.apps.handlers.json import json_handler
 
 _CARVEOUT_DIRS = frozenset((".git", ".trinity", ".aipass", ".codex", ".agents"))
+
+ARCHIVE_DIR = ".archive"
+# Interpreter output, rebuilt on the next import: archiving it keeps nothing worth having.
+_BYTECODE_DIR = "__pycache__"
+_BYTECODE_SUFFIX = ".pyc"
 
 
 def get_allowed_roots() -> list[Path]:
@@ -255,7 +260,25 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
             )
             continue
 
+        if ARCHIVE_DIR in resolved.parts:
+            message = f"Refused: {resolved} is inside {ARCHIVE_DIR}/ — emptying an archive is the owner's, by hand"
+            results.append((path_str, False, message))
+            logger.info("rm: %s", message)
+            deletion_log.record_deletion(
+                lane=deletion_log.LANE_RM,
+                outcome=deletion_log.OUTCOME_REFUSED,
+                requested=path_str,
+                resolved=resolved,
+                reason=message,
+                target=target,
+            )
+            continue
+
         measurement = deletion_log.measure(absolute)
+
+        if _archives(resolved, project_root):
+            results.append(_move_to_archive(path_str, resolved, measurement, target))
+            continue
 
         try:
             # Delete the RESOLVED path the guards judged: rmtree("spawn/..") fails its last rmdir.
@@ -292,6 +315,73 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
             )
 
     return results
+
+
+def _archives(resolved: Path, project_root: Path | None) -> bool:
+    """True when *resolved* is moved, not deleted: inside the project and not bytecode.
+
+    Outside the project means the system temp dir, the one place a true delete is the design.
+    """
+    if project_root is None or not resolved.is_relative_to(project_root):
+        return False
+    return _BYTECODE_DIR not in resolved.parts and resolved.suffix != _BYTECODE_SUFFIX
+
+
+def _archive_destination(archive: Path, name: str) -> Path:
+    """The first free name in *archive*: *name*, else *name* plus a time stamp, then a counter."""
+    candidate = archive / name
+    if not os.path.lexists(candidate):
+        return candidate
+    stamped = f"{name}.{time.strftime('%Y%m%d-%H%M%S')}"
+    candidate, count = archive / stamped, 1
+    while os.path.lexists(candidate):
+        count += 1
+        candidate = archive / f"{stamped}-{count}"
+    return candidate
+
+
+def _move_to_archive(path_str: str, resolved: Path, measurement: dict, target: Path | None) -> tuple[str, bool, str]:
+    """Rename *resolved* into the ``.archive`` beside it and record the outcome.
+
+    One ``os.rename``, never a copy: it moves whole or not at all, and a cross-device target fails.
+    A symlinked ``.archive`` is refused, as it would carry the target out of the tree.
+    """
+    archive = resolved.parent / ARCHIVE_DIR
+    destination: Path | None = None
+    try:
+        if archive.is_symlink():
+            raise OSError(f"{archive} is a symlink — an archive must be a real folder beside the target")
+        archive.mkdir(exist_ok=True)
+        # shortcut: free-name check then rename, a same-instant twin move can race it; renameat2 NOREPLACE if seen.
+        destination = _archive_destination(archive, resolved.name)
+        os.rename(resolved, destination)
+    except OSError as exc:
+        message = f"Move to {ARCHIVE_DIR} failed, nothing moved: {exc}"
+        logger.error("rm: move failed for %s: %s", path_str, exc)
+        deletion_log.record_deletion(
+            lane=deletion_log.LANE_RM,
+            outcome=deletion_log.OUTCOME_FAILED,
+            requested=path_str,
+            resolved=resolved,
+            reason=message,
+            measurement=measurement,
+            target=target,
+        )
+        return path_str, False, message
+
+    message = f"Moved: {resolved} -> {destination}" + (f" (symlink to {target})" if target is not None else "")
+    logger.info("rm: moved %s to %s", resolved, destination)
+    deletion_log.record_deletion(
+        lane=deletion_log.LANE_RM,
+        outcome=deletion_log.OUTCOME_MOVED,
+        requested=path_str,
+        resolved=resolved,
+        reason=message,
+        measurement=measurement,
+        target=target,
+        moved_to=destination,
+    )
+    return path_str, True, message
 
 
 MODE_STALE = "stale"
@@ -522,7 +612,7 @@ def _find_stale(
             continue
         visited.add(here)
         report.folders_scanned += 1
-        dirnames[:] = [name for name in dirnames if name not in _CARVEOUT_DIRS and name not in (".archive", "dropbox")]
+        dirnames[:] = [name for name in dirnames if name not in _CARVEOUT_DIRS and name not in (ARCHIVE_DIR, "dropbox")]
         if not here.name.endswith(_STALE_FOLDER_SUFFIX):
             continue
         for name in filenames:

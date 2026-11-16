@@ -3,7 +3,7 @@
 # Description: Tests for the gh passthrough verbs, release edit, restore and the external-repo door (--repo)
 # Version: 1.9.2
 # Created: 2026-10-08
-# Modified: 2026-11-11
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/git/repo_door.py, the gh verbs and release edit of apps/modules/git_module.py."""

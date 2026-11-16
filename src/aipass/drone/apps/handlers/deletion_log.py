@@ -1,15 +1,12 @@
 # =================== AIPass ====================
 # Name: deletion_log.py
-# Description: Durable record of every delete drone performs
-# Version: 1.3.1
+# Description: Durable record of every delete and archive-move drone performs
+# Version: 1.4.0
 # Created: 2026-08-14
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
-"""Durable record of every delete drone performs.
-
-Reference: docs/rm_and_the_record.md
-"""
+"""Durable record of every delete and archive-move drone performs: docs/rm_and_the_record.md."""
 
 from __future__ import annotations
 
@@ -42,6 +39,7 @@ _ROTATIONS = 1
 _MEASURE_ENTRY_CAP = 10_000
 
 OUTCOME_DELETED = "deleted"
+OUTCOME_MOVED = "moved"
 OUTCOME_REFUSED = "refused"
 OUTCOME_FAILED = "failed"
 OUTCOME_NOT_FOUND = "not_found"
@@ -215,11 +213,12 @@ def record_deletion(
     mode: str | None = None,
     age: str | None = None,
     target: Path | str | None = None,
+    moved_to: Path | str | None = None,
 ) -> dict:
     """Write one deletion record to both channels and return it.
 
     ``caller``/``project_root``: the broker passes its HMAC-authenticated requester and served repo.
-    ``mode``/``age``/``target`` add keys only when given; a plain delete keeps its twelve.
+    ``mode``/``age``/``target``/``moved_to`` add keys only when given; a plain delete keeps its twelve.
     Never raises: losing the log must not turn into losing the delete.
     """
     cwd = caller_cwd()
@@ -242,6 +241,8 @@ def record_deletion(
         record["age"] = age
     if target is not None:
         record["target"] = str(target)
+    if moved_to is not None:
+        record["moved_to"] = str(moved_to)
 
     logger.info(
         "deletion record: %s %s%s by %s — %s (%s, size=%s, entries=%s)%s",

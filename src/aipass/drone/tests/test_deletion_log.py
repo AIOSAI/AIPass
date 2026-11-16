@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_deletion_log.py
 # Description: Every drone delete, and every refused one, leaves a deletion record
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-08-14
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/deletion_log.py, the safe_delete path writing it and apps/modules/door_deletion_log.py."""
@@ -46,6 +46,12 @@ def project(tmp_path, monkeypatch):
     return tmp_path
 
 
+@pytest.fixture()
+def outside_project(tmp_path_factory):
+    """A temp folder outside the project: only a true delete there can take the cwd with it."""
+    return tmp_path_factory.mktemp("outside")
+
+
 def read_records(project_root: Path) -> list[dict]:
     """Return every record in the project's deletion log, oldest first."""
     log = deletion_log.deletion_log_path()
@@ -55,17 +61,17 @@ def read_records(project_root: Path) -> list[dict]:
 
 
 class TestDeletionIsRecorded:
-    def test_successful_delete_writes_a_record(self, project):
+    def test_a_successful_move_writes_a_record_naming_both_paths(self, project):
         target = project / "build"
         target.mkdir()
         (target / "a.txt").write_text("x", encoding="utf-8")
 
         safe_delete([str(target)])
 
-        records = read_records(project)
-        assert len(records) == 1
-        assert records[0]["outcome"] == "deleted"
-        assert records[0]["path"] == str(target.resolve())
+        (record,) = read_records(project)
+        assert record["outcome"] == "moved"
+        assert record["path"] == str(target.resolve())
+        assert record["moved_to"] == str(project.resolve() / ".archive" / "build")
 
     def test_refusal_writes_a_record(self, project, monkeypatch):
         """A guard refusal is the only trace that attempt leaves — record it."""
@@ -513,12 +519,12 @@ class TestRecordFailureIsContained:
 
         assert log.error.called, "a lost deletion record must be loud"
 
-    def test_deleting_the_current_directory_still_reports_success(self, project, monkeypatch):
+    def test_deleting_the_current_directory_still_reports_success(self, outside_project, monkeypatch):
         """The delete worked. Losing cwd must not turn it into a failure.
 
         The rmtree leaves no cwd (``Path.cwd()`` raises ENOENT); the record absorbs that, not the result.
         """
-        doomed = project / "scratch"
+        doomed = outside_project / "scratch"
         doomed.mkdir()
         (doomed / "f.txt").write_text("x", encoding="utf-8")
         monkeypatch.chdir(doomed)
@@ -528,12 +534,12 @@ class TestRecordFailureIsContained:
         assert results[0][1] is True, "the delete succeeded; the result must say so"
         assert not doomed.exists()
 
-    def test_deleting_the_current_directory_does_not_raise(self, project, monkeypatch):
+    def test_deleting_the_current_directory_does_not_raise(self, outside_project, monkeypatch):
         """safe_delete returns per-path results. It must not become a crash.
 
         A record raising on the success path, then again in the except handler, must not escape.
         """
-        doomed = project / "scratch"
+        doomed = outside_project / "scratch"
         doomed.mkdir()
         monkeypatch.chdir(doomed)
 
@@ -562,12 +568,12 @@ class TestRecordFailureIsContained:
 
         assert record["outcome"] == deletion_log.OUTCOME_DELETED
 
-    def test_a_successful_delete_is_never_logged_as_a_failure(self, project, monkeypatch):
+    def test_a_successful_delete_is_never_logged_as_a_failure(self, project, outside_project, monkeypatch):
         """The log said 'deleted' and 'delete failed' for one path, one second.
 
         Whoever reads the log next must not have to guess which line is true.
         """
-        doomed = project / "scratch"
+        doomed = outside_project / "scratch"
         doomed.mkdir()
         monkeypatch.chdir(doomed)
 
@@ -579,7 +585,7 @@ class TestRecordFailureIsContained:
         # Mutant killed: the success path writing its ledger record as outcome "failed".
         assert [r["outcome"] for r in read_records(project)] == [deletion_log.OUTCOME_DELETED]
 
-    def test_the_record_still_lands_when_the_cwd_is_deleted(self, project, monkeypatch):
+    def test_the_record_still_lands_when_the_cwd_is_deleted(self, project, outside_project, monkeypatch):
         """Losing cwd must not cost the durable half of the record.
 
         The store path walks up from cwd; with cwd gone the env override or tempdir home must still answer.
@@ -589,7 +595,7 @@ class TestRecordFailureIsContained:
         home.mkdir()
         monkeypatch.setattr(deletion_log, "_temp_dir", lambda: home)
         monkeypatch.delenv("AIPASS_DELETION_LOG", raising=False)
-        doomed = project / "scratch"
+        doomed = outside_project / "scratch"
         doomed.mkdir()
         monkeypatch.chdir(doomed)
 

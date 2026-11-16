@@ -1,15 +1,15 @@
 # =================== AIPass ====================
 # Name: rm.py
-# Description: Module orchestrator for contained safe-delete
-# Version: 1.1.1
+# Description: Module orchestrator for contained safe-delete: in-tree targets move to .archive
+# Version: 1.2.0
 # Created: 2026-06-02
-# Modified: 2026-09-11
+# Modified: 2026-11-15
 # =============================================
 
 """Module orchestrator for contained safe-delete.
 
-Thin orchestrator that delegates to rm_handler for path containment
-checks and deletion. Provider-agnostic alternative to shell ``rm``.
+Thin orchestrator that delegates to rm_handler for path containment checks and the move or
+delete. Provider-agnostic alternative to shell ``rm``.
 ``--stale AGE`` in any slot selects the stale-temp sweep instead (DPLAN-0338).
 """
 
@@ -36,8 +36,8 @@ from aipass.drone.apps.handlers.help_flags import wants_help
 
 DRONE_MODULE = {
     "name": "rm",
-    "version": "1.1.1",
-    "description": "Contained safe-delete (project + tmp)",
+    "version": "1.2.0",
+    "description": "Contained safe-delete: in-tree targets move to .archive, temp is deleted",
 }
 
 
@@ -128,7 +128,7 @@ def print_introspection() -> None:
     console.print()
     console.print("[bold cyan]rm — Contained Safe-Delete[/bold cyan]")
     console.print()
-    console.print("[dim]Deletes files and directories constrained to project root and system tmp.[/dim]")
+    console.print("[dim]Moves project files into the .archive beside them; deletes in the system tmp.[/dim]")
     console.print()
     console.print("Run [green]'drone rm --help'[/green] for usage information")
     console.print()
@@ -138,21 +138,27 @@ def print_help() -> None:
     """Display help (--help flag)."""
     console.print("Usage: drone rm <path> [<path>...]")
     console.print()
-    console.print("Contained safe-delete. Removes files and directories using pure Python")
-    console.print("(shutil.rmtree), constrained to the project root and system temp directory.")
+    console.print("Contained safe-delete, within the project root and the system temp dir.")
+    console.print("Inside the project nothing is deleted: the target MOVES to")
+    console.print("<its folder>/.archive/<its name> in one rename, a directory whole, the")
+    console.print(".archive made if absent. A name already archived keeps both: the new one")
+    console.print("gets a time stamp suffix. Nothing is overwritten.")
+    console.print("True deletes, and only these: the system temp dir, __pycache__, *.pyc, --stale.")
     console.print()
     console.print("[bold]Rules:[/bold]")
     console.print("  • Path must resolve under the project root or system temp dir")
     console.print("  • Cannot delete the project root or temp root itself")
     console.print("  • Symlinks are resolved; refuses if target escapes allowed roots")
     console.print("  • Nonexistent paths produce a clean error")
+    console.print("  • A target inside a .archive is refused: emptying one is the owner's")
+    console.print("  • A failed move fails loudly and moves nothing; a symlinked .archive refuses")
     console.print("  • Carve-outs: .git, .trinity, .aipass, .codex, .agents, other citizens' trees")
-    console.print("  • A project folder that CONTAINS another citizen is refused, naming the first one")
+    console.print("  • A project folder that CONTAINS another citizen is refused, naming it")
     console.print()
-    console.print("[bold]Every delete is recorded:[/bold]")
+    console.print("[bold]Every move and delete is recorded:[/bold]")
     console.print("  Successes AND refusals land in [cyan]<project>/.ai_central/deletions.jsonl[/cyan]")
-    console.print("  (timestamp, caller, cwd, resolved path, size/entries) and in the prax logs")
-    console.print("  at INFO. Nothing you delete through drone goes unwritten.")
+    console.print("  (timestamp, caller, cwd, resolved path, size/entries; a move adds moved_to)")
+    console.print("  and in the prax logs at INFO. Nothing removed through drone goes unwritten.")
     console.print()
     console.print("[bold]Stale mode — sweep old staging temps:[/bold]")
     console.print("  drone rm --stale AGE [--dry-run] DIR [DIR...]")
