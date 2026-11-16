@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_trinity_tripwire.py
 # Description: edit_gate's memory tripwire: a .trinity write a shell made is reported at PostToolUse, project-wide
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-11-10
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py: tripwire_snapshot and tripwire."""
@@ -16,6 +16,7 @@
 
 import json
 import logging
+from unittest.mock import patch
 
 from aipass.hooks.apps.handlers.security import edit_gate
 from aipass.hooks.tests.support_edit_gate_trinity import (
@@ -112,6 +113,30 @@ class TestShellMemoryTripwire:
         seat = self._seat(tmp_path, monkeypatch)
         result = self._around(seat, "drone @ai_mail inbox", during=lambda: self._over_cap(seat))
         assert "MEMORY WRITTEN FROM A SHELL" in self._context(result)
+
+    def test_a_snapshot_that_cannot_be_taken_refuses_the_call_with_one_stable_error(self, tmp_path, monkeypatch):
+        seat = self._seat(tmp_path, monkeypatch)
+        blocker = tmp_path / "not_a_dir"
+        blocker.write_text("", encoding="utf-8")
+        monkeypatch.setattr(edit_gate, "_TRIPWIRE_DIR", blocker)
+        with patch.object(edit_gate, "logger") as log:
+            result = edit_gate.tripwire_snapshot(self._data(seat, "ls"))
+        assert result["exit_code"] == 2
+        reason = json.loads(result["stdout"])["reason"]
+        assert "could not take this call's before-image (NotADirectoryError" in reason
+        assert "drone @hooks promote rollback" in reason
+        assert [c.args for c in log.error.call_args_list] == [(edit_gate.SNAPSHOT_FAILED_LOG,)]
+        assert str(blocker) in str(log.info.call_args_list)
+
+    def test_a_comparison_that_fails_tells_the_seat_and_logs_one_stable_error(self, tmp_path, monkeypatch):
+        seat = self._seat(tmp_path, monkeypatch)
+        torn = {"toolu_a": {"stats": {}}}
+        (tmp_path / "aipass-trinity-tripwire-session-1.json").write_text(json.dumps(torn), encoding="utf-8")
+        with patch.object(edit_gate, "logger") as log:
+            result = edit_gate.tripwire(self._data(seat, "ls"))
+        context = self._context(result)
+        assert context.startswith("MEMORY CHECK DID NOT RUN for this Bash call (KeyError")
+        assert [c.args for c in log.error.call_args_list] == [(edit_gate.TRIPWIRE_FAILED_LOG,)]
 
     def test_a_file_the_shell_left_unreadable_is_named(self, tmp_path, monkeypatch):
         seat = self._seat(tmp_path, monkeypatch)

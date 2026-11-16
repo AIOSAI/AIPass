@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.23.1
+# Version: 1.24.0
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
@@ -12,8 +12,9 @@
 """Blocks unsafe edits: inbox, cross-project, cross-branch and shell-to-memory writes, daemon confinement, diagnostics
 state. Reports a shell memory write the reader could not see, after the call.
 
-Failure mode: handle() refuses the call it was checking when it crashes; the tripwire pair report and never block,
-so a crash there leaves one call unwatched, logged. The engine refuses on import error and timeout for all three."""
+Failure mode: handle() refuses the call it was checking when it crashes, and so does tripwire_snapshot; tripwire
+runs after the call, so a crash there tells the seat its memory check did not run. The engine refuses on import
+error and timeout for all three."""
 
 import importlib
 import json
@@ -32,6 +33,20 @@ GATE_CRASHED = (
     "edit_gate could not check this call ({error}), so it is refused: a gate that cannot read a call "
     "does not let it through.\n"
     'Mail @hooks and @devpulse: drone @ai_mail email @hooks "Gate broken: edit_gate" "<what you ran, and this text>"'
+)
+# The tripwire pair: one fixed ERROR line per fault, so medic fingerprints it once; the cause follows at INFO.
+SNAPSHOT_FAILED_LOG = "[HOOKS] edit_gate tripwire: the memory snapshot could not be taken, Bash is refused until it can"
+TRIPWIRE_FAILED_LOG = "[HOOKS] edit_gate tripwire: the memory check failed, a shell write to memory may be unreported"
+SNAPSHOT_REFUSED = (
+    "The shell-memory tripwire could not take this call's before-image ({error}), so this Bash call is refused: "
+    "a memory write it cannot see would land unreported. Every Bash call in this seat is refused until it is "
+    "fixed; Read, Edit and Write still work, so drone cannot be reached from here.\n"
+    "Tell the user this text. The repair is outside this seat: the owner runs drone @hooks promote rollback "
+    "from a terminal, or clears the cause named above."
+)
+TRIPWIRE_DARK = (
+    "MEMORY CHECK DID NOT RUN for this Bash call ({error}): if the command wrote a .trinity file, nothing "
+    "measured it. Read your memory files; anything a shell wrote is re-landed with Edit/Write."
 )
 # Named for the log line only: WHO is decided by modules/admin_seat's verified rail. Spelled, not imported:
 # a handler reaches modules at call time. It must equal modules/admin_seat.ADMIN_SEAT; no test pins that.
@@ -1098,7 +1113,7 @@ def handle(hook_data: dict) -> dict:
 def tripwire_snapshot(hook_data: dict) -> dict:
     """PreToolUse (Bash): record the seat's memory-file stats under this call's tool_use_id.
 
-    Never blocks; a snapshot that cannot be taken leaves the call unwatched and logs it."""
+    A snapshot that cannot be taken refuses the call: an unwatched shell call is not let through."""
     try:
         if hook_data.get("tool_name") != "Bash":
             return {"stdout": "", "exit_code": 0}
@@ -1119,8 +1134,10 @@ def tripwire_snapshot(hook_data: dict) -> dict:
         scratch = path.with_name(f"{path.name}.{os.getpid()}.tmp")
         scratch.write_text(json.dumps(pending), encoding="utf-8")
         os.replace(scratch, path)
-    except Exception as exc:
-        logger.warning("[HOOKS] edit_gate tripwire: snapshot failed, this call goes unwatched: %s", exc)
+    except Exception as exc:  # declared FAIL_CLOSED: an unwatched call is refused, never let through
+        logger.error(SNAPSHOT_FAILED_LOG)
+        logger.info("[HOOKS] edit_gate tripwire: snapshot into %s: %s: %s", _TRIPWIRE_DIR, type(exc).__name__, exc)
+        return _refuse(SNAPSHOT_REFUSED.format(error=f"{type(exc).__name__}: {exc}"))
     return {"stdout": "", "exit_code": 0}
 
 
@@ -1161,7 +1178,8 @@ def tripwire(hook_data: dict) -> dict:
     """PostToolUse (Bash): if the seat's memory changed during the call, measure it on disk and say so loudly.
 
     Compared against the same tool_use_id's snapshot, so a memory Edit just before the call is never blamed.
-    A drone @memory or @spawn verb is the sanctioned writer. Never blocks: the command has already run."""
+    A drone @memory or @spawn verb is the sanctioned writer. Never blocks: the command has already run.
+    A comparison that fails says so to the seat and logs ERROR."""
     try:
         if hook_data.get("tool_name") != "Bash":
             return {"stdout": "", "exit_code": 0}
@@ -1199,6 +1217,9 @@ def tripwire(hook_data: dict) -> dict:
         log("[HOOKS] edit_gate tripwire: %s", context.replace("\n", " | "))
         output = {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": context}}
         return {"stdout": json.dumps(output), "exit_code": 0}
-    except Exception as exc:
-        logger.warning("[HOOKS] edit_gate tripwire: failed, memory change unreported: %s", exc)
-        return {"stdout": "", "exit_code": 0}
+    except Exception as exc:  # the call has run: nothing is left to refuse, so the seat is told the check is dark
+        logger.error(TRIPWIRE_FAILED_LOG)
+        logger.info("[HOOKS] edit_gate tripwire: comparison failed: %s: %s", type(exc).__name__, exc)
+        dark = TRIPWIRE_DARK.format(error=f"{type(exc).__name__}: {exc}")
+        output = {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": dark}}
+        return {"stdout": json.dumps(output), "exit_code": 0}

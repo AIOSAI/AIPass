@@ -489,9 +489,9 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "logged_fallback",
       "lines": [
-        613,
-        850,
-        906
+        628,
+        865,
+        921
       ],
       "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 613: the todos advisory text, never a verdict. 850 _seat_trinity and 906 _read_pending: the tripwire, which reports after the call and decides nothing."
     },
@@ -897,7 +897,7 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "fallback",
       "lines": [
-        704
+        719
       ],
       "reason": "Advisory only: the section-count note never blocks, and the caps that do block are judged by _evaluate_limits under the fail-closed refusal. Raising here would turn a dark config door into a refused memory write. It logs at WARNING, which @trigger escalates."
     },
@@ -905,7 +905,7 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "fallback",
       "lines": [
-        805
+        820
       ],
       "reason": "The gate writes nothing: a memory file already unparseable on disk, met by an edit that parses, is the agent's repair, judged as a new file. Refusing it would lock a broken memory file forever. WARNING names the file, and @trigger escalates it."
     },
@@ -913,7 +913,7 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "fallback",
       "lines": [
-        904
+        919
       ],
       "reason": "The hook's own per-session /tmp snapshot of in-flight Bash calls; a corrupt copy holds only stale stats, and starting fresh costs at most one unwatched call. Raising would darken the tripwire for the whole session. Logged at WARNING, which @trigger escalates."
     },

@@ -32,7 +32,17 @@ and the command ran no `drone @memory` or `drone @spawn` verb, the whole file is
 during this Bash call, outside the caps gate`, followed by every over-cap entry with its cut point. A file
 that measures clean is **said, not charged**: `MEMORY CHANGED DURING THIS BASH CALL`, which adds
 that it may not have been this command — @memory's rollover, run by *any* seat's compaction, writes here
-too. A clean change logs at INFO, a charged one at WARNING. It never blocks. Keying on `tool_use_id` is what keeps a memory Edit made just before the call from being blamed on it.
+too. A clean change logs at INFO, a charged one at WARNING. A report never blocks. Keying on `tool_use_id` is what keeps a memory Edit made just before the call from being blamed on it.
+
+**Both halves fail loud.** A snapshot that cannot be taken refuses the Bash call: an unwatched shell call is
+not let through. The text names the cause and says that every Bash call in that seat is refused until it is
+fixed, that Read, Edit and Write still work, and that the repair is outside the seat (`drone @hooks promote
+rollback` from a terminal, or the cause cleared), because a seat with no Bash cannot reach drone. It logs one
+fixed ERROR line, `[HOOKS] edit_gate tripwire: the memory snapshot could not be taken, Bash is refused until it
+can`, with the snapshot directory and cause at INFO. A comparison that fails runs after the command, so there is
+nothing left to refuse: the seat is told `MEMORY CHECK DID NOT RUN for this Bash call (<cause>)`, and one fixed
+ERROR line, `[HOOKS] edit_gate tripwire: the memory check failed, a shell write to memory may be unreported`,
+reaches medic with the cause at INFO.
 
 It watches **every `.trinity` in the project**, not just the seat's, and
 `passport.json` with `local.json` and `observations.json`. A cross-branch shell write is exactly the shape the reader cannot always see. The wording follows
