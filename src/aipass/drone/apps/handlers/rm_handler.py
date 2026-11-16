@@ -13,12 +13,14 @@ Roots match Codex sandbox boundaries: writable = {project, /tmp, $TMPDIR}.
 
 from __future__ import annotations
 
+import ctypes
 import os
 import re
 import shutil
 import stat
 import tempfile
 import time
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -106,23 +108,67 @@ def check_protected_dirs(resolved: Path) -> tuple[bool, str]:
     return False, ""
 
 
+@dataclass(frozen=True)
+class Seat:
+    """Who asks: their own branch root, and whether they hold the admin seat, asked per fence and path."""
+
+    own: Path | None
+    is_admin: Callable[[str], bool]
+
+
+def cli_seat(project_root: Path | None) -> Seat:
+    """The seat of a drone rm run in a shell: the cwd's branch, and @ai_mail's verified-caller rail."""
+    return Seat(own=_current_branch_root(project_root), is_admin=_verified_admin)
+
+
+@dataclass(frozen=True)
+class Verdict:
+    """One target judged: why it stays (None when it goes), the guards lifted, and move or true delete."""
+
+    refusal: str | None
+    exemption: str | None
+    moves: bool
+
+
+def judge(resolved: Path, project_root: Path | None, seat: Seat, *, lift_dot: bool) -> Verdict:
+    """The one decision every delete lane takes after its own containment: fences, archive, dot names, move or not."""
+    blocked, reason, exemption = check_carveouts(resolved, project_root, admin_may_cross=True, seat=seat)
+    if blocked:
+        return Verdict(reason, None, False)
+    if ARCHIVE_DIR in resolved.parts:
+        return Verdict(f"Refused: inside {ARCHIVE_DIR}/ — emptying an archive is the owner's, by hand", None, False)
+    moves = _archives(resolved, project_root)
+    dot = _dot_name(resolved, project_root) if moves else None
+    if dot is not None:
+        refusal = _dot_refusal(dot, lift_dot, seat)
+        if refusal is not None:
+            return Verdict(refusal, None, False)
+        exemption = DOT_EXEMPTION if exemption is None else f"{exemption}+{DOT_EXEMPTION}"
+    if moves and (resolved.parent / ARCHIVE_DIR).is_symlink():
+        archive_link = f"Refused: {ARCHIVE_DIR} beside the target is a symlink — an archive must be a real folder"
+        return Verdict(archive_link, None, False)
+    return Verdict(None, exemption, moves)
+
+
 def check_carveouts(
-    resolved: Path, project_root: Path | None, *, admin_may_cross: bool = False
+    resolved: Path, project_root: Path | None, *, admin_may_cross: bool = False, seat: Seat | None = None
 ) -> tuple[bool, str, str | None]:
     """Refuse protected paths even inside allowed roots; one exemption, the verified admin in a sibling's tree.
 
     The branch root itself stays refused (retiring a citizen is @spawn's), and so does every
-    carve-out, which is judged first. Returns ``(blocked, reason, exemption used or None)``.
+    carve-out, which is judged first. *seat* is the asker, the shell's when not given.
+    Returns ``(blocked, reason, exemption used or None)``.
     """
     blocked, reason = check_protected_dirs(resolved)
     if blocked:
         return blocked, reason, None
 
-    own = _current_branch_root(project_root)
+    seat = seat or cli_seat(project_root)
+    own = seat.own
     if project_root is not None:
         target_branch_root = _find_branch_root(resolved, project_root)
         if target_branch_root is not None and target_branch_root != own:
-            if admin_may_cross and resolved != target_branch_root and _verified_admin():
+            if admin_may_cross and resolved != target_branch_root and seat.is_admin("sibling fence"):
                 return False, "", ADMIN_EXEMPTION
             return True, f"Protected: path is inside sibling branch {target_branch_root.name}/{SIBLING_NEXT_STEP}", None
 
@@ -132,7 +178,7 @@ def check_carveouts(
     return blocked, reason, None
 
 
-def _verified_admin(fence: str = "sibling fence") -> bool:
+def _verified_admin(fence: str) -> bool:
     """@ai_mail's verified-caller rail, the hooks gates' rail, asked per path; it fails closed and logs why."""
     verdict = repo_door.admin_verdict()
     if not verdict.granted:
@@ -147,9 +193,9 @@ def _dot_name(resolved: Path, project_root: Path | None) -> str | None:
     return resolved.name
 
 
-def _dot_refusal(name: str, lift: bool) -> str | None:
+def _dot_refusal(name: str, lift: bool, seat: Seat) -> str | None:
     """Why a dot target stays, or None when the verified admin lifted the guard with ``--dot``."""
-    admin = _verified_admin("dot guard")
+    admin = seat.is_admin("dot guard")
     if admin and lift:
         return None
     reason = f"Protected: {name} is a dot name (a settings, identity or system file), and drone rm does not move it"
@@ -261,6 +307,7 @@ def _safe_delete_direct(paths: list[str], lift_dot: bool) -> list[tuple[str, boo
         return [(p, False, "No allowed roots found (no project registry, no temp dir)") for p in paths]
 
     project_root = find_project_root()
+    seat = cli_seat(project_root)
     json_handler.log_operation("rm", {"paths": paths, "roots": [str(r) for r in roots]})
 
     results: list[tuple[str, bool, str]] = []
@@ -297,28 +344,16 @@ def _safe_delete_direct(paths: list[str], lift_dot: bool) -> list[tuple[str, boo
             results.append(_refuse(path_str, resolved, reason, _shown(reason, resolved), target=target))
             continue
 
-        blocked, carveout_reason, exemption = check_carveouts(resolved, project_root, admin_may_cross=True)
-        if blocked:
-            shown = _shown(carveout_reason, resolved)
-            results.append(_refuse(path_str, resolved, carveout_reason, shown, target=target))
+        verdict = judge(resolved, project_root, seat, lift_dot=lift_dot)
+        if verdict.refusal is not None:
+            shown = _shown(verdict.refusal, resolved)
+            results.append(_refuse(path_str, resolved, verdict.refusal, shown, target=target))
             continue
-
-        if ARCHIVE_DIR in resolved.parts:
-            verdict = f"Refused: inside {ARCHIVE_DIR}/ — emptying an archive is the owner's, by hand"
-            results.append(_refuse(path_str, resolved, verdict, _shown(verdict, resolved), target=target))
-            continue
-
-        dot = _dot_name(resolved, project_root) if _archives(resolved, project_root) else None
-        if dot is not None:
-            refusal = _dot_refusal(dot, lift_dot)
-            if refusal is not None:
-                results.append(_refuse(path_str, resolved, refusal, _shown(refusal, resolved), target=target))
-                continue
-            exemption = DOT_EXEMPTION if exemption is None else f"{exemption}+{DOT_EXEMPTION}"
+        exemption = verdict.exemption
 
         measurement = deletion_log.measure(absolute)
 
-        if _archives(resolved, project_root):
+        if verdict.moves:
             results.append(_move_to_archive(path_str, resolved, measurement, target, exemption))
             continue
 
@@ -367,17 +402,50 @@ def _archives(resolved: Path, project_root: Path | None) -> bool:
     return _BYTECODE_DIR not in resolved.parts and resolved.suffix != _BYTECODE_SUFFIX
 
 
-def _archive_destination(archive: Path, name: str) -> Path:
-    """The first free name in *archive*: *name*, else *name* plus a time stamp, then a counter."""
-    candidate = archive / name
-    if not os.path.lexists(candidate):
-        return candidate
+_LIBC = ctypes.CDLL(None, use_errno=True)
+# renameat2's flag from linux/fs.h: fail with EEXIST rather than replace what holds the name.
+_RENAME_NOREPLACE = 1
+_ARCHIVE_NAME_TRIES = 1000
+
+
+def _rename_noreplace(src_dir_fd: int, src: str, dst_dir_fd: int, dst: str) -> None:
+    """One ``renameat2(RENAME_NOREPLACE)``: whole or not at all, and a taken *dst* raises FileExistsError."""
+    if _LIBC.renameat2(src_dir_fd, os.fsencode(src), dst_dir_fd, os.fsencode(dst), _RENAME_NOREPLACE) != 0:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err), dst)
+
+
+def _archive_names(name: str) -> Iterator[str]:
+    """*name*, then *name* plus a time stamp, then the stamp with a counter."""
+    yield name
     stamped = f"{name}.{time.strftime('%Y%m%d-%H%M%S')}"
-    candidate, count = archive / stamped, 1
-    while os.path.lexists(candidate):
-        count += 1
-        candidate = archive / f"{stamped}-{count}"
-    return candidate
+    yield stamped
+    for count in range(2, _ARCHIVE_NAME_TRIES):
+        yield f"{stamped}-{count}"
+
+
+def move_into_archive(parent_fd: int, name: str) -> str:
+    """Rename *name*, in the folder *parent_fd* holds, into the ``.archive`` there; return the name it took.
+
+    Never over anything: a name taken, even in the same instant, moves on to the next. The
+    ``.archive`` opens without following a link, so one swapped in for a symlink fails, never redirects.
+    """
+    try:
+        os.mkdir(ARCHIVE_DIR, dir_fd=parent_fd)
+    except FileExistsError:
+        logger.debug("rm: the %s is already there", ARCHIVE_DIR)
+    archive_fd = os.open(ARCHIVE_DIR, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
+    try:
+        for candidate in _archive_names(name):
+            try:
+                _rename_noreplace(parent_fd, name, archive_fd, candidate)
+            except FileExistsError:
+                logger.info("rm: %s is taken in the %s, trying the next name", candidate, ARCHIVE_DIR)
+                continue
+            return candidate
+    finally:
+        os.close(archive_fd)
+    raise FileExistsError(f"no free name for {name} in {ARCHIVE_DIR} after {_ARCHIVE_NAME_TRIES} tries")
 
 
 def _move_to_archive(
@@ -385,19 +453,14 @@ def _move_to_archive(
 ) -> tuple[str, bool, str]:
     """Rename *resolved* into the ``.archive`` beside it and record the outcome, and any *exemption* used.
 
-    One ``os.rename``, never a copy: it moves whole or not at all, and a cross-device target fails.
-    A symlinked ``.archive`` is refused before anything is tried: it would carry the target out of the tree.
+    One rename, never a copy: it moves whole or not at all, and a cross-device target fails.
     """
-    archive = resolved.parent / ARCHIVE_DIR
-    if archive.is_symlink():
-        verdict = f"Refused: {ARCHIVE_DIR} beside the target is a symlink — an archive must be a real folder"
-        shown = _shown(verdict, archive, resolved)
-        return _refuse(path_str, resolved, verdict, shown, measurement=measurement, target=target, exemption=exemption)
     try:
-        archive.mkdir(exist_ok=True)
-        # shortcut: free-name check then rename, a same-instant twin move can race it; renameat2 NOREPLACE if seen.
-        destination = _archive_destination(archive, resolved.name)
-        os.rename(resolved, destination)
+        parent_fd = os.open(resolved.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            destination = resolved.parent / ARCHIVE_DIR / move_into_archive(parent_fd, resolved.name)
+        finally:
+            os.close(parent_fd)
     except OSError as exc:
         message = f"Move to {ARCHIVE_DIR} failed, nothing moved: {exc}"
         fields = {"measurement": measurement, "target": target, "exemption": exemption}

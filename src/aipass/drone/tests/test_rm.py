@@ -952,6 +952,20 @@ class TestAnInTreeTargetMovesToTheLocalArchive:
         assert not target.exists()
         assert (in_project / ".archive" / "scratch" / "deep" / "a.txt").read_text(encoding="utf-8") == "a"
 
+    def test_a_name_taken_after_any_look_is_never_overwritten(self, in_project, monkeypatch, tmp_path):
+        """A twin move can take the name in the instant before the rename: only the rename itself may refuse it."""
+        (in_project / ".archive").mkdir()
+        (in_project / ".archive" / "plan.md").write_text("first", encoding="utf-8")
+        (in_project / "plan.md").write_text("second", encoding="utf-8")
+        monkeypatch.setattr(rm_handler, "_archive_names", lambda name: iter([name, f"{name}.twin"]))
+
+        ((_, ok, _),) = safe_delete([str(in_project / "plan.md")])
+
+        assert ok is True
+        assert (in_project / ".archive" / "plan.md").read_text(encoding="utf-8") == "first"
+        assert (in_project / ".archive" / "plan.md.twin").read_text(encoding="utf-8") == "second"
+        assert _ledger(tmp_path)[0]["moved_to"].endswith("plan.md.twin")
+
     def test_a_name_already_archived_keeps_both_and_overwrites_nothing(self, in_project):
         archive = in_project / ".archive"
         archive.mkdir()

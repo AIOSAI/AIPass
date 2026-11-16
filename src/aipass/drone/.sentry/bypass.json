@@ -240,6 +240,14 @@
       ],
       "reason": "save_registry: True = written, False = not written; every False is a failure (invalid structure, a failed write here, logged ERROR) and the success path returns True only. Callers add_command/remove_command report False as a failed save. load_registry never saves: a missing file reads as an empty registry. Fleet green leg 6, drone's decision.",
       "anchor": "return False"
+    },
+    {
+      "file": "apps/handlers/rm_handler.py",
+      "standard": "fallback",
+      "functions": [
+        "move_into_archive"
+      ],
+      "reason": "Two FileExistsError handlers that are the design, not a default: an .archive already there is the common case (mkdir is tried first because a check-then-mkdir races), and a name already taken in the .archive moves on to the next free name, never over it. Neither hides a failure: any other OSError raises to _move_to_archive and the broker, which record outcome failed at ERROR; running out of names raises FileExistsError."
     }
   ],
   "notes": {

@@ -17,10 +17,12 @@ the flags are `drone rm --help`.
 A target under the project root moves to `<its folder>/.archive/<its name>`, the `.archive` made if
 absent. From the caller's side it is gone and out of the way; nothing is lost.
 
-- **One `os.rename`, never a copy.** It moves whole or not at all: a directory goes whole, and a
+- **One rename, never a copy.** It moves whole or not at all: a directory goes whole, and a
   target on another device fails with the error rather than a half-done copy. A failure is recorded
   `failed` and logged at ERROR.
-- **Nothing is overwritten.** A name already in that `.archive` keeps both: the new one is
+- **Nothing is overwritten.** The rename is `renameat2(RENAME_NOREPLACE)`, so a taken name, even one
+  taken in the same instant by a twin move, is refused by the kernel, never replaced. A name already
+  in that `.archive` keeps both: the new one is
   `<name>.<YYYYmmdd-HHMMSS>`, with `-2`, `-3` added if that is taken too.
 - **A target inside a `.archive`, or the `.archive` itself, is refused.** Emptying an archive is the
   owner's, by hand.
@@ -32,8 +34,8 @@ absent. From the caller's side it is gone and out of the way; nothing is lost.
 Truly deleted, and only where an archive keeps nothing worth having, each case named in
 `rm_handler.py`: files in the system temp dir (outside the project), Python bytecode
 (`__pycache__`, `*.pyc`, rebuilt on the next import) and stale-mode temps. Everything else is
-moved. The broker lane (`apps/handlers/broker/daemon.py`) still deletes; `drone rm` never routes
-through it.
+moved. The broker lane (`apps/handlers/broker/daemon.py`) takes the same decision through the same
+function, `rm_handler.judge()`, and moves through the same `move_into_archive()`; see below.
 
 Each result prints as a verdict line, then every path whole on a line of its own (a move shows the
 source, then `-> ` and the destination), unwrapped, so a long path copies intact. A refusal ends
@@ -97,7 +99,7 @@ Four things worth knowing:
 store is bounded at 2 MB with one rotation, because a delete log that grows forever becomes the
 runaway log the monitoring lane exists to catch.
 
-Both delete lanes feed it: `rm`, and the broker (`apps/handlers/broker/daemon.py`), which deletes on
+Both lanes feed it: `rm`, and the broker (`apps/handlers/broker/daemon.py`), which acts on
 behalf of an HMAC-authenticated requester and therefore passes that identity in rather than reading
 its own cwd. The broker's protocol audit log is unchanged — that records requests and error codes;
 this records deletions.

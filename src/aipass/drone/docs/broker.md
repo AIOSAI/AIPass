@@ -1,14 +1,28 @@
 [<- Back to the README](../README.md)
 
-# The broker — a delete lane with a server-side path check
+# The broker — a removal lane with a server-side path check
 
 **Branch** drone · **Code** `apps/modules/broker.py`, `apps/handlers/broker/` (daemon, client,
 path_resolver, protocol)
 
-The broker deletes on behalf of an HMAC-authenticated requester over a unix socket, with a typed
-JSON-line protocol and an inherited-fd transport. It records deletions like the plain verb does
-(see [rm_and_the_record.md](rm_and_the_record.md)) and passes the requester's identity in rather
-than reading its own cwd.
+The broker removes on behalf of an HMAC-authenticated requester over a unix socket, with a typed
+JSON-line protocol and an inherited-fd transport. Its live caller is @ai_mail's dispatch monitor,
+which connects one per dispatch when `AIPASS_SANDBOX_ENABLED` is on and hands the fd to the
+sandboxed child; `drone rm` under `AIPASS_BROKER_FD` routes through it. It records every outcome
+like the plain verb does (see [rm_and_the_record.md](rm_and_the_record.md)), lane `broker`, and
+passes the requester's identity in rather than reading its own cwd.
+
+## One decision, the plain verb's
+
+After its own containment (the identity's bases: the temp dir, the caller's branch, the whole repo
+for the identity granted it, and never a base itself), the broker asks `rm_handler.judge()` — the
+function `drone rm` asks — with the requester's seat: its own branch, and as admin the identity the
+policy grants the whole repo. So the rule is the same in both lanes: in the tree a target moves into
+the `.archive` beside it through `rm_handler.move_into_archive()`, never over a taken name; a dot
+name, a carve-out, a `.archive`, a branch root and a folder holding a citizen are refused; only the
+temp dir's files and bytecode are truly deleted. The protocol has no `--dot`, so the dot guard is
+never lifted here. Every act runs relative to the parent fd the resolver held, so a parent swapped
+after the check cannot redirect it.
 
 Each start writes a fresh 32-byte HMAC secret to `.ai_central/broker_secret` under the project root
 (the host temp directory when there is none), which the launcher reads to sign its identify step.

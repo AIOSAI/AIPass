@@ -106,7 +106,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | [docs/git_interface.md](docs/git_interface.md) | What each verb does: scoping, the `--json` machine surface, remote redaction, the commit subject cap, the pre-commit lane, tag lanes, gh passthrough |
 | [docs/external_repo_door.md](docs/external_repo_door.md) | `--repo <path>`: the admin-seat door into a repository that is not AIPass, and its ledger |
 | [docs/rm_and_the_record.md](docs/rm_and_the_record.md) | The delete record, the sibling-branch guard, the contains-a-citizen fence, dot names, and stale mode |
-| [docs/broker.md](docs/broker.md) | The broker delete lane and its server-side path verification on every host |
+| [docs/broker.md](docs/broker.md) | The broker removal lane, its one decision with drone rm, and its server-side path verification |
 | [docs/testing.md](docs/testing.md) | How the suite is run and judged, the standards lanes, the mutation bar |
 
 ---

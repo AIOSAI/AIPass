@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_broker.py
 # Description: Tests for the drone-broker daemon, identity, and allowlist
-# Version: 2.0.9
+# Version: 2.1.0
 # Created: 2026-06-09
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/broker/daemon.py, its path resolver, protocol, client and rm routing."""
@@ -37,7 +37,7 @@ from aipass.drone.apps.handlers.broker.client import (
     is_sandboxed,
     BROKER_FD_ENV,
 )
-from aipass.drone.apps.handlers import deletion_log
+from aipass.drone.apps.handlers import deletion_log, rm_handler
 from aipass.drone.apps.modules.rm import safe_delete
 
 # Tests for the drone-broker daemon (Phase 3 + Phase 6a FPLAN-0250).
@@ -390,7 +390,7 @@ class TestBrokerDaemon:
     """Test the broker daemon accept/delete/refuse logic with an identified connection."""
 
     def test_delete_allowed_file(self, running_broker: BrokerDaemon, repo_root: Path) -> None:
-        """Broker deletes an allowed file under the identified branch tree."""
+        """Broker moves an allowed file under the identified branch tree into the .archive beside it."""
         target = repo_root / "src" / "aipass" / "testbranch" / "deleteme.txt"
         assert target.exists()
 
@@ -400,12 +400,12 @@ class TestBrokerDaemon:
             BrokerRequest(op="delete", path="deleteme.txt", request_id="t1"),
         )
         assert resp.ok is True
-        assert "Deleted" in resp.message
+        assert "Moved" in resp.message
         assert not target.exists()
 
         audit = running_broker.audit_path.read_text(encoding="utf-8").strip().split("\n")
         last = json.loads(audit[-1])
-        assert last["result"] == "DELETED"
+        assert last["result"] == "MOVED"
         assert last["identity"] == "testbranch"
 
     def test_delete_nested_file(self, running_broker: BrokerDaemon, repo_root: Path) -> None:
@@ -898,7 +898,7 @@ class TestAllowlistPolicy:
         delete_entries = [json.loads(raw) for raw in lines if json.loads(raw).get("op") == "delete"]
         last = delete_entries[-1]
         assert last["identity"] == "testbranch"
-        assert last["result"] == "DELETED"
+        assert last["result"] == "MOVED"
 
     def test_audit_carries_identity_on_refusal(self, running_broker: BrokerDaemon, repo_root: Path) -> None:
         """Audit entries for refusals include the identity."""
@@ -1075,7 +1075,7 @@ class TestBrokerFeedsDeletionRecord:
         assert resp.ok is True
         assert not target.exists()
 
-        deletions = [r for r in self._records() if r["outcome"] == "deleted"]
+        deletions = [r for r in self._records() if r["outcome"] == "moved"]
         assert len(deletions) == 1
         assert deletions[0]["lane"] == "broker"
         assert deletions[0]["path"] == str(target.resolve())
@@ -1124,7 +1124,7 @@ class TestBrokerFeedsDeletionRecord:
             BrokerRequest(op="delete", path="deleteme.txt", request_id="rec2"),
         )
 
-        deletions = [r for r in self._records() if r["outcome"] == "deleted"]
+        deletions = [r for r in self._records() if r["outcome"] == "moved"]
         assert deletions[0]["caller"] == "testbranch"
 
     def test_broker_measures_before_deleting(self, running_broker: BrokerDaemon, repo_root: Path) -> None:
@@ -1137,7 +1137,7 @@ class TestBrokerFeedsDeletionRecord:
             BrokerRequest(op="delete", path="deleteme.txt", request_id="rec3"),
         )
 
-        deletions = [r for r in self._records() if r["outcome"] == "deleted"]
+        deletions = [r for r in self._records() if r["outcome"] == "moved"]
         assert deletions[0]["kind"] == "file"
         assert deletions[0]["size_bytes"] == expected
 
@@ -1170,6 +1170,54 @@ class TestBrokerFeedsDeletionRecord:
         refusals = [r for r in self._records() if r["outcome"] == "refused"]
         assert refusals, "an out-of-scope broker delete left no record"
         assert refusals[-1]["caller"] == "testbranch"
+
+
+class TestTheBrokerTakesRmsOneDecision:
+    """In the tree nothing is deleted: the broker lane moves, refuses dot names and records it, as drone rm does."""
+
+    def test_an_in_tree_file_moves_into_the_archive_beside_it_and_the_record_says_where(
+        self, running_broker: BrokerDaemon, repo_root: Path
+    ) -> None:
+        branch = repo_root / "src" / "aipass" / "testbranch"
+
+        resp = _send_identified(running_broker, "testbranch", BrokerRequest(op="delete", path="deleteme.txt"))
+
+        assert resp.ok is True, resp.message
+        assert "Moved" in resp.message
+        assert (branch / ".archive" / "deleteme.txt").read_text(encoding="utf-8") == "delete me"
+        (record,) = TestBrokerFeedsDeletionRecord._records()
+        assert (record["lane"], record["outcome"]) == ("broker", "moved")
+        assert record["moved_to"] == str(branch.resolve() / ".archive" / "deleteme.txt")
+
+    def test_a_dot_name_in_the_tree_is_refused_and_stays(self, running_broker: BrokerDaemon, repo_root: Path) -> None:
+        target = repo_root / "src" / "aipass" / "testbranch" / ".env"
+        target.write_text("keep", encoding="utf-8")
+
+        resp = _send_identified(running_broker, "testbranch", BrokerRequest(op="delete", path=".env"))
+
+        assert (resp.ok, target.exists()) == (False, True)
+        assert ".env is a dot name" in resp.message
+        (record,) = TestBrokerFeedsDeletionRecord._records()
+        assert (record["lane"], record["outcome"]) == ("broker", "refused")
+
+    def test_bytecode_in_the_tree_is_still_truly_deleted(self, running_broker: BrokerDaemon, repo_root: Path) -> None:
+        branch = repo_root / "src" / "aipass" / "testbranch"
+        (branch / "__pycache__").mkdir()
+        (branch / "__pycache__" / "m.pyc").write_bytes(b"\0")
+
+        resp = _send_identified(running_broker, "testbranch", BrokerRequest(op="delete", path="__pycache__"))
+
+        assert resp.ok is True, resp.message
+        assert not (branch / "__pycache__").exists()
+        assert not (branch / ".archive").exists()
+
+    def test_the_verdict_is_rms_own(self, running_broker: BrokerDaemon, monkeypatch: pytest.MonkeyPatch) -> None:
+        verdict = rm_handler.Verdict("judged by rm", None, False)
+        monkeypatch.setattr(rm_handler, "judge", lambda *_args, **_kwargs: verdict)
+
+        resp = _send_identified(running_broker, "testbranch", BrokerRequest(op="delete", path="deleteme.txt"))
+
+        assert (resp.ok, resp.message) == (False, "judged by rm")
 
 
 class TestAnUnreadFolderIsNotAnAbsentBranch:
@@ -1243,14 +1291,14 @@ class TestTheDeleteHoldsWhatItJudged:
         branch = repo_root / "src" / "aipass" / "testbranch"
         sibling_file = repo_root / "src" / "aipass" / "sibling" / "important.txt"
         (branch / "subdir" / "important.txt").write_text("mine", encoding="utf-8")
-        judge = running_broker._check_denylist
+        judge = rm_handler.judge
 
-        def swap_then_judge(resolved: Path, own: Path | None) -> str | None:
+        def swap_then_judge(*args, **kwargs) -> rm_handler.Verdict:
             os.rename(branch / "subdir", branch / "subdir_moved")
             (branch / "subdir").symlink_to(sibling_file.parent, target_is_directory=True)
-            return judge(resolved, own)
+            return judge(*args, **kwargs)
 
-        monkeypatch.setattr(running_broker, "_check_denylist", swap_then_judge)
+        monkeypatch.setattr(rm_handler, "judge", swap_then_judge)
         resp = _send_identified(
             running_broker, "testbranch", BrokerRequest(op="delete", path="subdir/important.txt", request_id="swap")
         )
