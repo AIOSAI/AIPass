@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: rm_handler.py
 # Description: Contained safe-delete: in-tree targets move to the local .archive
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-06-02
 # Modified: 2026-11-15
 # =============================================
@@ -21,6 +21,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from aipass.prax import logger
 from aipass.drone.apps.handlers import deletion_log
@@ -131,7 +132,7 @@ def _verified_admin() -> bool:
     """@ai_mail's verified-caller rail, the hooks gates' rail, asked per path; it fails closed and logs why."""
     verdict = repo_door.admin_verdict()
     if not verdict.granted:
-        logger.info("rm: sibling fence holds for %s: %s", verdict.caller, verdict.refusal)
+        logger.info("rm: sibling fence holds for %s: not the verified admin seat", verdict.caller)
     return verdict.granted
 
 
@@ -195,6 +196,26 @@ def safe_delete(paths: list[str]) -> list[tuple[str, bool, str]]:
     return _safe_delete_direct(paths)
 
 
+def _record(outcome: str, path_str: str, resolved: Path | None, reason: str, **fields: Any) -> tuple:
+    """Write the ledger row; return the prax line for it, one a reader can act on alone.
+
+    Who, outcome, path, where to. The caller logs it: a broken operation at ERROR, a move, a delete
+    and every deliberate refusal at INFO (a refusal is the fence doing its job, shown and in the ledger).
+    """
+    record = deletion_log.record_deletion(
+        lane=deletion_log.LANE_RM, outcome=outcome, requested=path_str, resolved=resolved, reason=reason, **fields
+    )
+    destination = f" -> {record['moved_to']}" if "moved_to" in record else ""
+    exemption = f", {record['exemption']} exemption" if "exemption" in record else ""
+    return "rm: %s %s%s by %s%s — %s", outcome, record["path"], destination, record["caller"], exemption, reason
+
+
+def _refuse(path_str: str, resolved: Path | None, reason: str, shown: str, **fields: Any) -> tuple[str, bool, str]:
+    """Record and log one deliberate refusal; *shown* is the caller's text, the recorded line appended."""
+    logger.info(*_record(deletion_log.OUTCOME_REFUSED, path_str, resolved, reason, **fields))
+    return path_str, False, _shown(shown, RECORDED_LINE)
+
+
 def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
     """Delete paths directly (unsandboxed mode — current behavior)."""
     roots = get_allowed_roots()
@@ -215,29 +236,14 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
         else:
             # Refused per path, so absolute paths in the same call still delete.
             message = f"Cannot resolve relative path '{path_str}' — this process has no current directory"
-            results.append((path_str, False, _shown(message, RECORDED_LINE)))
-            logger.info("rm: %s", message)
-            deletion_log.record_deletion(
-                lane=deletion_log.LANE_RM,
-                outcome=deletion_log.OUTCOME_REFUSED,
-                requested=path_str,
-                resolved=original,
-                reason=message,
-            )
+            results.append(_refuse(path_str, original, message, message))
             continue
 
         exists_on_disk = absolute.exists() or absolute.is_symlink()
         if not exists_on_disk:
             message = f"Path does not exist: {absolute}"
+            logger.info(*_record(deletion_log.OUTCOME_NOT_FOUND, path_str, absolute, message))
             results.append((path_str, False, _shown("Path does not exist:", absolute, RECORDED_LINE)))
-            logger.info("rm: nonexistent path %s", absolute)
-            deletion_log.record_deletion(
-                lane=deletion_log.LANE_RM,
-                outcome=deletion_log.OUTCOME_NOT_FOUND,
-                requested=path_str,
-                resolved=absolute,
-                reason=message,
-            )
             continue
 
         # A symlink is judged by where the LINK lives, not its target: only the link is removed.
@@ -250,55 +256,18 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
 
         allowed, reason = check_containment(resolved, roots)
         if not allowed:
-            results.append((path_str, False, _shown(reason, resolved, RECORDED_LINE)))
-            logger.warning(
-                "rm: containment refused %s (resolved %s): %s",
-                path_str,
-                resolved,
-                reason,
-            )
-            deletion_log.record_deletion(
-                lane=deletion_log.LANE_RM,
-                outcome=deletion_log.OUTCOME_REFUSED,
-                requested=path_str,
-                resolved=resolved,
-                reason=reason,
-                target=target,
-            )
+            results.append(_refuse(path_str, resolved, reason, _shown(reason, resolved), target=target))
             continue
 
         blocked, carveout_reason, exemption = check_carveouts(resolved, project_root, admin_may_cross=True)
         if blocked:
-            results.append((path_str, False, _shown(carveout_reason, resolved, RECORDED_LINE)))
-            logger.warning(
-                "rm: carveout refused %s (resolved %s): %s",
-                path_str,
-                resolved,
-                carveout_reason,
-            )
-            deletion_log.record_deletion(
-                lane=deletion_log.LANE_RM,
-                outcome=deletion_log.OUTCOME_REFUSED,
-                requested=path_str,
-                resolved=resolved,
-                reason=carveout_reason,
-                target=target,
-            )
+            shown = _shown(carveout_reason, resolved)
+            results.append(_refuse(path_str, resolved, carveout_reason, shown, target=target))
             continue
 
         if ARCHIVE_DIR in resolved.parts:
             verdict = f"Refused: inside {ARCHIVE_DIR}/ — emptying an archive is the owner's, by hand"
-            message = f"{verdict}: {resolved}"
-            results.append((path_str, False, _shown(verdict, resolved, RECORDED_LINE)))
-            logger.info("rm: %s", message)
-            deletion_log.record_deletion(
-                lane=deletion_log.LANE_RM,
-                outcome=deletion_log.OUTCOME_REFUSED,
-                requested=path_str,
-                resolved=resolved,
-                reason=message,
-                target=target,
-            )
+            results.append(_refuse(path_str, resolved, verdict, _shown(verdict, resolved), target=target))
             continue
 
         measurement = deletion_log.measure(absolute)
@@ -315,33 +284,29 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
                 shutil.rmtree(resolved)
             else:
                 resolved.unlink()
-            message = f"Deleted: {resolved}" + (f" (symlink to {target})" if target is not None else "")
-            link = () if target is None else (f"(the link only; it pointed at {target})",)
-            results.append((path_str, True, _shown("Deleted:", resolved, *link)))
-            logger.info("rm: deleted %s (resolved %s)", path_str, resolved)
-            deletion_log.record_deletion(
-                lane=deletion_log.LANE_RM,
-                outcome=deletion_log.OUTCOME_DELETED,
-                requested=path_str,
-                resolved=resolved,
-                reason=message,
+        except Exception as exc:
+            message = f"Delete failed: {exc}"
+            logger.error(
+                *_record(
+                    deletion_log.OUTCOME_FAILED, path_str, resolved, message, measurement=measurement, target=target
+                )
+            )
+            results.append((path_str, False, _shown(message, resolved, RECORDED_LINE)))
+            continue
+        message = f"Deleted: {resolved}" + (f" (symlink to {target})" if target is not None else "")
+        logger.info(
+            *_record(
+                deletion_log.OUTCOME_DELETED,
+                path_str,
+                resolved,
+                message,
                 measurement=measurement,
                 target=target,
                 exemption=exemption,
             )
-        except Exception as exc:
-            message = f"Delete failed: {exc}"
-            results.append((path_str, False, _shown(message, resolved, RECORDED_LINE)))
-            logger.error("rm: delete failed for %s: %s", path_str, exc)
-            deletion_log.record_deletion(
-                lane=deletion_log.LANE_RM,
-                outcome=deletion_log.OUTCOME_FAILED,
-                requested=path_str,
-                resolved=resolved,
-                reason=message,
-                measurement=measurement,
-                target=target,
-            )
+        )
+        link = () if target is None else (f"(the link only; it pointed at {target})",)
+        results.append((path_str, True, _shown("Deleted:", resolved, *link)))
 
     return results
 
@@ -375,47 +340,29 @@ def _move_to_archive(
     """Rename *resolved* into the ``.archive`` beside it and record the outcome, and any *exemption* used.
 
     One ``os.rename``, never a copy: it moves whole or not at all, and a cross-device target fails.
-    A symlinked ``.archive`` is refused, as it would carry the target out of the tree.
+    A symlinked ``.archive`` is refused before anything is tried: it would carry the target out of the tree.
     """
     archive = resolved.parent / ARCHIVE_DIR
-    destination: Path | None = None
+    if archive.is_symlink():
+        verdict = f"Refused: {ARCHIVE_DIR} beside the target is a symlink — an archive must be a real folder"
+        shown = _shown(verdict, archive, resolved)
+        return _refuse(path_str, resolved, verdict, shown, measurement=measurement, target=target, exemption=exemption)
     try:
-        if archive.is_symlink():
-            raise OSError(f"{archive} is a symlink — an archive must be a real folder beside the target")
         archive.mkdir(exist_ok=True)
         # shortcut: free-name check then rename, a same-instant twin move can race it; renameat2 NOREPLACE if seen.
         destination = _archive_destination(archive, resolved.name)
         os.rename(resolved, destination)
     except OSError as exc:
         message = f"Move to {ARCHIVE_DIR} failed, nothing moved: {exc}"
-        logger.error("rm: move failed for %s: %s", path_str, exc)
-        deletion_log.record_deletion(
-            lane=deletion_log.LANE_RM,
-            outcome=deletion_log.OUTCOME_FAILED,
-            requested=path_str,
-            resolved=resolved,
-            reason=message,
-            measurement=measurement,
-            target=target,
-            exemption=exemption,
-        )
+        fields = {"measurement": measurement, "target": target, "exemption": exemption}
+        logger.error(*_record(deletion_log.OUTCOME_FAILED, path_str, resolved, message, **fields))
         return path_str, False, _shown(message, resolved, RECORDED_LINE)
 
     message = f"Moved: {resolved} -> {destination}" + (f" (symlink to {target})" if target is not None else "")
     if exemption is not None:
         message += f" ({exemption} seat, across the sibling fence)"
-    logger.info("rm: moved %s to %s", resolved, destination)
-    deletion_log.record_deletion(
-        lane=deletion_log.LANE_RM,
-        outcome=deletion_log.OUTCOME_MOVED,
-        requested=path_str,
-        resolved=resolved,
-        reason=message,
-        measurement=measurement,
-        target=target,
-        moved_to=destination,
-        exemption=exemption,
-    )
+    fields = {"measurement": measurement, "target": target, "moved_to": destination, "exemption": exemption}
+    logger.info(*_record(deletion_log.OUTCOME_MOVED, path_str, resolved, message, **fields))
     verdict = "Moved to .archive" + (f" ({exemption} seat, across the sibling fence)" if exemption else "") + ":"
     link = () if target is None else (f"(the link only; it points at {target})",)
     return path_str, True, _shown(verdict, resolved, f"-> {destination}", *link)
@@ -609,7 +556,7 @@ def _refuse_stale_dir(
 ) -> None:
     """Count, log and (unless dry) record one refused DIR."""
     report.refusals.append(message)
-    logger.warning("rm --stale: refused %s: %s", dir_arg, message)
+    logger.info("rm --stale: refused %s: %s", dir_arg, message)
     if not request.dry_run:
         deletion_log.record_deletion(
             lane=deletion_log.LANE_RM,

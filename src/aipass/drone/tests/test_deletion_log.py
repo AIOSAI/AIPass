@@ -25,6 +25,7 @@ from aipass.drone.apps.handlers import deletion_log
 from aipass.drone.apps.handlers.router_handler import CallerIdentity
 from aipass.drone.apps.handlers.rm_handler import safe_delete
 from aipass.drone.apps.modules.door_deletion_log import record_deletion as door_record_deletion
+from aipass.drone.apps.modules.door_deletion_log import record_gate_refusal as door_record_gate_refusal
 
 # ``drone rm`` is the only sanctioned delete; refusals are records too (a blocked attempt leaves no other trace).
 
@@ -324,6 +325,93 @@ class TestSeverity:
 
         assert log.info.called
         assert not log.error.called
+
+
+def _line(call) -> str:
+    """A prax call rendered the way the logger renders it: format string % arguments."""
+    message, *args = call.args
+    return message % tuple(args)
+
+
+class TestEveryChannelTellsTheWholeStory:
+    def _moved(self, project) -> dict[str, Any]:
+        dest = project / ".archive" / "a.txt"
+        return dict(
+            lane=deletion_log.LANE_RM,
+            outcome=deletion_log.OUTCOME_MOVED,
+            requested="a.txt",
+            resolved=project / "a.txt",
+            reason="Moved",
+            caller="devpulse",
+            moved_to=dest,
+            exemption="admin",
+        )
+
+    def test_the_prax_line_of_a_move_names_outcome_destination_caller_and_exemption(self, project):
+        row = self._moved(project)
+        with patch("aipass.drone.apps.handlers.deletion_log.logger") as log:
+            deletion_log.record_deletion(**row)
+
+        line = _line(log.info.call_args)
+        assert "moved" in line
+        assert str(row["moved_to"]) in line
+        assert "devpulse" in line
+        assert "admin" in line
+        assert "deletion record" not in line
+
+    def test_the_json_entry_of_a_move_carries_moved_to_and_exemption(self, project):
+        row = self._moved(project)
+        with patch("aipass.drone.apps.handlers.deletion_log.json_handler") as service:
+            deletion_log.record_deletion(**row)
+
+        (operation, data), _ = service.log_operation.call_args
+        assert operation == "deletion_record"
+        assert (data["moved_to"], data["exemption"]) == (str(row["moved_to"]), "admin")
+
+    def test_a_refused_plain_file_is_recorded_with_its_kind(self, project):
+        target = project / ".aipass" / "notes.md"
+        target.parent.mkdir()
+        target.write_text("x", encoding="utf-8")
+
+        safe_delete([str(target)])
+
+        (record,) = read_records(project)
+        assert (record["outcome"], record["kind"], record["measured"]) == ("refused", "file", "none")
+
+
+class TestTheGateRecordsItsRefusalThroughTheDoor:
+    def test_a_gate_refusal_lands_with_its_lane_cwd_and_no_resolved_path(self, project):
+        standing = project / "src" / "aipass" / "canary"
+
+        door_record_gate_refusal(
+            caller="canary",
+            cwd=standing,
+            requested="../api/notes.md",
+            resolved=None,
+            reason="drone rm is the admin seat's alone",
+        )
+
+        (record,) = read_records(project)
+        assert door_record_gate_refusal is deletion_log.record_gate_refusal
+        assert (record["lane"], record["outcome"], record["caller"]) == ("rm_gate", "refused", "canary")
+        assert (record["cwd"], record["requested"], record["path"]) == (str(standing), "../api/notes.md", None)
+        assert record["reason"] == "drone rm is the admin seat's alone"
+
+    @pytest.mark.parametrize("field", ["caller", "requested", "reason"])
+    def test_an_empty_field_is_refused_and_writes_nothing(self, project, field):
+        row = {"caller": "canary", "cwd": project, "requested": "x", "resolved": None, "reason": "refused"}
+        with pytest.raises(ValueError, match=field):
+            deletion_log.record_gate_refusal(**{**row, field: " "})
+
+        assert read_records(project) == []
+
+    def test_an_unwritable_store_raises_so_the_gate_sees_it(self, project, monkeypatch):
+        blocked = project / "not_a_directory"
+        blocked.write_text("a file where a directory would have to be", encoding="utf-8")
+        monkeypatch.setenv("AIPASS_DELETION_LOG", str(blocked / "d.jsonl"))
+
+        with pytest.raises(OSError):
+            door_record_gate_refusal(caller="canary", cwd=project, requested="x", resolved=None, reason="refused")
 
 
 class TestBounded:

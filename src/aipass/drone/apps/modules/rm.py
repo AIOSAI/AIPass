@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: rm.py
 # Description: Module orchestrator for contained safe-delete: in-tree targets move to .archive
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-06-02
 # Modified: 2026-11-15
 # =============================================
@@ -36,7 +36,7 @@ from aipass.drone.apps.handlers.help_flags import wants_help
 
 DRONE_MODULE = {
     "name": "rm",
-    "version": "1.4.0",
+    "version": "1.5.0",
     "description": "Contained safe-delete: in-tree targets move to .archive, temp is deleted",
 }
 
@@ -69,13 +69,13 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
         print_help()
         return True
 
-    json_handler.log_operation("rm_command", {"command": command, "args": args})
-
     paths: list[str] = []
     if command is not None:
         paths.append(command)
     if args:
         paths.extend(args)
+    # One key: the router's command/args split is routing, not meaning; every token is a target.
+    json_handler.log_operation("rm_command", {"targets": paths})
 
     if not paths:
         print_help()

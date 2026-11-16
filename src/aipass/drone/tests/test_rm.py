@@ -1012,7 +1012,7 @@ class TestAnInTreeTargetMovesToTheLocalArchive:
         (record,) = _ledger(tmp_path)
         assert record["outcome"] == "deleted"
 
-    def test_an_archive_that_is_a_symlink_fails_loudly_and_nothing_moves(self, in_project, tmp_path_factory, tmp_path):
+    def test_an_archive_that_is_a_symlink_is_refused_and_nothing_moves(self, in_project, tmp_path_factory, tmp_path):
         elsewhere = tmp_path_factory.mktemp("elsewhere")
         (in_project / ".archive").symlink_to(elsewhere, target_is_directory=True)
         target = in_project / "keep.md"
@@ -1025,7 +1025,62 @@ class TestAnInTreeTargetMovesToTheLocalArchive:
         assert target.read_text(encoding="utf-8") == "here"
         assert list(elsewhere.iterdir()) == []
         (record,) = _ledger(tmp_path)
-        assert record["outcome"] == "failed"
+        assert record["outcome"] == "refused"
+
+
+def _lines(method) -> list[str]:
+    """Every call of one patched prax method, rendered as the logger renders it."""
+    return [call.args[0] % tuple(call.args[1:]) for call in method.call_args_list]
+
+
+class TestTheRmLogLineTellsTheWholeStory:
+    def test_a_move_line_names_the_caller_the_path_and_where_it_went(self, in_project, tmp_path):
+        target = in_project / "draft.md"
+        target.write_text("x", encoding="utf-8")
+
+        with patch("aipass.drone.apps.handlers.rm_handler.logger") as log:
+            safe_delete([str(target)])
+
+        (record,) = _ledger(tmp_path)
+        (line,) = [line for line in _lines(log.info) if "moved" in line]
+        assert record["caller"] in line
+        assert str(target) in line
+        assert str(in_project / ".archive" / "draft.md") in line
+
+    @pytest.mark.parametrize("case", ["sibling", "carveout", "archive", "symlinked_archive"])
+    def test_every_deliberate_refusal_logs_info_never_warning(
+        self, at_drone_beside_api, monkeypatch, tmp_path_factory, case
+    ):
+        _rail_answers(monkeypatch, False)
+        drone = at_drone_beside_api.parent / "drone"
+        if case == "symlinked_archive":
+            (drone / ".archive").symlink_to(tmp_path_factory.mktemp("elsewhere"), target_is_directory=True)
+        else:
+            (drone / ".archive").mkdir()
+            (drone / ".archive" / "old.md").write_text("x", encoding="utf-8")
+        target = {
+            "sibling": at_drone_beside_api / "README.md",
+            "carveout": drone / ".trinity",
+            "archive": drone / ".archive" / "old.md",
+            "symlinked_archive": drone / "README.md",
+        }[case]
+
+        with patch("aipass.drone.apps.handlers.rm_handler.logger") as log:
+            ((_, ok, _),) = safe_delete([str(target)])
+
+        assert ok is False
+        assert not log.warning.called
+        assert not log.error.called
+        assert any("refused" in line for line in _lines(log.info))
+
+    def test_the_command_logs_every_target_under_one_key(self, in_project):
+        with patch("aipass.drone.apps.modules.rm.json_handler") as service:
+            handle_command("first.txt", ["second.txt", "third.txt"])
+
+        assert service.log_operation.call_args_list[0].args == (
+            "rm_command",
+            {"targets": ["first.txt", "second.txt", "third.txt"]},
+        )
 
 
 class TestRmModule:
@@ -1323,6 +1378,13 @@ class TestStaleSweep:
         report = _sweep("--stale", "10d", str(stale_tree["api"] / "nope"))
         assert "does not exist" in report.refusals[0]
         assert _ledger(tmp_path)[0]["outcome"] == "not_found"
+
+    def test_a_refused_dir_logs_info_like_every_deliberate_refusal(self, stale_tree):
+        with patch("aipass.drone.apps.handlers.rm_handler.logger") as log:
+            _sweep("--stale", "10d", str(stale_tree["api"] / ".trinity"))
+
+        assert not log.warning.called
+        assert any("refused" in line for line in _lines(log.info))
 
     @pytest.mark.parametrize("dry_run", [False, True])
     @pytest.mark.parametrize("nested_first", [False, True])

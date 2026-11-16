@@ -64,13 +64,22 @@ Four things worth knowing:
 
 - **Refusals are records too.** A blocked delete leaves no other trace of what was attempted, which
   is exactly what makes it worth finding later. Refused paths are deliberately *not* measured — the
-  guard just said that tree is off-limits, so nothing goes and reads inside it.
+  guard just said that tree is off-limits, so nothing goes and reads inside it. Their `kind` comes
+  from one `lstat` of an absolute path (`file`, `directory`, `symlink`), which reads nothing inside;
+  sizes stay null and `measured` stays `none`.
 - **Measurement happens before the move or delete.** After a delete there is nothing left to ask
   how big it was. Directory walks stop at `_MEASURE_ENTRY_CAP` and say so via `measured: "capped"` rather than
   paying an unbounded walk.
-- **Severity is INFO on both channels.** A deletion through the sanctioned path is
-  chosen behaviour, not a fault. The guards keep their own WARNING when they refuse — that is the
-  guard speaking, and it is a separate line from the record.
+- **Severity is INFO, ERROR only for a break.** A move, a delete and every deliberate refusal
+  (containment, carve-out, sibling, `.archive`, a symlinked `.archive`, stale-mode DIRs) log at
+  INFO: a refusal is the fence doing its job, already shown to the caller and kept in the ledger.
+  An operation that was tried and broke (an `OSError`) is outcome `failed` at ERROR. WARNING is kept
+  for a check that could not run: the admin rail dark, a kind or folder that could not be read.
+- **Each channel tells the whole story alone.** The ledger's prax line reads
+  `rm ledger: <outcome> <path>[ -> <moved_to>] by <caller>, lane <lane>[, exemption admin] (kind, ...)`;
+  rm's own line reads `rm: <outcome> <path>[ -> <moved_to>] by <caller>[, admin exemption] — <reason>`.
+  The json service's `deletion_record` entry carries `moved_to` and `exemption` when present, and
+  `rm_command` stores every target under `targets`.
 - **The record follows the deletion's project, not the process's.** `deletion_log_path()` takes an
   optional `project_root`, and the broker passes the `repo_root` it was constructed with. A daemon
   can serve a repository it is not standing in; resolving the store from cwd there files the record
@@ -99,6 +108,13 @@ and `reason`, plus an optional `measurement` keyed like `measure()`'s and an opt
 empty `lane`, `outcome`, `caller`, `resolved` or `target`, or on a measurement with other keys, and
 writes nothing: a half row is refused. @spawn's branch and project retirements write through it
 under the `spawn_delete` and `spawn_retire` lanes.
+
+The door's second export, `record_gate_refusal()`, records a `drone rm` the hooks rm gate refused
+before drone ran. It writes lane `rm_gate`, outcome `refused`, and takes `caller`, `cwd`,
+`requested` (the text as typed), `resolved` (a path, or `None` when the gate could not resolve it;
+`path` is then null), `reason` and an optional `project_root`. An empty `caller`, `cwd`,
+`requested` or `reason` raises `ValueError` and writes nothing. A store that cannot be written raises the `OSError`
+after its ERROR line; the `drone rm` lanes log that failure and carry on.
 
 ---
 
