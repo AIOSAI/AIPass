@@ -481,7 +481,6 @@ class TestGetCallerInfo:
     def test_returns_tuple_of_three(self, mock_prax_infrastructure, monkeypatch):
         """get_caller_info returns the 3-tuple (name, path, branch) of its caller, this file."""
         monkeypatch.delenv("AIPASS_LOG_NAME", raising=False)
-        monkeypatch.delenv("AIPASS_BOT_ID", raising=False)
 
         result = get_caller_info()
         assert result == ("test_logging", __file__, str(_aipass_package_root() / "prax"))
@@ -489,7 +488,6 @@ class TestGetCallerInfo:
     def test_module_name_is_string(self, mock_prax_infrastructure, monkeypatch):
         """The caller is this file, so the name is this file's stem; env overrides cleared first."""
         monkeypatch.delenv("AIPASS_LOG_NAME", raising=False)
-        monkeypatch.delenv("AIPASS_BOT_ID", raising=False)
 
         module_name, path, branch = get_caller_info()
         assert isinstance(module_name, str)

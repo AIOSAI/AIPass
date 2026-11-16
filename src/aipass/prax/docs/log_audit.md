@@ -68,7 +68,7 @@ drone rm --stale 10d ..        # '..' from src/aipass/prax is src/aipass
   the job never fires at whatever minute a tick first discovers it. A Sunday
   missed while the machine was off fires on the first tick after it is back.
 - **Where it shows.** The `FIRE` and `DONE` lines (exit code, duration, output
-  tail) in daemon's `logs/run.log` and in `~/.aipass/daemon-tick.log`. The
+  tail) in daemon's `logs/run.log` and in `system_logs/daemon_run.log`. The
   runstate row `@prax/tmp-sweep-weekly` in `daemon/daemon_json/daemon_runstate.json`.
   One row per deleted file in `.ai_central/deletions.jsonl` (`mode: stale`,
   `age: 10d`). A mail to @devpulse when the sweep starts and another when it

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_display_resilience.py
 # Description: The display consumer must survive an unrenderable event
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-08-12
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/monitor.py and apps/handlers/monitoring/unified_stream.py."""
@@ -35,9 +35,8 @@ from aipass.prax.apps.modules import monitor
 
 
 @pytest.fixture
-def render(monkeypatch, capsys):
+def render(capsys):
     """Run ``call(unified_stream)`` through the product's own console, return what it printed."""
-    monkeypatch.setattr(unified_stream, "logger", MagicMock())
 
     def _render(call) -> str:
         capsys.readouterr()
@@ -229,7 +228,7 @@ class TestDisplayWorkerSurvivesBadEvent:
 
 
 class TestStandaloneRunArgs:
-    """`python -m ...monitor run` must mean run-all, not 'branch named run': the Telegram systemd unit launches so."""
+    """`python -m ...monitor run` must mean run-all, not 'branch named run'."""
 
     def test_bare_run_is_unscoped(self):
         mod = _import_monitor()

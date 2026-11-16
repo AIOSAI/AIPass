@@ -72,6 +72,17 @@ bypass the scope — a filter must never hide the reason the screen is empty.
 The scope is set at launch; there is no runtime `filter` command outside commons
 feed mode.
 
+**One rate tracker per machine.** `monitor run` is not single-instance: several
+Mission Controls can run side by side, each with its own display and watchers. The
+rate tracker is the exception, because two of them would raise every runaway alert
+twice. At startup each monitor tries a non-blocking `flock` on
+`prax_json/monitor.lock` (`apps/handlers/monitoring/instance_lock.py`). The winner
+runs the tracker and writes its PID into the file; the others log that another
+monitor runs it and only display events. The lock is held on an open file for the
+process life, so the kernel drops it when the holder dies and no stale pidfile is
+ever judged. The file stays on release, since unlinking it would race a waiting
+opener, and it lives outside `system_logs/`, which the monitor tails.
+
 **Display resilience.** Everything on screen is other branches' output, so every
 dynamic value is escaped before it reaches Rich — a tailed line containing
 `[/usr/bin]` is shown, not parsed. If a line still cannot be drawn, the failure

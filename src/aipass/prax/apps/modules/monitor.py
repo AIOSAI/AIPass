@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: monitor.py
 # Description: Unified Monitoring Module
-# Version: 0.5.2
+# Version: 0.5.3
 # Created: 2025-11-23
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """PRAX Monitor Module - Mission Control for Autonomous Branches."""
@@ -659,7 +659,7 @@ def _print_status():
 def _standalone_run_args(tokens: List[str], passthrough: List[str]) -> List[str]:
     """Turn `python -m ...monitor [run] [branches] [--flags]` into handle_command args.
 
-    A leading 'run' is the subcommand, not a branch name (the systemd unit runs `monitor run`).
+    A leading 'run' is the subcommand, not a branch name.
     """
     tokens = list(tokens)
     saw_run = bool(tokens) and tokens[0] == "run"

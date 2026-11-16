@@ -45,7 +45,7 @@ prax/
  - Direct logger: `from aipass.prax.apps.modules.logger import get_direct_logger` — for prax internals inside watchdog threads or the import chain, where the stack walk would recurse.
  - Auto-routing by stack introspection: caller's module, branch and file path decide the destination.
  - Two-tier placement: `system_logs/<branch>_<module>.log` central, `<branch>/logs/<module>.log` local. Both rotate by size.
- - Env override before the stack walk: `AIPASS_LOG_NAME` or `AIPASS_BOT_ID`, for shared base classes that would otherwise all log as one caller.
+ - Env override before the stack walk: `AIPASS_LOG_NAME`, for shared base classes that would otherwise all log as one caller.
  - Projects outside AIPass get their own `system_logs/` and `logs/` under their own root.
  - Self-healing: missing directories are created and an unknown caller is routed to system_logs/external/ and says so. A failed prax import raises in every spelling: no fallback logger.
 

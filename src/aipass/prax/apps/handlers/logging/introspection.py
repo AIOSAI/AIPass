@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: introspection.py
 # Description: Stack Introspection
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2025-11-10
 # Modified: 2026-11-15
 # =============================================
@@ -61,7 +61,7 @@ def get_caller_info() -> tuple:
     """Detect calling module name, path, and branch from a single stack walk.
 
     One walk, so name and path never come from different callers.
-    AIPASS_LOG_NAME, then AIPASS_BOT_ID (telegram-bot@.service), override the name.
+    AIPASS_LOG_NAME overrides the name.
     """
     import os
 
@@ -71,10 +71,6 @@ def get_caller_info() -> tuple:
     log_name = os.environ.get("AIPASS_LOG_NAME")
     if log_name:
         return (log_name, caller_path, branch)
-
-    bot_id = os.environ.get("AIPASS_BOT_ID")
-    if bot_id:
-        return (f"bot_{bot_id}", caller_path, branch)
 
     if not caller_path:
         return ("unknown_module", None, None)

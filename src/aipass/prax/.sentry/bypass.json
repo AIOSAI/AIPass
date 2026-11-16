@@ -141,7 +141,7 @@
       "file": "apps/handlers/logging/introspection.py",
       "standard": "logged_fallback",
       "lines": [
-        104
+        100
       ],
       "reason": "prax, leg 7: the docstring names None as the answer 'the caller cannot be located — an answer, not a failure'. A path that will not resolve is a caller that cannot be located; branch detection is a routing hint and must never raise into the caller's import."
     },
@@ -214,7 +214,7 @@
       "file": "tests/test_monitoring_handlers_display.py",
       "standard": "mock_console",
       "lines": [
-        153
+        142
       ],
       "reason": "prax, leg 11, under devpulse's console ruling (b): the colour is the claim (error level red, SENTRY green, an unknown branch white), and it exists nowhere but inside print_event's console call (a dict lookup into the markup string). capsys strips it. A real Console on a buffer with colour forced, set by monkeypatch for the three colour tests alone; every other test in the file reads the real console with capsys."
     },
