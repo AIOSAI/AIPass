@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: admin_seat.py
-# Version: 1.1.3
+# Version: 1.2.0
 # Description: The verified admin-seat exemption and the caller's name, read once for every gate
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-01
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Answers one question for every security gate: is this session the admin seat?
@@ -35,29 +35,30 @@ def is_admin_seat(cwd: str) -> bool:
 
 
 def caller_name(cwd: str) -> str | None:
-    """The citizen a session belongs to, named by the passport above *cwd*, never by the path.
+    """The passport's name above *cwd*, for refusal text only (a name never decides); raises if unreadable."""
+    root = branch_root(cwd)
+    if root is None:
+        return None
+    data = json.loads((root / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+    name = data.get("branch_info", {}).get("branch_name") or data.get("identity", {}).get("name")
+    return name if isinstance(name, str) and name else None
 
-    For refusal text only: a name never decides who passes. Raises on an unreadable passport.
-    """
+
+def branch_root(cwd: str) -> Path | None:
+    """The resolved directory holding the nearest passport above *cwd*, the walk stopping at home; None when none."""
     if not cwd:
         return None
     search = Path(cwd).resolve()
     home = Path.home().resolve()  # both sides resolved, or a symlinked home never stops the walk
     while search != home and search.parent != search:
-        passport = search / ".trinity" / "passport.json"
-        if passport.exists():
-            data = json.loads(passport.read_text(encoding="utf-8"))
-            name = data.get("branch_info", {}).get("branch_name") or data.get("identity", {}).get("name")
-            return name if isinstance(name, str) and name else None
+        if (search / ".trinity" / "passport.json").exists():
+            return search
         search = search.parent
     return None
 
 
 def seat_of(cwd: str) -> tuple[str | None, bool]:
-    """(caller name, verified admin) for one session, for the gates that refuse by seat.
-
-    An unreadable passport costs the name, never the decision.
-    """
+    """(caller name, verified admin) for one session; an unreadable passport costs the name, never the decision."""
     try:
         name = caller_name(cwd)
     except (OSError, ValueError, AttributeError) as exc:

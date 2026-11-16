@@ -1,25 +1,29 @@
 # =================== AIPass ====================
 # Name: rm_gate.py
-# Version: 3.0.1
-# Description: Refuses every raw rm, and every other delete off the admin seat; records each refused one (PreToolUse)
+# Version: 3.1.0
+# Description: Refuses raw rm, other deletes off the admin seat, and drone rm outside the caller's branch (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-06-02
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """Refuses deletes on the agent Bash tool, and writes every refused one down.
 
 Failure mode: a crash refuses the Bash call it was checking; the engine refuses on import error and timeout.
 
-Raw rm is refused for every seat; drone rm and every other delete (rmdir, unlink, find -delete,
-an interpreter's readable delete) off the verified admin seat (admin_seat's grant, never a name).
+Raw rm is refused for every seat; every other delete (rmdir, unlink, find -delete, an interpreter's
+readable delete) off the verified admin seat (admin_seat's grant, never a name). drone rm moves an
+in-tree target into .archive, so off that seat it runs when every target resolves strictly inside
+the caller's own branch (the nearest passport above the session cwd) or the system temp dir.
 What modules/shell_reader cannot read is refused off the admin seat too. Bash tool only:
 service code running drone rm passes no hook. git rm answers to git_gate.
 """
 
 import importlib
 import json
+import tempfile
+from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
@@ -40,13 +44,20 @@ _DONT_DELETE = (
 RM_REFUSED = "Raw rm is refused for every seat (the owner's ruling, DPLAN-0356). Caller: {caller}.\n\n" + _DONT_DELETE
 
 DRONE_RM_REFUSED = (
-    "drone rm is the admin seat's alone (@devpulse, the owner's ruling, DPLAN-0356). Caller: {caller}, "
-    "with no verified admin grant.\n\n" + _DONT_DELETE
+    "drone rm moves its target into the .archive/ beside it (the temp dir, __pycache__ and *.pyc it deletes). "
+    "Off the admin seat (@devpulse) it runs only on paths inside your own branch or the system temp dir. "
+    "Caller: {caller}.\n"
+    "Refused: {why}\n"
+    "\n"
+    "Not yours to move? Mail @devpulse with the path and why:\n"
+    '  drone @ai_mail email @devpulse "Delete request" "<path>: <why>"\n'
+    "\n"
+    "This refused attempt is recorded."
 )
 
 RM_REFUSED_ADMIN = (
     "Raw rm is refused for every seat, the admin seat included (DPLAN-0356). Use:\n"
-    "  drone rm <path>     # the logged, project-aware delete\n"
+    "  drone rm <path>     # moves it into the .archive/ beside it; the temp dir, __pycache__, *.pyc it deletes\n"
     "\n"
     "This refused attempt is recorded."
 )
@@ -79,6 +90,16 @@ _BLOCK_ALLOW = {"stdout": "", "exit_code": 0}
 
 _DRONE = "drone"
 
+_ADMIN_SEAT = "aipass.hooks.apps.modules.admin_seat"
+
+# The shell may still expand these, so the path drone rm receives is not the word the gate reads.
+_SHELL_EXPANDS = frozenset("$`*?[]{}~")
+
+
+def system_temp() -> Path:
+    """The system temp dir, resolved: the one place outside a branch where a citizen's drone rm runs."""
+    return Path(tempfile.gettempdir()).resolve()
+
 
 def _block(reason: str) -> dict:
     return {"stdout": json.dumps({"decision": "block", "reason": reason}), "exit_code": 2, "sound": "rm gate"}
@@ -96,7 +117,7 @@ def _seat(cwd: str) -> tuple[str | None, bool]:
     must never exempt every seat.
     """
     try:
-        return importlib.import_module("aipass.hooks.apps.modules.admin_seat").seat_of(cwd)
+        return importlib.import_module(_ADMIN_SEAT).seat_of(cwd)
     except Exception as exc:  # an unreachable seat module refuses rather than opens
         logger.warning("[HOOKS] rm_gate: admin lane dark — admin_seat unavailable, refusing as unnamed: %s", exc)
         return None, False
@@ -118,17 +139,54 @@ def _record(cmd: str, cwd: str, caller: str | None, lanes: dict[str, int]) -> No
             )
 
 
-def _classify(cmd: str, cwd: str) -> tuple[int, int, list[str], list[str]]:
-    """(raw rm, drone rm, other deletes, what could not be read) across every program *cmd* runs."""
+def _classify(cmd: str, cwd: str) -> tuple[int, list, list[str], list[str]]:
+    """(raw rm, the drone rm invocations, other deletes, what could not be read) across every program *cmd* runs."""
     reader = _reader()
     lanes: list[str] = []
+    drones: list = []
     unread: list[str] = []
     for inv in reader.invocations(cmd, cwd):
         if inv.unread:
             unread.append(inv.unread)
-        lanes.extend(_lanes_of(reader, inv))
+        found = _lanes_of(reader, inv)
+        if "drone rm" in found:
+            drones.append(inv)
+        lanes.extend(found)
     others = [lane for lane in lanes if lane not in ("rm", "drone rm")]
-    return lanes.count("rm"), lanes.count("drone rm"), others, unread
+    return lanes.count("rm"), drones, others, unread
+
+
+def _target(arg: str, runs_in: str) -> Path:
+    """*arg* resolved as drone rm resolves it, a link judged where it lives; raises when it cannot be."""
+    if arg.startswith("-"):
+        raise ValueError(f"{arg}: an option, and options are the admin seat's")
+    if _SHELL_EXPANDS & set(arg):
+        raise ValueError(f"{arg}: the shell still expands it, so the path it names is unknown here")
+    path = Path(arg)
+    if not path.is_absolute():
+        if not runs_in:
+            raise ValueError(f"{arg}: relative, and the directory it runs in is unknown here")
+        path = Path(runs_in) / path
+    if path.is_symlink():
+        return path.parent.resolve(strict=True) / path.name
+    return path.resolve(strict=True)
+
+
+def _not_movable(drones: list, cwd: str) -> str | None:
+    """Why a drone rm target is not this seat's to move, or None when each is inside its branch or the temp dir.
+
+    Raises when a target cannot be resolved.
+    """
+    root = importlib.import_module(_ADMIN_SEAT).branch_root(cwd)
+    places = [place for place in (root, system_temp()) if place is not None]
+    for inv in drones:
+        if len(inv.argv) < 3:
+            return "drone rm names no path"
+        for arg in inv.argv[2:]:
+            target = _target(arg, inv.cwd)
+            if not any(target != place and target.is_relative_to(place) for place in places):
+                return f"{target} is outside your branch ({root or 'none: no passport above the cwd'}) and the temp dir"
+    return None
 
 
 def _lanes_of(reader, inv) -> list[str]:
@@ -146,20 +204,20 @@ def _lanes_of(reader, inv) -> list[str]:
     return found
 
 
-def _refusal(raw: int, drone: int, others: list[str], admin: bool, caller: str | None, cwd: str) -> str:
+def _refusal(raw: int, others: list[str], admin: bool, caller: str | None, cwd: str, why: str) -> str:
     """The refusal that teaches this caller its own way forward."""
     if raw and admin:
         return RM_REFUSED_ADMIN
     named = f"@{caller}" if caller else UNNAMED_CALLER.format(cwd=cwd or "(no cwd)")
     if raw:
         return RM_REFUSED.format(caller=named)
-    if drone:
-        return DRONE_RM_REFUSED.format(caller=named)
-    return DELETE_REFUSED.format(what=", ".join(dict.fromkeys(others)), caller=named)
+    if others:
+        return DELETE_REFUSED.format(what=", ".join(dict.fromkeys(others)), caller=named)
+    return DRONE_RM_REFUSED.format(caller=named, why=why)
 
 
 def handle(hook_data: dict) -> dict:
-    """Refuse every raw rm, and drone rm, every other delete and any unreadable program off the admin seat."""
+    """Refuse raw rm; off the admin seat any other delete, unreadable program, or drone rm outside the own branch."""
     if not isinstance(hook_data, dict) or hook_data.get("tool_name", "") != "Bash":
         return _BLOCK_ALLOW
     try:
@@ -167,20 +225,33 @@ def handle(hook_data: dict) -> dict:
         if not cmd:
             return _BLOCK_ALLOW
         cwd = hook_data.get("cwd", "")
-        raw, drone, others, unread = _classify(cmd, cwd)
-        if not raw and not drone and not others and not unread:
+        raw, drones, others, unread = _classify(cmd, cwd)
+        if not raw and not drones and not others and not unread:
             return _BLOCK_ALLOW
 
         caller, admin = _seat(cwd)
         if not raw and admin:
             return _BLOCK_ALLOW
-        if not raw and not drone and not others:
+        why = ""
+        if drones and not raw and not others:
+            try:
+                why = (
+                    f"it also runs what the gates cannot read: {'; '.join(unread)}"
+                    if unread
+                    else _not_movable(drones, cwd)
+                )
+            except (OSError, RuntimeError, ValueError) as exc:  # an unresolvable target is refused, never waved through
+                logger.info("[HOOKS] rm_gate: drone rm target unresolvable, refusing: %s", exc)
+                why = f"a target cannot be resolved: {exc}"
+            if why is None:
+                return _BLOCK_ALLOW
+        if not raw and not drones and not others:
             named = f"@{caller}" if caller else UNNAMED_CALLER.format(cwd=cwd or "(no cwd)")
             _record(cmd, cwd, caller, {"unread program": len(unread)})
             return _block(UNREAD_REFUSED.format(what="; ".join(dict.fromkeys(unread)), caller=named))
 
-        _record(cmd, cwd, caller, {"raw rm": raw, "drone rm": drone, "delete verb": len(others)})
-        return _block(_refusal(raw, drone, others, admin, caller, cwd))
+        _record(cmd, cwd, caller, {"raw rm": raw, "drone rm": len(drones), "delete verb": len(others)})
+        return _block(_refusal(raw, others, admin, caller, cwd, why))
 
     except Exception as exc:  # fail closed on the Bash call this gate guards
         logger.error("[HOOKS] rm_gate: crashed, refusing the Bash call: %s", exc)

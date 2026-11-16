@@ -159,7 +159,16 @@ agent how to switch a gate off.
 
 - **Raw `rm`**, recursive or not, is refused for every seat, the admin seat included — `find -exec rm`
   and `xargs rm` are raw rm. The admin seat is taught `drone rm <path>`.
-- **`drone rm`** is refused off the verified admin seat.
+- **`drone rm`** moves an in-tree target into the `.archive/` beside it; the system temp dir,
+  `__pycache__` and `*.pyc` it deletes. The admin seat runs it on any path. Off that seat it runs
+  only when every target resolves strictly inside the caller's own branch (the directory of the
+  nearest passport above the session cwd, so a `cd` in the command does not change whose branch it
+  is) or the system temp dir. Targets resolve the way drone resolves them: against the directory the
+  command runs in, symlinks resolved, a link judged where it lives. Refused, naming the path: a
+  target elsewhere (repo root files, `.github`, another branch, a project), the branch root or the
+  temp dir itself, a path that does not exist, a word the shell still expands (`$ * ? [ ] { } ~` or
+  a backtick), a relative path after a `cd` the reader could not follow, no target, any option
+  (`--stale`, `--help`, `-rf`), or a command that also runs what the reader cannot read.
 - **Every other delete** is refused off the admin seat with the same text: `rmdir`, `unlink`,
   `shred` and their kin wherever a program runs (shell_reader names it, however it is spelled),
   `find -delete`, and an interpreter's delete (`os.remove`, `shutil.rmtree`, `Path.unlink`; node
@@ -170,7 +179,8 @@ agent how to switch a gate off.
   check — is named in `bash_writes.NOT_CAUGHT`.
 - `mv`, renaming and `mkdir` are never deletes. `git rm` answers to `git_gate`.
 
-Every refusal off the admin seat ends with `_DONT_DELETE`, verbatim:
+A refused `drone rm` names the path and why, and points to @devpulse. Every other refusal off the
+admin seat ends with `_DONT_DELETE`, verbatim:
 
 ```
 Don't delete. Move or rename instead — that is the safety feature: the owner sees the files and decides.

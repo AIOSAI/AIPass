@@ -880,8 +880,8 @@
       "file": "apps/modules/admin_seat.py",
       "standard": "fallback",
       "lines": [
-        73,
-        83
+        74,
+        84
       ],
       "reason": "Fail-closed admin check: an unimportable or raising verified-caller rail returns False, so every gate refuses the admin exemption; the refusal is the answer, and the WARNING line in the prax system log tells a dark rail from a plain no."
     },
@@ -1001,7 +1001,7 @@
       "file": "apps/handlers/security/rm_gate.py",
       "standard": "fallback",
       "lines": [
-        100
+        121
       ],
       "reason": "Fails closed: an unimportable admin_seat returns (None, False), so no seat is exempted and every delete refusal stands. The refusal is the answer; WARNING names the dark admin lane."
     },

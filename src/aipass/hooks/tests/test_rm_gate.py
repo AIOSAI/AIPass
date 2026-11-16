@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_rm_gate.py
-# Version: 3.2.0
+# Version: 3.3.0
 # Description: Tests for rm_gate security handler, the DPLAN-0356 lockdown since 2.0.0
 # Branch: hooks
 # Created: 2026-06-02
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/security/rm_gate.py."""
@@ -58,6 +58,15 @@ def audit_log_to_tmp(tmp_path, monkeypatch):
     yield
     probe.removeHandler(handler)
     handler.close()
+
+
+@pytest.fixture(autouse=True)
+def system_temp_apart(tmp_path, monkeypatch):
+    """The seats live under tmp_path, itself in the real temp dir, so the gate's temp lane moves aside."""
+    apart = tmp_path / "system_temp"
+    apart.mkdir()
+    monkeypatch.setattr(rm_gate, "system_temp", lambda: apart.resolve())
+    return apart
 
 
 @pytest.fixture(autouse=True)
@@ -424,7 +433,7 @@ class TestOneDeleteSpelledManyWays:
 
     def test_drone_spelled_any_way_is_the_admin_seats_lane(self):
         """DRONE rm is drone's lane, not a raw rm: the grant decides it, as for the bare spelling."""
-        assert "admin seat's alone" in json.loads(self._bash("DRONE rm -rf build/x")["stdout"])["reason"]
+        assert "inside your own branch" in json.loads(self._bash("DRONE rm -rf build/x")["stdout"])["reason"]
         with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=True):
             assert self._bash("DRONE rm -rf build/x")["exit_code"] == 0
 
@@ -522,6 +531,130 @@ class TestTheLockdown:
         records = [r.getMessage() for r in caplog.records if "DELETE" in r.getMessage()]
         assert len(records) == 2
         assert all("refused" in r and "branch=canary" in r for r in records)
+
+
+class TestDroneRmInsideTheOwnBranch:
+    """The owner, 2026-11-15: drone rm moves an in-tree target to .archive, so a citizen runs it in its own branch."""
+
+    def _run(self, command: str, cwd: str, grant: bool = False) -> dict:
+        with patch(_RAIL, return_value=grant):
+            return handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd})
+
+    def _refused(self, command: str, cwd: str) -> str:
+        result = self._run(command, cwd)
+        assert result["exit_code"] == 2, command
+        return json.loads(result["stdout"])["reason"]
+
+    @staticmethod
+    def _tree(tmp_path: Path) -> tuple[Path, Path]:
+        """Seats @canary and @other, each holding notes.txt and build/x, under one root holding README.md."""
+        canary, other = Path(_seat(tmp_path, "canary")), Path(_seat(tmp_path, "other"))
+        for seat in (canary, other):
+            (seat / "build").mkdir()
+            (seat / "notes.txt").write_text("n", encoding="utf-8")
+            (seat / "build" / "x").write_text("x", encoding="utf-8")
+        (tmp_path / "README.md").write_text("r", encoding="utf-8")
+        return canary, other
+
+    def test_targets_inside_the_callers_own_branch_are_allowed(self, tmp_path):
+        canary, _ = self._tree(tmp_path)
+        for command in ("drone rm notes.txt", "drone rm notes.txt build/x", f"drone rm {canary / 'build'}"):
+            result = self._run(command, str(canary))
+            assert (result["exit_code"], result["stdout"]) == (0, ""), command
+        assert self._run("drone rm x", str(canary / "build"))["exit_code"] == 0
+
+    def test_a_target_inside_the_system_temp_dir_is_allowed(self, tmp_path, system_temp_apart):
+        canary, _ = self._tree(tmp_path)
+        (system_temp_apart / "scratch").write_text("s", encoding="utf-8")
+        result = self._run(f"drone rm {system_temp_apart / 'scratch'}", str(canary))
+        assert (result["exit_code"], result["stdout"]) == (0, "")
+
+    def test_a_file_at_the_root_above_the_branches_is_refused_and_named(self, tmp_path):
+        canary, _ = self._tree(tmp_path)
+        reason = self._refused("drone rm ../README.md", str(canary))
+        assert str(tmp_path / "README.md") in reason and "@devpulse" in reason and "@canary" in reason
+
+    def test_a_sibling_branchs_file_is_refused_however_it_is_reached(self, tmp_path):
+        canary, other = self._tree(tmp_path)
+        for command in (
+            "drone rm ../other/notes.txt",
+            f"drone rm {other / 'notes.txt'}",
+            "drone rm notes.txt ../other/notes.txt",
+            "cd ../other && drone rm notes.txt",
+        ):
+            assert str(other / "notes.txt") in self._refused(command, str(canary)), command
+
+    def test_a_path_through_a_directory_link_is_judged_where_it_resolves(self, tmp_path):
+        canary, other = self._tree(tmp_path)
+        (canary / "door").symlink_to(other, target_is_directory=True)
+        assert str(other / "notes.txt") in self._refused("drone rm door/notes.txt", str(canary))
+
+    def test_a_link_inside_the_branch_is_judged_where_the_link_lives(self, tmp_path):
+        canary, other = self._tree(tmp_path)
+        (canary / "door").symlink_to(other, target_is_directory=True)
+        assert self._run("drone rm door", str(canary))["exit_code"] == 0
+
+    def test_the_branch_root_and_the_temp_dir_themselves_are_refused(self, tmp_path, system_temp_apart):
+        canary, _ = self._tree(tmp_path)
+        self._refused("drone rm .", str(canary))
+        self._refused(f"drone rm {system_temp_apart}", str(canary))
+
+    @pytest.mark.parametrize(
+        "command",
+        (
+            "drone rm missing.txt",
+            "drone rm $UNSET_TARGET",
+            "drone rm *.txt",
+            "drone rm ~/notes.txt",
+            "drone rm $(echo notes.txt)",
+            "cd $UNSET_DIR && drone rm notes.txt",
+            "drone rm",
+            "drone rm -rf notes.txt",
+            "drone rm --stale 1d build",
+            "drone rm --help",
+            "drone rm notes.txt; $UNSET_PROGRAM x",
+        ),
+    )
+    def test_a_target_the_gate_cannot_resolve_is_refused(self, tmp_path, monkeypatch, command):
+        canary, _ = self._tree(tmp_path)
+        # Each word also exists as a literal file in the branch: only the rule under test can refuse it.
+        (canary / "~").mkdir()
+        (canary / "~" / "notes.txt").write_text("n", encoding="utf-8")
+        for literal in ("$UNSET_TARGET", "*.txt", "-rf", "--stale", "1d", "--help"):
+            (canary / literal).write_text("l", encoding="utf-8")
+        monkeypatch.chdir(canary)
+        assert "drone rm" in self._refused(command, str(canary)), command
+
+    def test_a_caller_with_no_passport_owns_no_branch(self, tmp_path):
+        self._tree(tmp_path)
+        assert "could not be named" in self._refused("drone rm canary/notes.txt", str(tmp_path))
+
+    def test_the_admin_seat_still_runs_drone_rm_anywhere(self, tmp_path):
+        canary, other = self._tree(tmp_path)
+        for command in ("drone rm ../README.md", f"drone rm {other / 'notes.txt'}", "drone rm --stale 1d build"):
+            assert self._run(command, str(canary), grant=True)["exit_code"] == 0, command
+
+    def test_raw_rm_and_the_other_delete_lanes_stay_refused_in_the_own_branch(self, tmp_path):
+        canary, _ = self._tree(tmp_path)
+        for command in (
+            "rm notes.txt",
+            "drone rm notes.txt && rm build/x",
+            "drone rm notes.txt; rmdir build",
+            "unlink notes.txt",
+            "find build -delete",
+        ):
+            self._refused(command, str(canary))
+        assert "Raw rm is refused" in self._refused("rm notes.txt", str(canary))
+        admin = self._run("rm notes.txt", str(canary), grant=True)
+        assert "Raw rm is refused" in json.loads(admin["stdout"])["reason"]
+
+    def test_an_allowed_drone_rm_is_not_recorded_here(self, tmp_path, caplog):
+        canary, _ = self._tree(tmp_path)
+        with caplog.at_level(logging.INFO):
+            self._run("drone rm notes.txt", str(canary))
+            self._run("drone rm ../README.md", str(canary))
+        records = [r.getMessage() for r in caplog.records if "DELETE" in r.getMessage()]
+        assert len(records) == 1 and "lane=drone rm" in records[0]
 
 
 class TestEveryDeleteVerb:
