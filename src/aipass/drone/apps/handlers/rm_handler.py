@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: rm_handler.py
 # Description: Contained safe-delete: in-tree targets move to the local .archive
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-06-02
 # Modified: 2026-11-15
 # =============================================
@@ -36,6 +36,13 @@ _BYTECODE_DIR = "__pycache__"
 _BYTECODE_SUFFIX = ".pyc"
 # The owner's ruling: the verified admin seat, and only it, works inside every branch.
 ADMIN_EXEMPTION = "admin"
+SIBLING_NEXT_STEP = " — not yours to remove: mail @devpulse the path and why"
+RECORDED_LINE = "This attempt is recorded in .ai_central/deletions.jsonl."
+
+
+def _shown(verdict: str, *lines: object) -> str:
+    """A result as printed: the verdict, then each path (or note) whole on a line of its own."""
+    return "\n".join((verdict, *(str(line) for line in lines)))
 
 
 def get_allowed_roots() -> list[Path]:
@@ -112,7 +119,7 @@ def check_carveouts(
         if target_branch_root is not None and target_branch_root != own:
             if admin_may_cross and resolved != target_branch_root and _verified_admin():
                 return False, "", ADMIN_EXEMPTION
-            return True, f"Protected: path is inside sibling branch {target_branch_root.name}/", None
+            return True, f"Protected: path is inside sibling branch {target_branch_root.name}/{SIBLING_NEXT_STEP}", None
 
     blocked, reason = check_contained_citizens(resolved, project_root, own)
     if not blocked and own is not None and own.is_relative_to(resolved):
@@ -208,7 +215,7 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
         else:
             # Refused per path, so absolute paths in the same call still delete.
             message = f"Cannot resolve relative path '{path_str}' — this process has no current directory"
-            results.append((path_str, False, message))
+            results.append((path_str, False, _shown(message, RECORDED_LINE)))
             logger.info("rm: %s", message)
             deletion_log.record_deletion(
                 lane=deletion_log.LANE_RM,
@@ -222,7 +229,7 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
         exists_on_disk = absolute.exists() or absolute.is_symlink()
         if not exists_on_disk:
             message = f"Path does not exist: {absolute}"
-            results.append((path_str, False, message))
+            results.append((path_str, False, _shown("Path does not exist:", absolute, RECORDED_LINE)))
             logger.info("rm: nonexistent path %s", absolute)
             deletion_log.record_deletion(
                 lane=deletion_log.LANE_RM,
@@ -243,7 +250,7 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
 
         allowed, reason = check_containment(resolved, roots)
         if not allowed:
-            results.append((path_str, False, reason))
+            results.append((path_str, False, _shown(reason, resolved, RECORDED_LINE)))
             logger.warning(
                 "rm: containment refused %s (resolved %s): %s",
                 path_str,
@@ -262,7 +269,7 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
 
         blocked, carveout_reason, exemption = check_carveouts(resolved, project_root, admin_may_cross=True)
         if blocked:
-            results.append((path_str, False, carveout_reason))
+            results.append((path_str, False, _shown(carveout_reason, resolved, RECORDED_LINE)))
             logger.warning(
                 "rm: carveout refused %s (resolved %s): %s",
                 path_str,
@@ -280,8 +287,9 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
             continue
 
         if ARCHIVE_DIR in resolved.parts:
-            message = f"Refused: {resolved} is inside {ARCHIVE_DIR}/ — emptying an archive is the owner's, by hand"
-            results.append((path_str, False, message))
+            verdict = f"Refused: inside {ARCHIVE_DIR}/ — emptying an archive is the owner's, by hand"
+            message = f"{verdict}: {resolved}"
+            results.append((path_str, False, _shown(verdict, resolved, RECORDED_LINE)))
             logger.info("rm: %s", message)
             deletion_log.record_deletion(
                 lane=deletion_log.LANE_RM,
@@ -308,7 +316,8 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
             else:
                 resolved.unlink()
             message = f"Deleted: {resolved}" + (f" (symlink to {target})" if target is not None else "")
-            results.append((path_str, True, message))
+            link = () if target is None else (f"(the link only; it pointed at {target})",)
+            results.append((path_str, True, _shown("Deleted:", resolved, *link)))
             logger.info("rm: deleted %s (resolved %s)", path_str, resolved)
             deletion_log.record_deletion(
                 lane=deletion_log.LANE_RM,
@@ -322,7 +331,7 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
             )
         except Exception as exc:
             message = f"Delete failed: {exc}"
-            results.append((path_str, False, message))
+            results.append((path_str, False, _shown(message, resolved, RECORDED_LINE)))
             logger.error("rm: delete failed for %s: %s", path_str, exc)
             deletion_log.record_deletion(
                 lane=deletion_log.LANE_RM,
@@ -390,7 +399,7 @@ def _move_to_archive(
             target=target,
             exemption=exemption,
         )
-        return path_str, False, message
+        return path_str, False, _shown(message, resolved, RECORDED_LINE)
 
     message = f"Moved: {resolved} -> {destination}" + (f" (symlink to {target})" if target is not None else "")
     if exemption is not None:
@@ -407,7 +416,9 @@ def _move_to_archive(
         moved_to=destination,
         exemption=exemption,
     )
-    return path_str, True, message
+    verdict = "Moved to .archive" + (f" ({exemption} seat, across the sibling fence)" if exemption else "") + ":"
+    link = () if target is None else (f"(the link only; it points at {target})",)
+    return path_str, True, _shown(verdict, resolved, f"-> {destination}", *link)
 
 
 MODE_STALE = "stale"

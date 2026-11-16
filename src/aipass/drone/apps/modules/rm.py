@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: rm.py
 # Description: Module orchestrator for contained safe-delete: in-tree targets move to .archive
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-06-02
 # Modified: 2026-11-15
 # =============================================
@@ -18,7 +18,7 @@ from __future__ import annotations
 import tempfile
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, success
+from aipass.cli.apps.modules import console, err_console, error, mark_command_failed
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.rm_handler import (
     format_age,
@@ -36,7 +36,7 @@ from aipass.drone.apps.handlers.help_flags import wants_help
 
 DRONE_MODULE = {
     "name": "rm",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "description": "Contained safe-delete: in-tree targets move to .archive, temp is deleted",
 }
 
@@ -87,12 +87,24 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
     results = _safe_delete(paths)
     ok = True
     for _path_str, succeeded, message in results:
-        if succeeded:
-            success(message)
-        else:
-            error(message)
-            ok = False
+        _report(succeeded, message)
+        ok = ok and succeeded
     return ok
+
+
+def _report(succeeded: bool, message: str) -> None:
+    """The verdict line, then each further line whole and unwrapped: a path split at 80 columns cannot be copied.
+
+    Success to stdout, a failure to stderr and marked failed, as ``success()`` and ``error()`` do.
+    """
+    verdict, *lines = message.splitlines()
+    out = console if succeeded else err_console
+    if not succeeded:
+        mark_command_failed()
+    mark, style = ("✅", "green") if succeeded else ("❌", "red bold")
+    out.print(f"{mark} {verdict}", style=style, soft_wrap=True, markup=False, highlight=False)
+    for line in lines:
+        out.print(f"   {line}", soft_wrap=True, markup=False, highlight=False)
 
 
 def run_stale(tokens: list[str]) -> bool:
@@ -113,7 +125,7 @@ def run_stale(tokens: list[str]) -> bool:
         for path, age, size in report.candidates:
             _plain(f"  would delete  {format_age(age):>7}  {size:>9} B  {path}")
     for message in report.refusals:
-        error(message)
+        _report(False, message)
     _plain(format_stale_summary(request, report))
     return not report.refusals
 
@@ -128,7 +140,7 @@ def print_introspection() -> None:
     console.print()
     console.print("[bold cyan]rm — Contained Safe-Delete[/bold cyan]")
     console.print()
-    console.print("[dim]Moves project files into the .archive beside them; deletes in the system tmp.[/dim]")
+    console.print("[dim]Moves project files into the .archive beside them; deletes files in the system temp dir.[/dim]")
     console.print()
     console.print("Run [green]'drone rm --help'[/green] for usage information")
     console.print()
@@ -143,7 +155,8 @@ def print_help() -> None:
     console.print("<its folder>/.archive/<its name> in one rename, a directory whole, the")
     console.print(".archive made if absent. A name already archived keeps both: the new one")
     console.print("gets a time stamp suffix. Nothing is overwritten.")
-    console.print("True deletes, and only these: the system temp dir, __pycache__, *.pyc, --stale.")
+    console.print("Truly deleted, and only these: files in the system temp dir, Python bytecode")
+    console.print("(__pycache__, *.pyc) and --stale temps. Everything else is moved.")
     console.print()
     console.print("[bold]Rules:[/bold]")
     console.print("  • Path must resolve under the project root or system temp dir")

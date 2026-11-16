@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_rm.py
 # Description: drone rm: containment, carve-outs, the move to .archive, stale sweep
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-06-02
 # Modified: 2026-11-15
 # =============================================
@@ -491,7 +491,7 @@ class TestTemplateSkeletonIsNotACitizen:
 
         assert ok is False, message
         assert "sibling branch spawn/" in message
-        assert "aipass_framework" not in message
+        assert "aipass_framework" not in message.splitlines()[0], "the verdict names the citizen; the path line follows"
         assert stray.is_dir()
 
     def test_refusal_names_the_citizen_not_the_skeleton(self, project_with_template, monkeypatch):
@@ -685,7 +685,12 @@ class TestASymlinkIsJudgedWhereItLives:
         link.symlink_to(aipass_dir / "api", target_is_directory=True)
         ((_path, ok, message),) = safe_delete([str(link)])
         moved = aipass_dir / "drone" / ".archive" / "api_link"
-        assert message == f"Moved: {link} -> {moved} (symlink to {aipass_dir / 'api'})"
+        assert message.splitlines() == [
+            "Moved to .archive:",
+            str(link),
+            f"-> {moved}",
+            f"(the link only; it points at {aipass_dir / 'api'})",
+        ]
         assert ok is True
         assert not link.is_symlink()
         assert moved.is_symlink()
@@ -1053,6 +1058,41 @@ class TestRmModule:
         printed = capsys.readouterr().out
         assert "Usage: drone rm" in printed
         assert "Carve-outs" in printed
+
+    def test_help_says_files_in_the_temp_dir_are_deleted_not_the_temp_dir(self, capsys):
+        print_help()
+
+        printed = capsys.readouterr().out
+        assert "files in the system temp dir" in printed
+        assert "Everything else is moved" in printed
+        assert "only these: the system temp dir" not in printed
+
+    def test_a_move_prints_the_source_and_destination_each_whole_on_its_own_line(self, in_project, capsys):
+        """Longer than the pinned console width, so a wrapping print would split the name."""
+        target = in_project / ("a_long_scratch_name_" * 12 + ".txt")
+        target.write_text("x", encoding="utf-8")
+
+        assert handle_command(str(target), []) is True
+
+        lines = [line.strip() for line in capsys.readouterr().out.splitlines()]
+        assert str(target) in lines
+        assert f"-> {in_project / '.archive' / target.name}" in lines
+
+    def test_a_sibling_refusal_prints_the_path_whole_says_it_is_recorded_and_what_to_do(
+        self, at_drone_beside_api, monkeypatch, capsys
+    ):
+        _rail_answers(monkeypatch, False)
+        target = at_drone_beside_api / ("deep_" * 45) / "notes.md"
+        target.parent.mkdir()
+        target.write_text("x", encoding="utf-8")
+
+        assert handle_command(str(target), []) is False
+
+        lines = [line.strip() for line in capsys.readouterr().err.splitlines()]
+        assert str(target) in lines
+        assert any("recorded" in line for line in lines)
+        assert any("mail @devpulse the path and why" in line for line in lines)
+        assert not any("PLAN-" in line for line in lines)
 
     def test_a_refusal_outside_every_root_is_a_failure_not_a_quiet_success(self, tmp_path):
         """A refusal is an error: handle_command reports False, the CLI exits 1.

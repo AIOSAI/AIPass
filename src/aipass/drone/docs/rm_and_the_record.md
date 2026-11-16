@@ -29,10 +29,16 @@ absent. From the caller's side it is gone and out of the way; nothing is lost.
 - **The fences are the same** as for a delete: carve-outs, sibling branches, a folder holding a
   citizen. A move is judged before it runs, exactly as a delete was.
 
-True deletes stay where an archive keeps nothing worth having, each named in `rm_handler.py`: a
-target outside the project (the system temp dir), `__pycache__` and `*.pyc` (rebuilt on the next
-import), and stale mode. The broker lane (`apps/handlers/broker/daemon.py`) still deletes; `drone
-rm` never routes through it.
+Truly deleted, and only where an archive keeps nothing worth having, each case named in
+`rm_handler.py`: files in the system temp dir (outside the project), Python bytecode
+(`__pycache__`, `*.pyc`, rebuilt on the next import) and stale-mode temps. Everything else is
+moved. The broker lane (`apps/handlers/broker/daemon.py`) still deletes; `drone rm` never routes
+through it.
+
+Each result prints as a verdict line, then every path whole on a line of its own (a move shows the
+source, then `-> ` and the destination), unwrapped, so a long path copies intact. A refusal ends
+with a line saying the attempt is recorded, and a sibling-branch refusal names the next step: mail
+@devpulse the path and why.
 
 ---
 

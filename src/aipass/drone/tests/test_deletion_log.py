@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_deletion_log.py
 # Description: Every drone delete, and every refused one, leaves a deletion record
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-14
 # Modified: 2026-11-15
 # =============================================
@@ -549,7 +549,7 @@ class TestRecordFailureIsContained:
         ((path, ok, message),) = results
         assert path == str(doomed)
         assert ok is True, message
-        assert message.startswith("Deleted: ")
+        assert message.startswith("Deleted:")
 
     def test_record_deletion_does_not_raise_when_cwd_is_gone(self, project, monkeypatch):
         """The docstring says 'Never raises'. Two lines read cwd outside its try."""
