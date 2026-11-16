@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: stop.py
 # Description: Stop module — ends a project's running lanes by request, and the stopped report every lane prints
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-16
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Stop Module — ``stop <project_root|@name> [lane]`` ends the lanes running for a project.
@@ -39,7 +39,7 @@ USAGE = "stop <project_root|@name> [lane]"
 STOP_WAIT_SECONDS = 30
 
 #: The words a lane may be named by; all names whatever sub-lane an all run is in.
-LANE_WORDS = ("snapshot", "versioned", "drive_sync", "all")
+LANE_WORDS = ("snapshot", "drive_sync", "all")
 
 __all__ = ["STOPPED_EXIT", "reset_stop_state", "run_was_stopped", "report_stopped", "stop_lanes", "handle_command"]
 

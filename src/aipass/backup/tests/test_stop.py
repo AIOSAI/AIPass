@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_stop.py
 # Description: Tests for the stop verb and the lane side of a stop: the SIGTERM flag, the stopped line, exit 130
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-10-16
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
-"""Tests for apps/modules/stop.py and the lane side it signals: snapshot, versioned, all and drive_sync stopping."""
+"""Tests for apps/modules/stop.py and the lane side it signals: snapshot, all and drive_sync stopping."""
 
 # A new file for DPLAN-0412 item 3. A real SIGTERM is never sent here (template
 # item 23: no signals in tests): the lane's own installed handler is called the
@@ -161,26 +161,10 @@ class TestASnapshotStopsBetweenFiles:
         assert len(results) == 1 and results[0].files_copied == 5
 
 
-class TestAVersionedRunStops:
-    """SIGTERM mid-versioned: same rules as snapshot."""
-
-    def test_the_versioned_run_stops_between_files_and_exits_130(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        root = _project(tmp_path / "proj", files=4)
-        _sigterm_after_files(monkeypatch, done=1)
-
-        assert _main(["versioned", str(root)]) == 130
-
-        assert capsys.readouterr().out.splitlines()[-1] == "stopped by request: 1 of 4 files, 1000 B"
-        assert load_changelog(str(root)) == []
-        assert len(_trail_rows("versioned_stopped")) == 1
-
-
 class TestAllStopsTheCurrentSubLaneAndStartsNoOther:
-    """Under all, a stop in snapshot leaves versioned and the Drive step unstarted."""
+    """Under all, a stop in snapshot ends the cycle: the Drive step never starts."""
 
-    def test_a_stop_in_snapshot_never_starts_versioned_and_all_exits_130(
+    def test_a_stop_in_snapshot_ends_the_cycle_and_all_exits_130(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         root = _project(tmp_path / "proj")
@@ -189,7 +173,6 @@ class TestAllStopsTheCurrentSubLaneAndStartsNoOther:
         assert _main(["all", str(root), "--quiet"]) == 130
 
         assert capsys.readouterr().out.splitlines()[-1] == "stopped by request: 3 of 5 files, 2.9 KB"
-        assert not (root / ".backup" / "versioned").exists()
         assert _trail_rows("all_complete") == []
         rows = _trail_rows("snapshot_stopped")
         assert len(rows) == 1 and rows[0]["verb"] == "all"
@@ -472,13 +455,13 @@ class TestTheStopVerb:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         root = _project(tmp_path / "proj", files=1)
-        _running(root, "versioned", 900, verb="all")
+        _running(root, "snapshot", 900, verb="all")
         lane = FakeLane(900, ["python3", "apps/backup.py", "all", str(root), "--quiet"], STARTED_EPOCH)
         _table(monkeypatch, lane)
 
         assert _main(["stop", str(root), "all"]) == 0
 
-        assert capsys.readouterr().out.splitlines() == ["stopped versioned (pid 900)"]
+        assert capsys.readouterr().out.splitlines() == ["stopped snapshot (pid 900)"]
         assert lane.calls == ["terminate"]
 
     def test_a_pid_whose_command_line_is_not_a_backup_lane_for_this_root_is_never_signalled(

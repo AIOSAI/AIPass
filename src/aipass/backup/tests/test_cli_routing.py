@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_cli_routing.py
 # Description: Tests for apps/backup.py's command routing and the help gate every apps/modules/ verb carries
-# Version: 2.0.9
+# Version: 2.1.0
 # Created: 2026-06-12
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/backup.py's command routing and the help gate every apps/modules/ verb carries."""
@@ -32,12 +32,10 @@ from aipass.backup.apps.modules import (
     drive_stats,
     drive_sync,
     register,
-    restore,
     settings,
     share,
     snapshot,
     status,
-    versioned,
 )
 
 # argv is patched as patch("sys.argv", ...), not patch.object(sys, ...): sentry's stdlib_patch
@@ -172,7 +170,7 @@ class TestModuleDiscovery:
         assert found == on_disk, f"discovery and apps/modules/ disagree: {found!r} vs {on_disk!r}"
         assert "door_trail" not in found, "a door reached the router as a command module"
         # An empty MODULES_DIR would pass the equality on []; identity rules out a re-imported twin.
-        assert {"drive_sync", "register", "restore", "share"} <= set(found)
+        assert {"drive_sync", "register", "share"} <= set(found)
         assert drive_sync in discovered and register in discovered
         assert all(callable(module.handle_command) for module in discovered)
         assert "__init__" not in found, "a private file reached the router as a command module"
@@ -241,7 +239,7 @@ class TestPrintHelp:
 
         # First word only: the 'all' row's description also names 'snapshot'.
         listed_verbs = [row.split()[0] for row in commands]
-        for mod in (snapshot, versioned, all_module, register, status, settings, restore):
+        for mod in (snapshot, all_module, register, status, settings):
             verb = mod.PRIMARY_COMMAND
             assert verb in listed_verbs, f"COMMANDS block has no row for {verb}"
 
@@ -300,18 +298,9 @@ STANDALONE_ENTRY_MODULES = [
         id="drive_sync",
     ),
     pytest.param(register, "resolve_caller_path", lambda p: [str(p)], lambda p: call(str(p)), id="register"),
-    pytest.param(
-        restore,
-        "run_list_versions",
-        lambda p: [str(p), "list", "some_file.py"],
-        # args[2] is the FILE; reading args[1] looks up a file named "list".
-        lambda p: call(str(p), "some_file.py"),
-        id="restore",
-    ),
     pytest.param(share, "run_share", lambda p: [str(p)], lambda p: call(str(p), public=False), id="share"),
     pytest.param(snapshot, "run_snapshot", lambda p: [str(p)], lambda p: call(str(p)), id="snapshot"),
     pytest.param(status, "resolve_caller_path", lambda p: [str(p)], lambda p: call(str(p)), id="status"),
-    pytest.param(versioned, "run_versioned", lambda p: [str(p)], lambda p: call(str(p)), id="versioned"),
 ]
 
 HELP_GATE_MODULES = [pytest.param(*row.values[:3], id=row.id) for row in STANDALONE_ENTRY_MODULES]
@@ -319,10 +308,7 @@ HELP_GATE_MODULES = [pytest.param(*row.values[:3], id=row.id) for row in STANDAL
 #: Real work after the sentinel, neutralised too: 'all' otherwise runs a LIVE run_drive_sync that
 #: rewrites the machine's real google_creds.json. Patched on its own module: all imports it inside handle_command.
 DOWNSTREAM_AFTER_SENTINEL: dict[ModuleType, tuple[tuple[ModuleType, str], ...]] = {
-    all_module: (
-        (all_module, "run_versioned"),
-        (drive_sync, "run_drive_sync"),
-    ),
+    all_module: ((drive_sync, "run_drive_sync"),),
 }
 
 
@@ -425,22 +411,17 @@ class TestNoWriteEscapesToRealSecrets:
             }
             all_module.handle_command(all_module.PRIMARY_COMMAND, [project])
 
-        scanned = doubles["run_versioned"].call_args.kwargs["pre_scanned"]
-        # Single-scan rule: snapshot gets the very list versioned does, so the tree is walked once.
+        scanned = snap.call_args.kwargs["pre_scanned"]
         assert snap.call_args_list == [call(project, verb=all_module.PRIMARY_COMMAND, pre_scanned=scanned)]
-        assert snap.call_args.kwargs["pre_scanned"] is scanned
-        assert sorted(doubles) == ["run_drive_sync", "run_versioned"]
+        assert sorted(doubles) == ["run_drive_sync"]
 
         # show_panels comes from the absence of --quiet: True is the claim, not a placeholder.
         assert doubles["run_drive_sync"].call_args_list == [
             call(project, show_panels=True, verb=all_module.PRIMARY_COMMAND)
         ]
 
-        # Single-scan rule: versioned gets the list 'all' walked; the seed .backupignore proves it.
-        versioned_call = doubles["run_versioned"].call_args
-        assert doubles["run_versioned"].call_count == 1
-        assert versioned_call.args == (project,)
-        assert (str(tmp_path / ".backupignore"), ".backupignore") in versioned_call.kwargs["pre_scanned"]
+        # Single-scan rule: snapshot gets the list 'all' walked; the seed .backupignore proves it.
+        assert (str(tmp_path / ".backupignore"), ".backupignore") in scanned
 
     def test_no_write_reaches_real_secret_storage(self, tmp_path: Path, secrets_watch: list[str]) -> None:
         """Running 'all' touches nothing under ~/.secrets."""
@@ -481,45 +462,6 @@ class TestStubFailsHonestly:
         assert "settings sets one key today" in err
 
 
-class TestRestoreRefusesAMalformedInvocation:
-    """A restore invocation that cannot run must fail loudly, not print help and exit 0.
-
-    Exit 2, not 1: 1 is the router's unhandled-command code, and returning False would add a
-    second, false "Unknown command: restore" line.
-    """
-
-    def test_a_missing_output_path_is_refused_instead_of_exiting_zero(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """`restore <project> file <f>` with no output path printed help and exited 0."""
-        with patch("sys.argv", ["backup", "restore", str(tmp_path), "file", "notes.txt"]):
-            code = entry.main()
-
-        assert code == 2, f"a restore that never ran exited {code}"
-
-        out, err = capsys.readouterr()
-        # On stdout a refusal is indistinguishable from the "Restored X to Y" line a pipe reads for.
-        assert "restore <project> file <file> <out>" in err, f"the missing operand was never named on stderr: {err!r}"
-        assert "Unknown command" not in err, f"the refusal returned False and drew a second, false line: {err!r}"
-        assert "Usage:" not in out, "the malformed invocation still answered with the help page"
-        assert f"{restore.MODULE_NAME} Module" not in out, "the malformed invocation still printed the introspection"
-
-    def test_an_unknown_verb_is_refused_on_stderr_instead_of_answered_with_the_help_page(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """Any verb but list/file printed the help page on stdout and exited 0."""
-        with patch("sys.argv", ["backup", "restore", str(tmp_path), "lsit", "notes.txt"]):
-            code = entry.main()
-
-        assert code == 2, f"an unknown verb exited {code}"
-
-        out, err = capsys.readouterr()
-        assert "lsit" in err, f"the refusal never named the verb the user typed: {err!r}"
-        assert "Unknown command" not in err, f"the refusal returned False and drew a second, false line: {err!r}"
-        assert "restore <project> list <file>" not in out, "an unknown verb still answered with the usage page"
-        assert f"{restore.MODULE_NAME} Module" not in out, "an unknown verb still printed the introspection"
-
-
 class TestUnknownCommandNotSwallowed:
     """An unrecognised command must reach the 'Unknown command' error, not display.py's introspection."""
 
@@ -557,22 +499,18 @@ class TestHelpNeverExecutes:
     PROJECT = "<project>"
     HELP_ARGV = [
         ["snapshot", PROJECT, "--help"],
-        ["versioned", PROJECT, "-h"],
-        ["all", PROJECT, "--help"],
+        ["all", PROJECT, "-h"],
         ["drive_clear", PROJECT, "--force", "--help"],
-        ["restore", PROJECT, "file", "a.py", "b.py", "--help"],
     ]
 
     def test_the_help_sweep_still_covers_every_shape_it_was_built_for(self) -> None:
-        """HELP_ARGV keeps its five rows in order, every one ending in a help flag and exactly one in -h."""
-        assert len(self.HELP_ARGV) == 5
+        """HELP_ARGV keeps its three rows in order, every one ending in a help flag and exactly one in -h."""
+        assert len(self.HELP_ARGV) == 3
         # By name, not literal: a sweep dispatching a command no module owns sweeps nothing.
         assert [row[0] for row in self.HELP_ARGV] == [
             snapshot.PRIMARY_COMMAND,
-            versioned.PRIMARY_COMMAND,
             all_module.PRIMARY_COMMAND,
             drive_clear.PRIMARY_COMMAND,
-            restore.PRIMARY_COMMAND,
         ]
         assert all(row[-1] in ("--help", "-h") for row in self.HELP_ARGV)
         assert sum(1 for row in self.HELP_ARGV if "-h" in row) == 1

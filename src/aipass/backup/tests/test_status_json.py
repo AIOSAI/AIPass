@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_status_json.py
 # Description: Tests for apps/modules/status.py's --json and --sizes, the backup door's status contract
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-10-16
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/status.py's --json [--sizes], the backup door's status contract."""
@@ -68,7 +68,7 @@ class TestStatusJsonWithoutAStore:
             "mode": "snapshot",
             "drive_sync": False,
             "runs": 0,
-            "lanes": {"snapshot": NO_RUN, "versioned": NO_RUN, "drive_sync": NO_DRIVE_RUN},
+            "lanes": {"snapshot": NO_RUN, "drive_sync": NO_DRIVE_RUN},
             "drive": {"tracked_files": 0},
             "running": [],
         }
@@ -105,16 +105,15 @@ class TestTheBackupsNowPanel:
         """Mutant: the panel before the run reads a clock shared by every project."""
         root = tmp_path / "proj"
         now = datetime.now(timezone.utc).isoformat()
-        _store(root, entries=[{"timestamp": now, "mode": "versioned", "files_copied": 2}])
+        _store(root, entries=[{"timestamp": now, "mode": "drive_sync", "files_copied": 2}])
         _store(tmp_path / "other", entries=[{"timestamp": now, "mode": "snapshot", "files_copied": 1}])
 
         display.show_last_backups(str(root))
 
-        assert capsys.readouterr().out.splitlines()[-4:] == [
+        assert capsys.readouterr().out.splitlines()[-3:] == [
             "Last backups:",
             "  Snapshot:   never",
-            "  Versioned:  just now",
-            "  Drive sync: never",
+            "  Drive sync: just now",
         ]
 
     def test_the_panel_reads_this_projects_lanes_not_another_projects_run_on_the_branch_clock(
@@ -123,13 +122,12 @@ class TestTheBackupsNowPanel:
         root = tmp_path / "proj"
         now = datetime.now(timezone.utc).isoformat()
         _store(root, entries=[{"timestamp": now, "mode": "snapshot", "files_copied": 3}])
-        _store(tmp_path / "other", entries=[{"timestamp": now, "mode": "versioned", "files_copied": 1}])
+        _store(tmp_path / "other", entries=[{"timestamp": now, "mode": "drive_sync", "files_copied": 1}])
 
         display.show_backups_now(str(root))
 
-        assert capsys.readouterr().out.splitlines()[-3:] == [
+        assert capsys.readouterr().out.splitlines()[-2:] == [
             "  Snapshot:   just now",
-            "  Versioned:  never",
             "  Drive sync: never",
         ]
 
@@ -143,9 +141,10 @@ class TestStatusJsonFromTheStore:
         root = tmp_path / "proj"
         _store(
             root,
-            config={"project_name": "AIPass", "backup_mode": "versioned", "drive_sync": True},
+            config={"project_name": "AIPass", "backup_mode": "snapshot", "drive_sync": True},
             entries=[
                 {"timestamp": "2026-08-01T00:00:00+00:00", "mode": "snapshot", "files_copied": 10},
+                # An entry from the retired versioned lane: counted in runs, never a lane.
                 {"timestamp": "2026-09-28T03:12:00+00:00", "mode": "versioned", "files_copied": 120},
                 {"timestamp": "2026-10-16T07:09:50+00:00", "mode": "snapshot", "files_copied": 15414},
             ],
@@ -158,19 +157,18 @@ class TestStatusJsonFromTheStore:
             "project": "AIPass",
             "root": str(root),
             "registered": True,
-            "mode": "versioned",
+            "mode": "snapshot",
             "drive_sync": True,
             "runs": 3,
             "lanes": {
                 "snapshot": {"last": "2026-10-16T07:09:50+00:00", "files": 15414},
-                "versioned": {"last": "2026-09-28T03:12:00+00:00", "files": 120},
                 "drive_sync": NO_DRIVE_RUN,
             },
             "drive": {"tracked_files": 2},
             "running": [],
         }
 
-    def test_sizes_adds_the_bytes_of_both_stores_and_nothing_else(
+    def test_sizes_adds_the_snapshot_store_bytes_and_nothing_else(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         root = tmp_path / "proj"
@@ -178,12 +176,13 @@ class TestStatusJsonFromTheStore:
         (store / "snapshots" / "src").mkdir(parents=True)
         (store / "snapshots" / "src" / "a.py").write_text("x" * 7, encoding="utf-8")
         (store / "snapshots" / "b.txt").write_text("y" * 5, encoding="utf-8")
+        # An old versioned tree on disk is not measured.
         (store / "versioned" / "root" / "b.txt").mkdir(parents=True)
         (store / "versioned" / "root" / "b.txt" / "b.txt").write_text("z" * 11, encoding="utf-8")
 
         answer = _status_json(root, "--sizes", capsys=capsys)
 
-        assert answer["store"] == {"snapshots_bytes": 12, "versioned_bytes": 11}
+        assert answer["store"] == {"snapshots_bytes": 12}
         keys = ["project", "root", "registered", "mode", "drive_sync", "runs", "lanes", "store", "drive", "running"]
         assert list(answer) == keys
 

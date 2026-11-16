@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: prune.py
 # Description: Prune handler — finds and removes stored copies whose project path the ignore spec now matches
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-10-16
 # Modified: 2026-11-15
 # =============================================
@@ -12,7 +12,6 @@ Reference: docs/store_cleanup.md
 """
 
 import os
-import shutil
 from pathlib import Path
 
 import pathspec
@@ -23,10 +22,12 @@ from ..audit import trail
 from ..ignore.patterns import load_spec
 from ..ignore.whitelist import load_whitelist
 from ..scan.filter import is_excluded
-from ..path.builder import build_snapshot_path, build_versioned_store, versioned_folder_name, versioned_rel_path
+from ..path.builder import build_snapshot_path
 
 #: The top-level group a root-level file is listed under.
 ROOT_GROUP = "(root files)"
+#: The one store prune reads: the snapshot store. Nothing else under .backup/ is touched.
+LANE = "snapshots"
 
 
 def _raise_walk_error(err: OSError) -> None:
@@ -54,44 +55,6 @@ def _snapshot_candidates(store: Path, spec: pathspec.PathSpec, whitelist: list[s
     return found
 
 
-def _current_name(folder: Path, filenames: list[str]) -> str | None:
-    """The current copy's name when ``folder`` is a versioned file-folder, else None."""
-    for filename in filenames:
-        if versioned_folder_name(filename) == folder.name:
-            return filename
-    return None
-
-
-def _folder_bytes(folder: Path, name: str, filenames: list[str]) -> int:
-    """Bytes held by one file-folder: its own files and its ``<name>_diffs/``."""
-    total = sum((folder / filename).lstat().st_size for filename in filenames)
-    diffs = folder / f"{name}_diffs"
-    if diffs.is_dir():
-        for dirpath, _dirnames, diff_files in os.walk(diffs, onerror=_raise_walk_error, followlinks=False):
-            total += sum((Path(dirpath) / f).lstat().st_size for f in diff_files)
-    return total
-
-
-def _versioned_candidates(store: Path, spec: pathspec.PathSpec, whitelist: list[str]) -> list[dict]:
-    """Every file-folder under the versioned store whose project-relative path is now matched."""
-    found: list[dict] = []
-    if not store.exists():
-        return found
-    for dirpath, dirnames, filenames in os.walk(store, onerror=_raise_walk_error, followlinks=False):
-        folder = Path(dirpath)
-        name = _current_name(folder, filenames) if folder != store else None
-        if name is None:
-            continue
-        # A file-folder's own diffs are part of it, never a folder of their own.
-        dirnames[:] = [d for d in dirnames if d != f"{name}_diffs"]
-        rel_path = versioned_rel_path(folder.parent.relative_to(store).as_posix(), name)
-        if is_excluded(rel_path, spec, whitelist):
-            found.append(
-                {"rel_path": rel_path, "path": folder, "bytes": _folder_bytes(folder, name, filenames), "name": name}
-            )
-    return found
-
-
 def _group(candidates: list[dict]) -> dict[str, dict]:
     """Per top-level directory: how many candidates and how many bytes, sorted by name."""
     groups: dict[str, dict] = {}
@@ -103,44 +66,21 @@ def _group(candidates: list[dict]) -> dict[str, dict]:
 
 
 def find_prunable(project_root: str) -> dict:
-    """List the stored copies the ignore spec now matches, in both stores; OSError on an unlistable store."""
+    """List the snapshot copies the ignore spec now matches; OSError on an unlistable store."""
     spec = load_spec(project_root)
     whitelist = load_whitelist(project_root)
     snapshots = _snapshot_candidates(build_snapshot_path(project_root), spec, whitelist)
-    versioned = _versioned_candidates(build_versioned_store(project_root), spec, whitelist)
-    everything = snapshots + versioned
     found = {
-        "snapshots": snapshots,
-        "versioned": versioned,
-        "groups": {"snapshots": _group(snapshots), "versioned": _group(versioned)},
-        "count": len(everything),
-        "bytes": sum(item["bytes"] for item in everything),
+        LANE: snapshots,
+        "groups": {LANE: _group(snapshots)},
+        "count": len(snapshots),
+        "bytes": sum(item["bytes"] for item in snapshots),
     }
     trail.log_operation(
         "prune_listed",
         {"project_root": project_root, "count": found["count"], "bytes": found["bytes"]},
     )
     return found
-
-
-def _remove(lane: str, item: dict) -> None:
-    """Remove one candidate: a snapshot file, or a versioned file-folder's files and diffs.
-
-    A file-folder itself goes only once empty: a subdirectory other than its
-    diffs belongs to a later project directory of the same name, and stays.
-    """
-    if lane == "snapshots":
-        item["path"].unlink()
-        return
-    folder: Path = item["path"]
-    for entry in folder.iterdir():
-        if entry.is_file() or entry.is_symlink():
-            entry.unlink()
-    diffs = folder / f"{item['name']}_diffs"
-    if diffs.is_dir():
-        shutil.rmtree(diffs)
-    if not any(folder.iterdir()):
-        folder.rmdir()
 
 
 def _remove_empty_parents(paths: list[Path], store: Path) -> None:
@@ -156,28 +96,27 @@ def apply_prune(project_root: str, found: dict) -> dict:
     removed = 0
     freed = 0
     errors: list[str] = []
-    for lane in ("snapshots", "versioned"):
-        done: list[Path] = []
-        for item in found[lane]:
-            try:
-                _remove(lane, item)
-            except OSError as e:
-                logger.warning(f"[prune] Could not remove {item['path']}: {e}")
-                errors.append(f"{lane}/{item['rel_path']}: {e}")
-                continue
-            removed += 1
-            freed += item["bytes"]
-            done.append(item["path"])
-            trail.log_operation(
-                "prune_removed",
-                {"project_root": project_root, "lane": lane, "rel_path": item["rel_path"], "bytes": item["bytes"]},
-            )
-        store = build_snapshot_path(project_root) if lane == "snapshots" else build_versioned_store(project_root)
+    done: list[Path] = []
+    for item in found[LANE]:
         try:
-            _remove_empty_parents(done, store)
+            item["path"].unlink()
         except OSError as e:
-            logger.warning(f"[prune] Could not remove an emptied directory under {store}: {e}")
-            errors.append(f"{lane}: emptied directory not removed: {e}")
+            logger.warning(f"[prune] Could not remove {item['path']}: {e}")
+            errors.append(f"{LANE}/{item['rel_path']}: {e}")
+            continue
+        removed += 1
+        freed += item["bytes"]
+        done.append(item["path"])
+        trail.log_operation(
+            "prune_removed",
+            {"project_root": project_root, "lane": LANE, "rel_path": item["rel_path"], "bytes": item["bytes"]},
+        )
+    store = build_snapshot_path(project_root)
+    try:
+        _remove_empty_parents(done, store)
+    except OSError as e:
+        logger.warning(f"[prune] Could not remove an emptied directory under {store}: {e}")
+        errors.append(f"{LANE}: emptied directory not removed: {e}")
     trail.log_operation(
         "prune_applied",
         {"project_root": project_root, "removed": removed, "bytes": freed, "errors": len(errors)},

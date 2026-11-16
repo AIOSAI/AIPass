@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: progress.py
 # Description: Running-lane progress files — .backup/running/<lane>.json, written by the lane, read by status and stop
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-16
-# Modified: 2026-10-29
+# Modified: 2026-11-15
 # =============================================
 
 """Running-lane progress files.
@@ -29,7 +29,7 @@ RUNNING_DIRNAME = "running"
 WRITE_INTERVAL_SECONDS = 1.0
 
 #: The lanes that do work and so write a file, in the contract's order.
-WORK_LANES = ("snapshot", "versioned", "drive_sync")
+WORK_LANES = ("snapshot", "drive_sync")
 
 
 def now() -> float:

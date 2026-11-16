@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: prune.py
 # Description: Prune module — lists, and with --apply removes, stored copies the ignore spec now matches
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-16
 # Modified: 2026-11-15
 # =============================================
@@ -28,7 +28,7 @@ PRIMARY_COMMAND = "prune"
 USAGE = "prune <project_root|@name> [--apply]"
 
 #: What one candidate is called in each store.
-UNITS = {"snapshots": "files", "versioned": "file-folders"}
+UNITS = {"snapshots": "files"}
 
 
 def print_introspection():
@@ -44,8 +44,8 @@ def print_help():
     print_introspection()
     console.print()
     console.print(f"Usage: {USAGE}")
-    console.print("  Lists, per top-level directory, the snapshots/ files and versioned/")
-    console.print("  file-folders whose project path the ignore spec now matches.")
+    console.print("  Lists, per top-level directory, the snapshots/ files whose project")
+    console.print("  path the ignore spec now matches. Snapshot files only.")
     console.print("  Without --apply nothing is deleted. --apply deletes them,")
     console.print("  one trail row each.")
 

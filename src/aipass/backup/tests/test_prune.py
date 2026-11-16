@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_prune.py
 # Description: Tests for apps/modules/prune.py and the cleanup/prune handler it drives
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-16
 # Modified: 2026-11-15
 # =============================================
@@ -9,14 +9,14 @@
 """Tests for apps/modules/prune.py and the cleanup/prune handler it drives."""
 
 # A new file for a new verb (DPLAN-0411 item 8); the gate is open for new test files
-# on this build. The stores are built by the real snapshot and versioned engines on a
-# tmp_path project, so the layout under test is the one the product writes.
+# on this build. The snapshot store is built by the real snapshot engine on a tmp_path
+# project, so the layout under test is the one the product writes. A retired-lane
+# .backup/versioned/ tree is built by hand beside it: prune must never touch it.
 #
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(os_walk_onerror) — _raise_walk_error, the walk's hook for a store directory it cannot list
 
 import json
-import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -26,9 +26,8 @@ from aipass.backup.apps import backup as entry
 from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.modules import prune
 from aipass.backup.apps.modules.snapshot import run_snapshot
-from aipass.backup.apps.modules.versioned import run_versioned
 
-#: A file name over 50 characters: the versioned store hashes its folder name.
+#: A file name over 50 characters.
 LONG_NAME = "L" * 60 + ".txt"
 
 
@@ -44,7 +43,7 @@ def _files(root: Path) -> set[str]:
 
 @pytest.fixture
 def backed_up(tmp_path: Path) -> Path:
-    """A project backed up by both engines, then given rules that match part of what they stored."""
+    """A project with a snapshot store and an old versioned tree, then rules that match part of both."""
     root = tmp_path / "proj"
     _write(root / ".backupignore", ".backup/\n")
     _write(root / "src" / "main.py", "print(1)\n")
@@ -53,11 +52,10 @@ def backed_up(tmp_path: Path) -> Path:
     _write(root / "app" / "target" / LONG_NAME, "long\n")
     _write(root / "notes.log", "one\n")
     run_snapshot(str(root), show_panels=False)
-    run_versioned(str(root), show_panels=False)
-    # A second versioned run over a changed file gives its file-folder a diff.
-    _write(root / "notes.log", "one\ntwo\n")
-    os.utime(root / "notes.log", (1_700_000_000, 1_700_000_000))
-    run_versioned(str(root), show_panels=False)
+    # Data left by the retired versioned lane, matched by the new rules: prune leaves it all.
+    _write(root / ".backup" / "versioned" / "root" / "notes.log" / "notes.log", "one\n")
+    _write(root / ".backup" / "versioned" / "root" / "notes.log" / "notes.log_diffs" / "a.diff", "+two\n")
+    _write(root / ".backup" / "versioned" / "app" / "target" / "debug" / "x.bin" / "x.bin", "bb\n")
     _write(root / ".backupignore", ".backup/\napp/target/\n*.log\n")
     return root
 
@@ -70,7 +68,6 @@ class TestPruneDryRun:
     ) -> None:
         store = backed_up / ".backup"
         before = _files(store)
-        assert "versioned/root/notes.log/notes.log_diffs" in {str(Path(p).parent) for p in before}
 
         assert prune.handle_command("prune", [str(backed_up)]) is True
 
@@ -80,12 +77,10 @@ class TestPruneDryRun:
         assert _files(store) == before
         assert lines[-1].startswith("Dry run -- nothing deleted.")
         assert "snapshots/  3 files" in out
-        assert "versioned/  3 file-folders" in out
+        assert "versioned" not in out
         assert any(line.split()[:3] == ["app", "2", "files"] for line in lines)
         assert any(line.split()[:4] == ["(root", "files)", "1", "files"] for line in lines)
-        assert any(line.split()[:3] == ["app", "2", "file-folders"] for line in lines)
-        assert any(line.split()[:4] == ["(root", "files)", "1", "file-folders"] for line in lines)
-        assert "Total: 6 stored paths" in out
+        assert "Total: 3 stored paths" in out
 
     def test_a_whitelisted_path_is_never_listed(self, backed_up: Path, capsys: pytest.CaptureFixture[str]) -> None:
         config_path = backed_up / ".backup" / "config.json"
@@ -97,7 +92,7 @@ class TestPruneDryRun:
 
         out, _err = capsys.readouterr()
         assert "(root" not in out
-        assert "Total: 4 stored paths" in out
+        assert "Total: 2 stored paths" in out
 
 
 class TestPruneApply:
@@ -107,21 +102,17 @@ class TestPruneApply:
         self, backed_up: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         store = backed_up / ".backup"
+        versioned_before = _files(store / "versioned")
 
         assert prune.handle_command("prune", [str(backed_up), "--apply"]) is True
 
         out, err = capsys.readouterr()
         assert err == ""
-        assert out.strip().splitlines()[-1].startswith("Removed 6 stored paths")
+        assert out.strip().splitlines()[-1].startswith("Removed 3 stored paths")
         assert {p for p in _files(store / "snapshots")} == {".backupignore", "app/keep.txt", "src/main.py"}
-        assert {str(Path(p).parent) for p in _files(store / "versioned")} == {
-            "root/.backupignore",
-            "app/keep.txt",
-            "src/main.py",
-        }
         assert not (store / "snapshots" / "app" / "target").exists()
-        assert not (store / "versioned" / "app" / "target").exists()
-        assert not (store / "versioned" / "root" / "notes.log").exists()
+        # The old version store is never prune's: every file in it survives, matched or not.
+        assert _files(store / "versioned") == versioned_before
 
     def test_apply_writes_one_trail_row_per_removed_path(
         self, backed_up: Path, capsys: pytest.CaptureFixture[str]
@@ -135,9 +126,6 @@ class TestPruneApply:
             ("snapshots", "app/target/" + LONG_NAME),
             ("snapshots", "app/target/debug/x.bin"),
             ("snapshots", "notes.log"),
-            ("versioned", "app/target/" + LONG_NAME),
-            ("versioned", "app/target/debug/x.bin"),
-            ("versioned", "notes.log"),
         ]
 
 
@@ -205,7 +193,7 @@ class TestPruneRefusals:
 
         out, err = capsys.readouterr()
         assert err == ""
-        assert out.strip().splitlines()[-1].startswith("Removed 6 stored paths")
+        assert out.strip().splitlines()[-1].startswith("Removed 3 stored paths")
 
     def test_a_dry_run_from_any_citizen_still_lists(
         self, backed_up: Path, verified_seat, capsys: pytest.CaptureFixture[str]

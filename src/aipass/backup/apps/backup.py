@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: backup.py
 # Description: BACKUP Branch — main orchestrator with auto-discovery
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-04-16
-# Modified: 2026-10-21
+# Modified: 2026-11-15
 # =============================================
 
 """BACKUP Branch - Main Orchestrator"""
@@ -55,19 +55,17 @@ def print_help() -> None:
     console.print("  [dim]drone @backup --help[/dim]")
     console.print()
     console.print("  [dim]Legacy form, still live: drone @backup backup <project_path|@name>[/dim]")
-    console.print("  [dim]runs snapshot; add --versioned or --all to pick another lane.[/dim]")
+    console.print("  [dim]runs snapshot; add --all to run the full cycle.[/dim]")
     console.print()
     console.print("-" * 70)
     console.print()
     console.print("[bold cyan]COMMANDS:[/bold cyan]")
     console.print()
     console.print("  [green]snapshot[/green]     Full mirror backup of a project")
-    console.print("  [green]versioned[/green]    Incremental timestamped backup")
-    console.print("  [green]all[/green]          Run snapshot, versioned, then drive_sync when the project has it on")
+    console.print("  [green]all[/green]          Run snapshot, then drive_sync when the project has it on")
     console.print("  [green]register[/green]     Register a project + scaffold its .backup/")
     console.print("  [green]status[/green]       Show backup info and recent history")
     console.print("  [green]prune[/green]        List stored copies the ignore spec now matches; --apply deletes them")
-    console.print("  [green]restore[/green]      List a file's versions, or restore its current version")
     console.print("  [green]settings[/green]     Turn a project's drive_sync on or off (the one live setting)")
     console.print("  [green]drive_sync[/green]   Upload the snapshot store to the remote drive, whatever the setting")
     console.print("  [green]drive_check[/green]  Test the remote drive connection")
@@ -89,12 +87,11 @@ def print_help() -> None:
     console.print("  [green]--note <text>[/green]     drive_sync: attach a note to the sync record")
     console.print("  [green]--public[/green]          share: anyone with the link may read the uploaded file")
     console.print("  [green]--json[/green]            status: one JSON object on stdout, nothing else")
-    console.print("  [green]--sizes[/green]           status --json: add both store sizes (walks the store)")
+    console.print("  [green]--sizes[/green]           status --json: add the snapshot store size (walks the store)")
     console.print("  [green]--apply[/green]           prune: delete what the listing names (without it, nothing goes)")
     console.print()
-    console.print("  [dim]restore takes subcommands, not flags: list <file> and file <file> <out>.[/dim]")
     console.print("  [dim]settings takes one key: drive_sync on|off <project_path|@name>.[/dim]")
-    console.print("  [dim]stop takes an optional lane word: snapshot, versioned, drive_sync or all.[/dim]")
+    console.print("  [dim]stop takes an optional lane word: snapshot, drive_sync or all.[/dim]")
     console.print()
     console.print("-" * 70)
     console.print()
@@ -103,17 +100,14 @@ def print_help() -> None:
     console.print("  [bold dim]Register & back up:[/bold dim]")
     console.print("    [dim]drone @backup register /path/to/project --name myapp[/dim]")
     console.print("    [dim]drone @backup snapshot @myapp[/dim]")
-    console.print("    [dim]drone @backup versioned @myapp[/dim]")
     console.print("    [dim]drone @backup all @myapp[/dim]")
     console.print("    [dim]drone @backup all --registered --quiet[/dim]")
     console.print()
-    console.print("  [bold dim]Status & restore:[/bold dim]")
+    console.print("  [bold dim]Status & stop:[/bold dim]")
     console.print("    [dim]drone @backup status @myapp[/dim]")
     console.print("    [dim]drone @backup status @myapp --json --sizes[/dim]")
     console.print("    [dim]drone @backup stop @myapp[/dim]")
     console.print("    [dim]drone @backup stop @myapp drive_sync[/dim]")
-    console.print("    [dim]drone @backup restore @myapp list src/main.py[/dim]")
-    console.print("    [dim]drone @backup restore @myapp file src/main.py ./restored.py[/dim]")
     console.print()
     console.print("  [bold dim]Store cleanup:[/bold dim]")
     console.print("    [dim]drone @backup prune @myapp[/dim]")
@@ -216,10 +210,7 @@ def main():
             return 1
         remaining = [project_root] + args[2:]
         mode = "snapshot"
-        if "--versioned" in args:
-            mode = "versioned"
-            remaining = [r for r in remaining if r != "--versioned"]
-        elif "--all" in args:
+        if "--all" in args:
             mode = "all"
             remaining = [r for r in remaining if r != "--all"]
 

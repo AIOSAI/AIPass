@@ -3,8 +3,7 @@
 # The Drive lane
 
 Optional, off by default, and the only part of this branch that leaves the
-machine. It uploads the **snapshot** store; the versioned store never leaves
-the machine.
+machine. It uploads the **snapshot** store.
 
 ## When it runs
 
@@ -39,8 +38,7 @@ verifies it end to end.
 
 `drive_sync` walks `<project>/.backup/snapshots/` and uploads each file under
 `AIPass Backups/<project dir name>/snapshot/<path relative to the snapshot
-store>`. Anything else under `AIPass Backups/<project dir name>/` (such as what
-a versioned-store sync put directly there) is left alone: this branch never
+store>`. Anything else under `AIPass Backups/<project dir name>/` (such as a file put directly there) is left alone: this branch never
 deletes anything remote; removing it is a job done by hand.
 
 Before uploading, the store is re-filtered through `load_spec()`, so a store that
@@ -97,8 +95,8 @@ so the verb exits 2. The sentence goes to stdout rather than through
 line. A run with nothing to upload never asks for the quota.
 
 `all`'s Drive step is the same function, so an `all` whose Drive step cannot
-fit ends on the same sentence, exits 2, and keeps what its snapshot and
-versioned steps wrote. `all` does not repeat the sentence (`error_shown`).
+fit ends on the same sentence, exits 2, and keeps what its snapshot
+step wrote. `all` does not repeat the sentence (`error_shown`).
 Under `all --registered` the per-project summary still follows it, as it
 follows every project. Through the host API's backup door, a refused run is a
 `failed` job, not an HTTP error: the lane exits 2, the job read answers 200, and
@@ -107,7 +105,7 @@ the job's `summary`, the tail of the lane's output, carries the sentence.
 ## On the host API's backup door
 
 The host API (@api) runs these lanes for the phone through four routes. A lane is
-one of the four drone verb names, `snapshot`, `versioned`, `all` or `drive_sync`,
+one of the three drone verb names, `snapshot`, `all` or `drive_sync`,
 and runs as `drone @backup <lane> <root>`, with `--quiet` for all but
 `drive_sync`, which has none.
 
@@ -128,7 +126,7 @@ and runs as `drone @backup <lane> <root>`, with `--quiet` for all but
   timeout, or a routing error mid-run, whose sentence is in `error`). Jobs live in
   the server's memory: a finished one is kept an hour, and a restart forgets all.
 - **Four error codes.** **400 `verb_refused`**: no project or an unknown one, a
-  lane outside the four, or that lane already running for that project
+  lane outside the three, or that lane already running for that project
   (`<lane> already running for <project> since <iso>`). **404 `job_unknown`**: a
   job the server does not hold. **404 `not_running`**: cancel found nothing of
   that lane running; the message is `stop`'s line verbatim. **503
@@ -208,8 +206,8 @@ line; a run that only logged its reason read as passed.
 
 `.backup/drive_tracker.json` records what has been uploaded, keyed by path
 relative to the snapshot store, and carries a top-level `"_lane": "snapshot"`.
-A tracker with no stamp, or a stamp naming another lane, was written by the
-versioned-era lane: its keys are versioned-store paths. The next `drive_sync`
+A tracker with no stamp, or a stamp naming another lane, was written by another
+lane: its keys are not snapshot-store paths (an old tracker keyed version-store paths). The next `drive_sync`
 renames it to `drive_tracker.versioned.json` beside it -- kept, never deleted --
 logs one line saying so, and starts a fresh tracker. If a
 `drive_tracker.versioned.json` already exists the run stops instead of
@@ -220,7 +218,7 @@ overwriting it; move one of the two by hand. An empty tracker (what
 
 Every run that uploaded a file appends one entry to the project's
 `.backup/changelog.json`, whether it finished, was stopped or was aborted by
-the breaker. It has the shape snapshot and versioned write, with `mode`
+the breaker. It has the shape snapshot writes, with `mode`
 `drive_sync` and `files_copied` set to the files uploaded in that run, plus
 `stopped` (true or false), `aborted` (the breaker's sentence, or `""`) and
 `failed` (a count). `status --json` reads the Drive lane's `last`, `files`

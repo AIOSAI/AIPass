@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: caller.py
 # Description: Caller-CWD path resolution — relative paths resolve where the user is
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-08
 # Modified: 2026-11-15
 # =============================================
 
-"""Caller-CWD path resolution handler, and the fence on where a caller may write or delete."""
+"""Caller-CWD path resolution handler, and the fence on who may delete from a backup store."""
 
 # Under drone, Path.cwd() is backup's own branch dir; drone exports AIPASS_CALLER_CWD, where the user typed.
 
@@ -17,8 +17,6 @@ from aipass.prax import logger
 
 from ..audit import trail
 
-#: Restore never writes inside these, whoever asks.
-PROTECTED_PARTS = frozenset({".git", ".trinity", ".aipass", ".archive"})
 #: The seat that owns every backup store: besides the verified admin, the only caller that deletes from one.
 STORE_SEAT = "@backup"
 
@@ -58,19 +56,6 @@ def verified_caller() -> tuple[str, bool]:
     return rail.resolve_verified_caller(), bool(rail.is_verified_admin_caller())
 
 
-def own_branch_root() -> Path | None:
-    """Return the caller's branch: the outermost non-symlink .trinity/ ancestor of AIPASS_CALLER_CWD, or None."""
-    caller = os.environ.get("AIPASS_CALLER_CWD")
-    if not caller:
-        return None
-    start = Path(caller).resolve()
-    outermost = None
-    for parent in [start, *start.parents]:
-        if (parent / ".trinity").is_dir() and not parent.is_symlink():
-            outermost = parent
-    return outermost
-
-
 def _record(operation: str, caller: str, target: Path, reason: str | None) -> None:
     """One trail row and one prax line per fence verdict, naming the caller."""
     who = caller or "<unverified>"
@@ -79,21 +64,6 @@ def _record(operation: str, caller: str, target: Path, reason: str | None) -> No
         logger.warning(f"[backup] {operation} REFUSED for {who}: {reason}")
     else:
         logger.info(f"[backup] {operation} allowed for {who}: {target}")
-
-
-def restore_refusal(output: Path) -> str | None:
-    """Why the caller may not restore to *output* (already resolved, links followed), or None when it may."""
-    caller, admin = verified_caller()
-    protected = sorted(PROTECTED_PARTS.intersection(output.parts))
-    own = own_branch_root()
-    reason = None
-    if protected:
-        reason = f"{output} is inside {protected[0]}/, which restore never writes"
-    elif not admin and (own is None or not output.is_relative_to(own)):
-        where = f"your branch {own}" if own else "no branch at your cwd"
-        reason = f"{output} is outside {where}; only the verified admin seat restores into another tree"
-    _record("restore_fence", caller, output, reason)
-    return reason
 
 
 def store_delete_refusal(verb: str, project_root: Path) -> str | None:

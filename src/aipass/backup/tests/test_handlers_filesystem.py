@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_handlers_filesystem.py
 # Description: Backup handlers: scan/{walk,filter}.py, ignore/patterns.py, audit/trail.py, project/, path/, report/
-# Version: 1.2.6
+# Version: 1.2.7
 # Created: 2026-06-12
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Backup handlers: scan/{walk,filter}.py, ignore/patterns.py, audit/trail.py, project/, path/, report/."""
@@ -214,7 +214,7 @@ class TestBackupResult:
     def test_format_result_renders_the_counts_the_result_carries(self, tmp_path: Path) -> None:
         """The counts a result carries are the counts the report renders."""
         result = BackupResult(
-            mode="versioned",
+            mode="snapshot",
             project_root=str(tmp_path),
             files_copied=10,
             bytes_copied=1024,
@@ -224,7 +224,7 @@ class TestBackupResult:
 
         assert summary == "\n".join(
             [
-                "Backup complete (versioned)",
+                "Backup complete (snapshot)",
                 f"  Project:  {tmp_path}",
                 "  Files:    10",
                 "  Size:     1.0 KB",

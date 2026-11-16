@@ -1,12 +1,12 @@
 # =================== META ====================
 # Name: test_error_resilience.py
-# Description: Tests for error resilience in snapshot.py, versioned.py, the document handlers and audit trail
-# Version: 1.1.5
+# Description: Tests for error resilience in snapshot.py, the document handlers and audit trail
+# Version: 1.2.0
 # Created: 2026-06-12
 # Modified: 2026-11-15
 # =============================================
 
-"""Tests for error resilience in apps/modules/snapshot.py, versioned.py, the document handlers and audit trail."""
+"""Tests for error resilience in apps/modules/snapshot.py, the document handlers and audit trail."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that handlers/ and modules/ lint clean; the imports below prove only that they parse
@@ -28,7 +28,6 @@ from aipass.backup.apps.handlers.state import timestamps
 from aipass.backup.apps.handlers.state.timestamps import load_timestamps
 from aipass.backup.apps.modules import snapshot
 from aipass.backup.apps.modules.snapshot import run_snapshot
-from aipass.backup.apps.modules.versioned import run_versioned
 from aipass.cli.apps.modules import command_failed
 
 
@@ -151,17 +150,6 @@ class TestMissingProjectRoot:
         assert result.errors, "expected an honest error, got a clean result"
         assert result.files_copied == 0
         assert not missing.exists(), "refused path must not be scaffolded"
-
-    def test_versioned_on_a_missing_root_errors_and_scaffolds_nothing(self, tmp_path: Path) -> None:
-        """run_versioned on a missing path errors and writes nothing."""
-
-        missing = tmp_path / "no_such_project"
-
-        result = run_versioned(str(missing), show_panels=False)
-
-        assert result.errors
-        assert result.files_copied == 0
-        assert not missing.exists()
 
     def test_snapshot_on_a_file_as_root_errors_and_copies_nothing(self, tmp_path: Path) -> None:
         """A file (not a directory) passed as the project root is refused."""

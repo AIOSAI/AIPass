@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: status.py
 # Description: Status module — show backup status for a project, as a page or one JSON object
-# Version: 1.4.1
+# Version: 1.5.0
 # Created: 2026-04-23
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """Status Module — display backup info and recent history for a project.
@@ -27,7 +27,6 @@ from aipass.backup.apps.handlers.path.builder import (
     backup_root,
     build_config_path,
     build_snapshot_path,
-    build_versioned_store,
 )
 from aipass.backup.apps.handlers.path.caller import resolve_caller_path
 from aipass.backup.apps.handlers.project.config import load_project_config
@@ -38,7 +37,7 @@ MODULE_NAME = "status"
 PRIMARY_COMMAND = "status"
 
 #: The lanes the contract reports, in its order; each one's last run is its changelog ``mode``.
-LANES = ("snapshot", "versioned", "drive_sync")
+LANES = ("snapshot", "drive_sync")
 FLAGS = ("--json", "--sizes")
 
 
@@ -56,7 +55,7 @@ def print_help():
     console.print()
     console.print("Usage: status <project_root|@name> [--json [--sizes]]")
     console.print("  --json   one JSON object on stdout, nothing else (the backup door)")
-    console.print("  --sizes  with --json: add both store sizes (walks the store)")
+    console.print("  --sizes  with --json: add the snapshot store size (walks the store)")
 
 
 def _raise_walk_error(err: OSError) -> None:
@@ -112,7 +111,6 @@ def build_status(project_root: str, sizes: bool = False) -> dict:
     if sizes:
         status["store"] = {
             "snapshots_bytes": _tree_bytes(build_snapshot_path(project_root)),
-            "versioned_bytes": _tree_bytes(build_versioned_store(project_root)),
         }
     # load_tracker leaves the tracker's lane stamp out: every key it answers is a file.
     status["drive"] = {"tracked_files": len(tracker)}
