@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_rm.py
-# Description: drone rm: containment, carve-outs, the move to .archive, stale sweep
-# Version: 1.3.1
+# Description: drone rm: containment, carve-outs, the sibling fence and the admin crossing
+# Version: 1.4.0
 # Created: 2026-06-02
 # Modified: 2026-11-15
 # =============================================
@@ -12,57 +12,33 @@
 # sentry: no-test-needed(covered_elsewhere) — the deletion record's contents, pinned in tests/test_deletion_log.py
 # sentry: no-test-needed(covered_elsewhere) — the broker lane of a sandboxed delete, pinned in tests/test_broker.py
 # sentry: no-test-needed(covered_elsewhere) — rm from a deleted working directory, pinned in tests/test_no_cwd_sweep.py
+# sentry: no-test-needed(covered_elsewhere) — the move to .archive, --stale and the dot guard, pinned in tests/test_rm_archive.py, tests/test_rm_stale.py and tests/test_rm_dot.py
 
-import json
 import os
 import shutil
 import sys
 import tempfile
-import time
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from aipass.ai_mail.apps.modules import door_verified_caller as rail
-from aipass.drone.apps import drone as drone_cli
 from aipass.drone.apps.handlers import rm_handler
 from aipass.drone.apps.handlers.rm_handler import (
     check_carveouts,
     check_containment,
-    format_age,
-    format_stale_summary,
     get_allowed_roots,
-    parse_age,
-    parse_stale_args,
     safe_delete,
-    stale_sweep,
 )
-from aipass.drone.apps.modules.rm import handle_command, print_help, print_introspection
+
+from .conftest import rail_answers, rm_ledger
 
 POSIX_TMP = Path(os.sep, "tmp")
 
 #: A mode-0 folder only stops a caller the kernel holds to permissions: not as root.
 _PERMISSIONS_DO_NOT_BIND = os.geteuid() == 0
 _PERMISSIONS_REASON = "needs file permissions that bind the caller"
-
-
-@pytest.fixture()
-def project_dir(tmp_path):
-    """Fake project root with a registry file and src/aipass layout."""
-    (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
-    return tmp_path
-
-
-@pytest.fixture()
-def project_with_branches(project_dir):
-    """Project root with branch dirs containing .trinity/ markers."""
-    for branch in ("drone", "api", "flow"):
-        d = project_dir / "src" / "aipass" / branch
-        d.mkdir(parents=True)
-        (d / ".trinity").mkdir()
-        (d / "README.md").write_text(f"# {branch}", encoding="utf-8")
-    return project_dir
 
 
 @pytest.fixture()
@@ -587,7 +563,7 @@ class TestContainedCitizens:
 
     def test_the_refusal_is_recorded(self, at_drone, tmp_path):
         safe_delete([".."])
-        (record,) = _ledger(tmp_path)
+        (record,) = rm_ledger(tmp_path)
         assert record["outcome"] == "refused"
         assert "contains citizen api/" in record["reason"]
 
@@ -695,7 +671,7 @@ class TestASymlinkIsJudgedWhereItLives:
         assert not link.is_symlink()
         assert moved.is_symlink()
         assert (aipass_dir / "api" / ".trinity").is_dir()
-        (record,) = _ledger(tmp_path)
+        (record,) = rm_ledger(tmp_path)
         assert (record["path"], record.get("target")) == (str(link), str(aipass_dir / "api"))
 
     def test_a_link_inside_a_carveout_is_refused_wherever_it_points(self, aipass_dir, monkeypatch):
@@ -818,30 +794,11 @@ class TestEdgeCases:
         assert results == []
 
 
-def _rail_answers(monkeypatch, verdict):
-    """Stand in for @ai_mail's verified-caller rail (another branch's edge): True, False, or an exception to raise."""
-
-    def answer():
-        if isinstance(verdict, Exception):
-            raise verdict
-        return verdict
-
-    monkeypatch.setattr(rail, "is_verified_admin_caller", answer)
-    monkeypatch.setattr(rail, "resolve_verified_caller", lambda: "@devpulse" if verdict is True else "@drone")
-
-
-@pytest.fixture()
-def at_drone_beside_api(project_with_branches, monkeypatch):
-    """Standing in @drone; @api is the sibling whose tree the admin may enter."""
-    monkeypatch.chdir(project_with_branches / "src" / "aipass" / "drone")
-    return project_with_branches / "src" / "aipass" / "api"
-
-
 class TestTheVerifiedAdminCrossesTheSiblingFence:
     def test_the_admin_moves_a_sibling_file_into_that_branchs_archive_and_the_record_says_so(
         self, at_drone_beside_api, monkeypatch, tmp_path
     ):
-        _rail_answers(monkeypatch, True)
+        rail_answers(monkeypatch, True)
         target = at_drone_beside_api / "README.md"
 
         ((_, ok, message),) = safe_delete([str(target)])
@@ -849,11 +806,11 @@ class TestTheVerifiedAdminCrossesTheSiblingFence:
         assert ok is True, message
         assert not target.exists()
         assert (at_drone_beside_api / ".archive" / "README.md").read_text(encoding="utf-8") == "# api"
-        (record,) = _ledger(tmp_path)
+        (record,) = rm_ledger(tmp_path)
         assert (record["outcome"], record["exemption"]) == ("moved", "admin")
 
     def test_a_caller_the_rail_says_is_not_admin_is_still_refused(self, at_drone_beside_api, monkeypatch, tmp_path):
-        _rail_answers(monkeypatch, False)
+        rail_answers(monkeypatch, False)
         target = at_drone_beside_api / "README.md"
 
         ((_, ok, message),) = safe_delete([str(target)])
@@ -861,11 +818,11 @@ class TestTheVerifiedAdminCrossesTheSiblingFence:
         assert ok is False
         assert "sibling branch api/" in message
         assert target.exists()
-        (record,) = _ledger(tmp_path)
+        (record,) = rm_ledger(tmp_path)
         assert "exemption" not in record
 
     def test_a_raising_rail_fails_closed(self, at_drone_beside_api, monkeypatch):
-        _rail_answers(monkeypatch, RuntimeError("passport unreadable"))
+        rail_answers(monkeypatch, RuntimeError("passport unreadable"))
         target = at_drone_beside_api / "README.md"
 
         ((_, ok, message),) = safe_delete([str(target)])
@@ -896,7 +853,7 @@ class TestTheVerifiedAdminCrossesTheSiblingFence:
     def test_the_admin_is_still_refused_a_carveout_an_archive_and_the_branch_itself(
         self, at_drone_beside_api, monkeypatch, relative, refusal
     ):
-        _rail_answers(monkeypatch, True)
+        rail_answers(monkeypatch, True)
         (at_drone_beside_api / ".archive").mkdir()
         (at_drone_beside_api / ".archive" / "old.md").write_text("old", encoding="utf-8")
         target = at_drone_beside_api.joinpath(*relative)
@@ -908,7 +865,7 @@ class TestTheVerifiedAdminCrossesTheSiblingFence:
         assert target.exists()
 
     def test_the_admin_is_still_refused_a_folder_that_holds_citizens(self, at_drone_beside_api, monkeypatch):
-        _rail_answers(monkeypatch, True)
+        rail_answers(monkeypatch, True)
         fleet = at_drone_beside_api.parent
 
         ((_, ok, message),) = safe_delete([str(fleet)])
@@ -916,612 +873,3 @@ class TestTheVerifiedAdminCrossesTheSiblingFence:
         assert ok is False
         assert "contains citizen" in message
         assert (at_drone_beside_api / ".trinity").is_dir()
-
-
-@pytest.fixture()
-def in_project(project_dir, monkeypatch):
-    """Stand in the fake project, so it is the tree drone rm archives inside."""
-    monkeypatch.chdir(project_dir)
-    return project_dir
-
-
-class TestAnInTreeTargetMovesToTheLocalArchive:
-    def test_a_file_moves_into_the_archive_beside_it_and_the_record_says_where(self, in_project, tmp_path):
-        target = in_project / "notes" / "draft.md"
-        target.parent.mkdir()
-        target.write_text("keep me", encoding="utf-8")
-
-        ((_, ok, message),) = safe_delete([str(target)])
-
-        moved = in_project / "notes" / ".archive" / "draft.md"
-        assert ok is True
-        assert not target.exists()
-        assert moved.read_text(encoding="utf-8") == "keep me"
-        assert str(moved) in message
-        (record,) = _ledger(tmp_path)
-        assert (record["outcome"], record["path"], record["moved_to"]) == ("moved", str(target), str(moved))
-
-    def test_a_directory_moves_whole(self, in_project):
-        target = in_project / "scratch"
-        (target / "deep").mkdir(parents=True)
-        (target / "deep" / "a.txt").write_text("a", encoding="utf-8")
-
-        ((_, ok, _),) = safe_delete([str(target)])
-
-        assert ok is True
-        assert not target.exists()
-        assert (in_project / ".archive" / "scratch" / "deep" / "a.txt").read_text(encoding="utf-8") == "a"
-
-    def test_a_name_taken_after_any_look_is_never_overwritten(self, in_project, monkeypatch, tmp_path):
-        """A twin move can take the name in the instant before the rename: only the rename itself may refuse it."""
-        (in_project / ".archive").mkdir()
-        (in_project / ".archive" / "plan.md").write_text("first", encoding="utf-8")
-        (in_project / "plan.md").write_text("second", encoding="utf-8")
-        monkeypatch.setattr(rm_handler, "_archive_names", lambda name: iter([name, f"{name}.twin"]))
-
-        ((_, ok, _),) = safe_delete([str(in_project / "plan.md")])
-
-        assert ok is True
-        assert (in_project / ".archive" / "plan.md").read_text(encoding="utf-8") == "first"
-        assert (in_project / ".archive" / "plan.md.twin").read_text(encoding="utf-8") == "second"
-        assert _ledger(tmp_path)[0]["moved_to"].endswith("plan.md.twin")
-
-    def test_a_name_already_archived_keeps_both_and_overwrites_nothing(self, in_project):
-        archive = in_project / ".archive"
-        archive.mkdir()
-        (archive / "plan.md").write_text("first", encoding="utf-8")
-        target = in_project / "plan.md"
-        target.write_text("second", encoding="utf-8")
-
-        ((_, ok, _),) = safe_delete([str(target)])
-
-        assert ok is True
-        assert (archive / "plan.md").read_text(encoding="utf-8") == "first"
-        (stamped,) = [p for p in archive.iterdir() if p.name != "plan.md"]
-        assert stamped.name.startswith("plan.md.")
-        assert stamped.read_text(encoding="utf-8") == "second"
-
-    @pytest.mark.parametrize("inside", [False, True])
-    def test_a_target_in_an_archive_is_refused_and_stays(self, in_project, tmp_path, inside):
-        archive = in_project / ".archive"
-        archive.mkdir()
-        (archive / "old.md").write_text("old", encoding="utf-8")
-        target = archive / "old.md" if inside else archive
-
-        ((_, ok, message),) = safe_delete([str(target)])
-
-        assert ok is False
-        assert ".archive" in message
-        assert (archive / "old.md").read_text(encoding="utf-8") == "old"
-        (record,) = _ledger(tmp_path)
-        assert record["outcome"] == "refused"
-
-    @pytest.mark.parametrize("name", ["__pycache__", "mod.cpython-312.pyc"])
-    def test_bytecode_is_truly_deleted_and_no_archive_is_made(self, in_project, tmp_path, name):
-        target = in_project / "pkg" / name
-        target.parent.mkdir()
-        if name == "__pycache__":
-            target.mkdir()
-            (target / "m.pyc").write_bytes(b"\0")
-        else:
-            target.write_bytes(b"\0")
-
-        ((_, ok, _),) = safe_delete([str(target)])
-
-        assert ok is True
-        assert not target.exists()
-        assert not (in_project / "pkg" / ".archive").exists()
-        (record,) = _ledger(tmp_path)
-        assert record["outcome"] == "deleted"
-
-    def test_a_temp_dir_target_outside_the_project_is_truly_deleted(self, in_project, tmp_path_factory, tmp_path):
-        target = tmp_path_factory.mktemp("scratch") / "junk.txt"
-        target.write_text("x", encoding="utf-8")
-
-        ((_, ok, _),) = safe_delete([str(target)])
-
-        assert ok is True
-        assert not target.exists()
-        assert not (target.parent / ".archive").exists()
-        (record,) = _ledger(tmp_path)
-        assert record["outcome"] == "deleted"
-
-    def test_an_archive_that_is_a_symlink_is_refused_and_nothing_moves(self, in_project, tmp_path_factory, tmp_path):
-        elsewhere = tmp_path_factory.mktemp("elsewhere")
-        (in_project / ".archive").symlink_to(elsewhere, target_is_directory=True)
-        target = in_project / "keep.md"
-        target.write_text("here", encoding="utf-8")
-
-        ((_, ok, message),) = safe_delete([str(target)])
-
-        assert ok is False
-        assert "symlink" in message
-        assert target.read_text(encoding="utf-8") == "here"
-        assert list(elsewhere.iterdir()) == []
-        (record,) = _ledger(tmp_path)
-        assert record["outcome"] == "refused"
-
-
-def _lines(method) -> list[str]:
-    """Every call of one patched prax method, rendered as the logger renders it."""
-    return [call.args[0] % tuple(call.args[1:]) for call in method.call_args_list]
-
-
-class TestTheRmLogLineTellsTheWholeStory:
-    def test_a_move_line_names_the_caller_the_path_and_where_it_went(self, in_project, tmp_path):
-        target = in_project / "draft.md"
-        target.write_text("x", encoding="utf-8")
-
-        with patch("aipass.drone.apps.handlers.rm_handler.logger") as log:
-            safe_delete([str(target)])
-
-        (record,) = _ledger(tmp_path)
-        (line,) = [line for line in _lines(log.info) if "moved" in line]
-        assert record["caller"] in line
-        assert str(target) in line
-        assert str(in_project / ".archive" / "draft.md") in line
-
-    @pytest.mark.parametrize("case", ["sibling", "carveout", "archive", "symlinked_archive"])
-    def test_every_deliberate_refusal_logs_info_never_warning(
-        self, at_drone_beside_api, monkeypatch, tmp_path_factory, case
-    ):
-        _rail_answers(monkeypatch, False)
-        drone = at_drone_beside_api.parent / "drone"
-        if case == "symlinked_archive":
-            (drone / ".archive").symlink_to(tmp_path_factory.mktemp("elsewhere"), target_is_directory=True)
-        else:
-            (drone / ".archive").mkdir()
-            (drone / ".archive" / "old.md").write_text("x", encoding="utf-8")
-        target = {
-            "sibling": at_drone_beside_api / "README.md",
-            "carveout": drone / ".trinity",
-            "archive": drone / ".archive" / "old.md",
-            "symlinked_archive": drone / "README.md",
-        }[case]
-
-        with patch("aipass.drone.apps.handlers.rm_handler.logger") as log:
-            ((_, ok, _),) = safe_delete([str(target)])
-
-        assert ok is False
-        assert not log.warning.called
-        assert not log.error.called
-        assert any("refused" in line for line in _lines(log.info))
-
-    def test_the_command_logs_every_target_under_one_key(self, in_project):
-        with patch("aipass.drone.apps.modules.rm.json_handler") as service:
-            handle_command("first.txt", ["second.txt", "third.txt"])
-
-        assert service.log_operation.call_args_list[0].args == (
-            "rm_command",
-            {"targets": ["first.txt", "second.txt", "third.txt"]},
-        )
-
-
-class TestRmModule:
-    def test_handle_command_help_prints_the_usage_and_deletes_nothing(self, capsys):
-        """Mutant killed: handle_command's --help branch returning True without print_help()."""
-        result = handle_command("--help")
-
-        assert result is True
-        assert "Usage: drone rm" in capsys.readouterr().out
-
-    def test_handle_command_with_no_arguments_prints_the_self_map(self, capsys):
-        """Mutant killed: handle_command's no-argument branch returning True without print_introspection()."""
-        result = handle_command(None, None)
-
-        assert result is True
-        assert "Contained Safe-Delete" in capsys.readouterr().out
-
-    def test_print_introspection(self, capsys):
-        """The self-map names the module and points at --help."""
-        print_introspection()
-
-        printed = capsys.readouterr().out
-        assert "Contained Safe-Delete" in printed
-        assert "--help" in printed
-
-    def test_print_help(self, capsys):
-        """--help states the usage line and the containment rule it enforces."""
-        print_help()
-
-        printed = capsys.readouterr().out
-        assert "Usage: drone rm" in printed
-        assert "Carve-outs" in printed
-
-    def test_help_says_files_in_the_temp_dir_are_deleted_not_the_temp_dir(self, capsys):
-        print_help()
-
-        printed = capsys.readouterr().out
-        assert "files in the system temp dir" in printed
-        assert "Everything else is moved" in printed
-        assert "only these: the system temp dir" not in printed
-
-    def test_a_move_prints_the_source_and_destination_each_whole_on_its_own_line(self, in_project, capsys):
-        """Longer than the pinned console width, so a wrapping print would split the name."""
-        target = in_project / ("a_long_scratch_name_" * 12 + ".txt")
-        target.write_text("x", encoding="utf-8")
-
-        assert handle_command(str(target), []) is True
-
-        lines = [line.strip() for line in capsys.readouterr().out.splitlines()]
-        assert str(target) in lines
-        assert f"-> {in_project / '.archive' / target.name}" in lines
-
-    def test_a_sibling_refusal_prints_the_path_whole_says_it_is_recorded_and_what_to_do(
-        self, at_drone_beside_api, monkeypatch, capsys
-    ):
-        _rail_answers(monkeypatch, False)
-        target = at_drone_beside_api / ("deep_" * 45) / "notes.md"
-        target.parent.mkdir()
-        target.write_text("x", encoding="utf-8")
-
-        assert handle_command(str(target), []) is False
-
-        lines = [line.strip() for line in capsys.readouterr().err.splitlines()]
-        assert str(target) in lines
-        assert any("recorded" in line for line in lines)
-        assert any("mail @devpulse the path and why" in line for line in lines)
-        assert not any("PLAN-" in line for line in lines)
-
-    def test_a_refusal_outside_every_root_is_a_failure_not_a_quiet_success(self, tmp_path):
-        """A refusal is an error: handle_command reports False, the CLI exits 1.
-
-        The root and target are siblings under tmp_path with roots narrowed by hand: ``_patch_roots``
-        allows /tmp and ``project_dir`` IS ``tmp_path``, so either would put the target inside a root.
-        """
-        root = tmp_path / "the_only_allowed_root"
-        root.mkdir()
-        elsewhere = tmp_path / "elsewhere"
-        elsewhere.mkdir()
-        target = elsewhere / "keepme.txt"
-        target.write_text("must survive", encoding="utf-8")
-
-        with patch(
-            "aipass.drone.apps.handlers.rm_handler.get_allowed_roots",
-            return_value=[root.resolve()],
-        ):
-            assert handle_command(str(target)) is False
-
-        assert target.exists(), "the refusal did not hold — the file was deleted"
-
-    def test_the_cli_maps_a_refusal_to_a_non_zero_exit(self, monkeypatch, tmp_path):
-        """False is not flattened to 0 on the way out; mutant killed: _handle_rm returning 0 always."""
-        target = str(tmp_path / "refused")
-        calls = []
-
-        def answer(verdict):
-            def recorder(command, args=None):
-                calls.append((command, args))
-                return verdict
-
-            return recorder
-
-        monkeypatch.setattr("sys.argv", ["drone", "rm", target])
-        monkeypatch.setattr("aipass.drone.apps.modules.rm.handle_command", answer(False))
-        assert drone_cli.main() == 1
-        monkeypatch.setattr("aipass.drone.apps.modules.rm.handle_command", answer(True))
-        assert drone_cli.main() == 0
-        assert calls == [(target, None), (target, None)]
-
-
-# Stale mode crosses the sibling fence on purpose: the fixture stands in @drone and sweeps @api,
-# so a lost crossing turns the whole block red, not one test.
-
-_DAY = 86_400
-
-#: The twelve keys a plain delete record has always carried.
-_PLAIN_RECORD_KEYS = {
-    "timestamp",
-    "lane",
-    "outcome",
-    "caller",
-    "cwd",
-    "requested",
-    "path",
-    "reason",
-    "kind",
-    "size_bytes",
-    "entry_count",
-    "measured",
-}
-
-
-def _aged(path: Path, age_seconds: float, body: str = "x") -> Path:
-    """Write *path* and backdate its mtime by *age_seconds*."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(body, encoding="utf-8")
-    then = time.time() - age_seconds
-    os.utime(path, (then, then))
-    return path
-
-
-def _ledger(tmp_path: Path) -> list[dict]:
-    """Every record the autouse deletion-log fixture captured in this test."""
-    store = tmp_path / "deletions.jsonl"
-    if not store.exists():
-        return []
-    return [json.loads(line) for line in store.read_text(encoding="utf-8").splitlines()]
-
-
-def _sweep(*tokens: str):
-    return stale_sweep(parse_stale_args(list(tokens)))
-
-
-@pytest.fixture()
-def stale_tree(project_with_branches, monkeypatch):
-    """@drone stands at home; @api's tree holds one stale temp and one of each skip."""
-    monkeypatch.chdir(project_with_branches / "src" / "aipass" / "drone")
-    api = project_with_branches / "src" / "aipass" / "api"
-    return {
-        "api": api,
-        "stale": _aged(api / "api_json" / "tmpab12cd.tmp", 11 * _DAY, "abc"),
-        "young": _aged(api / "api_json" / ".4242_7.tmp", 9 * _DAY),
-        "not_tmp": _aged(api / "api_json" / "api_log.json", 11 * _DAY),
-        "not_json_folder": _aged(api / "scratch" / "old.tmp", 11 * _DAY),
-    }
-
-
-class TestStaleAge:
-    @pytest.mark.parametrize(("text", "seconds"), [("10d", 864_000), ("36h", 129_600), ("90m", 5_400)])
-    def test_the_three_forms(self, text, seconds):
-        assert parse_age(text) == seconds
-
-    @pytest.mark.parametrize("text", ["10", "10s", "2w", "d", "-5d", "10D", "1.5d", "10d ", "", "0d", "٣d"])
-    def test_anything_else_is_refused_naming_the_three_forms(self, text):
-        """Includes zero (a write in flight is younger than any real age) and a
-        non-ASCII digit, which ``\\d`` would have matched and ``int()`` read."""
-        with pytest.raises(ValueError) as caught:
-            parse_age(text)
-        message = str(caught.value)
-        assert "10d" in message
-        assert "36h" in message
-        assert "90m" in message
-
-    @pytest.mark.parametrize(
-        ("seconds", "shown"), [(11 * _DAY + 3 * 3600 + 120, "11d3h"), (5_400, "1h30m"), (59, "0m")]
-    )
-    def test_format_age(self, seconds, shown):
-        assert format_age(seconds) == shown
-
-
-class TestStaleArgs:
-    def test_flags_ride_in_any_slot(self):
-        request = parse_stale_args(["a", "--dry-run", "--stale", "36h", "b"])
-        assert (request.age, request.age_seconds, request.dry_run, request.dirs) == ("36h", 129_600, True, ("a", "b"))
-
-    def test_the_equals_spelling_is_read(self):
-        request = parse_stale_args(["--stale=90m", "a"])
-        assert (request.age, request.dry_run, request.dirs) == ("90m", False, ("a",))
-
-    @pytest.mark.parametrize(
-        "tokens",
-        [
-            ["--stale"],
-            ["--stale", "10d"],
-            ["--stale", "10d", "--dryrun", "a"],
-            ["--stale", "10d", "--stale", "5d", "a"],
-            ["--staleness", "a"],
-            ["--stale", "--dry-run", "a"],
-        ],
-        ids=["no-age", "no-dir", "typo-dry-run", "twice", "unknown-spelling", "flag-in-age-slot"],
-    )
-    def test_malformed_requests_are_refused(self, tokens):
-        with pytest.raises(ValueError):
-            parse_stale_args(tokens)
-
-
-class TestStaleSweep:
-    def test_the_stale_tmp_in_a_json_folder_is_deleted(self, stale_tree):
-        report = _sweep("--stale", "10d", str(stale_tree["api"]))
-        assert not stale_tree["stale"].exists()
-        assert (report.deleted, report.refusals) == (1, [])
-
-    def test_a_dot_named_stale_tmp_is_deleted_without_dot(self, stale_tree):
-        """The atomic-write leftovers are dot names; the dot guard is the plain lane's, not this sweep's."""
-        leftover = _aged(stale_tree["api"] / "api_json" / ".999558_87.tmp", 11 * _DAY)
-        _sweep("--stale", "10d", str(stale_tree["api"]))
-        assert not leftover.exists()
-
-    @pytest.mark.parametrize("survivor", ["young", "not_tmp", "not_json_folder"])
-    def test_the_three_skip_rules(self, stale_tree, survivor):
-        """Younger than AGE, not named .tmp, not inside a _json folder: untouched."""
-        _sweep("--stale", "10d", str(stale_tree["api"]))
-        assert stale_tree[survivor].exists()
-
-    def test_the_parent_folder_is_the_one_that_counts(self, stale_tree):
-        """A _json GRANDPARENT is not enough — the rule reads the parent's name."""
-        deeper = _aged(stale_tree["api"] / "api_json" / "sub" / "old.tmp", 11 * _DAY)
-        _sweep("--stale", "10d", str(stale_tree["api"]))
-        assert deeper.exists()
-
-    def test_a_symlink_named_tmp_is_skipped(self, stale_tree):
-        """The LINK is aged too, so only the regular-file rule can spare it."""
-        target = _aged(stale_tree["api"] / "elsewhere" / "real.tmp", 11 * _DAY)
-        link = stale_tree["api"] / "api_json" / "link.tmp"
-        link.symlink_to(target)
-        then = time.time() - 11 * _DAY
-        os.utime(link, (then, then), follow_symlinks=False)
-
-        report = _sweep("--stale", "10d", str(stale_tree["api"]))
-
-        assert link.is_symlink()
-        assert target.exists()
-        assert report.matched == 1
-
-    def test_a_directory_named_tmp_is_skipped(self, stale_tree):
-        folder = stale_tree["api"] / "api_json" / "held.tmp"
-        folder.mkdir()
-        then = time.time() - 11 * _DAY
-        os.utime(folder, (then, then))
-        _sweep("--stale", "10d", str(stale_tree["api"]))
-        assert folder.is_dir()
-
-    def test_the_walk_never_enters_a_carve_out(self, stale_tree):
-        hidden = _aged(stale_tree["api"] / ".trinity" / "trinity_json" / "old.tmp", 11 * _DAY)
-        _sweep("--stale", "10d", str(stale_tree["api"]))
-        assert hidden.exists()
-
-    @pytest.mark.parametrize("sandbox", [".archive", "dropbox"])
-    def test_the_walk_never_enters_a_sandbox_and_the_stale_temp_beside_it_goes(self, stale_tree, sandbox):
-        """Nothing looks into a dropbox or an .archive (owner ruling).
-
-        Mutant killed: _find_stale's sandbox prune dropped (both ids)."""
-        kept = _aged(stale_tree["api"] / sandbox / "api_json" / "old.tmp", 11 * _DAY)
-        _sweep("--stale", "10d", str(stale_tree["api"]))
-        assert kept.exists()
-        assert not stale_tree["stale"].exists()
-
-    def test_a_carve_out_dir_is_refused_and_recorded(self, stale_tree, tmp_path):
-        trinity = stale_tree["api"] / ".trinity"
-        hidden = _aged(trinity / "trinity_json" / "old.tmp", 11 * _DAY)
-
-        report = _sweep("--stale", "10d", str(trinity))
-
-        assert hidden.exists()
-        assert len(report.refusals) == 1
-        assert "Protected directory" in report.refusals[0]
-        (record,) = _ledger(tmp_path)
-        assert (record["outcome"], record["mode"], record["age"]) == ("refused", "stale", "10d")
-
-    def test_a_dir_outside_the_project_is_refused(self, stale_tree, tmp_path_factory):
-        """Outside the project but inside the system temp dir: the plain lane's
-        temp roots are not swept here."""
-        outside = tmp_path_factory.mktemp("outside")
-        litter = _aged(outside / "x_json" / "old.tmp", 11 * _DAY)
-
-        report = _sweep("--stale", "10d", str(outside))
-
-        assert litter.exists()
-        assert "outside allowed roots" in report.refusals[0]
-
-    def test_a_missing_dir_is_a_refusal(self, stale_tree, tmp_path):
-        report = _sweep("--stale", "10d", str(stale_tree["api"] / "nope"))
-        assert "does not exist" in report.refusals[0]
-        assert _ledger(tmp_path)[0]["outcome"] == "not_found"
-
-    def test_a_refused_dir_logs_info_like_every_deliberate_refusal(self, stale_tree):
-        with patch("aipass.drone.apps.handlers.rm_handler.logger") as log:
-            _sweep("--stale", "10d", str(stale_tree["api"] / ".trinity"))
-
-        assert not log.warning.called
-        assert any("refused" in line for line in _lines(log.info))
-
-    @pytest.mark.parametrize("dry_run", [False, True])
-    @pytest.mark.parametrize("nested_first", [False, True])
-    def test_overlapping_dirs_walk_each_folder_once(self, stale_tree, nested_first, dry_run):
-        """A real run hides a double walk — the first pass already unlinked what
-        the second would list — so the folder count and the dry run carry it."""
-        dirs = [str(stale_tree["api"]), str(stale_tree["api"] / "api_json")]
-        if nested_first:
-            dirs.reverse()
-        report = _sweep("--stale", "10d", *(["--dry-run"] if dry_run else []), *dirs)
-        assert (report.folders_scanned, report.matched, report.refusals) == (3, 1, [])
-
-
-class TestStaleCrossesTheSiblingFence:
-    def test_stale_mode_deletes_inside_a_sibling_branch(self, stale_tree):
-        assert handle_command("--stale", ["10d", str(stale_tree["api"])]) is True
-        assert not stale_tree["stale"].exists()
-
-    def test_the_plain_verb_still_refuses_the_same_file(self, stale_tree, tmp_path):
-        assert handle_command(str(stale_tree["stale"])) is False
-        assert stale_tree["stale"].exists()
-        assert "sibling branch api" in _ledger(tmp_path)[0]["reason"]
-
-
-class TestStaleDryRun:
-    def test_dry_run_lists_every_candidate_and_deletes_nothing(self, stale_tree, capsys, tmp_path):
-        assert handle_command("--stale", ["10d", "--dry-run", str(stale_tree["api"])]) is True
-
-        out = capsys.readouterr().out
-        assert stale_tree["stale"].exists()
-        candidate_lines = [line for line in out.splitlines() if "would delete" in line]
-        assert len(candidate_lines) == 1
-        assert str(stale_tree["stale"].resolve()) in candidate_lines[0]
-        assert "11d0h" in candidate_lines[0]
-        assert "3 B" in candidate_lines[0]
-        assert "files deleted 0" in out.splitlines()[-1]
-        assert _ledger(tmp_path) == [], "a dry run deletes nothing, so it records nothing"
-
-    def test_a_dry_run_refusal_prints_and_fails_but_is_not_recorded(self, stale_tree, tmp_path):
-        """No delete was attempted, so the ledger has nothing to say about it."""
-        assert handle_command("--stale", ["10d", "--dry-run", str(stale_tree["api"] / "nope")]) is False
-        assert _ledger(tmp_path) == []
-
-
-class TestStaleRecord:
-    def test_a_stale_delete_is_recorded_with_mode_and_age(self, stale_tree, tmp_path):
-        _sweep("--stale", "10d", str(stale_tree["api"]))
-
-        (record,) = _ledger(tmp_path)
-        assert record["path"] == str(stale_tree["stale"].resolve())
-        assert (record["lane"], record["outcome"], record["mode"], record["age"]) == ("rm", "deleted", "stale", "10d")
-        assert record["requested"] == str(stale_tree["api"])
-        assert record["size_bytes"] == 3
-
-    def test_a_plain_move_keeps_its_twelve_keys_plus_where_it_went(self, project_dir, monkeypatch, tmp_path):
-        """Without --stale there is no mode key; a move adds moved_to and nothing else."""
-        monkeypatch.chdir(project_dir)
-        target = project_dir / "build.log"
-        target.write_text("x", encoding="utf-8")
-        safe_delete([str(target)])
-        (record,) = _ledger(tmp_path)
-        assert set(record) == _PLAIN_RECORD_KEYS | {"moved_to"}
-
-
-class TestStaleSummary:
-    def test_the_summary_line_counts(self, stale_tree, capsys):
-        """api, api_json and scratch are walked; .trinity is not."""
-        _aged(stale_tree["api"] / "api_json" / "tmpzz99.tmp", 30 * _DAY, "defg")
-
-        assert handle_command("--stale", ["10d", str(stale_tree["api"])]) is True
-
-        assert capsys.readouterr().out.splitlines()[-1] == (
-            "rm --stale 10d (swept): folders scanned 3, files matched 2 (7 bytes), "
-            "files deleted 2, bytes freed 7, refusals 0"
-        )
-
-    def test_the_summary_is_rendered_from_the_report(self, stale_tree):
-        request = parse_stale_args(["--stale", "10d", "--dry-run", str(stale_tree["api"])])
-        assert format_stale_summary(request, stale_sweep(request)) == (
-            "rm --stale 10d (dry run): folders scanned 3, files matched 1 (3 bytes), "
-            "files deleted 0, bytes freed 0, refusals 0"
-        )
-
-    def test_nothing_matched_is_a_success(self, stale_tree, capsys):
-        assert handle_command("--stale", ["10d", str(stale_tree["api"] / "scratch")]) is True
-        assert "files matched 0" in capsys.readouterr().out
-
-    def test_a_refusal_fails_the_run(self, stale_tree):
-        assert handle_command("--stale", ["10d", str(stale_tree["api"] / "nope")]) is False
-
-    @pytest.mark.skipif(_PERMISSIONS_DO_NOT_BIND, reason=_PERMISSIONS_REASON)
-    def test_an_unreadable_folder_is_a_refusal_not_a_silence(self, stale_tree):
-        locked = stale_tree["api"] / "locked_json"
-        locked.mkdir()
-        locked.chmod(0)
-        try:
-            report = _sweep("--stale", "10d", str(stale_tree["api"]))
-        finally:
-            locked.chmod(0o700)
-        assert any("Cannot scan" in message for message in report.refusals)
-
-
-class TestStaleNeverFallsIntoThePlainLane:
-    def test_a_stale_flag_after_the_dir_still_selects_stale_mode(self, stale_tree, monkeypatch):
-        """Standing in @api, the plain lane would remove api_json whole."""
-        monkeypatch.chdir(stale_tree["api"])
-        assert handle_command("api_json", ["--stale", "10d"]) is True
-        assert not stale_tree["stale"].exists()
-        assert stale_tree["young"].exists()
-
-    @pytest.mark.parametrize(
-        "tokens",
-        [["--stale=", "api_json"], ["--staleness", "api_json"], ["--stale", "10d", "--dryrun", "api_json"]],
-        ids=["empty-age", "unknown-spelling", "typo-dry-run"],
-    )
-    def test_a_malformed_stale_request_deletes_nothing(self, stale_tree, monkeypatch, tokens):
-        monkeypatch.chdir(stale_tree["api"])
-        assert handle_command(tokens[0], tokens[1:]) is False
-        assert stale_tree["stale"].exists()
-        assert stale_tree["young"].exists()

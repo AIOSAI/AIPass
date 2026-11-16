@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared fixtures for the drone suite
-# Version: 1.3.2
+# Version: 1.4.0
 # Created: 2026-03-05
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Shared pytest fixtures for drone tests."""
@@ -24,6 +24,7 @@ from typing import Any, Generator
 
 import pytest
 
+from aipass.ai_mail.apps.modules import door_verified_caller as rail
 from aipass.cli.apps.modules import display
 from aipass.drone.apps.handlers import registry_handler, router_handler
 from aipass.drone.apps.handlers.git import session_home
@@ -293,3 +294,54 @@ def builder_seat(aipass_github: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     )
     monkeypatch.chdir(seat)
     return seat
+
+
+# The drone rm suites' shared ground: test_rm, test_rm_archive, test_rm_stale and test_rm_dot.
+@pytest.fixture()
+def project_dir(tmp_path):
+    """Fake project root with a registry file and src/aipass layout."""
+    (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+    return tmp_path
+
+
+@pytest.fixture()
+def project_with_branches(project_dir):
+    """Project root with branch dirs containing .trinity/ markers."""
+    for branch in ("drone", "api", "flow"):
+        d = project_dir / "src" / "aipass" / branch
+        d.mkdir(parents=True)
+        (d / ".trinity").mkdir()
+        (d / "README.md").write_text(f"# {branch}", encoding="utf-8")
+    return project_dir
+
+
+@pytest.fixture()
+def at_drone_beside_api(project_with_branches, monkeypatch):
+    """Standing in @drone; @api is the sibling whose tree the admin may enter."""
+    monkeypatch.chdir(project_with_branches / "src" / "aipass" / "drone")
+    return project_with_branches / "src" / "aipass" / "api"
+
+
+def rm_ledger(tmp_path: Path) -> list[dict]:
+    """Every record the autouse deletion-log fixture captured in this test."""
+    store = tmp_path / "deletions.jsonl"
+    if not store.exists():
+        return []
+    return [json.loads(line) for line in store.read_text(encoding="utf-8").splitlines()]
+
+
+def rail_answers(monkeypatch, verdict):
+    """Stand in for @ai_mail's verified-caller rail (another branch's edge): True, False, or an exception to raise."""
+
+    def answer():
+        if isinstance(verdict, Exception):
+            raise verdict
+        return verdict
+
+    monkeypatch.setattr(rail, "is_verified_admin_caller", answer)
+    monkeypatch.setattr(rail, "resolve_verified_caller", lambda: "@devpulse" if verdict is True else "@drone")
+
+
+def logged_lines(method) -> list[str]:
+    """Every call of one patched prax method, rendered as the logger renders it."""
+    return [call.args[0] % tuple(call.args[1:]) for call in method.call_args_list]

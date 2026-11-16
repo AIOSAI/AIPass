@@ -39,7 +39,8 @@ deletion store away from the live `.ai_central/`, and the reset of the caller-id
 | Handlers | `test_registry_handler.py`, `test_discovery.py`, `test_executor.py` |
 | Commit gate | `test_commit_gate_branch_mapping.py` |
 | Infrastructure | `test_module_registry.py`, `test_config.py`, `test_generic_adapter.py` |
-| Features | `test_rm.py`, `test_commands.py`, `test_scan.py` |
+| Features | `test_commands.py`, `test_scan.py` |
+| drone rm | `test_rm.py` (containment and fences), `test_rm_archive.py`, `test_rm_stale.py`, `test_rm_dot.py`; shared fixtures in `conftest.py` |
 | Deletion record | `test_deletion_log.py` |
 | Broker | `test_broker.py` |
 | Standards | `test_cli_routing.py` |
