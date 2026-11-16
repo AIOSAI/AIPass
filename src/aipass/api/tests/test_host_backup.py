@@ -726,7 +726,7 @@ class TestReadSchedule:
 
 
 class TestSetSchedule:
-    """POST /v1/backup/schedule's logic: frequency and time, then on or off, then the schedule read back."""
+    """POST /v1/backup/schedule's logic: a frequency with its fields, then on or off, then the read-back."""
 
     def test_a_time_and_on_are_set_in_that_order_and_answered_as_read_back(self, door: Any, seated: Path) -> None:
         door.route_command.side_effect = [_result(), _result(), _result(json.dumps(SCHEDULE))]
@@ -749,16 +749,53 @@ class TestSetSchedule:
     @pytest.mark.parametrize(
         ("fields", "words"),
         [
+            ({"frequency": "daily", "time": "00:00"}, ["daily", "00:00"]),
+            ({"frequency": "weekly", "weekday": "monday", "time": "05:00"}, ["weekly", "monday", "05:00"]),
+            ({"frequency": "weekly", "weekday": "sunday", "time": "23:59"}, ["weekly", "sunday", "23:59"]),
+            ({"frequency": "monthly", "day": 1, "time": "05:00"}, ["monthly", "1", "05:00"]),
+            ({"frequency": "monthly", "day": 31, "time": "05:00"}, ["monthly", "31", "05:00"]),
+        ],
+    )
+    def test_each_frequency_sends_backups_set_form_in_its_word_order(
+        self, door: Any, fields: dict, words: List[str]
+    ) -> None:
+        door.route_command.side_effect = [_result(), _result(json.dumps(SCHEDULE))]
+
+        host_backup.set_schedule("AIPASS", **fields)
+
+        assert door.route_command.call_count == 2
+        assert _schedule_calls(door) == [words, ["--json"]]
+
+    @pytest.mark.parametrize(
+        ("fields", "words"),
+        [
             ({}, "Nothing to set"),
-            ({"frequency": "weekly", "time": "05:00"}, "Unknown frequency 'weekly' — the schedule takes daily"),
-            ({"time": "05:00"}, "A frequency is required with a time"),
+            (
+                {"frequency": "yearly", "time": "05:00"},
+                "Unknown frequency 'yearly' — the schedule takes daily, weekly, monthly",
+            ),
+            ({"time": "05:00"}, "A frequency is required with its fields"),
+            ({"on": True, "weekday": "monday"}, "A frequency is required with its fields"),
             ({"frequency": "daily"}, "Not a 24-hour HH:MM time: None"),
             ({"frequency": "daily", "time": "5:00"}, "Not a 24-hour HH:MM time: '5:00'"),
             ({"frequency": "daily", "time": "24:00"}, "Not a 24-hour HH:MM time: '24:00'"),
             ({"frequency": "daily", "time": "05:00x"}, "Not a 24-hour HH:MM time: '05:00x'"),
+            ({"frequency": "daily", "time": "05:00", "weekday": "monday"}, "daily takes no weekday"),
+            ({"frequency": "daily", "time": "05:00", "day": 1}, "daily takes no day"),
+            ({"frequency": "weekly", "weekday": "monday", "time": "05:00", "day": 1}, "weekly takes no day"),
+            ({"frequency": "monthly", "day": 1, "time": "05:00", "weekday": "monday"}, "monthly takes no weekday"),
+            ({"frequency": "weekly", "time": "05:00"}, "Not a weekday: None"),
+            ({"frequency": "weekly", "weekday": "Monday", "time": "05:00"}, "Not a weekday: 'Monday'"),
+            ({"frequency": "weekly", "weekday": "mon", "time": "05:00"}, "Not a weekday: 'mon'"),
+            ({"frequency": "weekly", "weekday": "monday"}, "Not a 24-hour HH:MM time: None"),
+            ({"frequency": "monthly", "time": "05:00"}, "Not a day of the month: None"),
+            ({"frequency": "monthly", "day": 0, "time": "05:00"}, "Not a day of the month: 0"),
+            ({"frequency": "monthly", "day": 32, "time": "05:00"}, "Not a day of the month: 32"),
+            ({"frequency": "monthly", "day": "5", "time": "05:00"}, "Not a day of the month: '5'"),
+            ({"frequency": "monthly", "day": True, "time": "05:00"}, "Not a day of the month: True"),
+            ({"frequency": "monthly", "day": 5.0, "time": "05:00"}, "Not a day of the month: 5.0"),
+            ({"frequency": "monthly", "day": 5}, "Not a 24-hour HH:MM time: None"),
             ({"on": "true"}, "on is true or false, not 'true'"),
-            ({"on": True, "weekday": 1}, "weekday and day are not schedulable yet"),
-            ({"frequency": "daily", "time": "05:00", "day": 1}, "weekday and day are not schedulable yet"),
         ],
     )
     def test_a_body_backup_would_refuse_is_refused_here_and_nothing_is_written(

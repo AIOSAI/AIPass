@@ -95,7 +95,7 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `GET /v1/backup/job?id=` | read | One job: `running`/`done`/`stopped`/`failed`. Forgotten: **404** `job_unknown` |
 | `GET /v1/backup/status?project=&sizes=` | read | `drone @backup status --json` passed through; each `running` entry gains `job`. No `--json`: **503** |
 | `GET /v1/backup/schedule?project=` | read | `drone @backup schedule --json` passed through, keys unchanged |
-| `POST /v1/backup/schedule` | operate | `{project, frequency?, time?, on?}` → **200** the schedule read back. A bad body or @backup refusing: **400** `verb_refused` |
+| `POST /v1/backup/schedule` | operate | `{project, frequency?, time?, weekday?, day?, on?}` → **200** the read-back. A bad body or @backup refusing: **400** `verb_refused` |
 | `GET /v1/agent-settings?branch=&project=` | read | One branch's three owned claude settings; an absent key reads `null`. `project` names a census project's citizen, absent = the seat |
 | `POST /v1/agent-settings` | operate | `{branch, project?, patch}`. Three-state: absent touches nothing, `null` removes, a value sets; the file keeps its mode |
 | `GET /v1/baud-settings` | read | BAUD's own document for the seat, whole and opaque |

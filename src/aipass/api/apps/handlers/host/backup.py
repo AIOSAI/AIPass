@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: backup.py
 # Description: Host API Backup Handler — the backup door: start and stop a lane, read a job, the store, the schedule
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-10-16
 # Modified: 2026-11-15
 # =============================================
@@ -84,8 +84,10 @@ SCHEDULE_TIMEOUT_SECONDS = 120
 # shortcut: @backup exits 2 for a refusal and a fault it names alike, so both are 400; split when its codes do.
 SCHEDULE_REFUSED_EXIT = 2
 
-# weekly and monthly join when @daemon has types for them; @backup refuses them until then.
-SCHEDULE_FREQUENCIES = ("daily",)
+# Each frequency's fields, in the order @backup's set form takes them after the frequency.
+SCHEDULE_SHAPES = {"daily": ("time",), "weekly": ("weekday", "time"), "monthly": ("day", "time")}
+
+SCHEDULE_WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 
 SCHEDULE_TIME = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
 
@@ -422,6 +424,26 @@ def read_schedule(project: str) -> Dict[str, Any]:
     return _schedule_json(_root_of(project))
 
 
+def _schedule_words(frequency: Any, time: Any, weekday: Any, day: Any) -> List[str]:
+    """@backup's set form for one frequency; a missing, malformed or stray field is refused."""
+    if frequency not in SCHEDULE_SHAPES:
+        named = f"Unknown frequency {frequency!r}" if frequency else "A frequency is required with its fields"
+        raise VerbRefused(f"{named} — the schedule takes {', '.join(SCHEDULE_SHAPES)}")
+    shape = SCHEDULE_SHAPES[frequency]
+    given = {"weekday": weekday, "day": day, "time": time}
+    stray = [field for field, value in given.items() if value is not None and field not in shape]
+    if stray:
+        raise VerbRefused(f"{frequency} takes no {' or '.join(stray)}")
+    if "weekday" in shape and weekday not in SCHEDULE_WEEKDAYS:
+        raise VerbRefused(f"Not a weekday: {weekday!r} — monday to sunday, lowercase")
+    # type(), not isinstance: JSON true is a bool, and a bool is an int to isinstance.
+    if "day" in shape and (type(day) is not int or not 1 <= day <= 31):
+        raise VerbRefused(f"Not a day of the month: {day!r} — a whole number 1 to 31")
+    if not isinstance(time, str) or not SCHEDULE_TIME.fullmatch(time):
+        raise VerbRefused(f"Not a 24-hour HH:MM time: {time!r}")
+    return [frequency] + [str(given[field]) for field in shape]
+
+
 def set_schedule(
     project: str,
     on: Any = None,
@@ -431,24 +453,17 @@ def set_schedule(
     day: Any = None,
 ) -> Dict[str, Any]:
     """
-    Set a frequency and time, then on or off, through @backup; answer the schedule read back.
+    Set a frequency with its fields, then on or off, through @backup; answer the schedule read back.
     Everything @backup would refuse for its form is refused here first, before anything is written."""
-    if weekday is not None or day is not None:
-        raise VerbRefused("weekday and day are not schedulable yet: @backup takes daily only")
     calls: List[List[str]] = []
-    if frequency is not None or time is not None:
-        if frequency not in SCHEDULE_FREQUENCIES:
-            named = f"Unknown frequency {frequency!r}" if frequency else "A frequency is required with a time"
-            raise VerbRefused(f"{named} — the schedule takes {', '.join(SCHEDULE_FREQUENCIES)}")
-        if not isinstance(time, str) or not SCHEDULE_TIME.fullmatch(time):
-            raise VerbRefused(f"Not a 24-hour HH:MM time: {time!r}")
-        calls.append([str(frequency), time])
+    if any(field is not None for field in (frequency, time, weekday, day)):
+        calls.append(_schedule_words(frequency, time, weekday, day))
     if on is not None:
         if not isinstance(on, bool):
             raise VerbRefused(f"on is true or false, not {on!r}")
         calls.append(["on" if on else "off"])
     if not calls:
-        raise VerbRefused("Nothing to set: send on, or frequency and time")
+        raise VerbRefused("Nothing to set: send on, or a frequency with its fields")
 
     root = _root_of(project)
     for words in calls:

@@ -91,7 +91,7 @@ def register(app: Any, deny: Callable[..., Any], require_scope: Callable[[str], 
         payload: dict = Body(default={}),
         record: dict = Depends(require_scope("operate")),
     ) -> dict:
-        """Set frequency and time, then on or off; 200 with the schedule read back."""
+        """Set a frequency with its fields, then on or off; 200 with the schedule read back."""
         project = str(payload.get("project") or "")
         fields = [payload.get(key) for key in ("on", "frequency", "time", "weekday", "day")]
         return _answered(host_backup.answer(host_backup.set_schedule, project, *fields))

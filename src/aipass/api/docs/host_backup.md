@@ -50,14 +50,18 @@ dropped after an hour. A forgotten id is **404 `job_unknown`**, and the phone th
 
 **The schedule is @backup's, read and set through it.** `GET /v1/backup/schedule` answers
 `drone @backup schedule <root> --json` unchanged: `project`, `root`, `job_id`, `scheduled`,
-`on`, `frequency`, `time`, `weekday`, `day`, `steps`, `last_run`, `last_status`,
-`last_error`, `next_run`. `POST /v1/backup/schedule` takes `frequency` and `time` together
-and `on`, in one body or apart; it sends `daily HH:MM` first, then `on` or `off`, and
-answers the schedule read back. A new schedule starts off, and `on` with no schedule yet is
-@backup's refusal. The body is checked first, so nothing @backup would refuse for its form
-reaches it: `daily` is the one frequency, the time is a 24-hour `HH:MM`, `on` is a JSON
-boolean, `weekday` and `day` are refused. Each is a **400 `verb_refused`** naming the field.
+`on`, `frequency` (`daily`, `weekly`, `monthly` or null), `time`, `weekday` (the day's name,
+weekly only), `day` (an integer, monthly only), `steps`, `last_run`, `last_status`,
+`last_error`, `next_run`. `POST /v1/backup/schedule` takes a frequency with its fields and
+`on`, in one body or apart: `daily` takes `time`; `weekly` takes `weekday` (`monday` to
+`sunday`, lowercase) and `time`; `monthly` takes `day` (a JSON integer, 1 to 31) and `time`.
+It sends @backup's set form first (`weekly monday 05:00`), then `on` or `off`, and answers the
+schedule read back; changing the frequency or time keeps on or off. A new schedule starts
+off, and `on` with no schedule yet is @backup's refusal. The body is checked first, so nothing
+@backup would refuse for its form reaches it: a missing field, a field the frequency does not
+take (`weekday` with `daily`), a time that is not a 24-hour `HH:MM`, an `on` that is not a
+JSON boolean. Each is a **400 `verb_refused`** naming the field.
 @backup's exit 2 carries a sentence on stderr: that sentence, without its usage hint, is a
 **400 `verb_refused`**, for a refusal and for a fault @backup names (@daemon unreachable)
 alike, because one exit code covers both. Any other exit, or an exit 2 with no sentence, is a
-**503**. A time set before a refused `on` stays set.
+**503**. A schedule set before a refused `on` stays set.
