@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_help_flag_safety.py
 # Description: Rule E canaries — a help flag anywhere explains, never executes
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-13
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/help_flags.py and the help gate of every drone module."""
@@ -124,11 +124,12 @@ class TestRmNeverDeletesOnHelp:
         with (
             patch(f"{_M}.rm._safe_delete", return_value=[("a.txt", True, "deleted")]) as delete,
             patch(f"{_M}.rm.print_help") as help_,
-            patch(f"{_M}.rm.success"),
+            patch(f"{_M}.rm._report") as report,
         ):
-            rm.handle_command("a.txt", [])
+            assert rm.handle_command("a.txt", []) is True
 
         delete.assert_called_once_with(["a.txt"])
+        report.assert_called_once_with(True, "deleted")
         help_.assert_not_called()
 
 

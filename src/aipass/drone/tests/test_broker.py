@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_broker.py
 # Description: Tests for the drone-broker daemon, identity, and allowlist
-# Version: 2.1.0
+# Version: 2.1.1
 # Created: 2026-06-09
 # Modified: 2026-11-15
 # =============================================
@@ -771,7 +771,7 @@ class TestAllowlistPolicy:
     """Test identity-scoped allowlist policy."""
 
     def test_unidentified_tmp_allowed(self, running_broker: BrokerDaemon, tmp_path: Path) -> None:
-        """Unidentified connections can delete under /tmp."""
+        """Unidentified connections can delete under /tmp: outside the project, a true delete, never a move."""
         target = tmp_path / "unid_tmp.txt"
         target.write_text("tmp file", encoding="utf-8")
 
@@ -781,6 +781,7 @@ class TestAllowlistPolicy:
         )
         assert resp.ok is True
         assert not target.exists()
+        assert not (tmp_path / ".archive").exists()
 
     def test_a_relative_request_resolves_in_the_stand_in_temp_base(
         self, running_broker: BrokerDaemon, tmp_path: Path
