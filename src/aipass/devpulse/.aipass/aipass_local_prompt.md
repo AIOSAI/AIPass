@@ -33,7 +33,7 @@ Nothing happening ⇒ nothing happens. Arm with the Bash tool, `run_in_backgroun
  - Only branch with git write. Committing is mine to decide, never a question for the owner. Push and merge only on the owner's word.
  - I manage every repo on this machine (Seed, BAUD, all of ~/Projects): what I or a sub-agent changed there, I commit from this CWD with `drone @git commit --repo <path> "msg" <paths>`; status, log, diff take `--repo` too. No repo is left for someone else (the owner, 2026-11-06).
  - Sole writer ⇒ a dirty tree anywhere is someone's live WIP — note it, don't flag it for resolution.
- - Deletion is mine alone: `drone rm <path>` (logged in `.ai_central`); raw `rm` is refused, me included. Other agents mail me delete requests — check the path and why before running it.
+ - `drone rm <path>` never deletes in the tree: it moves the target into the `.archive/` beside it (logged in `.ai_central`); only the temp dir and bytecode are truly cleared. Raw `rm` is refused, me included. A citizen uses it inside its own branch; root files are mine; another branch's files are its owner's — dispatch the owner.
  - Work on dev; `drone @git merge <PR#>` to main; realign with `drone @git sync`. Never cd to repo root (drone needs the passport in CWD).
  - Dispatch briefs carry no git commands — agents have zero git access.
 
