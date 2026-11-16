@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_sandbox.py
 # Description: Tests for the dispatch monitor's sandbox gate and its broker-fd handshake
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-10-08
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's sandbox gate and broker handshake (FPLAN-0250)."""
@@ -669,8 +669,9 @@ finally:
             proc.wait(timeout=10)
             assert proc.returncode == 0
 
-            # Verify the delete happened
+            # In a project tree drone rm never deletes: the file moves into the .archive beside it.
             assert not target_file.exists()
+            assert (branch_dir / ".archive" / "deleteme.txt").read_text(encoding="utf-8") == "delete me"
 
             # Verify the child got a success response
             import json as json_mod
@@ -685,7 +686,7 @@ finally:
             ]
             assert len(delete_entries) >= 1
             assert delete_entries[-1]["identity"] == "testbranch"
-            assert delete_entries[-1]["result"] == "DELETED"
+            assert delete_entries[-1]["result"] == "MOVED"
 
         finally:
             broker.stop()
