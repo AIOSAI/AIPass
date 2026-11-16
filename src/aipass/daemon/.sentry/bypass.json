@@ -37,32 +37,20 @@
     {
       "file": "apps/handlers/schedule/recovery.py",
       "standard": "logged_fallback",
-      "lines": [108, 195, 238, 243, 400],
+      "lines": [110, 197, 240, 245, 397],
       "reason": "Catch-up lane, built and OFF (RECOVERY_LANE_LIVE False) (daemon, fleet green leg 5). Each answer is the documented decision: an unparseable last_tick is no history, so no gap (181, as a missing one); an unreadable hourly time enumerates no windows, as the due check refuses the same value (286); an unreadable max-age bound or instant is unlimited, since one late wake with an honest header costs less than a window dropped unreported (350, 354); an unreadable instant has no age to print, '' (563, a header suffix)."
     },
     {
       "file": "apps/handlers/monitoring/inbox_scanner.py",
       "standard": "logged_fallback",
-      "lines": [52, 63],
-      "reason": "Inbox sweep, a hand tool (daemon, fleet green leg 5): an unparseable stamp answers None like a missing one, so the message is not aged, because a sweep that cannot tell a message's age must not wake a branch over it (60); an unreadable inbox answers None like a malformed one, so the branch is not reported, because the woken agent could not read that inbox either, and the warning names the file (74)."
+      "lines": [48],
+      "reason": "Inbox sweep, a hand tool (daemon, fleet green leg 5): an unparseable stamp answers None like a missing one, so the message is not aged, because a sweep that cannot tell a message's age must not wake a branch over it (60)."
     },
     {
       "file": "apps/handlers/monitoring/red_flag_detector.py",
       "standard": "logged_fallback",
       "lines": [41],
       "reason": "Report parsing (daemon, fleet green leg 5): an unreadable ISO stamp answers None like a missing one, and every caller treats None as 'no known activity time' for a report line; nothing is fired or written from it, and a raise would take the whole activity report down over one bad stamp."
-    },
-    {
-      "file": "apps/handlers/schedule/discovery.py",
-      "standard": "logged_fallback",
-      "lines": [149, 155],
-      "reason": "citizen_class_for (daemon, fleet green legs 2 and 3): None means 'unreadable' on every path that returns it (an unreadable .trinity or passport, a passport or identity that is not a dict); no passport can hold None, and an absent passport answers ''. The checker reads the guard returns as a success path, but they are the same answer for the same case. Callers (inbox sweep, rounds roster) leave a None citizen out."
-    },
-    {
-      "file": "apps/handlers/schedule/discovery.py",
-      "standard": "logged_fallback",
-      "lines": [285],
-      "reason": "_load_schedule_file (daemon, fleet green leg 5): None means 'this schedule file cannot be used', for an unreadable file and a malformed one alike; the one caller, discover_jobs, skips that file with a warning naming it, so one bad file cannot stop the fleet's tick. A raise would stop discovery for every citizen."
     },
     {
       "file": "apps/handlers/schedule/command_job.py",

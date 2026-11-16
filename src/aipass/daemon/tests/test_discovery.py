@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_discovery.py
 # Description: Tests for registry-led citizen discovery and .daemon/ schedule job discovery
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-06-15
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/schedule/discovery.py — citizens from the registries, jobs from their .daemon/."""
@@ -27,6 +27,7 @@ from aipass.daemon.apps.handlers.schedule.command_job import ok_exit_codes_for
 from aipass.daemon.apps.handlers.schedule import discovery
 from aipass.memory.apps.modules import fleet
 from aipass.daemon.apps.handlers.schedule.discovery import (
+    PassportUnreadable,
     discover_jobs,
     active_citizens,
     citizen_class_for,
@@ -39,7 +40,7 @@ from aipass.daemon.apps.handlers.schedule.discovery import (
 
 DISCOVERY = "aipass.daemon.apps.handlers.schedule.discovery"
 
-# Failures to stat a passport that are NOT its absence: a .trinity that cannot be
+# Failures to read a passport that are NOT its absence: a .trinity that cannot be
 # searched (EACCES) and a .trinity that is not a directory (ENOTDIR).
 NOT_ABSENT = (
     PermissionError(errno.EACCES, "Permission denied"),
@@ -641,45 +642,51 @@ class TestCitizenClass:
         assert citizen_class_for(tmp_path) == ""
 
     @pytest.mark.parametrize("error", NOT_ABSENT, ids=["EACCES", "ENOTDIR"])
-    def test_a_trinity_that_cannot_be_read_returns_none(self, tmp_path, caplog, error):
-        """Only a passport truly absent is an ordinary citizen; not learning whether it exists is None.
+    def test_a_trinity_that_cannot_be_read_raises_naming_the_passport(self, tmp_path, error):
+        """Only a passport truly absent is an ordinary citizen; not learning whether it exists raises.
 
         Path.exists() raises on EACCES and answers False on ENOTDIR, so an unreadable .trinity read as "" (a worker).
         Mutant killed: except FileNotFoundError widened to except OSError in citizen_class_for.
         """
         passport = tmp_path / ".trinity" / "passport.json"
-        with patch(f"{DISCOVERY}._stat_passport", side_effect=error) as stat, caplog.at_level("WARNING"):
-            assert citizen_class_for(tmp_path) is None
-        stat.assert_called_once_with(passport)
-        assert str(passport) in caplog.text
+        with (
+            patch(f"{DISCOVERY}._passport_text", side_effect=error) as read,
+            pytest.raises(PassportUnreadable) as raised,
+        ):
+            citizen_class_for(tmp_path)
+        read.assert_called_once_with(passport)
+        assert str(passport) in str(raised.value)
 
-    def test_malformed_passport_returns_none(self, tmp_path):
-        """A passport that exists but cannot be read answers None, never "" (not a manager).
+    def test_malformed_passport_raises(self, tmp_path):
+        """A passport that exists but cannot be read raises, never answers "" (not a manager).
 
         Mutant killed: the parse failure answering "".
         """
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
         (trinity / "passport.json").write_text("{not json", encoding="utf-8")
-        assert citizen_class_for(tmp_path) is None
+        with pytest.raises(PassportUnreadable):
+            citizen_class_for(tmp_path)
 
-    def test_non_dict_passport_returns_none(self, tmp_path):
+    def test_non_dict_passport_raises(self, tmp_path):
         """Mutant killed: a non-dict passport answering ""."""
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
         (trinity / "passport.json").write_text("[]", encoding="utf-8")
-        assert citizen_class_for(tmp_path) is None
+        with pytest.raises(PassportUnreadable):
+            citizen_class_for(tmp_path)
 
     @pytest.mark.parametrize("identity", [{"citizen_class": None}, {"citizen_class": 7}, "manager"])
-    def test_an_unreadable_class_returns_none(self, tmp_path, identity):
-        """A class that is not a string is as unreadable as a corrupt file: None, never a worker.
+    def test_an_unreadable_class_raises(self, tmp_path, identity):
+        """A class that is not a string is as unreadable as a corrupt file: it raises, never reads as a worker.
 
         Mutant killed: the class returned unchecked (null leaked through, a non-dict identity raised).
         """
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
         (trinity / "passport.json").write_text(json.dumps({"identity": identity}), encoding="utf-8")
-        assert citizen_class_for(tmp_path) is None
+        with pytest.raises(PassportUnreadable):
+            citizen_class_for(tmp_path)
 
 
 # Residency: discovery is registry-led and shallow; classification reads the branch's OWN passport; inside
@@ -1057,7 +1064,8 @@ class TestSkippedOwners:
         (one_branch / "schedule.json").write_text(json.dumps({"jobs": [KEEP, bad]}), encoding="utf-8")
         assert [j["id"] for j in discover_jobs(refusals=refusals)] == ["keep"]
         assert refusals == [
-            f"{one_branch / 'a_bad.json'}: not a readable schedule (bad JSON, not an object, or no jobs list)",
+            f"{one_branch / 'a_bad.json'}: not a readable schedule"
+            " (Expecting property name enclosed in double quotes: line 1 column 2 (char 1))",
             f"Job 'bad' has invalid schedule type 'biweekly' in {one_branch / 'schedule.json'}",
         ]
 

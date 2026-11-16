@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: recovery.py
 # Description: Gap detection, missed-window enumeration, catch-up queue and drain policy
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-09-08
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -19,8 +19,10 @@ from typing import List, Optional, Tuple
 import psutil
 
 from aipass.prax import logger
+from aipass.ai_mail import outstanding_dispatches
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.schedule import runstate as rs
+from aipass.daemon.apps.handlers.schedule.discovery import active_citizens
 
 #: One window (2 * WINDOW_MINUTES), the smallest span a daily job's whole firing chance can pass in.
 GAP_THRESHOLD_MINUTES = 30
@@ -51,9 +53,9 @@ def boot_time() -> datetime:
                 if line.startswith("btime "):
                     return datetime.fromtimestamp(int(line.split()[1]))
     except (OSError, ValueError, IndexError) as e:
-        logger.warning("[recovery] /proc/stat btime unreadable: %s", e)
+        raise BootTimeUnavailable(f"no readable boot time (psutil unusable, /proc/stat btime unreadable: {e})") from e
 
-    raise BootTimeUnavailable("no readable boot time (psutil absent, /proc/stat unusable)")
+    raise BootTimeUnavailable("no readable boot time (psutil unusable, no btime line in /proc/stat)")
 
 
 def _classify_cause(gap_start: datetime, boot: Optional[datetime]) -> Tuple[str, str]:
@@ -311,12 +313,7 @@ def _branch_is_awake(owner: str) -> bool:
     Unreadable answers awake: holding costs a tick, firing onto a live agent is the collision.
     """
     try:
-        from aipass.ai_mail import outstanding_dispatches
-
         return any(str(entry.get("target", "")) == owner for entry in outstanding_dispatches())
-    except ImportError as e:
-        logger.warning("[recovery] dispatch register unavailable (%s) — holding the drain", e)
-        return True
     except OSError as e:
         logger.warning("[recovery] dispatch register unreadable (%s) — holding the drain", e)
         return True
@@ -473,12 +470,10 @@ def _branch_daemon_dir(owner: str):
     Keyed on email through discovery's roster, never a path convention of its own.
     """
     try:
-        from aipass.daemon.apps.handlers.schedule.discovery import active_citizens
-
         for citizen in active_citizens():
             if citizen.get("email") == owner:
                 return Path(citizen["path"]) / ".daemon"
-    except (ImportError, OSError, TypeError, KeyError) as e:
+    except (OSError, TypeError, KeyError) as e:
         logger.warning("[recovery] could not resolve .daemon/ for %s: %s", owner, e)
     return None
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runstate.py
 # Description: Daemon runstate tracking and due-logic for decentralized scheduler
-# Version: 1.9.0
+# Version: 1.9.1
 # Created: 2026-06-15
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -120,7 +120,7 @@ def _target_minutes(schedule: dict) -> Optional[int]:
     try:
         target_h, target_m = map(int, target_time.split(":"))
     except (ValueError, AttributeError) as e:
-        logger.info("[runstate] Daily time parse failed for %r: %s", target_time, e)
+        logger.warning("[runstate] Daily time parse failed for %r: %s", target_time, e)
         return None
     return target_h * 60 + target_m
 
@@ -194,7 +194,7 @@ def _is_interval_due(schedule: dict, last_run: Optional[str], now: datetime) -> 
         elapsed = (now - last_dt).total_seconds() / 60
         return elapsed >= interval
     except (ValueError, TypeError) as e:
-        logger.info("[runstate] Interval last_run parse failed: %s", e)
+        logger.warning("[runstate] Interval last_run parse failed: %s", e)
         return True
 
 
@@ -546,12 +546,12 @@ def _calc_next_run(schedule: dict, last_run_ts: str) -> Optional[str]:
         try:
             target_h, target_m = map(int, target_time.split(":"))
         except (ValueError, AttributeError) as e:
-            logger.info("[runstate] calc_next_run daily time parse failed: %s", e)
+            logger.warning("[runstate] calc_next_run daily time parse failed: %s", e)
             return None
         try:
             last_dt = datetime.fromisoformat(last_run_ts)
         except (ValueError, TypeError) as e:
-            logger.info("[runstate] calc_next_run daily last_run parse failed: %s", e)
+            logger.warning("[runstate] calc_next_run daily last_run parse failed: %s", e)
             return None
         today_target = last_dt.replace(hour=target_h, minute=target_m, second=0, microsecond=0)
         candidate = _fired_occurrence(last_dt, today_target, timedelta(days=1)) + timedelta(days=1)
@@ -568,12 +568,12 @@ def _calc_next_run(schedule: dict, last_run_ts: str) -> Optional[str]:
         try:
             target_m = int(target_m_str)
         except (ValueError, TypeError) as e:
-            logger.info("[runstate] calc_next_run hourly time parse failed: %s", e)
+            logger.warning("[runstate] calc_next_run hourly time parse failed: %s", e)
             return None
         try:
             last_dt = datetime.fromisoformat(last_run_ts)
         except (ValueError, TypeError) as e:
-            logger.info("[runstate] calc_next_run hourly last_run parse failed: %s", e)
+            logger.warning("[runstate] calc_next_run hourly last_run parse failed: %s", e)
             return None
         this_hour = last_dt.replace(minute=target_m, second=0, microsecond=0)
         return (_fired_occurrence(last_dt, this_hour, timedelta(hours=1)) + timedelta(hours=1)).isoformat()
@@ -587,7 +587,7 @@ def _calc_next_run(schedule: dict, last_run_ts: str) -> Optional[str]:
             last_dt = datetime.fromisoformat(last_run_ts)
             return (last_dt + timedelta(minutes=interval)).isoformat()
         except (ValueError, TypeError) as e:
-            logger.info("[runstate] calc_next_run interval parse failed: %s", e)
+            logger.warning("[runstate] calc_next_run interval parse failed: %s", e)
             return None
 
     if sched_type == "once":

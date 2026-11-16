@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rotation.py
 # Description: Tests for the steward rotation handler and module
-# Version: 1.6.0
+# Version: 1.6.1
 # Created:2026-08-12
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/rotation.py and handlers/schedule/rotation.py — the nightly rounds (DPLAN-0287)."""
@@ -41,7 +41,12 @@ from aipass.daemon.apps.handlers.schedule.rotation import (
 from aipass.daemon.apps.handlers.schedule import runstate as runstate_mod
 from aipass.ai_mail.apps.modules import door_wake
 from aipass.ai_mail.apps.modules.door_wake import wake_branch
-from aipass.daemon.apps.handlers.schedule.discovery import active_citizens, discover_jobs, framework_root
+from aipass.daemon.apps.handlers.schedule.discovery import (
+    PassportUnreadable,
+    active_citizens,
+    discover_jobs,
+    framework_root,
+)
 from aipass.daemon.apps.modules import rotation as rotation_module
 from aipass.daemon.apps.modules import run as run_module
 
@@ -196,13 +201,18 @@ class TestBuildRoster:
     def test_an_unreadable_passport_is_left_off_the_roster(self, fleet, classes):
         """A citizen whose passport cannot be read may be a manager: it sits this night out, knob or no knob.
 
-        Mutant killed: build_roster treating an unreadable class (None) as a worker.
+        Mutant killed: build_roster treating an unreadable passport as a worker.
         """
-        unreadable = dict(classes, **{"@commons": None})
+
+        def class_or_unreadable(path):
+            if path.name == "commons":
+                raise PassportUnreadable(f"passport at {path} unreadable")
+            return classes[f"@{path.name}"]
+
         for include_managers in (False, True):
             with (
                 patch(f"{HANDLER}.active_citizens", return_value=fleet),
-                patch(f"{HANDLER}.citizen_class_for", side_effect=lambda p: unreadable[f"@{p.name}"]),
+                patch(f"{HANDLER}.citizen_class_for", side_effect=class_or_unreadable),
             ):
                 roster = build_roster(include_managers=include_managers)
             assert "@commons" not in [c["email"] for c in roster]

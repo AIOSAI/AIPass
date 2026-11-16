@@ -3,7 +3,7 @@
 # Description: Tests for the activity_report CLI module
 # Version: 1.2.1
 # Created: 2026-04-03
-# Modified: 2026-11-10
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/activity_report.py — activity, activity-report, branch-health."""

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rotation.py
 # Description: Rounds roster, pointer state and prompt rendering
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-08-12
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -21,6 +21,7 @@ from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.schedule.discovery import (
     MANAGER_CLASS,
+    PassportUnreadable,
     active_citizens,
     citizen_class_for,
     framework_root,
@@ -87,11 +88,11 @@ def build_roster(include_managers: bool = DEFAULT_INCLUDE_MANAGERS, repo_root: O
             continue
 
         entry = dict(citizen)
-        entry["citizen_class"] = citizen_class_for(citizen["path"])
-
         # An unreadable passport may be a manager's: it sits this night out, knob or no knob.
-        if entry["citizen_class"] is None:
-            logger.warning("[rotation] %s excluded from roster (passport unreadable)", email)
+        try:
+            entry["citizen_class"] = citizen_class_for(citizen["path"])
+        except PassportUnreadable as e:
+            logger.warning("[rotation] %s excluded from roster: %s", email, e)
             continue
 
         if entry["citizen_class"] == MANAGER_CLASS and not include_managers:

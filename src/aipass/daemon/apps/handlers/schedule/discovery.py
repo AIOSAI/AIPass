@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discovery.py
 # Description: Decentralized .daemon/ schedule file discovery
-# Version: 2.7.0
+# Version: 2.8.0
 # Created: 2026-06-15
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -54,6 +54,10 @@ _CORE_REGISTRY_NAME = "AIPASS_REGISTRY.json"
 
 # Reads its mail live; must never be woken into an interactive session by a scheduled job.
 MANAGER_CLASS = "manager"
+
+
+class PassportUnreadable(Exception):
+    """A passport is there but cannot be read. It may be a manager's: callers must not treat it as a worker's."""
 
 
 def _source_label(record: dict, repo_root: Path) -> str:
@@ -127,42 +131,33 @@ def framework_root(repo_root: Optional[Path] = None) -> Path:
     return root / "src" / "aipass"
 
 
-def _stat_passport(passport_file: Path) -> None:
-    """Ask the filesystem whether *passport_file* is there, raising whatever it raises.
+def _passport_text(passport_file: Path) -> str:
+    """The text of *passport_file*, raising whatever the read raises.
     A seam so a test can inject EACCES or ENOTDIR without replacing pathlib process-wide."""
-    passport_file.stat()
+    return passport_file.read_text(encoding="utf-8")
 
 
-def citizen_class_for(branch_path: Path) -> Optional[str]:
+def citizen_class_for(branch_path: Path) -> str:
     """Read citizen_class from a branch passport.
 
-    Only a truly absent passport answers ''; any unreadable case answers None (may be a
-    manager's: callers must not treat it as a worker). stat(), not exists(): on 3.12
-    exists() raises on EACCES and answers False on ENOTDIR."""
+    Only a truly absent passport answers ''; any unreadable case raises PassportUnreadable.
+    FileNotFoundError alone is absence: EACCES and ENOTDIR are not (Path.exists() would
+    raise on the first and answer False on the second)."""
     passport_file = branch_path / ".trinity" / "passport.json"
     try:
-        _stat_passport(passport_file)
+        passport = json.loads(_passport_text(passport_file))
     except FileNotFoundError:
         return ""
-    except OSError as e:
-        logger.warning("[discovery] Could not learn whether a passport is at %s: %s", passport_file, e)
-        return None
-    try:
-        with open(passport_file, "r", encoding="utf-8") as f:
-            passport = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
-        logger.warning("[discovery] Could not read passport at %s: %s", passport_file, e)
-        return None
+        raise PassportUnreadable(f"passport at {passport_file} unreadable: {e}") from e
 
     if not isinstance(passport, dict):
-        logger.warning("[discovery] Non-dict passport at %s", passport_file)
-        return None
+        raise PassportUnreadable(f"passport at {passport_file} is not an object")
 
     identity = passport.get("identity", {})
     citizen_class = identity.get("citizen_class", "") if isinstance(identity, dict) else None
     if not isinstance(citizen_class, str):
-        logger.warning("[discovery] Unreadable citizen_class in passport at %s", passport_file)
-        return None
+        raise PassportUnreadable(f"passport at {passport_file} has no readable citizen_class")
     return citizen_class
 
 
@@ -274,23 +269,17 @@ def _validate_job(job: dict, file_path: Path, refusals: Optional[list] = None) -
     return True
 
 
-def _load_schedule_file(file_path: Path) -> Optional[dict]:
-    """Load and validate a schedule.json file. Returns parsed dict or None.
-    None (unreadable or malformed) skips that one file so it cannot stop the fleet's tick."""
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        logger.warning("[discovery] Failed to read %s: %s", file_path, e)
-        return None
+def _load_schedule_file(file_path: Path) -> dict:
+    """Load a schedule.json file and check its shape.
+    Raises OSError or ValueError (JSONDecodeError is one) when unreadable or malformed."""
+    with open(file_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
 
     if not isinstance(data, dict):
-        logger.warning("[discovery] Non-dict root in %s", file_path)
-        return None
+        raise ValueError("the root is not an object")
 
     if "jobs" not in data or not isinstance(data["jobs"], list):
-        logger.warning("[discovery] Missing or invalid 'jobs' array in %s", file_path)
-        return None
+        raise ValueError("no 'jobs' list")
 
     return data
 
@@ -306,11 +295,12 @@ def _jobs_for_citizen(citizen: dict, skipped_owners: set, refusals: Optional[lis
         if sched_file.name.startswith("."):
             continue
 
-        data = _load_schedule_file(sched_file)
-        if data is None:
+        # One unreadable file skips only itself, so it cannot stop the fleet's tick.
+        try:
+            data = _load_schedule_file(sched_file)
+        except (OSError, ValueError) as e:
             skipped_owners.add(citizen["email"])
-            if refusals is not None:
-                refusals.append(f"{sched_file}: not a readable schedule (bad JSON, not an object, or no jobs list)")
+            _refused(refusals, "[discovery] %s: not a readable schedule (%s)", sched_file, e)
             continue
 
         for job in data["jobs"]:
