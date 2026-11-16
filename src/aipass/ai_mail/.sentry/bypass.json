@@ -143,14 +143,14 @@
       "file": "apps/modules/email.py",
       "standard": "logged_fallback",
       "lines": [
-        194,
-        198,
-        243,
-        247,
-        288,
-        322,
-        352,
-        372
+        197,
+        201,
+        246,
+        250,
+        291,
+        325,
+        355,
+        375
       ],
       "reason": "CLI handler layer (ai_mail, fleet green leg 9). A handle_* return is 'command recognised', not 'it worked' (branch prompt, Critical Rules): the router stops on True. Failure is told by cli error(), which calls mark_command_failed() and sets the process exit; a BrokenPipeError is stdout closed early, not a failure. So True on these lines is the contract, and the checker reads it as an indistinguishable fallback."
     },
@@ -158,8 +158,8 @@
       "file": "apps/modules/email_send.py",
       "standard": "logged_fallback",
       "lines": [
-        241,
-        246
+        247,
+        252
       ],
       "reason": "Same CLI handler contract as apps/modules/email.py (ai_mail, fleet green leg 9): 248 is a BrokenPipeError (stdout closed early); 253 has already called error() (mark_command_failed) and mailed the failure through dispatch_send_error, so the caller is told by the failure flag, not by the bool."
     },
@@ -178,10 +178,10 @@
       "file": "apps/handlers/email/send.py",
       "standard": "logged_fallback",
       "lines": [
-        236,
-        244,
-        260,
-        268
+        242,
+        250,
+        266,
+        274
       ],
       "reason": "The value is the true answer (ai_mail, fleet green leg 10): collect_interactive_input documents None as 'cancelled', and these four arms are the user cancelling at a prompt (Ctrl-C, end of input, or a pick that is not a number), the same answer its in-try paths give for an out-of-range pick, an empty subject or a 'n' at the confirm. No system failure is hidden: its one caller, email_send.py:189, prints 'Cancelled' and sends nothing, and each arm logs what was typed or raised."
     },

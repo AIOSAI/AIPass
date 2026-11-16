@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: email.py
 # Description: Email Orchestration Module
-# Version: 3.5.0
+# Version: 3.6.0
 # Created: 2025-12-02
-# Modified: 2026-11-08
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -114,6 +114,9 @@ FLAGS:
                     carrying KEY (from you) instead of stacking a new one.
                     Bumps its update counter, keeps its id and read status,
                     never wakes anything. Closing it re-arms the signature.
+  --kind KIND       Declare the mail's kind: medic, rounds, job_failed, notice
+                    or mail. Undeclared, delivery guesses it from sender and
+                    subject. An unknown kind is refused.
 
 NOTE: To send + wake in one step, use: drone @ai_mail dispatch @target "Subject" "Body"
 """

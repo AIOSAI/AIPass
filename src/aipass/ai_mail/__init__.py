@@ -11,6 +11,7 @@ if TYPE_CHECKING:  # Import-free type visibility; never executed at runtime.
 __all__ = [
     "FEED_PATH",  # noqa: F822 - resolves via __getattr__ (PEP 562), not a module-level binding
     "feed_path",
+    "mail_kind",
     "outstanding_dispatches",
     "post_to_inbox_file",
     "register_path",
@@ -37,6 +38,13 @@ def outstanding_dispatches(repo_root: "Path | None" = None) -> "list[dict]":
     from aipass.ai_mail.apps.handlers.dispatch.register import outstanding
 
     return outstanding(repo_root)
+
+
+def mail_kind(message: dict) -> str:
+    """A stored inbox message's kind: medic, rounds, job_failed, notice or mail (docs/mail_kinds.md)."""
+    from aipass.ai_mail.apps.handlers.email.mail_kind import stored_kind
+
+    return stored_kind(message)
 
 
 def post_to_inbox_file(inbox_file: "Path", email_data: dict) -> "tuple[bool, str, str]":

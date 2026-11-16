@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_wake.py
 # Description: Tests for the dispatch monitor's wake-back - the sender wake, its log, the manager mail and the decline
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-10-08
 # Modified: 2026-11-15
 # =============================================
@@ -533,6 +533,7 @@ class TestWakeBackManagerHonesty:
         argv = sent.call_args.args[0]
         assert argv[:3] == ["drone", "@ai_mail", "send"]
         assert argv[3] == "@devpulse"
+        assert argv[-2:] == ["--kind", "notice"]
         log.warning.assert_not_called()
 
     def test_manager_mail_names_target_and_exit_code(self, monkeypatch, tmp_path):
@@ -561,7 +562,7 @@ class TestWakeBackManagerHonesty:
 
         wake_sender("@devpulse", "@ai_mail", 0, run_line="run: codex · gpt-6.1-sol (observed; flag) session t1")
 
-        assert " ".join(sent.call_args.args[0][4:]).endswith("run: codex · gpt-6.1-sol (observed; flag) session t1")
+        assert " ".join(sent.call_args.args[0][4:6]).endswith("run: codex · gpt-6.1-sol (observed; flag) session t1")
 
     def test_manager_mail_failure_is_not_reported_as_delivered(self, monkeypatch, tmp_path):
         """If the send fails the manager still learns nothing — that must not wear

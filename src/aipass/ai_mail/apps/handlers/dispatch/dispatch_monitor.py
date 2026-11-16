@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.16.0
+# Version: 2.17.0
 # Created: 2026-03-02
 # Modified: 2026-11-15
 # =============================================
@@ -190,7 +190,7 @@ def _sending_home(recipient: str, target_home: Optional[Path]) -> Path:
 
 
 def _send_from_ai_mail(
-    recipient: str, subject: str, body: str, target_home: Optional[Path]
+    recipient: str, subject: str, body: str, target_home: Optional[Path], kind: Optional[str] = None
 ) -> subprocess.CompletedProcess:
     """Send one of the monitor's notices through drone, as @ai_mail.
 
@@ -200,7 +200,7 @@ def _send_from_ai_mail(
     env = dict(os.environ)
     env["AIPASS_BRANCH_NAME"] = "ai_mail"
     return subprocess.run(
-        ["drone", "@ai_mail", "send", recipient, subject, body],
+        ["drone", "@ai_mail", "send", recipient, subject, body] + (["--kind", kind] if kind else []),
         capture_output=True,
         text=True,
         timeout=30,
@@ -227,7 +227,7 @@ def _mail_wake_back(
         f"off the next phase if there is one." + (f"\n\n{run_line}" if run_line else "")
     )
     try:
-        result = _send_from_ai_mail(sender, subject, body, target_home)
+        result = _send_from_ai_mail(sender, subject, body, target_home, kind="notice")
         if result.returncode != 0:
             logger.warning(
                 "[monitor] Wake-back mail to manager %s FAILED (exit %d): %s",

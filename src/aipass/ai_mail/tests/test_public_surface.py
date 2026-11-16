@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_public_surface.py
 # Description: Tests for ai_mail's package-level public surface (the feed, register, outstanding and inbox doors)
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-16
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for aipass/ai_mail/__init__.py's public surface: feed_path(), register_path(), outstanding_dispatches()."""
@@ -208,6 +208,29 @@ class TestNotificationDoor:
 
     def test_the_door_is_advertised_in_dunder_all(self):
         assert "send_notification" in ai_mail.__all__
+
+
+class TestMailKindDoor:
+    """The reader @hooks, @api and BAUD use for a stored message's kind."""
+
+    @pytest.mark.parametrize(
+        "message, kind",
+        [
+            ({"kind": "medic", "subject": "Dispatch complete: x"}, "medic"),
+            ({"kind": "job_failed"}, "job_failed"),
+            ({"from": "@ai_mail", "subject": "Dispatch complete: @x finished (exit 0)"}, "notice"),
+            ({"from": "@daemon", "subject": "Command job started: @s/j"}, "notice"),
+            ({"from": "@daemon", "subject": "Command job passed: @s/j"}, "notice"),
+            ({"from": "@trigger", "subject": "[REPEAT] ERROR x5"}, "mail"),
+            ({"from": "@daemon", "subject": "Command job FAILED: @s/j"}, "mail"),
+            ({"kind": "urgent", "subject": "Dispatch complete: x"}, "mail"),
+        ],
+    )
+    def test_a_stored_kind_is_read_as_is_and_a_message_without_one_reads_notice_or_mail(self, message, kind):
+        assert ai_mail.mail_kind(message) == kind
+
+    def test_the_door_is_advertised_in_dunder_all(self):
+        assert "mail_kind" in ai_mail.__all__
 
 
 class TestImportStaysLight:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_email_module_send.py
 # Description: Tests for email_send.py's send lane and email.py's command routing
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-11-08
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/email_send.py's handle_send and the routing of apps/modules/email.py."""
@@ -627,3 +627,26 @@ class TestSendInteractiveExtended:
         assert any("sent" in p.lower() for p in printed)
         tty.assert_called_once_with()
         error_mock.assert_not_called()
+
+
+class TestDeclaredKind:
+    """`--kind` reaches the send it was declared on, single and broadcast."""
+
+    def test_a_declared_kind_reaches_the_single_send(self, monkeypatch, tmp_path):
+        _stub_single_send(monkeypatch, tmp_path)
+        seen: list = []
+        monkeypatch.setattr(email_send_mod, "send_to_single", lambda *a, **kw: seen.append(kw["kind"]) or (True, None))
+
+        assert handle_send(["@target", "--kind", "rounds", "Rounds @x", "green"]) is True
+        assert seen == ["rounds"]
+
+    def test_a_declared_kind_reaches_the_broadcast(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(email_send_mod, "resolve_sender_info", lambda *a: {"email_address": "@ai_mail"})
+        monkeypatch.setattr(email_send_mod, "get_all_branches", lambda: [{"name": "A", "email": "@a"}])
+        seen: list = []
+        monkeypatch.setattr(
+            email_send_mod, "send_to_broadcast", lambda *a, **kw: seen.append(kw["kind"]) or (True, 1, 1, [])
+        )
+
+        assert handle_send(["@all", "--kind", "notice", "S", "B"]) is True
+        assert seen == ["notice"]
