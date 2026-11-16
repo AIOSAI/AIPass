@@ -68,11 +68,6 @@
       "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (python3 shebang/run lines). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard)."
     },
     {
-      "file": "apps/handlers/aipass_standards/encapsulation_content.py",
-      "standard": "architecture",
-      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (a modules import as the allowed pattern (line 42)). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: this checker passes no line= to is_bypassed."
-    },
-    {
       "file": "apps/handlers/aipass_standards/handlers_content.py",
       "standard": "architecture",
       "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (a parent-module import as the example (line 51)). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: this checker passes no line= to is_bypassed."
@@ -116,24 +111,9 @@
       "reason": "Console(stderr=True) appears only in documentation strings and comments, not executable code. False positive from text-matching checker."
     },
     {
-      "file": "apps/handlers/aipass_standards/help_text_check.py",
-      "standard": "help_text",
-      "reason": "Docstring explains what the checker detects (python3 command references). Documentation of violation patterns, not actual help text."
-    },
-    {
       "file": "apps/handlers/aipass_standards/introspection_check.py",
       "standard": "help_text",
       "reason": "Docstring in check_content_references() explains that help text should use drone commands instead of python3. Documentation of violation patterns, not actual help text."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/shebang_check.py",
-      "standard": "help_text",
-      "reason": "Docstrings explain that shebangs are unnecessary because execution goes through python3 -m. Documentation of technical context, not user-facing command instructions."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/todo_check.py",
-      "standard": "todo",
-      "reason": "Checker file references TODO/FIXME/HACK/XXX in its own comments and regex pattern as documentation of what it detects. False positive from self-referential detection logic."
     },
     {
       "file": "apps/handlers/audit/audit_display.py",
@@ -211,7 +191,6 @@
       "standard": "unused_function",
       "reason": "Content functions (get_*_standards, get_*_proof) are discovered and called dynamically by standards_query.py via naming convention. The checker cannot trace convention-based dynamic dispatch."
     },
-
     {
       "file": "apps/modules/permissions.py",
       "standard": "unused_function",
@@ -247,16 +226,6 @@
       "reason": "Data, not a host path (fleet green leg 15): plugin._split_path splits a STRING on separators and never touches disk; '/weird/back\\\\slash.txt' is the input whose backslash must survive on POSIX."
     },
     {
-      "file": "tests/test_json_handler_contract.py",
-      "standard": "no_product_call",
-      "reason": "One test, test_the_divergence_tables_only_name_branches_that_still_exist (fleet green leg 15): it guards this file's own xfail tables against the discovered branch set, a meta-test of the file's apparatus. File-wide because no_product_call passes no line to is_bypassed; every other test here runs a shim."
-    },
-    {
-      "file": "tests/test_json_handler_contract_durability.py",
-      "standard": "weak_oracle",
-      "reason": "Three tests, 312/455/888 (fleet green leg 15; moved from test_json_handler_contract.py 1613/1756/2184 by the 2026-10-08 split): each runs over EVERY branch's copy, whose constants differ per branch, so the claim is a bound (attempts > 1, backoff > 0, a floor of two implementations, no success answer) and no exact value exists to pin; the 1108 test was cured to == []. File-wide because weak_oracle passes no line to is_bypassed."
-    },
-    {
       "file": "tests/test_audit_tests_static.py",
       "standard": "stdlib_patch",
       "reason": "Eight patches (fleet green leg 15): line 626 monkeypatch.setattr(sys, 'executable', ...) moves the interpreter's own table, as sys.argv and sys.path are acquitted for; lines 652, 659, 667, 675, 682, 692 and 705 replace ruff_pt_check.shutil.which to put ruff on or off PATH. The lookup under test reads sys.executable and PATH, and a test that did not move them would measure the host. File-wide because stdlib_patch passes no line to is_bypassed."
@@ -283,7 +252,6 @@
       "lines": [630, 650, 664, 676, 689, 700, 710, 718, 725],
       "reason": "No public route (fleet green leg 15): runner._m10_proof is reached by the lane only after a full suite run under the gate. Named in the leg 15 reply to @devpulse as the checker asks."
     },
-
     {
       "file": "tests/test_audit_tests_lane_statement_deletion.py",
       "standard": "through_the_command",
@@ -424,12 +392,6 @@
       "reason": "A file outside its branch root cannot be on that branch's audit ignore list, so None (not ignored) is the true answer, not a stand-in. The info line names both paths."
     },
     {
-      "file": "apps/handlers/aipass_standards/fallback_check.py",
-      "standard": "fallback",
-      "lines": [316],
-      "reason": "An unparseable file is ruff's red. Its 'Not judged' message says the file was not checked, so a second red here would repeat the same defect."
-    },
-    {
       "file": "apps/handlers/context_standards/startup_budget_check.py",
       "standard": "unused_function",
       "functions": [
@@ -442,7 +404,6 @@
       "standard": "hardcoded_path",
       "reason": "The POSIX home literals are INPUT to plugin.classify(), whose job is to judge a path SHAPE. The literal is the fixture; this file never opens it. Replacing it with pathlib would delete the test."
     },
-
     {
       "file": "apps/handlers/audit/incremental_cache.py",
       "standard": "logged_fallback",
@@ -467,7 +428,6 @@
       "lines": [52, 190],
       "reason": "The checker is wrong on these lines (fleet green leg 14): each failure answer is the STRICT answer. An unparseable file gets no console-import window (86) and no stderr-directed print lines (317), so it keeps every finding; ignorance never buys an exemption, as the comment at 86 says."
     },
-
     {
       "file": "apps/handlers/aipass_standards/json_structure_check.py",
       "standard": "logged_fallback",
@@ -587,12 +547,6 @@
       "standard": "logged_fallback",
       "lines": [74],
       "reason": "The checker is wrong on this line (2026-10-24): decode_line answers None only for a line that holds no record (blank, not JSON, not an object), as its docstring says; the success path returns a dict, never None. The broken line is logged as a warning naming the file and line, and read_gate_log counts it as malformed."
-    },
-    {
-      "file": "apps/modules/checklist.py",
-      "standard": "logged_fallback",
-      "lines": [198],
-      "reason": "The checker is wrong on this line (2026-10-24): relative_to raises ValueError only when the file is not under the branch root, and such a file is truly not audit-ignored, since a branch's ignore rules govern its own tree only. None here is the answer, not a failure, and the case is logged (same ruling as ignore_handler.py)."
     },
     {
       "file": "tests/test_audit_tests_lane_adapter.py",

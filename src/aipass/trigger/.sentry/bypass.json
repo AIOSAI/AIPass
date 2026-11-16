@@ -10,12 +10,6 @@
   },
   "bypass": [
     {
-      "file": "apps/config.py",
-      "standard": "silent_catch",
-      "pattern": "tmp cleanup",
-      "reason": "atomic_write_json unlinking its temp file on an already-failing write; the original exception is re-raised on the next line."
-    },
-    {
       "file": "apps/modules/core.py",
       "standard": "silent_catch",
       "pattern": "ImportError console fallback / _coerce_value cascade",
@@ -32,18 +26,6 @@
       "standard": "silent_catch",
       "pattern": "timestamp format probe loop",
       "reason": "L185: `except ValueError: continue` in _parse_timestamp's format loop — same probe idiom as log_watcher.py. When every format fails the function returns None and the caller decides. FILE-WIDE because silent_catch_check passes no line."
-    },
-    {
-      "file": "apps/config.py",
-      "standard": "error_handling",
-      "pattern": "atomic_write_json tmp cleanup",
-      "reason": "Reported as line 116, body at L116-117: unlinking the temp file after a failed atomic write. The real error is re-raised immediately after, so nothing is swallowed. FILE-WIDE: error_handling_check passes no line to is_bypassed()."
-    },
-    {
-      "file": "apps/modules/core.py",
-      "standard": "error_handling",
-      "pattern": "_coerce_value int-then-float probe",
-      "reason": "L185-186: `except ValueError: pass` in _coerce_value, falling through from the int() attempt to the float() attempt. Nothing is swallowed — the last branch returns the raw string. Re-derived 2026-08-09: the old reason here described a checker misattribution at 'line 73' that no longer occurs. FILE-WIDE: error_handling_check passes no line to is_bypassed()."
     },
     {
       "file": "apps/handlers/error_reporter.py",
@@ -86,12 +68,6 @@
       "standard": "architecture",
       "pattern": "handler importing from parent module",
       "reason": "L23 imports apps/modules/core because setup_handlers() calls trigger.on() for every handler. FILE-WIDE: architecture_check passes no line."
-    },
-    {
-      "file": "apps/log_watcher_service.py",
-      "standard": "cli",
-      "pattern": "bare print() + no --help",
-      "reason": "Systemd unit, not a CLI module: started by trigger-log-watcher.service and never routed through drone. Its stdout is the journal, where rich markup would be noise. FILE-WIDE rather than line-scoped because the '--help not implemented' finding carries no line, so a `lines` key would cover the prints and silently drop the --help half."
     },
     {
       "file": "apps/handlers/events/registry.py",
@@ -166,18 +142,6 @@
       "pattern": "_rollup_is_due sends anyway on an unreadable stamp",
       "reason": "An unreadable stamp must not mute the manager forever (fleet green leg 5, kept leg 10). True is the decision to send, taken on purpose, and the warning names the stamp.",
       "anchor": "return True"
-    },
-    {
-      "file": "apps/config.py",
-      "standard": "cli_flags",
-      "pattern": "config.py read as an entry point",
-      "reason": "config.py is not an entry point (fleet green leg 10 ruling). It holds constants and shared helpers imported by every trigger module; the entry point is apps/trigger.py. FILE-WIDE: the rule judges the file as a whole."
-    },
-    {
-      "file": "apps/config.py",
-      "standard": "cli_ux",
-      "pattern": "config.py read as an entry point",
-      "reason": "config.py is not an entry point (fleet green leg 10 ruling). It holds constants and shared helpers imported by every trigger module; the entry point is apps/trigger.py. FILE-WIDE: the rule judges the file as a whole."
     },
     {
       "file": "apps/log_watcher_service.py",

@@ -345,11 +345,6 @@
       "reason": "No tomllib and no tomli: the reason ('no TOML parser: Python X.Y has no tomllib and tomli is not installed') goes into *why* and the function returns None for 'unknown', never 'no packages'. Doctor's Structure group prints it as a WARN row with 'install tomli or fix pyproject.toml' (doctor.py), and placement is not measured against unknown packages."
     },
     {
-      "file": "shared/json_ops.py",
-      "standard": "unused_function",
-      "reason": "backup_json() is consumed by @spawn (cross-branch caller). Appears unused in @aipass-only scan but is a shared API."
-    },
-    {
       "file": "apps/handlers/provider_wire.py",
       "standard": "unused_function",
       "functions": [

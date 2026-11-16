@@ -28,16 +28,6 @@
       "reason": "inbox_lock() depth 6 — a file-locking context manager: open, flock, yield, and the release in finally under its own try so a failed unlock is logged, not raised"
     },
     {
-      "file": "apps/handlers/email/send.py",
-      "standard": "handlers",
-      "reason": "Imports trigger.apps.modules.core.trigger — cross-branch module import for firing email_sent events. trigger integration is by design."
-    },
-    {
-      "file": "apps/handlers/dispatch/dispatch_monitor.py",
-      "standard": "handlers",
-      "reason": "One cross-branch import, lazy and inside the function that needs it: hooks.apps.modules.sandbox.build_policy/build_srt_config/resolve_bwrap_command — the srt kernel sandbox wrap; @hooks owns the policy so this consumes their modules/ entry point rather than mirroring bwrap construction, which trips handler-imports-modules instead. It raises rather than falls back, so it cannot silently degrade a spawn. (The drone broker half expired in DPLAN-0404 leg 15: _connect_broker now reaches drone's door_broker.)"
-    },
-    {
       "file": "apps/handlers/dispatch/dispatch_monitor.py",
       "standard": "naming",
       "reason": "dispatch_monitor.py in dispatch/ dir — renaming to monitor.py would break its callers (wake.py, MONITOR_SCRIPT references) and confuse with prax monitor."
@@ -66,11 +56,6 @@
       "file": "apps/modules/email_send.py",
       "standard": "cli",
       "reason": "Internal helper extracted from email.py for size compliance. Not a drone-routable command module — handle_send is called by email.py's handle_command()."
-    },
-    {
-      "file": "apps/handlers/dispatch/report.py",
-      "standard": "handlers",
-      "reason": "Imports trigger.apps.modules.core.trigger inside fire_completed() — the same cross-branch module import already bypassed for apps/handlers/email/send.py, for the same reason: @trigger's pub/sub bus IS its modules/ entry point and there is no handler-level door to it. FPLAN-0452 P1 explicitly forbids inventing a second push mechanism ('trigger.fire() already exists and your lane already speaks it — DO NOT invent a mechanism'), so consuming the existing one is the instruction, not a shortcut. Lazy, inside the one function that needs it, and its failure is caught and warned so a dead bus cannot take a completed dispatch down with it."
     },
     {
       "file": "apps/handlers/registry/read.py",
@@ -260,16 +245,6 @@
         143
       ],
       "reason": "route_command (ai_mail, fleet green leg 9; re-lined DPLAN-0404 leg 3b and 2026-10-11): a BrokenPipeError is stdout closed early by the reader (e.g. piped to head); the command ran and was recognised, so True is the true answer. Line shifted 146 -> 143 when route_command stopped swallowing module crashes (2026-11-14): only the BrokenPipe arm answers here; every other crash propagates to main, which prints it and exits 2."
-    },
-    {
-      "file": "apps/handlers/dispatch/pid_lock.py",
-      "standard": "logged_fallback",
-      "lines": [
-        209,
-        212,
-        215
-      ],
-      "reason": "check_pid_alive (public since leg 15; ai_mail, fleet green legs 9 and 10, under @devpulse's leg 10 ruling b for the os.kill family; moved from wake.py to pid_lock.py unchanged in leg 13): os.kill(pid, 0) answers through its exception. ProcessLookupError IS 'no such process' (False, 209) and PermissionError IS 'it exists, owned by another user' (True, 212); neither is a fallback. The one guessed arm, named as a guess: 215, any other OSError, answers dead, but POSIX defines no other error for signal 0 (EINVAL needs a bad signal, EPERM and ESRCH are the two arms above), so the arm is unreachable. Since leg 13 this is the liveness rule of the one dispatch lock check, the wake's."
     },
     {
       "file": "apps/handlers/dispatch/wake.py",

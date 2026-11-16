@@ -30,11 +30,6 @@
       "reason": "handle_command returns dict (not bool) — module doubles as drone adapter for route_module_command() which requires dict return with stdout/stderr/exit_code"
     },
     {
-      "file": "apps/handlers/module_registry_handler.py",
-      "standard": "naming",
-      "reason": "_ExternalModuleConfig is PascalCase — leading underscore is Python private convention, not a naming violation"
-    },
-    {
       "file": "apps/plugins/devpulse_ops/auth.py",
       "standard": "architecture",
       "reason": "Plugin lives in apps/plugins/ by design — separate from 3-layer structure. Plugins are an intentional extension point."
@@ -96,11 +91,6 @@
     },
     {
       "file": "artifacts/broker_acceptance_test.py",
-      "standard": "help_text",
-      "reason": "Docstring run instruction shows how to invoke the script — not a production help text."
-    },
-    {
-      "file": "artifacts/broker_acceptance_test.py",
       "standard": "meta",
       "reason": "Acceptance test artifact — META blocks are for production source files."
     },
@@ -108,11 +98,6 @@
       "file": "artifacts/broker_acceptance_test.py",
       "standard": "trigger",
       "reason": "Acceptance test exercises .unlink() to clean up test symlinks — not production file operations."
-    },
-    {
-      "file": "artifacts/broker_acceptance_test.py",
-      "standard": "unused_function",
-      "reason": "Standalone acceptance demo runner — helper functions invoked from the demo main, not a production module (same pattern as the other demo bypasses)."
     },
     {
       "file": "apps/modules/git_module.py",
@@ -231,15 +216,6 @@
       ],
       "reason": "_registry_matches_credential, option C (accept loudly). True here means 'do not skip this registry', never 'the ids matched'. 338, the registry could not be read: load_registry() reads the same file and raises RegistryCorruptError or RegistryPermissionError naming it; skipping would resolve another registry further up in silence. 373, the passport could not be read: False would send find_registry() to another project's registry in silence, and a raise would stop every drone command under that passport, the mail to ask for help included. The fault is recorded for passport_fault() and drone.py main() prints it once on stderr after routing. Caller: find_registry() only. Fleet green leg 7, drone's decision.",
       "anchor": "return True"
-    },
-    {
-      "file": "apps/handlers/command_registry/ops.py",
-      "standard": "logged_fallback",
-      "lines": [
-        120
-      ],
-      "reason": "save_registry: True = written, False = not written; every False is a failure (invalid structure, a failed write here, logged ERROR) and the success path returns True only. Callers add_command/remove_command report False as a failed save. load_registry never saves: a missing file reads as an empty registry. Fleet green leg 6, drone's decision.",
-      "anchor": "return False"
     },
     {
       "file": "apps/handlers/rm_handler.py",

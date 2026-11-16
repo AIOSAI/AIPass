@@ -13,26 +13,6 @@
       "reason": "This IS the display handler layer. unified_stream.py is the designated terminal output formatter for the monitoring system. console.print() is its core responsibility, not a violation."
     },
     {
-      "file": "apps/handlers/discovery/watcher.py",
-      "standard": "handlers",
-      "reason": "Architectural — imports config.load (shared infrastructure) and trigger.modules.core, imported at call time because trigger imports prax's logger; a failed import is logged at the fire site."
-    },
-    {
-      "file": "apps/handlers/monitoring/log_watcher.py",
-      "standard": "handlers",
-      "reason": "Architectural — imports config.load (shared infrastructure), trigger (optional integration), and uses module_name parameter for explicit caller attribution in monitoring context."
-    },
-    {
-      "file": "apps/handlers/logging/direct.py",
-      "standard": "handlers",
-      "reason": "Architectural — imports config.load (shared infrastructure) and uses module_name parameter for explicit direct-logging binding. Auto-detection is the default (get_direct_logger()), but the internal class accepts explicit names for infrastructure callers."
-    },
-    {
-      "file": "apps/handlers/logging/setup.py",
-      "standard": "handlers",
-      "reason": "Architectural — logging infrastructure imports config.load for path configuration. Uses module_name parameter for explicit logger setup per-module. Auto-detection is not appropriate for a setup function that configures loggers for specified modules."
-    },
-    {
       "file": "apps/modules/monitor.py",
       "standard": "modules",
       "reason": "Monitor is a 3-thread architecture (display, file watcher, log watcher) that is tightly coupled by design. The threads share state (queues, positions dict, stop events) making splitting impractical without introducing complex inter-module synchronization. Direct JSON read of registry at line 344 is a one-time startup operation for branch discovery — routing through json_handler would add unnecessary dependency for a simple registry read."
@@ -43,11 +23,6 @@
       "reason": "Redundant prefix in filename — monitoring_filters.py in monitoring/ dir. Renaming to filters.py would break existing imports across multiple files. Deferred to avoid churn."
     },
     {
-      "file": "apps/handlers/logging/direct.py",
-      "standard": "naming",
-      "reason": "False positive — logger_key, target, sys_limits, backupCount, encoding, local_limits, key are local variables inside functions, not module-level constants. backupCount follows logging.handlers.RotatingFileHandler parameter naming."
-    },
-    {
       "file": "apps/handlers/logging/setup.py",
       "standard": "naming",
       "reason": "False positive — _terminal_output_enabled and _terminal_module_available are mutable flags set conditionally, not constants."
@@ -56,21 +31,6 @@
       "file": "apps/handlers/discovery/watcher.py",
       "standard": "unused_function",
       "reason": "on_created() is a watchdog.FileSystemEventHandler callback — called by watchdog.Observer at runtime, not by name in branch code."
-    },
-    {
-      "file": "apps/handlers/monitoring/filesystem_handler.py",
-      "standard": "unused_function",
-      "reason": "on_created(), on_modified(), on_deleted(), on_moved() are watchdog.FileSystemEventHandler callbacks — called by watchdog.Observer at runtime via method dispatch."
-    },
-    {
-      "file": "apps/handlers/monitoring/log_watcher.py",
-      "standard": "unused_function",
-      "reason": "on_modified() is a watchdog.FileSystemEventHandler callback — called by watchdog.Observer at runtime when log files change."
-    },
-    {
-      "file": "apps/modules/logger.py",
-      "standard": "unused_function",
-      "reason": "initialize_logging_system() and shutdown_logging_system() are public API lifecycle functions exported in __all__ — designed to be called by other branches and entry points to start/stop the logging system."
     },
     {
       "file": "apps/modules/status.py",
@@ -109,25 +69,12 @@
       "reason": "The path is pinned by the DPLAN-0325 spec (section 1) and hashed by sentry's acceptance: 'src/aipass/prax/apps/handlers/json/json_service.py'. Renaming it to service.py forks the one contract file the whole fleet reads. The prefix is not redundant either — json_service.py and json_handler.py (the shim) sit in the same directory and 'service.py' would not say which service."
     },
     {
-      "file": "apps/handlers/json/json_handler.py",
-      "standard": "naming",
-      "reason": "Shim pattern — module-level names are BOUND METHODS of the fleet json service's JsonHandle, not constants. Lowercase is correct for callable bindings, and the file is byte-identical in all 18 branches by the owner's ruling (2026-09-03), hashed by sentry. Matches the identical bypass in spawn/, canary/ and memory/."
-    },
-    {
       "file": "apps/prax.py",
       "standard": "logged_fallback",
       "lines": [
         137
       ],
       "reason": "prax, leg 7: same contract as status.py:132. The router's True means a module owned the command, as its docstring says, and the failure is reported through error() on the line above, which sets the exit code."
-    },
-    {
-      "file": "apps/handlers/monitoring/commons_feed.py",
-      "standard": "logged_fallback",
-      "lines": [
-        432
-      ],
-      "reason": "prax, leg 7: True is the command's 'handled'. The failure was already shown to the operator through error() two lines above (then the relay is stopped), the same as the db-missing guard's return True; error() is what marks the run failed."
     },
     {
       "file": "apps/handlers/json/json_service.py",
@@ -196,14 +143,6 @@
         104
       ],
       "reason": "prax, leg 15. False means the event did not enter the queue, the same answer a duplicate gets, which is the truth; the drop is counted and reported by the rate-limited _report_drops."
-    },
-    {
-      "file": "apps/handlers/dashboard/refresh.py",
-      "standard": "logged_fallback",
-      "lines": [
-        216
-      ],
-      "reason": "prax, leg 15. The dashboard is rebuilt from its sources; {} only loses the carried-forward section, which is logged as a WARNING naming the file. A raise would leave a corrupt dashboard that no refresh could heal."
     },
     {
       "file": "tests/test_monitor_module.py",

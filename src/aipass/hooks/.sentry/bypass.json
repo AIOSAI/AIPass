@@ -1174,14 +1174,6 @@
       "reason": "Display only: an unreadable start time, transcript mtime or lock timestamp drops the age from a boot-menu line. No choice or decision rests on the age."
     },
     {
-      "file": "apps/handlers/lifecycle/session_boot.py",
-      "standard": "fallback",
-      "lines": [
-        244
-      ],
-      "reason": "The failure is handed on as text: a PID already gone returns \"PID n: already dead\", which the boot menu prints to the user. That is the answer, not a stand-in."
-    },
-    {
       "file": "apps/handlers/config/ledger_store.py",
       "standard": "fallback",
       "lines": [

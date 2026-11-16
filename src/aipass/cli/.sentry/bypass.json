@@ -4,18 +4,7 @@
     "created": "2026-03-07T22:43:23.757073",
     "description": "Standards bypass configuration for this branch"
   },
-  "bypass": [
-    {
-      "file": "apps/modules/display.py",
-      "standard": "imports",
-      "reason": "Cannot import prax \u2014 circular import (prax depends on cli). Documented in code comment."
-    },
-    {
-      "file": "apps/modules/templates.py",
-      "standard": "imports",
-      "reason": "Cannot import prax \u2014 circular import (prax depends on cli). Documented in code comment."
-    }
-  ],
+  "bypass": [],
   "notes": {
     "usage": "Add entries to 'bypass' list to exclude specific violations",
     "example": {
