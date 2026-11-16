@@ -1277,7 +1277,7 @@
       "file": "apps/handlers/notification/email.py",
       "standard": "fallback",
       "lines": [
-        88
+        91
       ],
       "reason": "Fails toward showing: a cadence that cannot answer announces any new mail instead of hiding it, so the agent still hears of it. WARNING, which @trigger escalates, names the broken cadence."
     },

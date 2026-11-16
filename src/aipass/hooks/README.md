@@ -101,7 +101,7 @@ reached the model), `grounding_content` (the injected blocks and their budgets),
 `bash_writes`, `shell_reader`, `shell_programs` and `testwrite_targets` (a shell command's visible
 writes, its programs, its new tests), `admin_seat` and `testgate_policy` (who is exempt,
 and what the policy says), `promote` (source to live code), `protected_paths` (the files that switch
-the gates), `comment_scan` and `comments` (the comment budget), `hookstatus`, `hooksound`, `alert_dismiss`, `feedback`, `context_window`,
+the gates), `provider_launch` (a provider session started outside the caller's branch), `comment_scan` and `comments` (the comment budget), `hookstatus`, `hooksound`, `alert_dismiss`, `feedback`, `context_window`,
 `cc_sessions`, `cc_transcripts`, `diagnostics_state`, `hook_test`, `release_notice`, `sandbox` and
 `wire_verify`. `apps/handlers/` holds the implementation, one directory per concern: `bridges/` per
 platform, `prompt/` for injection, `security/` for the gates, `lifecycle/` for session and compaction
