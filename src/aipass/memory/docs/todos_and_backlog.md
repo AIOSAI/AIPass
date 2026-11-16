@@ -35,9 +35,9 @@ lane: where a todo goes, when, and what refuses.
   the pad untouched — a todo may end up in both places, never in neither. `rollover check` counts the
   same pad and prints `ready for rollover` when it is over.
   A `--branch` naming another seat's pad rolls only for @memory's seat or the verified admin
-  (@ai_mail's verified-caller rail, `handlers/cli/caller_gate.py`); any other verified seat is refused
-  and the fleet walk still runs. A caller the rail cannot prove still rolls: @hooks' PreCompact shells
-  drone from the repo root, where an interactive session verifies as nobody.
+  (@ai_mail's verified-caller rail, `handlers/cli/caller_gate.py`); any other seat, or a caller the
+  rail cannot prove, is refused and the fleet walk still runs. @hooks' PreCompact shells drone from the
+  compacting branch's directory, so its call verifies as that branch.
 - **`drone @memory push`**, the trinity push: every non-canonical todo, then any canonical overflow,
   moves to the same file, nothing reshaped (see
   [trinity_push.md](trinity_push.md#todos-go-to-the-backlog-never-to-vectors)).

@@ -978,7 +978,7 @@ class TestTheCallerGate:
         [
             ("@seed", ("--branch", "@canary"), "not @seed - run it from inside @canary's own directory"),
             ("", ("--branch", "@canary"), "not an unverified caller - run it from inside @canary's own directory"),
-            ("@canary", ("--confirm",), "not @canary - mail @devpulse, whose lane the fleet push is"),
+            ("@canary", ("--confirm",), "not @canary - mail @devpulse, the verified admin"),
         ],
     )
     def test_another_seat_is_refused_non_zero_and_nothing_is_pushed(self, push, capsys, caller, args, sentence):

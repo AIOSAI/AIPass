@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: caller_gate.py
-# Description: Caller Gate Handler: who may name another branch on a verb that writes its memory
-# Version: 1.0.0
+# Description: Caller Gate Handler: who may name another branch on a verb that writes for it
+# Version: 1.1.0
 # Created: 2026-11-15
 # Modified: 2026-11-15
 # =============================================
@@ -26,12 +26,8 @@ def _address(name: str) -> str:
     return f"@{name.strip().lstrip('@').lower()}"
 
 
-def other_branch_refusal(verb: str, target: str | None, *, unverified_passes: bool = False) -> str | None:
-    """Why the caller may not run *verb* against *target* (None = the fleet), or None when it may.
-
-    *unverified_passes* is for rollover run only: @hooks' PreCompact shells drone from the repo root,
-    where an interactive session verifies as nobody.
-    """
+def other_branch_refusal(verb: str, target: str | None, what: str) -> str | None:
+    """Why the caller may not run *verb*, which writes *what*, for *target* (None = the fleet); None when it may."""
     wanted = _address(target) if target else None
     try:
         caller, admin = verified_caller()
@@ -39,19 +35,18 @@ def other_branch_refusal(verb: str, target: str | None, *, unverified_passes: bo
     except Exception as exc:  # fail closed: a dark rail is a refusal, never a pass
         caller, admin, rail_down = "", False, f"{type(exc).__name__}: {exc}"
 
-    what = f"{wanted}'s .trinity memory" if wanted else "every branch's .trinity memory"
     who = caller or "an unverified caller"
     reason = None
     if rail_down:
         reason = f"{verb} writes {what}, and the verified-caller rail is unavailable ({rail_down}) - nothing written"
-    elif (caller and caller == wanted) or caller == MEMORY_SEAT or admin or (not caller and unverified_passes):
+    elif (caller and caller == wanted) or caller == MEMORY_SEAT or admin:
         reason = None
     elif wanted:
-        reason = f"{verb} writes {what}: its own seat, {MEMORY_SEAT} or the verified admin only, not {who} - "
+        reason = f"{verb} writes {what}: {wanted}'s own seat, {MEMORY_SEAT} or the verified admin only, not {who} - "
         reason += f"run it from inside {wanted}'s own directory"
     else:
         reason = f"{verb} writes {what}: {MEMORY_SEAT} or the verified admin only, not {who} - "
-        reason += "mail @devpulse, whose lane the fleet push is"
+        reason += "mail @devpulse, the verified admin"
 
     json_handler.log_operation(
         "caller_gate",

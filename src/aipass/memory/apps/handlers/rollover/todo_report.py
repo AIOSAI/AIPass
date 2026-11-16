@@ -96,7 +96,7 @@ def roll_pad(branch: str | None = None) -> dict[str, str]:
 
     name = target["name"]
     if branch is not None:
-        refusal = caller_gate.other_branch_refusal("rollover run --branch", name, unverified_passes=True)
+        refusal = caller_gate.other_branch_refusal("rollover run --branch", name, f"@{name}'s todo pad")
         if refusal:
             return _report(ERROR, f"@{name} todos NOT rolled - {refusal}")
     outcome = todo_roll.roll_todos(name, local_path=target["local"], backlog_path=target["backlog"])

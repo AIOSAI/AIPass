@@ -54,6 +54,11 @@ is the one explicit fleet-wide reset that brings every branch back to the defaul
 `os.replace`) and inherit the no-clobber contract: a config that exists but cannot be read is
 refused, never rewritten.
 
+**Who may write.** `config set @branch` is that branch's own seat, @memory's or the verified admin's;
+`set-default` and `rollover push` change every branch, so @memory's seat or the verified admin only
+(`handlers/cli/caller_gate.py`, on @ai_mail's verified-caller rail). Anyone else is refused non-zero,
+the file untouched, the verdict logged with the caller. A hand edit of the file is outside the verbs.
+
 **Apply timing:** limits take effect on the next rollover run (daemon tick) — there is no
 immediate-kick verb in v1. The `*_meta` tab strings follow the write: a `config` limit write
 re-renders the meta lines of every registry branch whose enforced count moved

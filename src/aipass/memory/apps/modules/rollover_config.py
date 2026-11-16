@@ -3,7 +3,7 @@
 # Description: The `config` verb surface over rollover limits - get / set / set-default
 # Version: 1.4.0
 # Created: 2026-09-15
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -23,7 +23,7 @@ from aipass.cli.apps.modules import console, error, warning
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
 from aipass.memory.apps.handlers.cli.json_flag import strip_json_flag, wants_json
-from aipass.memory.apps.handlers.cli import config_content
+from aipass.memory.apps.handlers.cli import caller_gate, config_content
 from aipass.memory.apps.handlers.monitor import detector
 
 # rollover_json imports nothing from here, so the entry-type tuples live there and come back in.
@@ -287,6 +287,10 @@ def handle_config_set(args: List[str], ctx: _Json) -> None:
     branch = _resolve_branch(args[0], ctx)
     if branch is None:
         return
+    refusal = caller_gate.other_branch_refusal(_VERB_CONFIG_SET, branch, f"@{branch}'s per_branch limits")
+    if refusal:
+        _refuse(ctx, refusal)
+        return
 
     entry_type = args[1]
     if not _validate_type(entry_type, ctx):
@@ -337,6 +341,11 @@ def handle_config_set_default(args: List[str], ctx: _Json) -> None:
             "config set-default needs: <type> <count>",
             suggestion="Example: drone @memory config set-default sessions 12",
         )
+        return
+
+    refusal = caller_gate.other_branch_refusal(_VERB_CONFIG_SET_DEFAULT, None, "the fleet's default limits")
+    if refusal:
+        _refuse(ctx, refusal)
         return
 
     entry_type = args[0]

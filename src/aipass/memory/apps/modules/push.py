@@ -62,7 +62,8 @@ def handle_command(command: str, args: List[str]) -> bool:
         )
         return True
 
-    refusal = None if dry_run else caller_gate.other_branch_refusal("push", branch)
+    what = f"@{branch.lstrip('@')}'s .trinity memory" if branch else "every branch's .trinity memory"
+    refusal = None if dry_run else caller_gate.other_branch_refusal("push", branch, what)
     if refusal:
         error(refusal)
         return True

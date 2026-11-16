@@ -233,18 +233,22 @@ class TestRolloverTodoPad:
         capsys.readouterr()
         _run_rollover(verbs, "run", "--branch", "@memory")
         err = _unwrapped(_streams(capsys))
-        assert _unwrapped("@memory todos NOT rolled - rollover run --branch writes @memory's .trinity memory") in err
+        assert _unwrapped("@memory todos NOT rolled - rollover run --branch writes @memory's todo pad") in err
         assert _unwrapped("not @seed - run it from inside @memory's own directory") in err, err
         assert pad.local.read_bytes() == pad.before
         assert not pad.backlog.exists()
         pad.execute.assert_called_once_with()
 
-    @pytest.mark.parametrize("caller", [("@seed", True), ("", False)])
-    def test_the_admin_and_an_unverified_precompact_caller_still_roll_the_named_pad(
-        self, verbs, pad, capsys, monkeypatch, caller
-    ) -> None:
-        """("", False) is the interactive PreCompact call from the repo root: HELD open until @hooks verifies it."""
-        monkeypatch.setattr(caller_gate, "verified_caller", lambda: caller)
+    def test_an_unverified_caller_naming_the_pad_is_refused(self, verbs, pad, capsys, monkeypatch) -> None:
+        monkeypatch.setattr(caller_gate, "verified_caller", lambda: ("", False))
+        capsys.readouterr()
+        _run_rollover(verbs, "run", "--branch", "@memory")
+        assert _unwrapped("not an unverified caller - run it from inside @memory's own") in _unwrapped(_streams(capsys))
+        assert pad.local.read_bytes() == pad.before
+        pad.execute.assert_called_once_with()
+
+    def test_the_admin_rolls_another_seats_pad(self, verbs, pad, capsys, monkeypatch) -> None:
+        monkeypatch.setattr(caller_gate, "verified_caller", lambda: ("@seed", True))
         capsys.readouterr()
         _run_rollover(verbs, "run", "--branch", "@memory")
         assert "@memory todos: rolled 2 oldest (#1, #2) -> " in _stdout(capsys)

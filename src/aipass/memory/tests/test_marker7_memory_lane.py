@@ -527,6 +527,7 @@ class TestPushDefaultsWritesOnlyItsConfig:
         monkeypatch.setattr(config_loader, "_find_repo_root", lambda: tmp_path)
         assert sys.modules.get(config_loader.__name__) is config_loader, "the product would import an unpatched loader"
         live_before = hashlib.sha256(operator_file.read_bytes()).hexdigest() if operator_file.exists() else None
+        monkeypatch.setattr(rollover.caller_gate, "verified_caller", lambda: ("@memory", False))
 
         rollover.push_defaults()
 
@@ -757,6 +758,7 @@ class TestTemplateBumpFiresThePush:
             lambda dry_run: {"success": False, "dry_run": dry_run, "scope": 0, "branches": [], "errors": ["refused"]},
         )
         monkeypatch.setattr(templates, "_announce_bump", lambda outcome: seen.append(outcome))
+        monkeypatch.setattr(templates.caller_gate, "verified_caller", lambda: ("@memory", False))
 
         templates.handle_command("templates", ["bump", "--confirm"])
         capsys.readouterr()

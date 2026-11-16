@@ -373,7 +373,7 @@
     {
       "file": "tests/test_marker7_memory_lane.py",
       "standard": "import_site",
-      "lines": [727],
+      "lines": [728],
       "reason": "The trigger bus package is stood in through sys.modules because the test pins the event _announce_bump fires through its own `from aipass.trigger.apps.modules.core import trigger`; the next line asserts that import reaches the stand-in. It is the only edge between @memory and @trigger's bus that keeps a real event from firing. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
@@ -552,7 +552,7 @@
     {
       "file": "tests/test_marker7_memory_lane.py",
       "standard": "through_the_command",
-      "lines": [94, 135, 156, 167, 271, 733],
+      "lines": [94, 135, 156, 167, 271, 734],
       "reason": "Contracts pinned, each with no public caller that leaves the disk alone. 149/284: detector._read_registry is the rollover WRITE scope (it stops at the repo edge); its public readers walk files and return counts, never rows, and read_scope adds the externals. 228/262: rollover._normalize_rolled never reaches another repository and names a branch whose frame could not be written; its public caller runs a real rollover first. 409: spawn_pusher._write_json refuses a path outside the root; its public caller pushes the spawn templates. 1015: templates._announce_bump fires on the bus; its public caller stamps the receipts. Leg 11 of DPLAN-0354."
     },
     {
@@ -564,7 +564,7 @@
     {
       "file": "tests/test_trinity_push.py",
       "standard": "through_the_command",
-      "lines": [1445],
+      "lines": [1532],
       "reason": "Ruling (b): tp._RULES_CACHE.clear() empties the module's cache of the global rules file so the test reads its own tmp copy and can count re-reads; there is no public reset, and no door is added for the test. Leg 11 of DPLAN-0354."
     },
     {

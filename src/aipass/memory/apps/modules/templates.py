@@ -3,7 +3,7 @@
 # Description: Gold-source template lane — spawn scaffold propagation, receipt status, and the bump site
 # Version: 1.0.0
 # Created: 2026-02-14
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Template Lane
@@ -20,6 +20,7 @@ from rich import box
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error
 from aipass.memory.apps.handlers.json import json_handler
+from aipass.memory.apps.handlers.cli import caller_gate
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
 from aipass.memory.apps.handlers.templates.spawn_pusher import push_to_spawn_templates
 from aipass.memory.apps.handlers.templates import template_bump
@@ -106,6 +107,14 @@ def _announce_retired(verb: str) -> None:
 
 def _run_spawn_push(dry_run: bool) -> None:
     """Propagate the gold templates into @spawn's scaffold sets."""
+    refusal = (
+        None
+        if dry_run
+        else caller_gate.other_branch_refusal("templates spawn-templates", "@spawn", "@spawn's scaffold templates")
+    )
+    if refusal:
+        error(refusal)
+        return
     console.print()
     mode = "DRY RUN" if dry_run else "PUSH"
     console.print(
@@ -213,6 +222,14 @@ def _announce_bump(outcome: dict) -> None:
 
 def _run_bump(confirm: bool) -> None:
     """The bump site: announce the template bump and heal the fleet."""
+    refusal = (
+        caller_gate.other_branch_refusal("templates bump --confirm", None, "every branch's .trinity memory")
+        if confirm
+        else None
+    )
+    if refusal:
+        error(refusal)
+        return
     console.print()
     mode = "EXECUTE" if confirm else "DRY RUN"
     console.print(

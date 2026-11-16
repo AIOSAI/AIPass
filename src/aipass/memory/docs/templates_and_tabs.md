@@ -24,7 +24,9 @@ real memory file. `pusher.py`, `differ.py` and the tests that pinned them are pa
 - `diff-templates` → `drone @memory push --dry-run`
 
 `templates spawn-templates` (`spawn_pusher.py`) propagates the gold templates into @spawn's template
-sets at `spawn/templates/*/.trinity/{local,observations}.json`.
+sets at `spawn/templates/*/.trinity/{local,observations}.json`. A real write is @spawn's seat,
+@memory's or the verified admin's; `templates bump --confirm` pushes every branch's memory, so it is
+@memory's or the admin's (`handlers/cli/caller_gate.py`). Dry runs pass for anyone.
 
 `template-status` reads each branch's own `.trinity/.template_version.json` receipt through
 `template_bump.receipt_status()`, plus the fleet ledger below.

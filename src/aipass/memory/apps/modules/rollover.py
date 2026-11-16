@@ -3,7 +3,7 @@
 # Description: Rollover Orchestration Module
 # Version: 0.10.1
 # Created: 2025-11-16
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """
@@ -22,6 +22,7 @@ from aipass.cli.apps.modules import console, error, warning
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
 from aipass.memory.apps.handlers.cli.json_flag import strip_json_flag, wants_json
+from aipass.memory.apps.handlers.cli import caller_gate
 from aipass.memory.apps.handlers.cli.branch_flag import read_branch_flag
 
 
@@ -471,6 +472,10 @@ def push_defaults(json_mode: bool = False) -> None:
     from aipass.memory.apps.handlers.json import config_loader
 
     ctx = _Json(_VERB_ROLLOVER_PUSH, json_mode)
+    refusal = caller_gate.other_branch_refusal(ctx.verb, None, "every branch's per_branch limits")
+    if refusal:
+        _refuse(ctx, refusal)
+        return
 
     if not ctx.on:
         console.print()

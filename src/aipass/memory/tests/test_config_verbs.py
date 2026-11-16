@@ -3,7 +3,7 @@
 # Description: Tests for the `config` verbs (rollover limit get/set/set-default): writes, display, help, isolation
 # Version: 1.9.0
 # Created: 2026-08-16
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/rollover_config.py — config verbs' writes, display and help, via apps/modules/rollover.py."""
@@ -23,6 +23,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from aipass.cli.apps.modules import display
 from aipass.memory.tests.support_config_verbs import (
     _HANDLER_MODULES,
     _ROLLOVER_MODULE,
@@ -32,6 +33,7 @@ from aipass.memory.tests.support_config_verbs import (
     _run,
     _run_rollover,
     _streams,
+    _unwrapped,
 )
 
 
@@ -219,6 +221,44 @@ class TestSetDefault:
         limits = verbs.loader.get_effective_limits("memory")
         assert limits["sessions"]["count"] == 15
         assert limits["sessions"]["is_override"] is True
+
+
+class TestOnlyItsOwnSeatSetsALimit:
+    """A seat sets its own per_branch limits; defaults and other seats' limits are @memory's or the admin's."""
+
+    @pytest.mark.parametrize(
+        ("caller", "admin", "args"),
+        [
+            ("@devpulse", False, ("set", "@devpulse", "sessions", "12")),
+            ("@devpulse", True, ("set", "@memory", "sessions", "12")),
+            ("@devpulse", True, ("set-default", "sessions", "12")),
+        ],
+    )
+    def test_its_own_seat_and_the_admin_write(self, verbs, monkeypatch, caller, admin, args) -> None:
+        monkeypatch.setattr(verbs.gate, "verified_caller", lambda: (caller, admin))
+        before = verbs.path.read_bytes()
+        _run(verbs, *args)
+        assert verbs.path.read_bytes() != before
+
+    @pytest.mark.parametrize(
+        ("args", "sentence"),
+        [
+            (("config", "set", "@memory", "sessions", "12"), "not @devpulse - run it from inside @memory's own"),
+            (("config", "set-default", "sessions", "12"), "the fleet's default limits: @memory or the verified"),
+            (("rollover", "push"), "every branch's per_branch limits: @memory or the verified admin only"),
+        ],
+    )
+    def test_another_seat_is_refused_non_zero_and_the_config_is_untouched(
+        self, verbs, monkeypatch, capsys, args, sentence
+    ) -> None:
+        monkeypatch.setattr(verbs.gate, "verified_caller", lambda: ("@devpulse", False))
+        before = verbs.path.read_bytes()
+        capsys.readouterr()
+        display.reset_command_state()
+        verbs.rollover.handle_command(args[0], list(args[1:]))
+        assert display.resolve_exit(True) == 2
+        assert _unwrapped(sentence) in _unwrapped(_streams(capsys))
+        assert verbs.path.read_bytes() == before
 
 
 class TestPushRoundTrip:

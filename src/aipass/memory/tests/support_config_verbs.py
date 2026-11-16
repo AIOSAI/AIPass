@@ -3,7 +3,7 @@
 # Description: Shared helpers for the test_config_verbs files - the minted verbs world and the run/read helpers
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Helpers for tests/test_config_verbs*.py (no test_ prefix: never collected)."""
@@ -103,8 +103,12 @@ def _real_verbs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamesp
     monkeypatch.setattr(rollover_config, "json_handler", MagicMock())
 
     _pin_console_width(monkeypatch)
+    gate = rollover.caller_gate
+    assert rollover_config.caller_gate is gate
+    monkeypatch.setattr(gate, "verified_caller", lambda: ("@memory", False))
 
     return SimpleNamespace(
+        gate=gate,
         rollover=rollover,
         loader=config_loader,
         detector=detector,
