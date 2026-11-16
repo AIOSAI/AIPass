@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: rm_gate.py
-# Version: 3.4.0
+# Version: 3.5.0
 # Description: Refuses raw rm, other deletes off the admin seat, and drone rm outside the caller's branch (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
@@ -37,7 +37,7 @@ _DONT_DELETE = (
     "Outside your own branch? Mail @devpulse with the path and why:\n"
     '  drone @ai_mail email @devpulse "Delete request" "<path>: <why>"\n'
     "\n"
-    "This refused attempt is recorded."
+    "{recorded}"
 )
 
 RM_REFUSED = (
@@ -54,7 +54,7 @@ DRONE_RM_REFUSED = (
     "Not yours to move? Mail @devpulse with the path and why:\n"
     '  drone @ai_mail email @devpulse "Delete request" "<path>: <why>"\n'
     "\n"
-    "This refused attempt is recorded."
+    "{recorded}"
 )
 
 RM_REFUSED_ADMIN = (
@@ -62,7 +62,7 @@ RM_REFUSED_ADMIN = (
     "  drone rm <path>     # moves it into the .archive/ folder beside it\n"
     "Files in the system temp dir and Python bytecode (__pycache__, *.pyc) are truly deleted instead.\n"
     "\n"
-    "This refused attempt is recorded."
+    "{recorded}"
 )
 
 UNNAMED_CALLER = "could not be named (no readable passport above {cwd})"
@@ -84,7 +84,9 @@ UNREAD_REFUSED = (
     "Spell the program out: a literal command word, not a variable or a substitution; a script that exists "
     "and is readable before the command runs; a program handed to a shell or interpreter with -c or a "
     "heredoc rather than through a pipe.\n"
-    'Need it as written? Mail @devpulse: drone @ai_mail email @devpulse "Command review" "<the command and why>"'
+    'Need it as written? Mail @devpulse: drone @ai_mail email @devpulse "Command review" "<the command and why>"\n'
+    "\n"
+    "{recorded}"
 )
 
 _BLOCK_ALLOW = {"stdout": "", "exit_code": 0}
@@ -92,6 +94,11 @@ _BLOCK_ALLOW = {"stdout": "", "exit_code": 0}
 _DRONE = "drone"
 
 _ADMIN_SEAT = "aipass.hooks.apps.modules.admin_seat"
+_OWNERSHIP = "aipass.hooks.apps.modules.write_ownership"
+_LEDGER_DOOR = "aipass.drone.apps.modules.door_deletion_log"
+
+RECORDED = "This refused attempt is recorded in .ai_central/deletions.jsonl."
+NOT_RECORDED = "Recording this refused attempt in the ledger failed; the failure is logged."
 
 # drone rm's help form alone runs nothing, so every seat may read it.
 _HELP_FORMS = (("--help",), ("-h",))
@@ -154,6 +161,27 @@ def _record_move(cmd: str, cwd: str, caller: str | None, count: int, target: str
             reason,
             cmd,
         )
+
+
+def _ledger(cmd: str, cwd: str, caller: str | None, resolved: str, reason: str) -> str:
+    """One row in the project's deletions ledger through @drone's door; the sentence the refusal ends on.
+
+    A row that cannot be written never lets the command through: the refusal stands and says so.
+    """
+    try:
+        project = importlib.import_module(_OWNERSHIP).project_of(Path(cwd)) if cwd else None
+        importlib.import_module(_LEDGER_DOOR).record_gate_refusal(
+            caller=caller or "unknown",
+            cwd=cwd,
+            requested=cmd,
+            resolved=resolved or None,
+            reason=reason,
+            project_root=project.root if project else None,
+        )
+    except Exception as exc:  # the refusal is already decided; a lost row is logged, never an allow
+        logger.error("[HOOKS] rm_gate: ledger write failed, the refusal stands: %s", exc)
+        return NOT_RECORDED
+    return RECORDED
 
 
 def _classify(cmd: str, cwd: str) -> tuple[int, list, list[str], list[str]]:
@@ -230,16 +258,25 @@ def _lanes_of(reader, inv) -> list[str]:
     return found
 
 
-def _refusal(raw: int, others: list[str], admin: bool, caller: str | None, cwd: str, why: str) -> str:
+def _refusal(raw: int, others: list[str], admin: bool, caller: str | None, cwd: str, why: str, recorded: str) -> str:
     """The refusal that teaches this caller its own way forward."""
     if raw and admin:
-        return RM_REFUSED_ADMIN
+        return RM_REFUSED_ADMIN.format(recorded=recorded)
     named = f"@{caller}" if caller else UNNAMED_CALLER.format(cwd=cwd or "(no cwd)")
     if raw:
-        return RM_REFUSED.format(caller=named)
+        return RM_REFUSED.format(caller=named, recorded=recorded)
     if others:
-        return DELETE_REFUSED.format(what=", ".join(dict.fromkeys(others)), caller=named)
-    return DRONE_RM_REFUSED.format(caller=named, why=why)
+        return DELETE_REFUSED.format(what=", ".join(dict.fromkeys(others)), caller=named, recorded=recorded)
+    return DRONE_RM_REFUSED.format(caller=named, why=why, recorded=recorded)
+
+
+def _ledger_reason(raw: int, others: list[str], why: str) -> str:
+    """The one-sentence reason the ledger row carries."""
+    if raw:
+        return "raw rm is refused for every seat."
+    if others:
+        return f"{', '.join(dict.fromkeys(others))} is a delete only @devpulse may run."
+    return why
 
 
 def handle(hook_data: dict) -> dict:
@@ -274,12 +311,15 @@ def handle(hook_data: dict) -> dict:
             why, moved = verdict
         if not raw and not drones and not others:
             named = f"@{caller}" if caller else UNNAMED_CALLER.format(cwd=cwd or "(no cwd)")
+            what = "; ".join(dict.fromkeys(unread))
             _record(cmd, cwd, caller, {"unread program": len(unread)})
-            return _block(UNREAD_REFUSED.format(what="; ".join(dict.fromkeys(unread)), caller=named))
+            recorded = _ledger(cmd, cwd, caller, "", f"it runs what the gates cannot read: {what}.")
+            return _block(UNREAD_REFUSED.format(what=what, caller=named, recorded=recorded))
 
         _record(cmd, cwd, caller, {"raw rm": raw, "delete verb": len(others)})
         _record_move(cmd, cwd, caller, len(drones), moved, why or "refused with the delete beside it in this command")
-        return _block(_refusal(raw, others, admin, caller, cwd, why))
+        recorded = _ledger(cmd, cwd, caller, moved if why else "", _ledger_reason(raw, others, why))
+        return _block(_refusal(raw, others, admin, caller, cwd, why, recorded))
 
     except Exception as exc:  # fail closed on the Bash call this gate guards
         logger.error("[HOOKS] rm_gate: crashed, refusing the Bash call: %s", exc)

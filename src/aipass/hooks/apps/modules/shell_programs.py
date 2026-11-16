@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: shell_programs.py
-# Version: 1.5.1
+# Version: 1.6.0
 # Description: Which programs only read, and which only take data — the default-deny tables (DPLAN-0356 phase 4)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-01
-# Modified: 2026-10-24
+# Modified: 2026-11-15
 # =============================================
 
 """The tables that invert the gates: what is KNOWN safe, so everything else is not (DPLAN-0356 phase 4).
@@ -43,6 +43,15 @@ _SED_LONG_FLAGS = frozenset(
 
 #: A sed script of addresses and p, d, q, = only: no s, w, W, e, r or R, so it neither writes nor runs.
 _SED_PRINT_SCRIPT = re.compile(r"[0-9$,;!~pdq= ]+")
+
+#: A /regex/ address; cut before the print-script test, so what is left must still be addresses and p, d, q, =.
+_SED_REGEX_ADDRESS = re.compile(r"/(?:[^/\\\n]|\\.)*/")
+
+#: What lets an awk program write or run: an output redirect, a pipe, system(), getline.
+_AWK_WRITES = (">", "|", "system", "getline")
+
+#: awk flags that take a value and only shape the read; -f, -i and any other flag keep awk off the read list.
+_AWK_VALUED = ("-F", "-v")
 
 # Launchers: the program they run comes after their own flags (the valued ones take the next
 # word) and, for a few, a fixed number of operands of their own (timeout's duration).
@@ -113,8 +122,14 @@ OWN_GATED = frozenset({"git", "gh"})
 #: Programs that delete every operand (rm_gate's verbs, the protected lane's delete role).
 DELETE_PROGRAMS = frozenset({"rm", "rmdir", "unlink", "shred", "srm", "wipe", "trash", "trash-put", "rimraf"})
 
+#: The provider CLIs this fleet launches; edit_gate judges where each would run (modules/provider_launch).
+PROVIDER_CLIS = frozenset({"claude", "codex", "opencode"})
+
 #: The command words a scan of an unknown wrapper's operands looks for (P3).
-WATCHED_VERBS = DELETE_PROGRAMS | OWN_GATED
+WATCHED_VERBS = DELETE_PROGRAMS | OWN_GATED | PROVIDER_CLIS
+
+#: Programs whose operands another rule judges: git_gate, and the provider launch rule (a prompt is no path).
+_JUDGED_ELSEWHERE = OWN_GATED | PROVIDER_CLIS
 
 
 def read_only(program: str, argv: tuple[str, ...]) -> bool:
@@ -123,6 +138,8 @@ def read_only(program: str, argv: tuple[str, ...]) -> bool:
         return not any(arg in _FIND_ACTIONS for arg in argv[1:])
     if program == "sed":
         return _sed_only_prints(argv)
+    if program in ("awk", "gawk"):
+        return _awk_only_reads(argv)
     if program in SHELL_PROGRAMS:
         return syntax_check_only(argv)
     if program == "aipass":
@@ -166,7 +183,21 @@ def _sed_only_prints(argv: tuple[str, ...]) -> bool:
             plain.append(arg)
     if script_next or not (scripts or plain):
         return False
-    return all(_SED_PRINT_SCRIPT.fullmatch(script) for script in (scripts or plain[:1]))
+    return all(_SED_PRINT_SCRIPT.fullmatch(_SED_REGEX_ADDRESS.sub("", script)) for script in (scripts or plain[:1]))
+
+
+def _awk_only_reads(argv: tuple[str, ...]) -> bool:
+    """True when awk's flags only shape the read and its program text cannot write or run anything."""
+    index = 1
+    while index < len(argv) and argv[index].startswith("-"):
+        arg = argv[index]
+        if arg in _AWK_VALUED:
+            index += 2
+        elif arg.startswith(_AWK_VALUED):
+            index += 1
+        else:
+            return False
+    return index < len(argv) and not any(token in argv[index] for token in _AWK_WRITES)
 
 
 def _sed_word(arg: str) -> str:
@@ -404,7 +435,7 @@ def named_operands(invocations: list, places=None) -> list[tuple[str, Path]]:
     carried = _carriers(invocations)
     found = []
     for index, inv in enumerate(invocations):
-        if index in carried or not inv.program or read_only(inv.program, inv.argv) or inv.program in OWN_GATED:
+        if index in carried or not inv.program or read_only(inv.program, inv.argv) or inv.program in _JUDGED_ELSEWHERE:
             continue
         for text in _operand_texts(inv.argv, inv.program):
             if inv.text and text == inv.text:  # an interpreter's -c program text is read as a program, not a path

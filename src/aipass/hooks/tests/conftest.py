@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: conftest.py
-# Version: 2.9.2
+# Version: 2.10.0
 # Description: Shared pytest fixtures for hooks tests
 # Branch: hooks
 # Layer: tests
@@ -125,6 +125,17 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
     sandbox = json_handler.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
+    return sandbox
+
+
+@pytest.fixture(autouse=True)
+def isolated_deletion_ledger(tmp_path_factory, monkeypatch) -> Path:
+    """Every rm_gate refusal writes a row through @drone's door: keep test rows out of the LIVE ledger.
+
+    The environment seam reaches child processes a test spawns too.
+    """
+    sandbox = tmp_path_factory.mktemp("deletion_ledger") / "deletions.jsonl"
+    monkeypatch.setenv("AIPASS_DELETION_LOG", str(sandbox))
     return sandbox
 
 

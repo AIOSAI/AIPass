@@ -194,7 +194,7 @@ drone rm puts the file there for the user; you never put anything there yourself
 Outside your own branch? Mail @devpulse with the path and why:
   drone @ai_mail email @devpulse "Delete request" "<path>: <why>"
 
-This refused attempt is recorded.
+This refused attempt is recorded in .ai_central/deletions.jsonl.
 ```
 
 Every refused attempt is one INFO line per deleting clause in `logs/rm_gate.log`:
@@ -202,6 +202,14 @@ Every refused attempt is one INFO line per deleting clause in `logs/rm_gate.log`
 refused before drone ran, `MOVE refused | lane=drone rm | branch=… | cwd=… | target=<resolved> |
 reason=… | cmd=…` (`target=-` when the target could not be resolved). Service code that runs `drone rm` as a
 subprocess never passes through a hook.
+
+Every refusal, the admin seat's raw `rm` included, is also one row in the project's deletions ledger
+(`.ai_central/deletions.jsonl`), written through @drone's door `door_deletion_log.record_gate_refusal`:
+lane `rm_gate`, outcome `refused`, the caller (`unknown` with no passport), the session cwd, the command
+as typed, the resolved path of a refused `drone rm` target (`null` when there is none or it cannot be
+resolved) and a one-sentence reason. The refusal's last line says so. A row that cannot be written leaves
+the refusal standing: its last line then says the recording failed, and an ERROR line
+(`rm_gate: ledger write failed, the refusal stands`) goes through prax. A crashed gate writes no row.
 
 ---
 

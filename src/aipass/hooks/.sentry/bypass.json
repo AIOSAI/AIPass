@@ -489,11 +489,11 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "logged_fallback",
       "lines": [
-        588,
-        825,
-        881
+        613,
+        850,
+        906
       ],
-      "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 592: the todos advisory text, never a verdict. 829 _seat_trinity and 885 _read_pending: the tripwire, which reports after the call and decides nothing."
+      "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 613: the todos advisory text, never a verdict. 850 _seat_trinity and 906 _read_pending: the tripwire, which reports after the call and decides nothing."
     },
     {
       "file": "apps/handlers/lifecycle/session_start.py",
@@ -921,7 +921,7 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "fallback",
       "lines": [
-        679
+        704
       ],
       "reason": "Advisory only: the section-count note never blocks, and the caps that do block are judged by _evaluate_limits under the fail-closed refusal. Raising here would turn a dark config door into a refused memory write. It logs at WARNING, which @trigger escalates."
     },
@@ -929,7 +929,7 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "fallback",
       "lines": [
-        780
+        805
       ],
       "reason": "The gate writes nothing: a memory file already unparseable on disk, met by an edit that parses, is the agent's repair, judged as a new file. Refusing it would lock a broken memory file forever. WARNING names the file, and @trigger escalates it."
     },
@@ -937,7 +937,7 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "fallback",
       "lines": [
-        879
+        904
       ],
       "reason": "The hook's own per-session /tmp snapshot of in-flight Bash calls; a corrupt copy holds only stale stats, and starting fresh costs at most one unwatched call. Raising would darken the tripwire for the whole session. Logged at WARNING, which @trigger escalates."
     },
@@ -1001,7 +1001,7 @@
       "file": "apps/handlers/security/rm_gate.py",
       "standard": "fallback",
       "lines": [
-        125
+        132
       ],
       "reason": "Fails closed: an unimportable admin_seat returns (None, False), so no seat is exempted and every delete refusal stands. The refusal is the answer; WARNING names the dark admin lane."
     },
@@ -1553,7 +1553,7 @@
       "file": "apps/modules/promote.py",
       "standard": "fallback",
       "lines": [
-        168
+        171
       ],
       "reason": "Fails closed: an answer that does not parse counts as \"not refused\", so check_smoke returns False with the exit code and output, and the promote stops. The failure is the answer."
     },
@@ -1803,6 +1803,24 @@
       "file": "apps/handlers/config/codex_trust.py",
       "standard": "json_structure",
       "reason": "json.dumps builds the exact bytes Codex hashes (sorted, compact), the input to sha256; no JSON file is read or written, and json_handler would change the bytes."
+    },
+    {
+      "file": "apps/modules/provider_launch.py",
+      "standard": "json_structure",
+      "reason": "Path arithmetic over the shell reader's invocations: where a provider CLI would run. Opens and writes no JSON, so json_handler has nothing to log; same profile as admin_seat.py."
+    },
+    {
+      "file": "apps/modules/provider_launch.py",
+      "standard": "modules",
+      "reason": "Not a drone command surface: consumed by handlers/security/edit_gate.py inside a PreToolUse hook. A CLI verdict would judge the operator's cwd as a seat. print_introspection() states the rule. Same profile as admin_seat.py."
+    },
+    {
+      "file": "apps/handlers/security/rm_gate.py",
+      "standard": "fallback",
+      "lines": [
+        181
+      ],
+      "reason": "Fails closed: the refusal is decided before the ledger is written, so a door that cannot load or write never lets the command through. The refusal then says the recording failed, and an ERROR goes through prax, which @trigger escalates."
     }
   ],
   "notes": {

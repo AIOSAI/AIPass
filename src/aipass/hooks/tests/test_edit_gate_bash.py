@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.11.1
+# Version: 1.12.0
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
@@ -268,7 +268,7 @@ class TestAGitWorkTreeWithNoRegistryIsAProject:
 
 
 class TestASessionInNoProjectCrossesIntoARegistryProject:
-    """A cwd in no project (a Seed workspace, /var/tmp) wrote into AIPass on both lanes; devpulse ruled it a crossing."""
+    """A cwd in no project (a Seed workspace, /var/tmp) wrote into AIPass on both lanes; devpulse ruled: a crossing."""
 
     @pytest.fixture
     def outside(self, tmp_path: Path) -> str:
@@ -553,8 +553,9 @@ class TestScriptedLaneDoesNotOverreach:
         target = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
         for command in (f"python3 -c \"print(open('{target}').read())\"", f"grep def {target}", f"cat {target}"):
             assert _run(registered_projects["hooks"], command=command)["exit_code"] == 0, command
-        # awk is not a read-only program (print > file, system()), so it may not name it.
-        assert _run(registered_projects["hooks"], command=f"awk '/def /' {target}")["exit_code"] == 2
+        # awk reads unless its program can write or run (print > file, a pipe, system(), getline).
+        assert _run(registered_projects["hooks"], command=f"awk '/def /' {target}")["exit_code"] == 0
+        assert _run(registered_projects["hooks"], command=f"awk '/def / {{print > \"y\"}}' {target}")["exit_code"] == 2
 
     def test_sentry_no_longer_writes_across_branches_from_a_shell(self, registered_projects: dict):
         """A name (sentry) decides nothing in the shell lane either."""
@@ -1214,3 +1215,138 @@ class TestASedPrintScriptIsARead:
         assert read["exit_code"] == 0, read["stdout"]
         for command in ("sed -i -n 68,90p .trinity/local.json", "sed -n s/a/b/p .trinity/local.json"):
             assert "Memory files are not written from a shell" in _reason(_run(str(seat), command=command)), command
+
+
+@pytest.fixture
+def fleet(tmp_path: Path) -> dict:
+    """An AIPass tree: @canary (with notes.txt and sub/), @other (with README.md), @devpulse, each with a passport."""
+    root = tmp_path / "AIPass"
+    (root / "AIPASS_REGISTRY.json").parent.mkdir(parents=True)
+    (root / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+    seats = {}
+    for name in ("canary", "other", "devpulse"):
+        seat = root / "src" / "aipass" / name
+        (seat / ".trinity").mkdir(parents=True)
+        (seat / ".trinity" / "passport.json").write_text(
+            json.dumps({"branch_info": {"branch_name": name}}), encoding="utf-8"
+        )
+        seats[name] = seat
+    (seats["canary"] / "sub").mkdir()
+    (seats["canary"] / "notes.txt").write_text("n\n", encoding="utf-8")
+    (seats["other"] / "README.md").write_text("r\n", encoding="utf-8")
+    return {"root": root, **seats}
+
+
+class TestAProviderSessionStartsOnlyInTheOwnBranch:
+    """The owner: no agent starts a session inside another branch; a session's directory IS that branch's seat."""
+
+    REFUSED = (
+        "cd ../other && claude",
+        "cd ../other && claude -p < notes.txt",
+        "(cd ../other; codex exec hi)",
+        "pushd ../other && opencode",
+        "codex -C ../other exec hi",
+        "codex --cd=../other exec hi",
+        "claude --add-dir ../other -p hi",
+        "claude --add-dir sub ../other -p hi",
+        "codex exec --add-dir ../other hi",
+        "opencode ../other",
+        "cd ../devpulse && claude",
+        "cd ../../.. && claude",
+        "bash -c 'cd ../other && claude'",
+        "env -C ../other claude",
+        "sudo -D ../other claude",
+        "systemd-run --user --working-directory=../other claude",
+        "systemd-run --user -p WorkingDirectory=../other claude",
+        "systemd-run --user claude -p hi",
+        "systemd-run claude -p hi",
+        "cd ../other && npx claude",
+        "cd ../other && nohup claude -p hi &",
+        "tmux new-session -d claude",
+        "tmux new -s x 'cd ../other && claude'",
+        "echo claude | at now",
+        "cd $UNSET_DIR && claude",
+        "opencode $UNSET_DIR",
+    )
+    ALLOWED = (
+        "claude -p hi",
+        "cd sub && claude -p hi",
+        "codex -C . exec hi",
+        "codex -C sub exec hi",
+        "claude --add-dir sub -p hi",
+        "nohup claude -p hi &",
+        "setsid claude -p hi",
+        "systemd-run --user -d claude -p hi",
+        "opencode sub",
+        'drone @ai_mail dispatch @other "Task" "start claude in tmux from ../other"',
+    )
+
+    @pytest.mark.parametrize("command", REFUSED)
+    def test_a_launch_outside_the_own_branch_is_refused(self, fleet: dict, grant_withheld, monkeypatch, command: str):
+        monkeypatch.chdir(fleet["canary"])  # an unfollowed cd must not be read against this process's cwd
+        result = _run(str(fleet["canary"]), command=command)
+        assert _blocked(result), command
+        assert "Starting a provider session" in _reason(result), command
+
+    @pytest.mark.parametrize("command", ALLOWED)
+    def test_a_launch_inside_the_own_branch_is_allowed(self, fleet: dict, grant_withheld, command: str):
+        assert _run(str(fleet["canary"]), command=command) == {"stdout": "", "exit_code": 0}, command
+
+    def test_the_admin_seat_starts_a_session_anywhere(self, fleet: dict, grant_granted):
+        for command in ("cd ../other && claude", "codex -C ../canary exec hi", "tmux new-session -d claude"):
+            assert _run(str(fleet["devpulse"]), command=command)["exit_code"] == 0, command
+
+    def test_a_seat_with_no_passport_starts_no_session(self, fleet: dict, grant_withheld):
+        assert _blocked(_run(str(fleet["root"]), command="claude -p hi"))
+
+    def test_systemd_run_names_the_directory_its_unit_would_start_in(self, fleet: dict, grant_withheld):
+        """With no directory given, a user unit starts in the home dir and a system unit in /."""
+        user = _reason(_run(str(fleet["canary"]), command="systemd-run --user claude -p hi"))
+        system = _reason(_run(str(fleet["canary"]), command="systemd-run claude -p hi"))
+        assert f"Refused: {Path.home()} is not inside" in user
+        assert "Refused: / is not inside" in system
+
+    def test_the_refusal_names_the_rule_the_target_and_the_way_forward_and_is_logged(
+        self, fleet: dict, grant_withheld, caplog
+    ):
+        reason = _reason(_run(str(fleet["canary"]), command="cd ../other && claude"))
+        assert "Caller: @canary." in reason
+        assert f"Refused: {fleet['other']} is not inside your own branch ({fleet['canary']})." in reason
+        assert 'drone @ai_mail dispatch @<branch> "Subject" "Body"' in reason
+        logged = [r.getMessage() for r in caplog.records if "provider launch refused" in r.getMessage()]
+        assert logged == [
+            f"[HOOKS] edit_gate: provider launch refused: @canary -> {fleet['other']} | cmd=cd ../other && claude"
+        ]
+
+
+class TestTheLaunchRuleCarriesTheWeightSoReadsPass:
+    """A provider prompt is no write target; awk and sed -n that only print are reads; each refuses if it can write."""
+
+    @pytest.mark.parametrize(
+        "command",
+        (
+            "claude -p ../other/README.md",
+            "awk '{print}' ../other/README.md",
+            "awk -F: -v x=1 '{print $1}' ../other/README.md",
+            "sed -n '/^r/,/^s/p' ../other/README.md",
+        ),
+    )
+    def test_a_read_of_another_branch_passes(self, fleet: dict, grant_withheld, command: str):
+        assert _run(str(fleet["canary"]), command=command) == {"stdout": "", "exit_code": 0}, command
+
+    @pytest.mark.parametrize(
+        "command",
+        (
+            "awk '{print > \"x\"}' ../other/README.md",
+            "awk '{print | \"sh\"}' ../other/README.md",
+            "awk '{system(\"true\")}' ../other/README.md",
+            "awk '{\"date\" | getline d}' ../other/README.md",
+            "awk '{getline line < \"/etc/hostname\"}' ../other/README.md",
+            "awk -i inplace '{print}' ../other/README.md",
+            "awk -f prog.awk ../other/README.md",
+            "sed -n '/^r/w ../other/x' notes.txt",
+            "sed -n '/^r/,/^s/e date' ../other/README.md",
+        ),
+    )
+    def test_a_form_that_can_write_stays_refused(self, fleet: dict, grant_withheld, command: str):
+        assert _blocked(_run(str(fleet["canary"]), command=command)), command

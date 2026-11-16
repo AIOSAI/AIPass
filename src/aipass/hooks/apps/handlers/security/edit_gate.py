@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.22.2
+# Version: 1.23.0
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
@@ -51,6 +51,14 @@ _TRIPWIRE_DIR = Path(tempfile.gettempdir())
 _TRIPWIRE_PENDING_MAX = 8
 # The log line is the diagnostic, not the copy: the head names the rule and the target.
 _REFUSAL_LOG_CHARS = 500
+
+PROVIDER_LAUNCH_REFUSED = (
+    "Starting a provider session (claude, codex, opencode) outside your own branch is refused. Caller: {caller}.\n"
+    "Refused: {why}\n"
+    "A session's directory makes it that branch's seat, so you may start one only inside your own branch; "
+    "@devpulse alone may start one elsewhere.\n"
+    'To hand work to another branch: drone @ai_mail dispatch @<branch> "Subject" "Body"'
+)
 # The sanctioned writers of memory files from a shell: drone verbs, not raw writes.
 _MEMORY_VERB_TARGETS = frozenset({"@memory", "@spawn"})
 _ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_]\w*=")
@@ -150,6 +158,23 @@ def _cross_project_block(caller: Any, landing: Any, target: Path, how: str, why:
         + 'To reach that project: drone @devpulse feedback send "Subject" "Body"'
     )
     return _refuse(reason)
+
+
+def _check_provider_launch(cwd: str, command: str) -> dict | None:
+    """Refuse a provider CLI started outside the caller's own branch, off the verified admin seat."""
+    invocations = _import_module("aipass.hooks.apps.modules.shell_reader").invocations(command, cwd)
+    found = _import_module("aipass.hooks.apps.modules.provider_launch").foreign_launch(invocations, command, cwd)
+    if found is None:
+        return None
+    caller, admin = _import_module("aipass.hooks.apps.modules.admin_seat").seat_of(cwd)
+    if admin:
+        return None
+    where, why = found
+    logger.warning(
+        "[HOOKS] edit_gate: provider launch refused: @%s -> %s | cmd=%s", caller or "unnamed", where, command
+    )
+    named = f"@{caller}" if caller else "unnamed (no passport above the cwd)"
+    return _refuse(PROVIDER_LAUNCH_REFUSED.format(caller=named, why=why))
 
 
 def _bash_write_targets(cwd: str, command: str) -> list[tuple[Path, str]]:
@@ -934,7 +959,11 @@ def handle(hook_data: dict) -> dict:
         # what the reader cannot see (bash_writes.NOT_CAUGHT) the tripwire reports after the call.
         if tool_name == "Bash":
             cwd = hook_data.get("cwd", "") or os.getcwd()
-            targets = _bash_write_targets(cwd, tool_input.get("command", ""))
+            command = tool_input.get("command", "")
+            launch = _check_provider_launch(cwd, command) if command else None
+            if launch:
+                return launch
+            targets = _bash_write_targets(cwd, command)
             if not targets:
                 return {"stdout": "", "exit_code": 0}
             caller = _ownership().project_of(Path(cwd))

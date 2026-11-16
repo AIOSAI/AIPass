@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_rm_gate.py
-# Version: 3.5.0
+# Version: 3.6.0
 # Description: Tests for rm_gate security handler, the DPLAN-0356 lockdown since 2.0.0
 # Branch: hooks
 # Created: 2026-06-02
@@ -946,3 +946,85 @@ class TestAnUnknownWrapperIsReadForWhatItRuns:
         result = self._run(tmp_path, command)
 
         assert (result["exit_code"], result["stdout"]) == (0, ""), command
+
+
+class TestEveryRefusalReachesTheLedger:
+    """A refusal that says it is recorded is a row in the project's deletions ledger, written through @drone's door."""
+
+    @pytest.fixture
+    def ledger(self, tmp_path, monkeypatch) -> Path:
+        path = tmp_path / "ledger" / "deletions.jsonl"
+        monkeypatch.setenv("AIPASS_DELETION_LOG", str(path))
+        return path
+
+    @staticmethod
+    def _rows(ledger: Path) -> list[dict]:
+        return [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()] if ledger.exists() else []
+
+    def _run(self, cwd: str, command: str) -> dict:
+        with patch(_RAIL, return_value=False):
+            return handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd})
+
+    def test_a_refused_drone_rm_is_a_row_naming_caller_cwd_text_path_and_reason(self, tmp_path, ledger, monkeypatch):
+        seat = _seat(tmp_path, "canary")
+        (tmp_path / "README.md").write_text("x", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)  # the row's cwd is the session's, never this process's
+        result = self._run(seat, "drone rm ../README.md")
+
+        assert result["exit_code"] == 2
+        [row] = self._rows(ledger)
+        assert (row["lane"], row["outcome"], row["caller"], row["cwd"]) == ("rm_gate", "refused", "canary", seat)
+        assert row["requested"] == "drone rm ../README.md"
+        assert row["path"] == str(tmp_path / "README.md")
+        assert row["reason"] == f"{tmp_path / 'README.md'} is outside your own branch ({seat}) and the system temp dir."
+
+    def test_an_unresolvable_target_is_a_row_with_no_path(self, tmp_path, ledger):
+        self._run(_seat(tmp_path, "canary"), "drone rm $X")
+
+        [row] = self._rows(ledger)
+        assert row["path"] is None
+        assert row["reason"].startswith("a target cannot be resolved: $X")
+
+    @pytest.mark.parametrize(
+        ("command", "reason"),
+        (
+            ("rm notes.txt", "raw rm is refused for every seat."),
+            ("shred notes.txt", "shred is a delete only @devpulse may run."),
+            (
+                "$CMD notes.txt",
+                "it runs what the gates cannot read: the program word $CMD is an expansion this reader cannot fold.",
+            ),
+        ),
+    )
+    def test_every_other_refusal_is_a_row_too(self, tmp_path, ledger, command, reason):
+        self._run(_seat(tmp_path, "canary"), command)
+
+        [row] = self._rows(ledger)
+        assert (row["requested"], row["path"], row["reason"]) == (command, None, reason)
+
+    def test_an_unnamed_caller_is_recorded_as_unknown(self, tmp_path, ledger):
+        self._run(str(tmp_path), "rm notes.txt")
+
+        assert self._rows(ledger)[0]["caller"] == "unknown"
+
+    def test_the_refusal_says_where_it_is_recorded(self, tmp_path, ledger):
+        reason = json.loads(self._run(_seat(tmp_path, "canary"), "rm notes.txt")["stdout"])["reason"]
+
+        assert reason.endswith("This refused attempt is recorded in .ai_central/deletions.jsonl.")
+
+    def test_an_allowed_drone_rm_writes_no_row(self, tmp_path, ledger):
+        seat = _seat(tmp_path, "canary")
+        (Path(seat) / "notes.txt").write_text("x", encoding="utf-8")
+
+        assert self._run(seat, "drone rm notes.txt")["exit_code"] == 0
+        assert self._rows(ledger) == []
+
+    def test_a_ledger_that_cannot_be_written_keeps_the_refusal_and_says_so(self, tmp_path, ledger, caplog):
+        ledger.parent.write_text("a file where the ledger's directory should be", encoding="utf-8")
+        with caplog.at_level(logging.ERROR, logger="test_rm_gate_audit"):
+            result = self._run(_seat(tmp_path, "canary"), "rm notes.txt")
+
+        assert result["exit_code"] == 2
+        reason = json.loads(result["stdout"])["reason"]
+        assert reason.endswith("Recording this refused attempt in the ledger failed; the failure is logged.")
+        assert any("rm_gate: ledger write failed" in r.getMessage() for r in caplog.records)

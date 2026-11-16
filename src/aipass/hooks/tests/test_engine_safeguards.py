@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_engine_safeguards.py
 # Description: The hook engine's safeguards: trust, timeouts, one document, the ledger, fail-closed gates, promote
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-10-08
 # Modified: 2026-11-15
 # =============================================
@@ -22,6 +22,7 @@ import io
 import json
 import os
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -1171,6 +1172,15 @@ class TestPromote:
         assert not [p for p in root.iterdir() if p.name.startswith(".live-2")]
         assert len(report) == 1 and "FAILED" in report[0]
         smoke.assert_not_called()
+
+    def test_the_smoke_refusal_writes_no_row_in_the_live_deletions_ledger(self, tmp_path, monkeypatch):
+        """The smoke's raw rm is refused for real: its ledger row goes to the temp dir, never the project's."""
+        monkeypatch.delenv("AIPASS_DELETION_LOG", raising=False)
+        with patch.object(promote.subprocess, "run") as run:
+            run.return_value.returncode, run.return_value.stdout = 0, ""
+            promote.check_smoke(tmp_path, ".live-x")
+        ledger = Path(run.call_args.kwargs["env"]["AIPASS_DELETION_LOG"])
+        assert ledger.parent == Path(tempfile.gettempdir())
 
     def test_a_failed_smoke_discards_the_candidate(self, tmp_path, mock_logger):
         root = self._branch(tmp_path)

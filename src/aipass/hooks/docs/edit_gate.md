@@ -17,15 +17,43 @@ operand of a program that does not only read (`modules/shell_programs.READ_ONLY_
 the same three rules: the project fence, whose file it is, and the `.trinity` memory rule. So a program
 nobody listed as a writer cannot name another branch's file or a memory file off the admin seat. `cat`,
 `grep`, `jq` and friends still read anywhere; `drone` is the router and passes; git and gh answer to
-git_gate. `awk` and `sed` are not read as filters: their scripts can write. The one exception is
-`sed` whose every script is addresses and `p`, `d`, `q`, `=` with only reading flags (`sed -n 68,90p f`).
-That shape reads anywhere, a memory file included. A `w` or `e` inside any other
+git_gate. `sed` is not read as a filter: its scripts can write. The exception is
+`sed` whose every script is addresses (line numbers, `/regex/`, ranges of either) and `p`, `d`, `q`, `=`
+with only reading flags (`sed -n 68,90p f`, `sed -n '/^## A/,/^## B/p' f`). `awk` reads when its only
+flags are `-F` and `-v` and its program holds no `>`, `|`, `system` or `getline`; `-f`, `-i` or any of
+those makes every operand a write target again. A provider CLI's operands (`claude -p ../x/README.md`)
+are prompts, not write targets: the launch rule below judges where it runs.
+Those shapes read anywhere, a memory file included. A `w` or `e` inside any other
 script is not read: its target or command passes unseen. More reads: a shell whose
 options before its script carry `-n` (`bash -n x.sh`, a syntax check; git_gate does not read the
 script's commands either), `aipass init update ... --dry-run` (a preview is a read), and `read`,
 whose operands are variable names. For `pytest` and `python -m pytest`, the value of `-c`,
 `--config-file` or `-c=x` is a file pytest only reads; every other operand is judged, `--rootdir`
 and `--confcutdir` included (the rootdir takes pytest's cache).
+
+## A provider session starts only in the own branch
+
+A session's directory makes it that branch's seat for every gate, so off the verified admin seat a
+`claude`, `codex` or `opencode` launch from the Bash tool is refused when the directory it would run in
+or reach lies outside the caller's own branch (the nearest passport directory above the session cwd).
+`modules/provider_launch.py` reads, per invocation from `shell_reader`:
+
+ - the invocation cwd after `cd`, `pushd`, subshells, `bash -c`, `script -c`, `nohup`, `setsid`, `env`, `sudo`;
+ - each CLI's own directory flags, from its `--help`: codex `-C`/`--cd`, claude and codex `--add-dir`
+   (claude's takes several), opencode's positional directory;
+ - a carrier's directory: `env -C`/`--chdir`, `sudo -D`/`--chdir`, `systemd-run --working-directory`
+   or `-p WorkingDirectory=`; with none of those and no `-d`/`--same-dir`, a unit starts in `/`
+   (system) or the home dir (`--user`), per `systemd.exec`.
+
+Refused as unknown: a cwd the reader cannot follow, a directory still holding `$` or a backtick, a
+glob that matches nothing. `tmux`, `screen`, `at`, `batch`, `dtach` and `abduco` run a command detached
+or later, so any of them in a command naming a provider is refused, the own branch included. A session
+with no passport above its cwd has no branch and starts none. @devpulse's directory has no special
+rule. The refusal names the caller and the next step (`drone @ai_mail dispatch`); `logs/edit_gate.log`
+gets `provider launch refused: @<caller> -> <dir> | cmd=<command>`. The dispatch services (ai_mail's
+wake, systemd units, the daemon) start sessions from Python, never through an agent's Bash tool, so this
+rule never sees them. Not read: a provider started under another name (`npx @anthropic-ai/claude-code`,
+`node cli.js`, a renamed binary).
 
 ## Who may write whose files
 

@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: promote.py
-# Version: 1.1.1
+# Version: 1.2.0
 # Description: The one step that makes edited hook code live: check, copy, smoke, then point (drone @hooks promote)
 # Branch: hooks
 # Layer: apps/modules
@@ -22,6 +22,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -140,7 +141,9 @@ def fingerprint(folder: Path) -> str:
 
 
 def _bridge_says(root: Path, name: str, payload: dict) -> tuple[int, str]:
-    env = _hook_env(**{OVERRIDE_ENV: name})
+    # The smoke's raw rm is refused for real; its ledger row is no event of the project's.
+    ledger = str(Path(tempfile.gettempdir()) / "promote-smoke-deletions.jsonl")
+    env = _hook_env(**{OVERRIDE_ENV: name, "AIPASS_DELETION_LOG": ledger})
     bridge = root / "apps" / "handlers" / "bridges" / "claude.py"
     done = subprocess.run(
         [sys.executable, str(bridge), "PreToolUse"],
