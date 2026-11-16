@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: rm_gate.py
-# Version: 3.1.0
+# Version: 3.2.0
 # Description: Refuses raw rm, other deletes off the admin seat, and drone rm outside the caller's branch (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
@@ -29,13 +29,12 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 
 _DONT_DELETE = (
-    "Don't delete. Move or rename instead — that is the safety feature: the owner sees the files and decides.\n"
-    "  rename it    name(disabled).ext       e.g. mv old.py 'old(disabled).py'\n"
-    "  archive it   move it into a .archive/ folder beside it\n"
-    "               (create the folder if it isn't there: mkdir -p .archive && mv old.py .archive/)\n"
-    "  or both.     Archived files can stay forever.\n"
+    "You do not delete. To have a file gone, use drone rm inside your own branch:\n"
+    "  drone rm <path>     # moves it into the .archive/ beside it\n"
+    "That .archive/ is the user's folder: not your concern, never a place to store anything, "
+    "and it can be emptied at any moment.\n"
     "\n"
-    "It must truly go? Mail @devpulse with the path and why:\n"
+    "Outside your own branch? Mail @devpulse with the path and why:\n"
     '  drone @ai_mail email @devpulse "Delete request" "<path>: <why>"\n'
     "\n"
     "This refused attempt is recorded."

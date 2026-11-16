@@ -158,7 +158,7 @@ agent how to switch a gate off.
 `git_gate`.
 
 - **Raw `rm`**, recursive or not, is refused for every seat, the admin seat included — `find -exec rm`
-  and `xargs rm` are raw rm. The admin seat is taught `drone rm <path>`.
+  and `xargs rm` are raw rm. Every seat is taught `drone rm <path>`.
 - **`drone rm`** moves an in-tree target into the `.archive/` beside it; the system temp dir,
   `__pycache__` and `*.pyc` it deletes. The admin seat runs it on any path. Off that seat it runs
   only when every target resolves strictly inside the caller's own branch (the directory of the
@@ -180,16 +180,15 @@ agent how to switch a gate off.
 - `mv`, renaming and `mkdir` are never deletes. `git rm` answers to `git_gate`.
 
 A refused `drone rm` names the path and why, and points to @devpulse. Every other refusal off the
-admin seat ends with `_DONT_DELETE`, verbatim:
+admin seat (raw `rm` and every other delete lane) ends with `_DONT_DELETE`, which teaches `drone rm`,
+verbatim:
 
 ```
-Don't delete. Move or rename instead — that is the safety feature: the owner sees the files and decides.
-  rename it    name(disabled).ext       e.g. mv old.py 'old(disabled).py'
-  archive it   move it into a .archive/ folder beside it
-               (create the folder if it isn't there: mkdir -p .archive && mv old.py .archive/)
-  or both.     Archived files can stay forever.
+You do not delete. To have a file gone, use drone rm inside your own branch:
+  drone rm <path>     # moves it into the .archive/ beside it
+That .archive/ is the user's folder: not your concern, never a place to store anything, and it can be emptied at any moment.
 
-It must truly go? Mail @devpulse with the path and why:
+Outside your own branch? Mail @devpulse with the path and why:
   drone @ai_mail email @devpulse "Delete request" "<path>: <why>"
 
 This refused attempt is recorded.

@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_rm_gate.py
-# Version: 3.3.0
+# Version: 3.4.0
 # Description: Tests for rm_gate security handler, the DPLAN-0356 lockdown since 2.0.0
 # Branch: hooks
 # Created: 2026-06-02
@@ -479,17 +479,16 @@ class TestTheLockdown:
         assert result["exit_code"] == 2
         return json.loads(result["stdout"])["reason"]
 
-    def test_a_plain_rm_from_canary_is_refused_and_teaches_rename_or_archive(self, tmp_path):
+    def test_a_plain_rm_from_canary_is_refused_and_teaches_drone_rm_in_its_own_branch(self, tmp_path):
         reason = self._reason(self._run("rm notes.txt", _seat(tmp_path, "canary"), grant=False))
 
-        assert "@canary" in reason
-        assert "(disabled)" in reason and ".archive/" in reason and "@devpulse" in reason
-        assert "drone rm" not in reason
+        assert "@canary" in reason and "drone rm <path>" in reason and "inside your own branch" in reason
+        assert "user's folder" in reason and "emptied at any moment" in reason and "@devpulse" in reason
 
     def test_a_recursive_rm_from_canary_is_refused_the_same_way(self, tmp_path):
         reason = self._reason(self._run("rm -rf build", _seat(tmp_path, "canary"), grant=False))
 
-        assert ".archive/" in reason and "drone rm" not in reason
+        assert "drone rm <path>" in reason and ".archive/" in reason
 
     def test_drone_rm_from_canary_is_refused(self, tmp_path):
         reason = self._reason(self._run("drone rm notes.txt", _seat(tmp_path, "canary"), grant=False))
@@ -660,7 +659,7 @@ class TestDroneRmInsideTheOwnBranch:
 class TestEveryDeleteVerb:
     """The owner, 2026-09-30 (dab4e222): "rm is a big no no; only devpulse deletes."
 
-    Every verb is refused off the admin seat with the rename/.archive text and
+    Every verb is refused off the admin seat with the drone rm text and
     allowed on it; moving, renaming and mkdir are never deletes. One row per verb,
     so the red team's canary list reads straight off this class.
     """
@@ -714,13 +713,13 @@ class TestEveryDeleteVerb:
             return handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd})
 
     @pytest.mark.parametrize("command", REFUSED)
-    def test_each_delete_verb_from_canary_is_refused_with_the_archive_text(self, tmp_path, command):
+    def test_each_delete_verb_from_canary_is_refused_and_teaches_drone_rm(self, tmp_path, command):
         result = self._run(command, _seat(tmp_path, "canary"), grant=False)
 
         assert result["exit_code"] == 2, command
         reason = json.loads(result["stdout"])["reason"]
         assert "is a delete" in reason and "@canary" in reason
-        assert "(disabled)" in reason and ".archive/" in reason and "@devpulse" in reason
+        assert "drone rm <path>" in reason and "emptied at any moment" in reason and "@devpulse" in reason
 
     @pytest.mark.parametrize("command", REFUSED)
     def test_each_delete_verb_from_the_admin_seat_is_allowed(self, tmp_path, command):
