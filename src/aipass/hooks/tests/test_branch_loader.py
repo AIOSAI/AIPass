@@ -35,20 +35,14 @@ def _mock_cadence_fires():
 
 
 @contextlib.contextmanager
-def _patch_cadence(cadence_mock: Any = None, missing: bool = False) -> Iterator[None]:
+def _patch_cadence(cadence_mock: Any) -> Iterator[None]:
     """Stand the cadence module in sys.modules, where the real import_module looks first.
 
-    importlib itself is never replaced (fleet green leg 7, stdlib_patch), so
-    load_content's own import of grounding_content resolves to the real module.
-    missing=True registers None under the name: the real import then raises
-    ModuleNotFoundError, the stdlib's documented answer for a None entry.
+    importlib itself is never replaced (stdlib_patch), so load_content's own import of grounding_content stays real.
     """
     with pytest.MonkeyPatch.context() as mp:
-        if missing:
-            mp.setitem(sys.modules, _CADENCE_MODULE, None)
-        else:
-            cadence_mock.__spec__ = None  # a MagicMock's __spec__ reads as a module still initializing
-            mp.setitem(sys.modules, _CADENCE_MODULE, cadence_mock)
+        cadence_mock.__spec__ = None  # a MagicMock's __spec__ reads as a module still initializing
+        mp.setitem(sys.modules, _CADENCE_MODULE, cadence_mock)
         yield
 
 
@@ -224,17 +218,22 @@ class TestInjectedBlocksStayUnderTheirCaps:
         assert head.endswith(tuple(str(d) for d in range(10))), "a block never stops mid-word"
 
 
-def test_the_branch_prompt_is_withheld_when_cadence_raises(tmp_path, caplog):
-    """The degraded fail mode (DPLAN-0347): 9,000 chars do not fire every turn on a broken cadence."""
+def test_a_raising_cadence_withholds_the_prompt_on_one_engine_fault_line(engine_fault, monkeypatch, tmp_path):
+    """9,000 chars do not fire every turn on a broken cadence."""
+
+    def boom(_loader_name, _hook_data=None):
+        raise RuntimeError("turn unreadable")
+
     seat = tmp_path / "seat"
     (seat / ".aipass").mkdir(parents=True)
     (seat / ".trinity").mkdir()
     (seat / ".aipass" / "aipass_local_prompt.md").write_text("BRANCH PROMPT", encoding="utf-8")
-    with _patch_cadence(missing=True):
-        result = handle({"cwd": str(seat)})
+    monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", boom)
+    handler = f"{handle.__module__}.handle"
+    faults, (stdout, code) = engine_fault("UserPromptSubmit", "branch_prompt", handler, {"cwd": str(seat)})
 
-    assert result == {"stdout": "", "exit_code": 0}
-    assert "branch_loader DEGRADED loader=branch" in caplog.text
+    assert code != 2 and stdout == ""
+    assert len(faults) == 1 and f"fault[UserPromptSubmit.branch_prompt.{handler}.RuntimeError@" in faults[0]
 
 
 def test_a_raising_load_is_one_engine_fault_line_and_the_prompt_goes_on(engine_fault, monkeypatch, tmp_path):

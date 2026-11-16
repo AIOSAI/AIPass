@@ -71,20 +71,19 @@ class TestCadenceGate:
         assert "devpulse Identity" in result["stdout"]
         assert result["sound"] == "identity"
 
-    def test_is_withheld_when_cadence_check_raises(self, tmp_path, monkeypatch, caplog):
-        """The degraded fail mode (DPLAN-0347): identity waits, the kernel fires alone and says why."""
-
+    def test_a_raising_cadence_withholds_identity_on_one_engine_fault_line(self, engine_fault, tmp_path, monkeypatch):
         self._write_passport(tmp_path)
 
         def _boom(*_a, **_k):
             raise RuntimeError("cadence state unreadable")
 
         monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", _boom)
+        handler = f"{handle.__module__}.handle"
+        faults, (stdout, code) = engine_fault("UserPromptSubmit", "identity_injector", handler, {"cwd": str(tmp_path)})
 
-        result = handle({"cwd": str(tmp_path)})
-
-        assert result == {"stdout": "", "exit_code": 0}
-        assert "identity DEGRADED loader=identity" in caplog.text
+        assert code != 2 and stdout == ""
+        assert len(faults) == 1
+        assert f"fault[UserPromptSubmit.identity_injector.{handler}.RuntimeError@" in faults[0]
 
 
 # Schema 1.0.0 shape — principles at the TOP LEVEL; still live, so it must keep rendering.

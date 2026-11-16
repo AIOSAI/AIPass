@@ -974,14 +974,6 @@
       "reason": "None is handed on as \"cannot rank\", never as \"younger\": _we_are_the_incumbent then answers False, so an unreadable start keeps the refusal of the newer seat. The refusal is the answer."
     },
     {
-      "file": "apps/handlers/security/presence_gate.py",
-      "standard": "fallback",
-      "lines": [
-        196
-      ],
-      "reason": "OPEN by the owner's decision, recorded in gates.FAIL_OPEN: a broken presence gate would refuse every prompt in every seat, the owner's included. It logs at WARNING, which @trigger escalates."
-    },
-    {
       "file": "apps/handlers/security/git_gate.py",
       "standard": "fallback",
       "lines": [
@@ -1080,30 +1072,6 @@
         82
       ],
       "reason": "The re-ground still ships without its release-notice head; raising would lose the whole grounding for the sake of one notice. WARNING, which @trigger escalates, names the failure."
-    },
-    {
-      "file": "apps/handlers/prompt/branch_loader.py",
-      "standard": "fallback",
-      "lines": [
-        32
-      ],
-      "reason": "Injector, withheld by design (DPLAN-0347): a cadence that cannot answer withholds this loader, and tier0_kernel's banner tells the agent on every turn that navmap, branch and identity are WITHHELD and why. The WARNING here is escalated by @trigger."
-    },
-    {
-      "file": "apps/handlers/prompt/navmap.py",
-      "standard": "fallback",
-      "lines": [
-        38
-      ],
-      "reason": "Injector, withheld by design (DPLAN-0347): a cadence that cannot answer withholds this loader, and tier0_kernel's banner tells the agent on every turn that navmap, branch and identity are WITHHELD and why. The WARNING here is escalated by @trigger."
-    },
-    {
-      "file": "apps/handlers/prompt/identity.py",
-      "standard": "fallback",
-      "lines": [
-        32
-      ],
-      "reason": "Injector, withheld by design (DPLAN-0347): a cadence that cannot answer withholds this loader, and tier0_kernel's banner tells the agent on every turn that navmap, branch and identity are WITHHELD and why. The WARNING here is escalated by @trigger."
     },
     {
       "file": "apps/handlers/prompt/tier0_kernel.py",

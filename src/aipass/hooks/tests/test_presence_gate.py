@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_presence_gate.py
-# Version: 1.0.5
+# Version: 1.1.0
 # Description: Tests for the presence gate handler
 # Branch: hooks
 # Layer: tests
 # Created: 2026-06-29
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/security/presence_gate.py."""
@@ -50,9 +50,7 @@ def _make_mocks(our_pid: int | None = 1000, occupant=None, all_sessions=None):
     cc_mock = MagicMock()
     cc_mock.resolve_session_pid.return_value = our_pid
     cc_mock.find_occupant.return_value = occupant
-    # Real list, not a MagicMock: the gate iterates this to find its own
-    # session, and a non-iterable would be swallowed by the gate's own
-    # error handler as a silent allow.
+    # Real list, not a MagicMock: the gate iterates this to find its own session.
     cc_mock.read_all_sessions.return_value = list(all_sessions or [])
 
     return cc_mock, lambda: _served(cc_mock)
@@ -310,11 +308,17 @@ class TestRemedyIsSatisfiable:
         assert result["exit_code"] == 2
         assert "reclaim" in json.loads(result["stdout"])["reason"]
 
-    def test_gate_error_allows(self):
+    def test_a_gate_error_is_one_engine_fault_line_and_the_prompt_is_allowed(self, engine_fault):
+        cc_mock, serve = _make_mocks()
+        cc_mock.resolve_session_pid.side_effect = RuntimeError("proc unreadable")
+        handler = f"{presence_gate.__name__}.handle"
         with patch.dict(os.environ, {**_kept_redirect(), "AIPASS_SESSION_TYPE": "interactive"}, clear=True):
-            with _served(None):
-                result = presence_gate.handle({})
-        assert result["exit_code"] == 0
+            with serve():
+                faults, (stdout, code) = engine_fault("UserPromptSubmit", "presence_gate", handler, {})
+
+        assert code != 2 and stdout == ""
+        assert len(faults) == 1 and f"fault[UserPromptSubmit.presence_gate.{handler}.RuntimeError@" in faults[0]
+        cc_mock.resolve_session_pid.assert_called_once_with()
 
 
 class TestHandleStop:

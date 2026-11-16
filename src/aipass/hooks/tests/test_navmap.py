@@ -36,20 +36,14 @@ def _mock_cadence(fires: bool = True):
 
 
 @contextlib.contextmanager
-def _patch_cadence(cadence_mock: Any = None, missing: bool = False) -> Iterator[None]:
+def _patch_cadence(cadence_mock: Any) -> Iterator[None]:
     """Stand the cadence module in sys.modules, where the real import_module looks first.
 
-    importlib itself is never replaced (fleet green leg 7, stdlib_patch), so
-    load_content's own import of grounding_content resolves to the real module.
-    missing=True registers None under the name: the real import then raises
-    ModuleNotFoundError, the stdlib's documented answer for a None entry.
+    importlib itself is never replaced (stdlib_patch), so load_content's own import of grounding_content stays real.
     """
     with pytest.MonkeyPatch.context() as mp:
-        if missing:
-            mp.setitem(sys.modules, _CADENCE_MODULE, None)
-        else:
-            cadence_mock.__spec__ = None  # a MagicMock's __spec__ reads as a module still initializing
-            mp.setitem(sys.modules, _CADENCE_MODULE, cadence_mock)
+        cadence_mock.__spec__ = None  # a MagicMock's __spec__ reads as a module still initializing
+        mp.setitem(sys.modules, _CADENCE_MODULE, cadence_mock)
         yield
 
 
@@ -107,18 +101,19 @@ class TestNavmapHandler:
         assert result["exit_code"] == 0
         assert "sound" not in result
 
-    def test_is_withheld_on_cadence_error(self, tmp_path, monkeypatch):
-        """The degraded fail mode (DPLAN-0347): the kernel fires alone and says why."""
+    def test_a_raising_cadence_withholds_the_navmap_on_one_engine_fault_line(self, engine_fault, tmp_path, monkeypatch):
+        def boom(_loader_name, _hook_data=None):
+            raise RuntimeError("turn unreadable")
+
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
         (aipass_dir / "tier1_navmap.md").write_text("navmap content", encoding="utf-8")
-        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", boom)
+        handler = f"{handle.__module__}.handle"
+        faults, (stdout, code) = engine_fault("UserPromptSubmit", "navmap", handler, {"cwd": str(tmp_path)})
 
-        with patch.dict("os.environ", {"AIPASS_HOME": str(tmp_path)}):
-            with _patch_cadence(missing=True):
-                result = handle({})
-
-        assert result == {"stdout": "", "exit_code": 0}
+        assert code != 2 and stdout == ""
+        assert len(faults) == 1 and f"fault[UserPromptSubmit.navmap.{handler}.RuntimeError@" in faults[0]
 
     def test_a_raising_load_is_one_engine_fault_line_and_the_prompt_goes_on(self, engine_fault, monkeypatch):
         def boom(_hook_data):

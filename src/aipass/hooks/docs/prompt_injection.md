@@ -24,6 +24,8 @@ fire: the kernel and the two notice channels (alerts, mail). Navmap, branch and 
 not replaced. The mode does not force turn 0, because turn 0 fires *every* loader, the whole grounding
 stack (~21,000 chars) on every prompt. cadence logs one WARNING per degraded turn from the kernel's decision
 (`[HOOKS] cadence DEGRADED loader=tier0 fires: turns cannot be counted, … — <cause>`) and the rest at INFO.
+A `should_fire` that raises instead of answering withholds navmap, branch and identity too: each raise is the
+engine's ERROR fault line, one marker per loader that stays the same every prompt, so medic hears it once.
 Dropping alerts and mail from `DEGRADED_LOADERS` makes the mode literally kernel-only. It is a rare path,
 made cheap and loud.
 

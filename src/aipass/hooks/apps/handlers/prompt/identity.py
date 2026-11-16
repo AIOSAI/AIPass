@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: identity.py
-# Version: 1.3.2
+# Version: 1.3.3
 # Description: Injects branch identity from passport.json (UserPromptSubmit), cadence-gated
 # Branch: hooks
 # Layer: apps/handlers/prompt
@@ -9,8 +9,6 @@
 # =============================================
 
 """Reads .trinity/passport.json and outputs formatted identity for prompt injection."""
-
-from aipass.prax.apps.modules.logger import system_logger as logger
 
 
 def load_content(hook_data: dict) -> str:
@@ -23,19 +21,11 @@ def load_content(hook_data: dict) -> str:
 
 def handle(hook_data: dict) -> dict:
     """Inject branch identity — cadence-gated (period from cadence_config.json, default 5)."""
-    try:
-        import importlib
+    import importlib
 
-        cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
-        if not cadence.should_fire("identity", hook_data):
-            return {"stdout": "", "exit_code": 0}
-    except Exception as exc:
-        # A cadence that cannot answer withholds this loader; the kernel fires alone and names why.
-        logger.warning(
-            "[HOOKS] identity DEGRADED loader=identity: cadence check raised, so it is WITHHELD and the kernel "
-            "fires alone until this is cured: %s",
-            exc,
-        )
+    # A cadence that raises withholds this loader: the engine logs the ERROR, the kernel's banner names why.
+    cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
+    if not cadence.should_fire("identity", hook_data):
         return {"stdout": "", "exit_code": 0}
 
     content = load_content(hook_data)

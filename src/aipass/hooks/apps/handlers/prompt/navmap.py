@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: navmap.py
-# Version: 1.4.2
+# Version: 1.4.3
 # Description: Tier 1 navigation map — periodic prompt injection (UserPromptSubmit); edit-time cap warning (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/prompt
@@ -31,18 +31,9 @@ def load_content(hook_data: dict) -> str:
 
 def handle(hook_data: dict) -> dict:
     """Load tier1 navmap — periodic (cadence period 5) + turn 0 + post-compaction."""
-    try:
-        cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
-        if not cadence.should_fire("navmap", hook_data):
-            return {"stdout": "", "exit_code": 0}
-    except Exception as exc:
-        # The degraded fail mode (DPLAN-0347): a cadence that cannot answer withholds
-        # this loader; the kernel fires alone and its banner names why.
-        logger.warning(
-            "[HOOKS] navmap DEGRADED loader=navmap: cadence check raised, so it is WITHHELD and the kernel "
-            "fires alone until this is cured: %s",
-            exc,
-        )
+    # A cadence that raises withholds this loader: the engine logs the ERROR, the kernel's banner names why.
+    cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
+    if not cadence.should_fire("navmap", hook_data):
         return {"stdout": "", "exit_code": 0}
 
     content = load_content(hook_data)
