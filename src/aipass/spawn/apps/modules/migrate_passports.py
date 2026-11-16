@@ -3,7 +3,7 @@
 # Description: Passport 2.0 fleet migration — thin CLI layer over passport_migration
 # Version: 1.0.1
 # Created: 2026-08-28
-# Modified: 2026-11-09
+# Modified: 2026-11-15
 # =============================================
 
 """One-shot fleet passport migration to schema 2.0 (DPLAN-0319).
@@ -19,6 +19,7 @@ from aipass.cli.apps.modules import console, err_console, error, header, warning
 
 from aipass.spawn.apps.handlers.passport_migration import migrate_fleet
 from aipass.spawn.apps.handlers.json import json_handler
+from aipass.spawn.apps.handlers.seat_gate import PREVIEW_NOTE, seat_refusal
 
 
 def print_introspection():
@@ -82,6 +83,11 @@ def handle_migrate_passports(args: list[str]) -> int:
         error(f"unknown argument(s): {' '.join(unknown)}", suggestion="drone @spawn migrate-passports --help")
         return 1
 
+    refusal = parsed.confirm and seat_refusal("migrate-passports --confirm", parsed.only or parsed.root or "fleet")
+    if refusal:
+        error(refusal)
+        return 1
+
     try:
         receipt = migrate_fleet(root=parsed.root, only=parsed.only, confirm=parsed.confirm)
     except Exception as exc:
@@ -101,6 +107,8 @@ def handle_migrate_passports(args: list[str]) -> int:
     )
 
     _print_receipt(receipt)
+    if not parsed.confirm:
+        console.print(f"[dim]{PREVIEW_NOTE}[/dim]")
     # Zero scanned is a refusal and exits 1, so a wrong --root never reads as "already 2.0".
     return 1 if receipt["errors"] or not receipt["scanned"] else 0
 

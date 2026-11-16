@@ -3,7 +3,7 @@
 # Description: adopt-citizen CLI — preview or apply moving a citizen into another project
 # Version: 1.0.0
 # Created: 2026-11-08
-# Modified: 2026-11-08
+# Modified: 2026-11-15
 # =============================================
 
 """adopt-citizen orchestrator: parse, plan, apply on --apply, print the stable preview."""
@@ -15,6 +15,7 @@ from aipass.prax import logger
 from aipass.cli.apps.modules import console, error, escape
 
 from aipass.spawn.apps.handlers.adopt_citizen_ops import apply_adoption, plan_adoption
+from aipass.spawn.apps.handlers.seat_gate import PREVIEW_NOTE, seat_refusal
 from aipass.spawn.apps.handlers.json import json_handler
 
 USAGE = "drone @spawn adopt-citizen @<name> <target_root> [--apply] [--json]"
@@ -67,6 +68,10 @@ def handle_adopt_citizen(args: list[str]) -> int:
         return 2
 
     apply = "--apply" in args
+    refusal = apply and seat_refusal("adopt-citizen --apply", " ".join(positional))
+    if refusal:
+        error(refusal)
+        return 1
     try:
         plan = plan_adoption(positional[0], positional[1])
         if apply and not plan["blocked"]:
@@ -82,6 +87,8 @@ def handle_adopt_citizen(args: list[str]) -> int:
         console.print(json.dumps(plan, indent=2), markup=False, highlight=False, soft_wrap=True)
     else:
         _print_text(plan, apply)
+        if not apply:
+            console.print(f"[dim]{PREVIEW_NOTE}[/dim]")
     if plan["blocked"]:
         if "--json" not in args:
             error("blocked: " + "; ".join(plan["blocked"]))

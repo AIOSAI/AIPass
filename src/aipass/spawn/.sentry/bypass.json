@@ -118,18 +118,18 @@
       "file": "apps/modules/repair.py",
       "standard": "logged_fallback",
       "lines": [
-        105,
-        129
+        117,
+        141
       ],
-      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): _handle_relocate and _handle_rename answer an exit code, 0 success and 1 failure. The other return 1 (line 88) follows error('--relocate requires @branch and new_path') and the warning with its usage line; it is a failure. Every 1 here is a failure, and spawn.py's exit seam reads it so."
+      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): _handle_relocate and _handle_rename answer an exit code, 0 success and 1 failure. The other return 1 (line 100) follows error('--relocate requires @branch and new_path') and the warning with its usage line; it is a failure. Every 1 here is a failure, and spawn.py's exit seam reads it so."
     },
     {
       "file": "apps/modules/sync_registry.py",
       "standard": "logged_fallback",
       "lines": [
-        131
+        138
       ],
-      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): _handle_check answers an exit code, 0 clean and 1 not clean. The other return 1 (line 140) is the not-clean verdict, reported by error('Owner/identity check: N issue(s)') and the issue lines; it is a failure. Every 1 here is a failure, and spawn.py's exit seam reads it so."
+      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): _handle_check answers an exit code, 0 clean and 1 not clean. The other return 1 (line 159) is the not-clean verdict, reported by error('Owner/identity check: N issue(s)') and the issue lines; it is a failure. Every 1 here is a failure, and spawn.py's exit seam reads it so."
     },
     {
       "file": "apps/modules/update.py",

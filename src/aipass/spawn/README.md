@@ -38,7 +38,8 @@ drone @spawn delete @my_agent --retire --dry-run   # preview retiring a citizen
   A path reaches a branch in any project; `retire-project` retires a whole project from the
   admin seat. Every removal leaves a row in `.ai_central/deletions.jsonl`.
 - **Keeps the registry true.** Scan, repair, relocate, and migrate passports to the current
-  schema; each write-capable lane previews first and needs an explicit flag to act.
+  schema; each write-capable lane previews first and needs an explicit flag to act. A real
+  run that rewrites another citizen is @spawn's or the verified admin seat's; previews are open.
 - **Owns the birth shape.** The template is the source of truth for what a citizen is, and a
   newborn is pinned to start inside every startup cap the fleet's other branches publish.
 

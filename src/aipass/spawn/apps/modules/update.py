@@ -3,7 +3,7 @@
 # Description: Update orchestrator — thin CLI layer for branch updates
 # Version: 1.3.0
 # Created: 2026-03-07
-# Modified: 2026-10-27
+# Modified: 2026-11-15
 # =============================================
 
 """Update orchestrator for branch lifecycle management.
@@ -20,6 +20,7 @@ from aipass.spawn.apps.handlers.update_ops import (
     update_all,
 )
 from aipass.spawn.apps.handlers.json import json_handler
+from aipass.spawn.apps.handlers.seat_gate import PREVIEW_NOTE, seat_refusal
 from aipass.spawn.apps.handlers.registry import find_registry
 
 
@@ -87,11 +88,7 @@ def handle_update(args: list[str]) -> int:
         console.print("  [green]--trace[/green]           Enable verbose logging")
         return 1
 
-    from aipass.spawn.apps.modules.core import (
-        validate_class,
-        get_available_classes,
-        refuse_retired_or_forbidden,
-    )
+    from aipass.spawn.apps.modules.core import refuse_retired_or_forbidden
 
     # Before branch parsing: a retired class name would otherwise fall through to
     # "specify a branch name", naming the wrong problem.
@@ -102,6 +99,20 @@ def handle_update(args: list[str]) -> int:
             return 1
 
     apply = "--apply" in args
+    refusal = apply and seat_refusal("update --apply", " ".join(args))
+    if refusal:
+        error(refusal)
+        return 1
+    code = _run(args, apply)
+    if not apply:
+        console.print(f"[dim]{PREVIEW_NOTE}[/dim]")
+    return code
+
+
+def _run(args: list[str], apply: bool) -> int:
+    """Resolve the class or branch and update it; returns the exit code."""
+    from aipass.spawn.apps.modules.core import validate_class, get_available_classes
+
     dry_run = not apply
     trace = "--trace" in args
 

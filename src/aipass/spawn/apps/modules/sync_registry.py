@@ -3,7 +3,7 @@
 # Description: Registry repair — thin CLI layer for registry synchronization
 # Version: 1.2.0
 # Created: 2026-03-07
-# Modified: 2026-10-31
+# Modified: 2026-11-15
 # =============================================
 
 """Registry synchronization for branch lifecycle management.
@@ -21,6 +21,7 @@ from aipass.spawn.apps.handlers.sync_registry_ops import (
     fix_owner_identity,
 )
 from aipass.spawn.apps.handlers.json import json_handler
+from aipass.spawn.apps.handlers.seat_gate import PREVIEW_NOTE, seat_refusal
 
 
 def print_introspection():
@@ -97,6 +98,12 @@ def handle_sync_registry(args: list[str]) -> int:
 
     fix = "--fix" in flags
     dry_run = "--dry-run" in flags
+    refusal = fix and not dry_run and seat_refusal("sync-registry --fix", str(registry_path))
+    if refusal:
+        error(refusal)
+        return 1
+    if fix and dry_run:
+        console.print(f"[dim]{PREVIEW_NOTE}[/dim]")
 
     try:
         result = sync_registry(fix=fix and not dry_run, registry_path=registry_path)

@@ -3,10 +3,10 @@
 # Description: Admin grant ceremony + permanent admin-class refusal (FPLAN-0401 P2)
 # Version: 1.1.1
 # Created: 2026-08-12
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
-"""Tests for apps/modules/grant_admin.py, apps/handlers/registry.py and apps/handlers/class_registry.py: the seat-flag fences and the owner seat."""
+"""Tests for apps/modules/grant_admin.py, apps/handlers/registry.py, apps/handlers/class_registry.py and apps/handlers/seat_gate.py: the seat fences and the owner seat."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that every handler and module this file imports parses and imports
@@ -14,7 +14,8 @@
 # sentry: no-test-needed(documentation) — docstrings on the class_registry refusal helpers
 
 import json
-from unittest.mock import patch
+import sys
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -27,6 +28,7 @@ from aipass.spawn.apps.handlers.class_registry import (
     resolve_template_class,
     validate_class,
 )
+from aipass.spawn.apps.handlers import seat_gate
 from aipass.spawn.apps.handlers.registry import ADMIN_BRANCH, ensure_admin, ensure_ci_cure, move_owner
 from aipass.spawn.apps.handlers.sync_registry_ops import resolve_sync_template_class
 from aipass.spawn.apps.modules.core import spawn_agent
@@ -525,3 +527,122 @@ class TestAdminClassRefusal:
 
         for live in ("manager", "specialist"):
             assert resolve_sync_template_class(live, "SOMEBRANCH").name == "citizen"
+
+
+def _polluted(tmp_path):
+    """A tmp project with its own empty registry and one nested duplicate directory to clean."""
+    project = tmp_path / "polluted"
+    (project / "polluted").mkdir(parents=True)
+    (project / "polluted" / "junk.txt").write_text("dup", encoding="utf-8")
+    reg = project / "POLLUTED_REGISTRY.json"
+    reg.write_text(json.dumps({"metadata": {"total_branches": 0}, "branches": []}), encoding="utf-8")
+    return project, reg
+
+
+def _spawn(monkeypatch, capsys, argv):
+    """Run `drone @spawn <argv>` through spawn's entry point; (exit, stdout, stderr) with whitespace collapsed."""
+    monkeypatch.setattr(sys, "argv", ["spawn", *argv])
+    code = main()
+    out, err = capsys.readouterr()
+    return code, " ".join(out.split()), " ".join(err.split())
+
+
+def _stand(monkeypatch, caller, admin):
+    """The seat gate's rail stood on one caller and one admin verdict."""
+    monkeypatch.setattr(seat_gate, "resolve_verified_caller", lambda: caller)
+    monkeypatch.setattr(seat_gate, "is_verified_admin_caller", lambda: admin)
+
+
+def _refusals(spawn_json):
+    """The write_refused rows in the seat gate's operation log."""
+    log = spawn_json / "seat_gate_log.json"
+    rows = json.loads(log.read_text(encoding="utf-8")) if log.exists() else []
+    return [e for e in rows if e["operation"] == "write_refused"]
+
+
+def _tree(root):
+    """Every path and file's bytes under root; the registry lock is the lock's, written by readers too."""
+    return {p: (p.read_bytes() if p.is_file() else None) for p in sorted(root.rglob("*")) if p.suffix != ".lock"}
+
+
+_NOTE = "@spawn or @devpulse the branch and why"
+
+_REAL_RUNS = {
+    "repair --rename": (["repair", "--rename", "@old", "@new", "{reg}", "--apply"], "repair --apply"),
+    "repair --relocate": (["repair", "--relocate", "@nav", "src/x/nav", "{reg}", "--apply"], "repair --apply"),
+    "repair --clean-pollution": (["repair", "{project}", "--clean-pollution", "--apply"], "repair --apply"),
+    "adopt-citizen": (["adopt-citizen", "@nav", "{other}", "--apply"], "adopt-citizen --apply"),
+    "update": (["update", "@nav", "--apply"], "update --apply"),
+    "sync-registry": (["sync-registry", "{project}", "--fix"], "sync-registry --fix"),
+    "migrate-passports": (["migrate-passports", "--confirm", "--root", "{project}"], "migrate-passports --confirm"),
+}
+
+_PREVIEWS = {
+    "repair": ["repair", "{project}", "--clean-pollution"],
+    "adopt-citizen": ["adopt-citizen", "@nav", "{other}"],
+    "update": ["update", "@nav"],
+    "sync-registry": ["sync-registry", "{project}", "--fix", "--dry-run"],
+    "migrate-passports": ["migrate-passports", "--root", "{project}"],
+}
+
+
+def _argv(template, project, reg):
+    """Fill a command template's {project}, {reg} and {other} slots."""
+    slots = {"project": str(project), "reg": str(reg), "other": str(project.parent / "other")}
+    return [a.format(**slots) for a in template]
+
+
+class TestLanesThatRewriteAnotherCitizenRunFromSpawnOrTheAdmin:
+    """repair, adopt-citizen, update, sync-registry --fix and migrate-passports write for real from two seats only."""
+
+    @pytest.mark.parametrize("lane", sorted(_REAL_RUNS))
+    def test_a_real_run_off_both_seats_is_refused_touches_nothing_and_records_the_caller(
+        self, tmp_path, monkeypatch, capsys, _isolate_spawn_json, lane
+    ):
+        project, reg = _polluted(tmp_path)
+        argv, verb = _REAL_RUNS[lane]
+        _stand(monkeypatch, "@commons", False)
+        before = _tree(project)
+
+        code, _out, err = _spawn(monkeypatch, capsys, _argv(argv, project, reg))
+
+        assert code == 1
+        assert _NOTE in err
+        assert _tree(project) == before
+        assert not (tmp_path / "other").exists()
+        (row,) = _refusals(_isolate_spawn_json)
+        assert row["timestamp"] and (row["data"]["verb"], row["data"]["caller"]) == (verb, "@commons")
+
+    @pytest.mark.parametrize("caller,admin", [("@spawn", False), ("@devpulse", True)], ids=["spawn", "admin"])
+    def test_spawn_and_the_admin_seat_run_it_for_real(self, tmp_path, monkeypatch, capsys, caller, admin):
+        project, reg = _polluted(tmp_path)
+        _stand(monkeypatch, caller, admin)
+
+        code, _out, _err = _spawn(monkeypatch, capsys, _argv(_REAL_RUNS["repair --clean-pollution"][0], project, reg))
+
+        assert code == 0
+        assert not (project / "polluted").exists()
+
+    def test_a_raising_verifier_refuses(self, tmp_path, monkeypatch, capsys):
+        project, reg = _polluted(tmp_path)
+        monkeypatch.setattr(seat_gate, "resolve_verified_caller", lambda: "@commons")
+        monkeypatch.setattr(seat_gate, "is_verified_admin_caller", Mock(side_effect=RuntimeError("unreadable")))
+
+        code, _out, _err = _spawn(monkeypatch, capsys, _argv(_REAL_RUNS["repair --clean-pollution"][0], project, reg))
+
+        assert code == 1
+        assert (project / "polluted" / "junk.txt").read_text(encoding="utf-8") == "dup"
+
+    @pytest.mark.parametrize("lane", sorted(_PREVIEWS))
+    def test_a_preview_off_both_seats_runs_names_who_may_apply_and_writes_nothing(
+        self, tmp_path, monkeypatch, capsys, _isolate_spawn_json, lane
+    ):
+        project, reg = _polluted(tmp_path)
+        _stand(monkeypatch, "@commons", False)
+        before = _tree(project)
+
+        _code, out, _err = _spawn(monkeypatch, capsys, _argv(_PREVIEWS[lane], project, reg))
+
+        assert _NOTE in out
+        assert _tree(project) == before
+        assert _refusals(_isolate_spawn_json) == []

@@ -27,6 +27,20 @@ never mistaken for "your fleet is already migrated" by anything reading the exit
 
 ---
 
+## Seats — who runs a lane that rewrites another citizen
+
+A real run of `repair --apply` (relocate, rename, clean-pollution, scan), `adopt-citizen --apply`,
+`update --apply`, `sync-registry --fix` and `migrate-passports --confirm` moves, renames,
+rewrites or removes files in branches that are not the caller's, so it runs from @spawn's own
+verified seat or the verified admin seat only (`apps/handlers/seat_gate.py`, ai_mail's
+`door_verified_caller` rail; a verifier that raises answers no). Any other seat is refused
+before anything is read or written, exits 1, is told to mail @spawn or @devpulse the branch and
+why, and the refusal is logged with the caller, the verb, the target and the time
+(`write_refused`). Every preview stays open to every seat and ends by naming who may run it for
+real. `delete` is stricter: its real run is the admin seat's alone ([retire.md](retire.md)).
+
+---
+
 ## Introspection
 
 The module and command inventory is generated from the code that runs it, so it is never

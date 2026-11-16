@@ -3,7 +3,7 @@
 # Description: Shared test fixtures for spawn test suite
 # Version: 1.3.1
 # Created: 2026-03-07
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Shared test fixtures for spawn test suite."""
@@ -21,6 +21,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import aipass.spawn.apps.handlers.file_ops as file_ops
+import aipass.spawn.apps.handlers.seat_gate as seat_gate
 from aipass.cli.apps.modules import display
 
 
@@ -141,6 +142,12 @@ def clean_command_state():
     """error() marks the process failed; a test must not hand that to the next."""
     yield
     display.reset_command_state()
+
+
+@pytest.fixture(autouse=True)
+def spawn_seat(monkeypatch):
+    """The seat gate's caller is @spawn unless a test stands another seat; the rail itself is ai_mail's."""
+    monkeypatch.setattr(seat_gate, "resolve_verified_caller", lambda: "@spawn")
 
 
 @pytest.fixture
