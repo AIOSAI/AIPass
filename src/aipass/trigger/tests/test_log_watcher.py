@@ -71,9 +71,10 @@ class TestDetectBranchFromPath:
         path = str(_SYNTHETIC_HOME / "src" / "aipass" / "flow" / "logs" / "flow_planner.log")
         assert lw.detect_branch_from_path(path) == "FLOW"
 
-    def test_system_logs_mapped_file(self):
+    def test_system_logs_mapped_file(self, monkeypatch):
         """Uses SYSTEM_LOGS_BRANCH_MAP for known filenames."""
-        path = str(lw.SYSTEM_LOGS_DIR / "telegram_bridge.log")
+        monkeypatch.setitem(lw.SYSTEM_LOGS_BRANCH_MAP, "bridge.log", "API")
+        path = str(lw.SYSTEM_LOGS_DIR / "bridge.log")
         assert lw.detect_branch_from_path(path) == "API"
 
     def test_system_logs_prefix_match(self):
@@ -132,11 +133,11 @@ class TestParsePraxLogLine:
 
     def test_dash_format_error(self):
         """Parses dash-separated ERROR line (Python logging format)."""
-        line = "2026-02-10 15:12:29,460 - telegram_bridge - ERROR - Connection lost"
+        line = "2026-02-10 15:12:29,460 - api_bot_base - ERROR - Connection lost"
         result = lw.parse_prax_log_line(line)
         assert result is not None
         assert result["level"] == "ERROR"
-        assert result["module"] == "telegram_bridge"
+        assert result["module"] == "api_bot_base"
         assert result["message"] == "Connection lost"
 
     def test_malformed_line_returns_none(self):
@@ -845,7 +846,7 @@ class TestSystemLogTwinIsNotProcessedTwice:
     def test_system_log_without_a_twin_is_still_watched(self, monkeypatch, tmp_path):
         """A real system-level log — no branch writes it — stays watched."""
         _point_at_tree(lw, monkeypatch, tmp_path)
-        orphan = tmp_path / "system_logs" / "telegram-bot-api.log"
+        orphan = tmp_path / "system_logs" / "standalone-service.log"
         orphan.parent.mkdir(parents=True, exist_ok=True)
         orphan.touch()
         watcher = lw.BranchLogWatcher()

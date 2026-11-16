@@ -51,10 +51,7 @@ _last_flush_time: float = 0.0
 _flush_lock = threading.Lock()
 
 # For system_logs files outside the <branch>_<module>.log convention.
-SYSTEM_LOGS_BRANCH_MAP: Dict[str, str] = {
-    "telegram_bridge.log": "API",
-    "telegram_chats.log": "API",
-}
+SYSTEM_LOGS_BRANCH_MAP: Dict[str, str] = {}
 
 SYSTEM_LOGS_DIR = AIPASS_PKG_ROOT.parent.parent / "system_logs"
 
