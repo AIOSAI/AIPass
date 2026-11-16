@@ -3,7 +3,7 @@
 # Description: Startup event handler with error catch-up scanning
 # Version: 1.6.0
 # Created: 2025-12-04
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Startup Event Handler - Run startup checks
@@ -76,11 +76,7 @@ def _load_trigger_data() -> Dict[str, Any]:
 
 def _save_trigger_data(data: Dict[str, Any]) -> None:
     """Save error_catchup.json."""
-    try:
-        atomic_write_json(CATCHUP_STATE_FILE, data)
-    except Exception as exc:
-        logger.warning(f"save trigger data failed: {exc}")
-        return
+    atomic_write_json(CATCHUP_STATE_FILE, data)
 
 
 def _log_suppression(reason: str) -> None:

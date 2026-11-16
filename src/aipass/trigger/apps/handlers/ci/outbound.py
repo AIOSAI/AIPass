@@ -3,7 +3,7 @@
 # Description: CI red lane's doors out - mail, dispatch (mail plus wake), the notification feed, the awake count
 # Version: 1.1.0
 # Created: 2026-10-22
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -72,19 +72,16 @@ def dispatch(to_branch: str, subject: str, body: str) -> bool:
 
 
 def feed(state: str, title: str, body: str, /, **extra: Any) -> str:
-    """One `system` event from source `ci` on the feed: answers written, refused or unavailable."""
+    """One `system` event from source `ci` on the feed: answers written or refused."""
     payload: Dict[str, str] = {
         key: str(extra.get(key, "") or "") for key in ("run_id", "workflow", "step", "owner", "url")
     }
     payload["state"] = state
-    try:
-        import aipass.ai_mail as ai_mail
+    from aipass.ai_mail import send_notification
 
-        send = ai_mail.send_notification
-    except (ImportError, OSError) as exc:
-        logger.warning(f"feed not written, ai_mail unavailable: {exc}")
-        return "unavailable"
-    written = bool(send(kind="system", source="ci", title=title.splitlines()[0][:120], body=body, extra=payload))
+    written = bool(
+        send_notification(kind="system", source="ci", title=title.splitlines()[0][:120], body=body, extra=payload)
+    )
     json_handler.log_operation("ci_feed", {"state": state, "written": written})
     return "written" if written else "refused"
 
@@ -102,10 +99,5 @@ def awake_count() -> int:
 
 
 def cap_allows() -> bool:
-    """True when one more wake stays within the cap; an unreadable register answers no, so the wake queues."""
-    try:
-        count = awake_count()
-    except Exception as exc:
-        logger.warning(f"dispatch register unreadable, wake queued: {exc}")
-        return False
-    return count < AWAKE_CAP
+    """True when one more wake stays within the cap; an unreadable register raises."""
+    return awake_count() < AWAKE_CAP

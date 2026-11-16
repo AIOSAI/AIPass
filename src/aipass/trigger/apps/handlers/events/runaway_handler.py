@@ -3,7 +3,7 @@
 # Description: Runaway log event handler with per-file cooldown gating
 # Version: 1.7.0
 # Created: 2026-07-14
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -82,30 +82,25 @@ def _write_alert(
     file_path: str, severity: str, branch: str, rate: float, duration: float, forever: bool = False
 ) -> None:
     """Write an alert entry to .aipass/alerts.json."""
-    try:
-        expires_at = None if forever else (datetime.now() + timedelta(seconds=DEFAULT_ALERT_TTL_SECONDS)).isoformat()
-        alert = {
-            "id": str(uuid.uuid4()),
-            "source": "prax",
-            "severity": severity,
-            "title": f"Runaway log: {Path(file_path).name}",
-            "body": (
-                f"Log file {file_path} producing {rate:.0f} lines/min sustained {duration:.0f}s. Branch: {branch}."
-            ),
-            "created_at": datetime.now().isoformat(),
-            "expires_at": expires_at,
-        }
-        ALERTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with json_file_lock(ALERTS_FILE):
-            existing = {"alerts": []}
-            if ALERTS_FILE.exists():
-                raw = ALERTS_FILE.read_text(encoding="utf-8").strip()
-                if raw:
-                    existing = json.loads(raw)
-            existing.setdefault("alerts", []).append(alert)
-            atomic_write_json(ALERTS_FILE, existing)
-    except Exception as exc:
-        logger.warning(f"_write_alert failed: {exc}")
+    expires_at = None if forever else (datetime.now() + timedelta(seconds=DEFAULT_ALERT_TTL_SECONDS)).isoformat()
+    alert = {
+        "id": str(uuid.uuid4()),
+        "source": "prax",
+        "severity": severity,
+        "title": f"Runaway log: {Path(file_path).name}",
+        "body": (f"Log file {file_path} producing {rate:.0f} lines/min sustained {duration:.0f}s. Branch: {branch}."),
+        "created_at": datetime.now().isoformat(),
+        "expires_at": expires_at,
+    }
+    ALERTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with json_file_lock(ALERTS_FILE):
+        existing = {"alerts": []}
+        if ALERTS_FILE.exists():
+            raw = ALERTS_FILE.read_text(encoding="utf-8").strip()
+            if raw:
+                existing = json.loads(raw)
+        existing.setdefault("alerts", []).append(alert)
+        atomic_write_json(ALERTS_FILE, existing)
 
 
 def handle_runaway_log_detected(

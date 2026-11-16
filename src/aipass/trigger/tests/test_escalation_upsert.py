@@ -3,7 +3,7 @@
 # Description: Tests that escalation digests upsert in place instead of stacking
 # Version: 1.0.1
 # Created: 2026-08-10
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/escalation.py digest upsert keys and the send adapter in handlers/events/registry.py."""
@@ -400,3 +400,15 @@ class TestOtherLanesUnkeyed:
         adapter(to_branch="@backup", subject="s", message="body", auto_execute=True)
 
         assert mailbox[-1]["email_data"]["message"].startswith("⚡ DISPATCH TASK")
+
+
+def test_setup_handlers_without_ai_mail_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pins the default: with ai_mail unimportable the bus was wired with no mailer and only a warning said so."""
+    trigger = MagicMock()
+    monkeypatch.setattr(core, "trigger", trigger)
+    monkeypatch.delattr(email_send, "deliver_email_to_branch")
+
+    with pytest.raises(ImportError):
+        setup_handlers()
+
+    trigger.on.assert_not_called()

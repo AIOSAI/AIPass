@@ -3,7 +3,7 @@
 # Description: Repeat-signature escalation digest — repeat warns/errors email the operator
 # Version: 1.8.0
 # Created: 2026-08-08
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -242,7 +242,7 @@ def _seen_order(entry: Dict[str, Any]) -> tuple:
 
 
 def _load_state() -> Dict[str, Any]:
-    """Read the state file, tolerating absence and corruption."""
+    """Read the state file; absent starts empty, unreadable raises."""
     if not STATE_FILE.exists():
         return _empty_state()
     try:
@@ -250,8 +250,7 @@ def _load_state() -> Dict[str, Any]:
 
         data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
     except Exception as exc:
-        logger.warning(f"unreadable escalation state, starting empty: {exc}")
-        return _empty_state()
+        raise RuntimeError(f"escalation state unreadable ({STATE_FILE.name}): {exc}") from exc
     if not isinstance(data, dict) or not isinstance(data.get("signatures"), dict):
         logger.warning("escalation state has wrong shape, starting empty")
         return _empty_state()

@@ -3,7 +3,7 @@
 # Description: Unit tests for the error_registry handler
 # Version: 1.3.2
 # Created: 2026-03-24
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/error_registry.py: the dedup engine, circuit breaker and backoff."""
@@ -943,6 +943,23 @@ class TestEmptyJsonResilience:
         assert status["cooldown_seconds"] == 300
         assert er.get_dispatch_count("any_fp") == 0
 
+    def test_an_unreadable_breaker_state_raises_and_is_left_untouched(self, tmp_path: Path) -> None:
+        """Pins the default: a torn breaker file read as a closed breaker, so an open one dispatched again."""
+        state_file = tmp_path / "trigger_json" / "trigger_cb_state.json"
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text("{torn", encoding="utf-8")
+
+        with pytest.raises(RuntimeError, match=r"circuit breaker state unreadable \(trigger_cb_state\.json\)"):
+            er.circuit_breaker_allows()
+        assert state_file.read_text(encoding="utf-8") == "{torn"
+
+    def test_a_breaker_state_that_cannot_be_saved_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Pins the default: a failed save was a warning, and the trip it held was lost on the next read."""
+        monkeypatch.setattr(er, "atomic_write_json", MagicMock(side_effect=OSError("disk full")))
+
+        with pytest.raises(RuntimeError, match=r"circuit breaker state unsaved \(trigger_cb_state\.json\).*disk full"):
+            er.circuit_breaker_record_error()
+
     def test_report_with_empty_registry(self, tmp_path: Path) -> None:
         """report() works when registry file is empty (creates fresh)."""
         registry_dir = tmp_path / "trigger_json"
@@ -1362,8 +1379,9 @@ def test_a_prefix_matching_two_rows_finds_neither_but_a_full_fingerprint_still_d
 
     assert er.get_entry("ab") is None
     assert er.update_status("ab", "suppressed") is False
-    assert er.get_entry(second)["fingerprint"] == second
-    assert er.get_entry("ab1")["fingerprint"] == first
+    full, prefixed = er.get_entry(second), er.get_entry("ab1")
+    assert full is not None and full["fingerprint"] == second
+    assert prefixed is not None and prefixed["fingerprint"] == first
 
 
 def test_purge_keeping_suppressed_drops_stale_rows_but_not_suppressed_ones(tmp_path: Path) -> None:

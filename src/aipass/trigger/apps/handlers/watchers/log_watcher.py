@@ -3,7 +3,7 @@
 # Description: Centralized log file watcher for system_logs directory
 # Version: 1.4.0
 # Created: 2026-01-31
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -132,33 +132,29 @@ class LogFileWatcher(WatchdogFileSystemEventHandler):
         if not known_inode or last_pos <= 0:
             return
 
-        try:
-            rotated: Optional[Path] = None
-            skipped = 0
-            for index in range(1, log_backup_count() + 1):
-                backup = Path(f"{file_path}.{index}")
-                if not backup.exists():
-                    break
-                if backup.stat().st_ino == known_inode:
-                    rotated = backup
-                    skipped = index - 1
-                    break
-            if rotated is None:
-                return
-            if skipped:
-                logger.warning(
-                    "Rotated log found at '%s' - %d earlier backup(s) rotated past unread (not replayed)",
-                    rotated,
-                    skipped,
-                )
-            if rotated.stat().st_size <= last_pos:
-                return
-            with open(rotated, "r", encoding="utf-8", errors="ignore") as f:
-                f.seek(last_pos)
-                tail = f.read()
-        except OSError as exc:
-            logger.warning("Failed to drain rotated log for '%s': %s", file_path, exc)
+        rotated: Optional[Path] = None
+        skipped = 0
+        for index in range(1, log_backup_count() + 1):
+            backup = Path(f"{file_path}.{index}")
+            if not backup.exists():
+                break
+            if backup.stat().st_ino == known_inode:
+                rotated = backup
+                skipped = index - 1
+                break
+        if rotated is None:
             return
+        if skipped:
+            logger.warning(
+                "Rotated log found at '%s' - %d earlier backup(s) rotated past unread (not replayed)",
+                rotated,
+                skipped,
+            )
+        if rotated.stat().st_size <= last_pos:
+            return
+        with open(rotated, "r", encoding="utf-8", errors="ignore") as f:
+            f.seek(last_pos)
+            tail = f.read()
 
         if not tail.strip():
             return
@@ -222,65 +218,61 @@ class LogFileWatcher(WatchdogFileSystemEventHandler):
 
     def _process_log_line(self, branch: str, log_line: str, log_file: str) -> None:
         """Process a log line and fire appropriate events."""
-        try:
-            from aipass.trigger.apps.modules.core import trigger
+        from aipass.trigger.apps.modules.core import trigger
 
-            level = detect_log_level(log_line)
-            message = parse_log_message(log_line)
-            module_name = extract_module_name(log_line)
-            timestamp = datetime.now().isoformat()
-            error_hash = generate_error_hash(module_name, message)
+        level = detect_log_level(log_line)
+        message = parse_log_message(log_line)
+        module_name = extract_module_name(log_line)
+        timestamp = datetime.now().isoformat()
+        error_hash = generate_error_hash(module_name, message)
 
-            event_data = {
-                "branch": branch,
-                "message": message,
-                "level": level,
-                "module_name": module_name,
-                "timestamp": timestamp,
-                "log_file": log_file,
-                "error_hash": error_hash,
-            }
+        event_data = {
+            "branch": branch,
+            "message": message,
+            "level": level,
+            "module_name": module_name,
+            "timestamp": timestamp,
+            "log_file": log_file,
+            "error_hash": error_hash,
+        }
 
-            if level == "error":
-                try:
-                    from aipass.trigger.apps.handlers.error_registry import report as registry_report
+        if level == "error":
+            try:
+                from aipass.trigger.apps.handlers.error_registry import report as registry_report
 
-                    result = registry_report(
-                        error_type="ERROR", message=message, component=branch, log_path=log_file, severity="medium"
-                    )
-                    error_count = result.get("count", 1)
-                    trigger.fire(
-                        "error_detected",
-                        branch=branch,
-                        module=module_name,
-                        message=message,
-                        log_path=log_file,
-                        error_hash=result.get("id", error_hash),
-                        timestamp=timestamp,
-                        fingerprint=result.get("fingerprint", ""),
-                        registry_id=result.get("id", ""),
-                        first_seen=result.get("first_seen", ""),
-                        last_seen=result.get("last_seen", ""),
-                        count=error_count,
-                    )
-                except Exception as exc:
-                    logger.warning("Registry unavailable, falling back to error_detected: %s", exc)
-                    trigger.fire(
-                        "error_detected",
-                        branch=branch,
-                        module=module_name,
-                        message=message,
-                        log_path=log_file,
-                        error_hash=error_hash,
-                        timestamp=timestamp,
-                    )
-                json_handler.log_operation("system_log_event", {"level": level, "module": module_name})
-            elif level == "warning":
-                trigger.fire("warning_logged", **event_data)
-                json_handler.log_operation("system_log_event", {"level": level, "module": module_name})
-
-        except Exception as exc:
-            logger.warning("Failed to process log line from '%s': %s", log_file, exc)
+                result = registry_report(
+                    error_type="ERROR", message=message, component=branch, log_path=log_file, severity="medium"
+                )
+                error_count = result.get("count", 1)
+                trigger.fire(
+                    "error_detected",
+                    branch=branch,
+                    module=module_name,
+                    message=message,
+                    log_path=log_file,
+                    error_hash=result.get("id", error_hash),
+                    timestamp=timestamp,
+                    fingerprint=result.get("fingerprint", ""),
+                    registry_id=result.get("id", ""),
+                    first_seen=result.get("first_seen", ""),
+                    last_seen=result.get("last_seen", ""),
+                    count=error_count,
+                )
+            except Exception as exc:
+                logger.warning("Registry unavailable, falling back to error_detected: %s", exc)
+                trigger.fire(
+                    "error_detected",
+                    branch=branch,
+                    module=module_name,
+                    message=message,
+                    log_path=log_file,
+                    error_hash=error_hash,
+                    timestamp=timestamp,
+                )
+            json_handler.log_operation("system_log_event", {"level": level, "module": module_name})
+        elif level == "warning":
+            trigger.fire("warning_logged", **event_data)
+            json_handler.log_operation("system_log_event", {"level": level, "module": module_name})
 
     def initialize_positions(self) -> None:
         """Initialize log positions to END of existing files."""

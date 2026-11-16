@@ -3,7 +3,7 @@
 # Description: Trigger event bus for AIPass system-wide event handling
 # Version: 1.6.0
 # Created: 2026-02-03
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -18,13 +18,7 @@ from aipass.trigger.apps.handlers.json import json_handler
 
 def print_introspection():
     """Display module introspection info."""
-    try:
-        from aipass.cli.apps.modules.display import console
-    # OSError too: an uncured peer's import guard raises FileNotFoundError.
-    except (ImportError, OSError):
-        from rich.console import Console
-
-        console = Console()
+    from aipass.cli.apps.modules.display import console
 
     console.print()
     console.print("[bold cyan]core Module[/bold cyan]")
@@ -59,12 +53,9 @@ class Trigger:
     def _ensure_initialized(cls):
         """Auto-register handlers on first use"""
         if not cls._initialized:
-            try:
-                from aipass.trigger.apps.handlers.events.registry import setup_handlers
+            from aipass.trigger.apps.handlers.events.registry import setup_handlers
 
-                setup_handlers()
-            except ImportError as e:
-                logger.warning(f"[TRIGGER] Handlers not available: {e}")
+            setup_handlers()
             cls._initialized = True
 
     @classmethod

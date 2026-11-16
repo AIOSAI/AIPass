@@ -3,7 +3,7 @@
 # Description: Trigger package paths and atomic JSON writes
 # Version: 1.9.0
 # Created: 2026-03-09
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -38,10 +38,7 @@ def atomic_write_json(path: Path, data, indent: int = 2, ensure_ascii: bool = Tr
             json.dump(data, f, indent=indent, ensure_ascii=ensure_ascii)
         os.replace(tmp_path, str(path))
     except BaseException:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
+        Path(tmp_path).unlink(missing_ok=True)
         raise
 
 
@@ -75,9 +72,9 @@ def _archive_legacy_file(path: Path) -> bool:
         return False
 
 
-def migrate_json_file(legacy_path: Path, new_path: Path) -> bool | None:
-    """Move live JSON state from a legacy path to its new home, losslessly."""
-    # New present is a no-op: the legacy name is json_handler's again. None means unreadable, left in place.
+def migrate_json_file(legacy_path: Path, new_path: Path) -> bool:
+    """Move live JSON state from a legacy path to its new home, losslessly; an unreadable legacy file raises."""
+    # New present is a no-op: the legacy name is json_handler's again. Unreadable is left in place for a human.
     # Locks the LEGACY path: callers already hold the new file's lock, and a second flock would deadlock.
     if new_path.exists() or not legacy_path.exists():
         return False
@@ -87,8 +84,7 @@ def migrate_json_file(legacy_path: Path, new_path: Path) -> bool | None:
         try:
             data = json.loads(legacy_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError, ValueError) as exc:
-            logger.warning(f"migration of {legacy_path.name} skipped, unreadable: {exc}")
-            return None
+            raise RuntimeError(f"migration refused: {legacy_path.name} unreadable: {exc}") from exc
         atomic_write_json(new_path, data)
         return _archive_legacy_file(legacy_path)
 
@@ -108,14 +104,7 @@ def write_text_file(path: Path, content: str, encoding: str = "utf-8") -> None:
 
 def print_introspection():
     """Display module introspection info."""
-    try:
-        from aipass.cli.apps.modules.display import console
-    # OSError too: an uncured peer's import guard raises FileNotFoundError.
-    except (ImportError, OSError):
-        logger.warning("CLI console not available, using rich fallback")
-        from rich.console import Console
-
-        console = Console()
+    from aipass.cli.apps.modules.display import console
 
     console.print()
     console.print("[bold cyan]config Module[/bold cyan]")

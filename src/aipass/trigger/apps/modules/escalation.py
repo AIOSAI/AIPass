@@ -3,7 +3,7 @@
 # Description: Escalation digest CLI — inspect repeat warning/error signatures
 # Version: 1.2.0
 # Created: 2026-08-08
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -12,7 +12,6 @@ Escalation Digest Module — inspect the repeat-signature lane
 
 import sys
 
-from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.trigger.apps.handlers import escalation
 from aipass.trigger.apps.handlers.json import json_handler
 
@@ -21,14 +20,7 @@ _SUBCOMMANDS = ["status", "list", "config"]
 
 def print_introspection():
     """Display module introspection info."""
-    try:
-        from aipass.cli.apps.modules.display import console
-    # OSError too: an uncured peer's import guard raises FileNotFoundError.
-    except (ImportError, OSError):
-        logger.info("CLI console not available, using rich fallback")
-        from rich.console import Console
-
-        console = Console()
+    from aipass.cli.apps.modules.display import console
 
     console.print()
     console.print("[bold cyan]escalation Module[/bold cyan]")

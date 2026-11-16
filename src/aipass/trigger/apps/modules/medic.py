@@ -3,7 +3,7 @@
 # Description: Medic toggle module for auto-healing error dispatch control
 # Version: 1.12.0
 # Created: 2026-02-12
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -58,14 +58,7 @@ def run_error_catchup(fire_event: Callable[..., object] | None = None) -> None:
 
 def print_introspection():
     """Display module introspection info."""
-    try:
-        from aipass.cli.apps.modules.display import console
-    # OSError too: an uncured peer's import guard raises FileNotFoundError.
-    except (ImportError, OSError):
-        logger.info("CLI console not available, using rich fallback")
-        from rich.console import Console
-
-        console = Console()
+    from aipass.cli.apps.modules.display import console
 
     console.print()
     console.print("[bold cyan]medic Module[/bold cyan]")

@@ -3,7 +3,7 @@
 # Description: Branch log events module for log watcher public API
 # Version: 1.2.0
 # Created: 2026-02-02
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -30,14 +30,7 @@ from rich.markup import escape
 
 def print_introspection():
     """Display module introspection info."""
-    try:
-        from aipass.cli.apps.modules.display import console
-    # OSError too: an uncured peer's import guard raises FileNotFoundError.
-    except (ImportError, OSError):
-        logger.info("CLI console not available, using rich fallback")
-        from rich.console import Console
-
-        console = Console()
+    from aipass.cli.apps.modules.display import console
 
     console.print()
     console.print("[bold cyan]branch_log_events Module[/bold cyan]")

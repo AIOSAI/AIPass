@@ -3,7 +3,7 @@
 # Name: test_import_dead_cwd.py
 # Description: repo_root never answers with the process cwd
 # Created: 2026-08-31
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # Version: 1.5.0
 # Category: trigger/tests
 # =============================================
@@ -16,6 +16,7 @@
 import subprocess
 import sys
 from pathlib import Path
+import pytest
 
 from aipass.trigger.apps.handlers import repo_root
 
@@ -122,3 +123,18 @@ def test_the_folding_injection_is_a_real_negative_control(tmp_path, monkeypatch)
         assert not repo_root.exists_exactly(bait_dir / "AIPASS_REGISTRY.json")
     else:
         assert not repo_root.exists_exactly(bait_dir / "AIPASS_REGISTRY.json")
+
+
+def test_an_unlistable_parent_raises_never_answers_exists(tmp_path):
+    """Pins the default: an unlistable parent answered True, so a case-folded marker could pass unchecked."""
+    home = tmp_path / "home"
+    home.mkdir()
+    marker = home / "AIPASS_REGISTRY.json"
+    marker.write_text("{}", encoding="utf-8")
+    home.chmod(0o300)  # searchable, not listable: exists() still answers, scandir cannot
+
+    try:
+        with pytest.raises(PermissionError):
+            repo_root.exists_exactly(marker)
+    finally:
+        home.chmod(0o700)

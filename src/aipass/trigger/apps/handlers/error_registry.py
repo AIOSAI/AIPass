@@ -3,7 +3,7 @@
 # Description: Structured error tracking and registry for Medic v2
 # Version: 2.8.0
 # Created: 2026-02-13
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -80,21 +80,21 @@ class CircuitBreakerState:
 
 def _save_circuit_breaker_state(breaker: CircuitBreakerState, per_fingerprint: dict) -> None:
     """Write breaker + per-fingerprint state to trigger_cb_state.json; the caller holds the lock."""
+    state_data = {
+        "circuit_breaker": {
+            "state": breaker.state,
+            "opened_at": breaker.opened_at,
+            "cooldown_seconds": breaker.cooldown_seconds,
+            "recent_errors": breaker.recent_errors,
+            "summary_sent": breaker.summary_sent,
+            "half_open_allow": breaker.half_open_allow,
+        },
+        "per_fingerprint": per_fingerprint,
+    }
     try:
-        state_data = {
-            "circuit_breaker": {
-                "state": breaker.state,
-                "opened_at": breaker.opened_at,
-                "cooldown_seconds": breaker.cooldown_seconds,
-                "recent_errors": breaker.recent_errors,
-                "summary_sent": breaker.summary_sent,
-                "half_open_allow": breaker.half_open_allow,
-            },
-            "per_fingerprint": per_fingerprint,
-        }
         atomic_write_json(CB_STATE_FILE, state_data)
     except Exception as exc:
-        logger.warning("Failed to save circuit breaker state: %s", exc)
+        raise RuntimeError(f"circuit breaker state unsaved ({CB_STATE_FILE.name}): {exc}") from exc
 
 
 def _load_circuit_breaker_state() -> Tuple[CircuitBreakerState, dict]:
@@ -120,7 +120,7 @@ def _load_circuit_breaker_state() -> Tuple[CircuitBreakerState, dict]:
         breaker.summary_sent = bool(cb_data.get("summary_sent", False))
         breaker.half_open_allow = bool(cb_data.get("half_open_allow", True))
     except Exception as exc:
-        logger.warning("Failed to load circuit breaker state: %s", exc)
+        raise RuntimeError(f"circuit breaker state unreadable ({CB_STATE_FILE.name}): {exc}") from exc
     return breaker, per_fingerprint
 
 

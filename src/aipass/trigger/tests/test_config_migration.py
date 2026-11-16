@@ -3,7 +3,7 @@
 # Description: Tests for migrate_json_file - moving live state off trio-owned paths
 # Version: 1.0.0
 # Created: 2026-08-07
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/config.py: migrate_json_file and _archive_legacy_file."""
@@ -13,6 +13,8 @@
 
 import json
 from pathlib import Path
+
+import pytest
 
 from aipass.trigger.apps.config import ARCHIVE_DIR_NAME, migrate_json_file
 
@@ -93,14 +95,14 @@ class TestMigrateJsonFile:
         assert not (tmp_path / ARCHIVE_DIR_NAME).exists()
 
     def test_unreadable_legacy_is_left_in_place(self, tmp_path: Path) -> None:
-        """Corrupt legacy file is not archived and not guessed at — a human decides."""
+        """Pins the default: an unreadable legacy file answered None under a warning; now it raises, left in place."""
         legacy = tmp_path / "trigger_config.json"
         new = tmp_path / "medic_state.json"
         legacy.parent.mkdir(parents=True, exist_ok=True)
         legacy.write_text("{not json", encoding="utf-8")
 
-        # None, not False: False means "nothing to migrate"; an unreadable file is work left undone.
-        assert migrate_json_file(legacy, new) is None
+        with pytest.raises(RuntimeError, match=r"trigger_config\.json unreadable"):
+            migrate_json_file(legacy, new)
         assert legacy.exists()
         assert not new.exists()
 

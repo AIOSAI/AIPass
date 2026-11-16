@@ -3,7 +3,7 @@
 # Description: Error detected event handler with Medic v2 dispatch gating
 # Version: 2.14.0
 # Created: 2026-02-10
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -97,7 +97,7 @@ def _get_registered_emails() -> set:
     return emails
 
 
-def _tell_registry_owner(reason: str) -> None:
+def _tell_registry_owner(reason: str, send: Callable[..., bool]) -> None:
     """Dispatch the registry's owner once per failure; a readable census re-arms it."""
     global _census_alerted
     if _census_alerted == reason:
@@ -106,7 +106,7 @@ def _tell_registry_owner(reason: str) -> None:
         f"Medic cannot read the branch registry, so every error dispatch is held until it can: {reason}\n\n"
         f"Path: {BRANCH_REGISTRY_FILE}\nEach held dispatch is recorded in trigger/logs/medic_suppressed.jsonl."
     )
-    sent = _send_email(
+    sent = send(
         to_branch=REGISTRY_OWNER,
         subject="[MEDIC] branch registry unreadable",
         message=body,
@@ -328,7 +328,7 @@ def handle_error_detected(
         registered_emails = _get_registered_emails()
     except RuntimeError as exc:
         _write_suppression_log(f"Held, {exc} - no dispatch for", branch, module, message)
-        _tell_registry_owner(str(exc))
+        _tell_registry_owner(str(exc), _send_email)
         return
     _census_alerted = None
     if recipient not in registered_emails:

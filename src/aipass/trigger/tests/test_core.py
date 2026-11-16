@@ -3,7 +3,7 @@
 # Description: Unit tests for trigger event bus core module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/core.py, the Trigger event bus."""
@@ -293,6 +293,16 @@ def test_a_second_wiring_pass_does_not_double_fire(trigger_cls):
     assert calls == ["a", "b"]
 
 
+def test_a_handler_registry_that_cannot_import_fails_the_fire(trigger_cls, monkeypatch):
+    """Pins the default: a failed handler import logged a warning and the bus ran with no handlers."""
+    monkeypatch.setattr(registry, "setup_handlers", MagicMock(side_effect=ImportError("no ai_mail")))
+
+    with pytest.raises(ImportError, match="no ai_mail"):
+        trigger_cls.fire("error_detected")
+
+    assert trigger_cls._initialized is False
+
+
 def test_a_header_event_reaches_no_handler_on_the_real_wiring(trigger_cls, monkeypatch, tmp_path, mock_infrastructure):
     """cli's header fire runs nothing in trigger and writes no operation line.
 
@@ -515,6 +525,8 @@ def test_a_failing_handler_logs_to_the_trail_once_per_interval(trigger_cls, monk
     """The bus failure line is a loop on a watched log: it goes to the failures trail, never door one."""
     clock = [1000.0]
     monkeypatch.setattr(failure_report, "monotonic", lambda: clock[0])
+    log = MagicMock()
+    monkeypatch.setattr(core, "logger", log)
     trigger_cls.on("error_detected", MagicMock(side_effect=RuntimeError("boom"), __name__="fail_handler"))
 
     for _ in range(4):
@@ -527,7 +539,7 @@ def test_a_failing_handler_logs_to_the_trail_once_per_interval(trigger_cls, monk
     lines = _failure_lines(tmp_path)
     assert [line["level"] for line in lines] == ["ERROR", "ERROR"]
     assert "5 in a row" in lines[-1]["msg"]
-    assert core.logger.error.call_count == 0
+    assert log.error.call_count == 0
 
 
 def test_a_failing_handler_shows_in_medic_state_and_the_manager_is_told_once(

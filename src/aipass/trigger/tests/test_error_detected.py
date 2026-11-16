@@ -3,7 +3,7 @@
 # Description: Tests for error_detected event handler with Medic v2 dispatch gating
 # Version: 1.4.0
 # Created: 2026-04-25
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/events/error_detected.py and the dispatch gates it runs."""
@@ -276,11 +276,15 @@ class TestHandleErrorDetectedGates:
 
         send.assert_not_called()
 
-    def test_a_wake_failure_after_delivery_raises_once_the_dispatch_is_recorded(self) -> None:
+    def test_a_wake_failure_after_delivery_raises_once_the_dispatch_is_recorded(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Pins the warning-only wake: a delivered mail that never woke its branch reached only a log line."""
         mod = _import_module()
         send = _setup_happy_path(mod)
-        wake.wake_branch.side_effect = RuntimeError("no session")
+        monkeypatch.setattr(wake, "wake_branch", MagicMock(side_effect=RuntimeError("no session")))
+        record = MagicMock()
+        monkeypatch.setattr(mod, "registry_record_dispatch", record)
 
         with pytest.raises(RuntimeError, match="mail delivered to @flow but wake failed.*no session"):
             mod.handle_error_detected(
@@ -288,19 +292,22 @@ class TestHandleErrorDetectedGates:
             )
 
         send.assert_called_once()
-        mod.registry_record_dispatch.assert_called_once_with("fp1")
+        record.assert_called_once_with("fp1")
 
-    def test_a_registry_owner_wake_failure_raises_after_the_hold_is_recorded(self, tmp_path: Path) -> None:
+    def test_a_registry_owner_wake_failure_raises_after_the_hold_is_recorded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Pins the warning-only wake on the census alert: spawn's mail sat unread and nobody knew."""
         send = MagicMock(return_value=True)
         error_detected.set_send_email_callback(send)
-        wake.wake_branch.side_effect = RuntimeError("no session")
+        wake_mock = MagicMock(side_effect=RuntimeError("no session"))
+        monkeypatch.setattr(wake, "wake_branch", wake_mock)
 
         with pytest.raises(RuntimeError, match="mail delivered to @spawn but wake failed.*no session"):
             error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
 
         assert "registry unreadable" in (tmp_path / "logs" / "medic_suppressed.jsonl").read_text(encoding="utf-8")
-        wake.wake_branch.side_effect = None
+        wake_mock.side_effect = None
         error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
         assert [c.kwargs["to_branch"] for c in send.call_args_list] == ["@spawn"], "the alert was not marked sent"
 

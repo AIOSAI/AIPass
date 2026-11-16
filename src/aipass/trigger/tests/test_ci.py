@@ -3,7 +3,7 @@
 # Description: Tests for the CI red lane module - poll, reply, verdict, status - and the handlers it drives
 # Version: 1.1.2
 # Created: 2026-10-23
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/ci.py and the handlers/ci/ handlers it drives."""
@@ -17,7 +17,11 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from aipass.trigger.apps.handlers.ci import ledger, replies, triage
+import pytest
+
+import aipass.ai_mail as ai_mail_pkg
+
+from aipass.trigger.apps.handlers.ci import ledger, outbound, replies, triage
 from aipass.trigger.apps.modules import ci
 
 AUDIT_LOG = (
@@ -299,6 +303,17 @@ class TestReply:
         assert ci_lane.ledger()["cures"]["900@hooks"]["state"] == "reviewing"
         assert ci_lane.mails[-1]["to_branch"] == "@sentry"
 
+    def test_an_unreadable_dispatch_register_fails_the_reply(self, ci_lane, capsys, monkeypatch):
+        """Pins the default: an unreadable dispatch register read as "cap full" and queued the review in silence."""
+        _dispatched_hooks_red(ci_lane)
+        monkeypatch.setattr(ai_mail_pkg, "outstanding_dispatches", MagicMock(side_effect=OSError("register torn")))
+
+        ci.handle_command("ci", ["reply", "900", "@hooks", OWNER_REPLY])
+
+        _out, err = capsys.readouterr()
+        assert "register torn" in err
+        assert ci_lane.ledger()["cures"]["900@hooks"]["state"] != "review_queued"
+
     def test_a_reply_for_an_unknown_cure_is_refused(self, ci_lane, capsys):
         ci.handle_command("ci", ["reply", "999", "@hooks", OWNER_REPLY])
         _out, err = capsys.readouterr()
@@ -390,6 +405,13 @@ class TestCommandSurface:
     def test_the_ledger_lives_on_its_own_name(self, ci_lane):
         _dispatched_hooks_red(ci_lane)
         assert json.loads((ci_lane.root / "ci_ledger.json").read_text(encoding="utf-8"))["version"] == 1
+
+    def test_a_feed_note_without_ai_mail_raises(self, monkeypatch):
+        """Pins the default: an unimportable ai_mail read as "unavailable" and the feed note was lost in a log line."""
+        monkeypatch.delattr(ai_mail_pkg, "send_notification")
+
+        with pytest.raises(ImportError):
+            outbound.feed("red", "CI red", "body")
 
 
 class TestClaimStamp:

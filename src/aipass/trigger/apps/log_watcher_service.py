@@ -3,7 +3,7 @@
 # Description: Persistent log watcher process for Medic error detection
 # Version: 1.5.0
 # Created: 2026-03-29
-# Modified: 2026-10-24
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -29,15 +29,9 @@ from aipass.trigger.apps.modules.log_events import (
 
 
 def _console():
-    """Return the shared CLI console, or a plain rich Console when cli is absent."""
-    try:
-        from aipass.cli.apps.modules.display import console
-    # OSError too: an uncured peer's import guard raises FileNotFoundError.
-    except (ImportError, OSError):
-        logger.info("CLI console not available, using rich fallback")
-        from rich.console import Console
+    """Return the shared CLI console."""
+    from aipass.cli.apps.modules.display import console
 
-        console = Console()
     return console
 
 

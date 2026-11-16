@@ -3,7 +3,7 @@
 # Description: Unit tests for centralized system_logs log watcher
 # Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for the centralized system_logs watcher (apps/handlers/watchers/log_watcher.py)."""
@@ -836,3 +836,59 @@ class TestSystemLogsOwnership:
     def test_owner_is_named_in_module_state(self):
         """The ruling is readable from the code, not just from a commit."""
         assert wlw.SYSTEM_LOGS_OWNER == "branch_log_events"
+
+
+def _modified(log_file: Path) -> MagicMock:
+    """A watchdog modified event for ``log_file``."""
+    return MagicMock(is_directory=False, src_path=str(log_file))
+
+
+class TestAFailureReachesTheCallback:
+    """A line that cannot be handled raises to on_modified's warning; it is never consumed in silence."""
+
+    def test_a_line_the_bus_refuses_is_not_read_past(self, tmp_path, monkeypatch):
+        """Pins the default: a line that failed to process was skipped and its offset advanced past it."""
+        log_file = tmp_path / "system_logs" / "prax_core.log"
+        log_file.parent.mkdir()
+        log_file.write_text("2026-08-04 | mod | INFO | seen\n", encoding="utf-8")
+        watcher = wlw.LogFileWatcher()
+        watcher.initialize_positions()
+        before = watcher.log_positions[str(log_file)]
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write("2026-08-04 | mod | WARNING | disk filling\n")
+        monkeypatch.setattr(trigger_core, "trigger", MagicMock(**{"fire.side_effect": RuntimeError("bus down")}))
+
+        log = MagicMock()
+        monkeypatch.setattr(wlw, "logger", log)
+
+        watcher.on_modified(_modified(log_file))
+
+        assert watcher.log_positions[str(log_file)] == before
+        assert "bus down" in str(log.warning.call_args.args[2])
+
+    def test_an_unreadable_rotated_backup_is_named_by_the_reader(self, tmp_path, monkeypatch):
+        """Pins the default: the drain swallowed its own read error; now it raises to the reader, which names it."""
+        log_file = tmp_path / "system_logs" / "prax_core.log"
+        log_file.parent.mkdir()
+        log_file.write_text("2026-08-04 | mod | INFO | seen\n", encoding="utf-8")
+        watcher = wlw.LogFileWatcher()
+        watcher.initialize_positions()
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write("2026-08-04 | mod | WARNING | unread tail\n")
+        _rotate_log(log_file)
+        log_file.write_text("2026-08-04 | mod | INFO | fresh\n", encoding="utf-8")
+        real_open = open
+
+        def deny_backup(path, *args, **kwargs):
+            if str(path).endswith(".log.1"):
+                raise PermissionError("backup denied")
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(wlw, "open", deny_backup, raising=False)
+        log = MagicMock()
+        monkeypatch.setattr(wlw, "logger", log)
+
+        watcher.on_modified(_modified(log_file))
+
+        warned = [call.args for call in log.warning.call_args_list]
+        assert any("Failed to drain rotated tail" in args[0] and "backup denied" in str(args[2]) for args in warned)

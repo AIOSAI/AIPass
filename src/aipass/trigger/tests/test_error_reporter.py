@@ -3,7 +3,7 @@
 # Description: Unit tests for error_reporter handler
 # Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for the error_reporter handler (apps/handlers/error_reporter.py)."""
@@ -144,13 +144,8 @@ class TestSendSourceFixEmail:
 
         assert result is False
 
-    def test_ai_mail_unavailable_returns_none(self, monkeypatch):
-        """send_source_fix_email returns None, the failed-send answer, when ai_mail import fails.
-
-        False is "nothing to send" (no branch named); a send that could not be
-        attempted must not read the same. Red first 2026-09-27 against the
-        handler's `return False`.
-        """
+    def test_ai_mail_unavailable_raises(self, monkeypatch):
+        """Pins the default: a failed ai_mail import read as None, a failed send, and the mailer stayed broken unseen."""
         reporter = _import_reporter()
 
         # The name gone from its home makes the handler's lazy
@@ -163,9 +158,8 @@ class TestSendSourceFixEmail:
             "error_type": "ImportError",
             "message": "test",
         }
-        result = reporter.send_source_fix_email(entry)
-
-        assert result is None
+        with pytest.raises(ImportError):
+            reporter.send_source_fix_email(entry)
 
     def test_deliver_failure_returns_none(self, monkeypatch):
         """send_source_fix_email returns None when deliver_email_to_branch refuses the mail.

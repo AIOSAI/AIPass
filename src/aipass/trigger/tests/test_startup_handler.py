@@ -3,7 +3,7 @@
 # Description: Tests for startup event handler
 # Version: 1.2.2
 # Created: 2026-04-25
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/events/startup.py and the error catch-up it runs."""
@@ -116,6 +116,19 @@ class TestCatchupStateMigration:
 
         assert mod.CATCHUP_STATE_FILE.exists()
         assert not mod.LEGACY_CATCHUP_STATE_FILE.exists()
+
+    def test_a_save_that_fails_fails_the_catchup(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Pins the default: an unsaved catch-up state was a warning, and the run was still logged as done."""
+        log = MagicMock()
+        monkeypatch.setattr(startup, "logger", log)
+        monkeypatch.setattr(startup, "atomic_write_json", MagicMock(side_effect=OSError("disk full")))
+        operations = MagicMock(return_value=True)
+        monkeypatch.setattr(startup.json_handler, "log_operation", operations)
+
+        startup.run_startup_catchup()
+
+        assert "startup_catchup" not in [c.args[0] for c in operations.call_args_list]
+        assert any("catchup scan failed: disk full" in c.args[0] for c in log.warning.call_args_list)
 
 
 class TestCatchupOccurrenceCounting:

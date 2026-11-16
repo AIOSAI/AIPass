@@ -3,7 +3,7 @@
 # Description: Tests for the runaway_log_detected event handler
 # Version: 1.0.2
 # Created: 2026-08-09
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/events/runaway_handler.py."""
@@ -468,6 +468,17 @@ class TestAlertAppends:
         assert len(data["alerts"]) == 2
         assert data["alerts"][0]["id"] == "existing-123"
         assert data["alerts"][1]["source"] == "prax"
+
+    def test_an_unreadable_alerts_file_is_not_observed_or_cooled_down(self, tmp_path: Path) -> None:
+        """Pins the default: a torn alerts.json lost the alert, yet the trail said "observed" and a cooldown booked."""
+        alerts_file = tmp_path / "alerts.json"
+        alerts_file.write_text("{torn", encoding="utf-8")
+
+        mod.handle_runaway_log_detected(file_path=RUNAWAY_LOG, branch="flow", rate_lines_per_min=500)
+
+        assert alerts_file.read_text(encoding="utf-8") == "{torn"
+        assert [line["outcome"] for line in _trail_lines()] == []
+        assert any("handle_runaway_log_detected failed" in c.args[0] for c in _log.warning.call_args_list)
 
 
 class TestEmailSendFails:
