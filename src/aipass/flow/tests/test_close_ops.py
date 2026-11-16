@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_close_ops.py
 # Description: Tests for close_ops handler — plan closure business logic
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-29
 # Modified: 2026-11-15
 # =============================================
@@ -690,16 +690,13 @@ class TestClosePlanImplValueError:
 class TestACloseAnswersToThePlansOwners:
     """A plan is closed by the branch holding it, its created_by citizen, or the verified admin seat."""
 
-    @staticmethod
-    def _seat(tmp_path, name: str) -> Path:
-        branch = tmp_path / name
-        (branch / ".trinity").mkdir(parents=True)
-        (branch / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
-        return branch
+    @pytest.fixture(autouse=True)
+    def _seats(self, make_seat):
+        self.make_seat = make_seat
 
     def _setup(self, tmp_path, monkeypatch, caller: str, admin=False, created_by=None):
-        beta = self._seat(tmp_path, "beta")
-        self._seat(tmp_path, "alpha")
+        beta = self.make_seat(tmp_path / "beta")
+        self.make_seat(tmp_path / "alpha")
         plan = beta / "FPLAN-0001_brief_2026-11-15.md"
         plan.write_text("# FPLAN-0001: brief\nnotes\n", encoding="utf-8")
         row = {"status": "open", "subject": "brief", "location": str(beta), "file_path": str(plan)}
@@ -781,3 +778,14 @@ class TestACloseAnswersToThePlansOwners:
         assert self._close(row, _make_deps())["success"] is True
 
         mock_json_handler.assert_any_call("plan_closed", {"plan_key": "1", "caller": "@beta", "success": True})
+
+    def test_the_holder_is_the_passports_branch_name_not_the_directory(self, tmp_path, monkeypatch):
+        seat = self.make_seat(tmp_path / "my-agent", "my_agent")
+        plan = seat / "FPLAN-0001_brief_2026-11-15.md"
+        plan.write_text("# FPLAN-0001: brief\n", encoding="utf-8")
+        row = {"status": "open", "subject": "brief", "location": str(seat), "file_path": str(plan)}
+        monkeypatch.setattr(authority, "resolve_verified_caller", lambda: "@my_agent")
+        deps = _make_deps()
+
+        assert self._close(row, deps)["success"] is True
+        deps["archive_plan_fn"].assert_called_once()

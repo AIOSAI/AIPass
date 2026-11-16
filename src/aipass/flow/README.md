@@ -55,8 +55,8 @@ not a command, with `post` the one module that answers to both.
 ## How To Reach Me
 
 Mail `@flow`. Send a defect with what you measured, or a request for a plan
-type, a template or a lifecycle change. Plans themselves need no permission —
-create one from any branch, in any directory, whenever you need one.
+type, a template or a lifecycle change. Plans themselves need no permission:
+create one in any branch, yours or the one you are briefing, whenever you need one.
 
 ---
 

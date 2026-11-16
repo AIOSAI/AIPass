@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: create_ops.py
 # Description: Plan Creation Implementation Handler
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-03-08
 # Modified: 2026-11-15
 # =============================================
@@ -19,6 +19,7 @@ from typing import Callable, Tuple, List, Dict, Any
 from aipass.prax import logger
 
 from aipass.flow.apps.handlers.json import json_handler
+from aipass.flow.apps.handlers.plan.authority import create_refusal
 
 
 from aipass.flow.apps.handlers.registry.load_registry import next_free_number
@@ -53,6 +54,7 @@ def create_plan_impl(
     update_dashboard_local: Callable[..., bool | None] | None = None,
     push_to_plans_central: Callable[..., bool] | None = None,
     push_flow_to_branch_dashboard: Callable[..., bool | None] | None = None,
+    create_refusal_fn: Callable[[Path], str | None] = create_refusal,
 ) -> Tuple[bool, int, str, str, str, List[Dict[str, Any]]]:
     """Implement plan creation workflow
     Returns (success, plan_number, location_description, template_type, error_message, messages).
@@ -101,6 +103,13 @@ def create_plan_impl(
     try:
         registry = load_registry(registry_file=registry_file)
 
+        success, target_dir, error_msg = resolve_plan_location(location, ecosystem_root)
+        if not success:
+            return False, 0, "", "", error_msg, messages
+        refusal = create_refusal_fn(target_dir)
+        if refusal:
+            return False, 0, "", "", refusal, messages
+
         registry, auto_closed_count = auto_close_orphaned_plans(registry)
         if auto_closed_count > 0:
             save_registry(registry, registry_file=registry_file)
@@ -108,10 +117,6 @@ def create_plan_impl(
 
         # Never a number a row already holds, whatever next_number says.
         NEXT_NUM = next_free_number(registry)
-
-        success, target_dir, error_msg = resolve_plan_location(location, ecosystem_root)
-        if not success:
-            return False, 0, "", "", error_msg, messages
 
         RELATIVE_LOCATION = calculate_relative_location(target_dir, ecosystem_root)
 
@@ -174,7 +179,7 @@ def create_plan_impl(
             # The file exists but no row names it, so the next create would reissue this number.
             error_msg = (
                 f"{PLAN_FILE.name} was written but the registry was not saved; "
-                "run 'drone @flow registry scan' to register it"
+                "mail @flow to run 'drone @flow registry scan' and register it"
             )
             logger.error(f"[{MODULE_NAME}] {error_msg}")
             return False, 0, "", "", error_msg, messages

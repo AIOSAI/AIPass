@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: restore_ops.py
 # Description: Plan Restore Implementation Handler
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-03-08
 # Modified: 2026-11-15
 # =============================================
@@ -122,6 +122,10 @@ def recover_plan_from_backup(
     registry = load_registry(registry_file=reg_file) if reg_file else load_registry()
 
     target = Path(original_location) / plan_file.name
+    # No row means no recorded creator: only the branch that will hold it, or the admin seat.
+    refusal = authority_refusal(target, {}, "restore")
+    if refusal:
+        return False, refusal
     copy2(plan_file, target)
 
     registry["plans"][plan_key] = {

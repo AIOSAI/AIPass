@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared fixtures for flow tests - log redirect, console pin, command-state reset, caller rail
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-03-05
 # Modified: 2026-11-15
 # =============================================
@@ -99,6 +99,19 @@ def verified_caller(monkeypatch):
     monkeypatch.setattr(
         authority, "is_verified_admin_caller", lambda: authority.resolve_verified_caller() == "@devpulse"
     )
+
+
+@pytest.fixture
+def make_seat():
+    """Make ``directory`` a citizen seat: a passport naming ``branch_name`` (default: the directory's name)."""
+
+    def build(directory: Path, branch_name: str | None = None) -> Path:
+        (directory / ".trinity").mkdir(parents=True, exist_ok=True)
+        passport = {"branch_info": {"branch_name": branch_name or directory.name}}
+        (directory / ".trinity" / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+        return directory
+
+    return build
 
 
 @pytest.fixture

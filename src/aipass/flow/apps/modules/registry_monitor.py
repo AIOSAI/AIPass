@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: registry_monitor.py
 # Description: Registry auto-healing module
-# Version: 3.6.0
+# Version: 3.7.0
 # Created: 2025-11-21
 # Modified: 2026-11-15
 # =============================================
@@ -52,6 +52,7 @@ from aipass.cli.apps.modules import console, error, success, warning
 
 from aipass.flow.apps.handlers.registry.load_registry import RegistryUnreadableError, load_registry
 from aipass.flow.apps.handlers.registry.save_registry import registry_lock
+from aipass.flow.apps.handlers.plan.authority import seat_refusal
 
 from aipass.flow.apps.handlers.registry.monitor_ops import (
     scan_plan_files_impl,
@@ -122,6 +123,10 @@ def handle_command(command: str, args: List[str]) -> bool:
     json_handler.log_operation("registry_monitor", {"command": command, "subcommand": subcommand})
 
     if subcommand in ["scan", "heal"]:
+        refusal = seat_refusal("registry_scan")
+        if refusal:
+            error(refusal)
+            raise SystemExit(1)
         console.print("[bold]Scanning for PLAN files...[/bold]")
         try:
             result = scan_plan_files()
@@ -217,6 +222,10 @@ def _move(args: List[str]) -> bool:
         error("registry move takes two absolute locations, old then new", suggestion=MOVE_USAGE)
         raise SystemExit(1)
     old, new = (Path(arg).expanduser() for arg in paths)
+    refusal = seat_refusal("registry_move") if apply else None
+    if refusal:
+        error(refusal)
+        raise SystemExit(1)
     try:
         with registry_lock():
             actions = move_location_rows(old, new, apply=apply)

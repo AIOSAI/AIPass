@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_plan_handlers.py
 # Description: Tests for apps/handlers/plan/create_ops.py and sibling plan handlers
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-04-05
 # Modified: 2026-11-15
 # =============================================
@@ -431,6 +431,54 @@ class TestCreatePlanImpl:
         deps["create_plan_file"].assert_called_once()
         deps["save_registry"].assert_called()
         bus.fire.assert_called_once_with("plan_created", plan_number=1, location="plans", subject="Widget feature")
+
+    def _create_in(self, target: Path) -> tuple:
+        deps = self._make_deps(resolve_plan_location=MagicMock(return_value=(True, target, "")))
+        result = create_plan_impl(location=str(target), subject="brief", template_type="default", **deps)
+        return result, deps
+
+    @pytest.mark.parametrize("forbidden", [".trinity", ".aipass", ".git", ".codex", ".agents", ".archive"])
+    def test_a_forbidden_tree_is_refused_even_for_the_admin(self, tmp_path, make_seat, mock_json_handler, forbidden):
+        target = make_seat(tmp_path / "beta") / forbidden / "deep"
+        target.mkdir(parents=True)
+
+        (success, *_rest, err, _msgs), deps = self._create_in(target)
+
+        assert success is False and f"inside {forbidden}/" in err
+        deps["create_plan_file"].assert_not_called()
+        deps["auto_close_orphaned_plans"].assert_not_called()
+        deps["save_registry"].assert_not_called()
+        mock_json_handler.assert_any_call("plan_create_refused", {"target": str(target), "caller": "@devpulse"})
+
+    def test_a_link_into_a_forbidden_tree_is_followed_and_refused(self, tmp_path, make_seat):
+        git = make_seat(tmp_path / "beta") / ".git"
+        git.mkdir()
+        (tmp_path / "innocent").symlink_to(git)
+
+        (success, *_rest, err, _msgs), deps = self._create_in(tmp_path / "innocent")
+
+        assert success is False and "inside .git/" in err
+        deps["create_plan_file"].assert_not_called()
+
+    def test_outside_every_branch_is_the_admins_only(self, tmp_path, monkeypatch):
+        loose = tmp_path / "loose"
+        loose.mkdir()
+        (admin_ok, *_r), _deps = self._create_in(loose)
+        monkeypatch.setattr(authority, "resolve_verified_caller", lambda: "@alpha")
+
+        (success, *_rest, err, _msgs), deps = self._create_in(loose)
+
+        assert admin_ok is True
+        assert success is False and "outside every branch" in err and "you are @alpha" in err
+        deps["create_plan_file"].assert_not_called()
+
+    def test_any_citizen_files_a_brief_inside_another_branch(self, tmp_path, monkeypatch, make_seat):
+        monkeypatch.setattr(authority, "resolve_verified_caller", lambda: "@alpha")
+
+        (success, *_r), deps = self._create_in(make_seat(tmp_path / "beta"))
+
+        assert success is True
+        deps["create_plan_file"].assert_called_once()
 
     @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
     def test_the_create_log_names_the_creator(self, mock_jh, bus):

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: create_plan.py
 # Description: PLAN creation module with location awareness
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2025-11-16
 # Modified: 2026-11-15
 # =============================================
@@ -250,6 +250,10 @@ def handle_command(command: str, args: List[str]) -> bool:
         plan_type_key=plan_type_key,
         plan_type_config=plan_type_config,
     )
+
+    if not success:
+        cli_error(error)
+        return True
 
     prefix = plan_type_config["prefix"] if plan_type_config else "FPLAN"
     digits = plan_type_config["digits"] if plan_type_config else 4

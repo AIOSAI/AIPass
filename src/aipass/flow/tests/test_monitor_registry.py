@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_monitor_registry.py
 # Description: Tests for monitor_ops handler and registry_monitor module
-# Version: 2.2.0
+# Version: 2.3.0
 # Created: 2026-03-08
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/registry/monitor_ops.py and apps/modules/registry_monitor.py."""
@@ -19,6 +19,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.flow.apps.handlers.plan import authority
 from aipass.flow.apps.handlers.registry import monitor_ops
 from aipass.flow.apps.handlers.template import get_template as template_mod
 from aipass.flow.apps.modules import registry_monitor
@@ -663,3 +664,47 @@ class TestDuplicateReportIsDeterministic:
         backward = self._report(mod, tmp_path / "backward", reverse_walk=True)
 
         assert forward == backward == ["FPLAN-0007_alpha_2026-08-13.md", "FPLAN-0007_beta_2026-08-13.md"]
+
+
+class TestARepairVerbIsFlowsOrTheAdminsRun:
+    @pytest.fixture(autouse=True)
+    def citizen(self, monkeypatch):
+        monkeypatch.setattr(authority, "resolve_verified_caller", lambda: "@alpha")
+
+    def test_a_citizens_scan_is_refused_recorded_and_runs_nothing(self, capsys, mock_json_handler):
+        with patch.object(registry_monitor, "scan_plan_files") as scan, pytest.raises(SystemExit) as stopped:
+            registry_monitor.handle_command("registry", ["scan"])
+
+        assert stopped.value.code == 1
+        scan.assert_not_called()
+        assert "you are @alpha" in capsys.readouterr().err
+        mock_json_handler.assert_any_call("registry_scan_refused", {"caller": "@alpha"})
+
+    def test_flows_own_seat_scans(self, monkeypatch):
+        monkeypatch.setattr(authority, "resolve_verified_caller", lambda: "@flow")
+        result = {
+            "total_plans": 0,
+            "added": [],
+            "updated": [],
+            "removed": [],
+            "duplicates": [],
+            "healing_performed": False,
+        }
+
+        with patch.object(registry_monitor, "scan_plan_files", return_value=result) as scan:
+            assert registry_monitor.handle_command("registry", ["scan"]) is True
+
+        scan.assert_called_once()
+
+    def test_a_citizens_apply_is_refused_but_its_preview_runs(self, tmp_path, capsys):
+        with (
+            patch.object(registry_monitor, "move_location_rows", return_value=[]) as move,
+            patch.object(registry_monitor, "registry_lock", nullcontext),
+        ):
+            registry_monitor.handle_command("registry", ["move", str(tmp_path / "a"), str(tmp_path)])
+            with pytest.raises(SystemExit) as stopped:
+                registry_monitor.handle_command("registry", ["move", str(tmp_path / "a"), str(tmp_path), "--apply"])
+
+        assert stopped.value.code == 1
+        move.assert_called_once_with(tmp_path / "a", tmp_path, apply=False)
+        assert "registry_move rewrites" in capsys.readouterr().err

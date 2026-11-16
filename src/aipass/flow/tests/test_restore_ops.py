@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_restore_ops.py
 # Description: Tests for restore_ops handler -- plan restore business logic, and validator
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-29
 # Modified: 2026-11-15
 # =============================================
@@ -966,10 +966,12 @@ class TestRestoreOfANormallyClosedPlan:
 
 
 class TestRestoreAnswersToThePlansOwners:
+    @pytest.fixture(autouse=True)
+    def _seats(self, make_seat):
+        self.make_seat = make_seat
+
     def _setup(self, tmp_path, monkeypatch, caller: str):
-        branch = tmp_path / "beta"
-        (branch / ".trinity").mkdir(parents=True)
-        (branch / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+        branch = self.make_seat(tmp_path / "beta")
         row = {"status": "closed", "file_path": str(branch / "FPLAN-0001.md"), "location": str(branch)}
         monkeypatch.setattr(authority, "resolve_verified_caller", lambda: caller)
         restore_file = MagicMock(return_value=(branch / "FPLAN-0001.md", "copied"))
@@ -999,3 +1001,36 @@ class TestRestoreAnswersToThePlansOwners:
             "plan_restored",
             {"plan_key": "0001", "location": str(tmp_path / "beta"), "caller": "@beta", "success": True},
         )
+
+
+class TestARecoveryAnswersToTheBranchThatWillHoldIt:
+    def _recover(self, tmp_path, monkeypatch, make_seat, caller: str):
+        beta = make_seat(tmp_path / "beta")
+        backup_dir = tmp_path / "processed_plans"
+        backup_dir.mkdir()
+        (backup_dir / "FPLAN-0042.md").write_text(f"# Plan\n**Location**: {beta}\n", encoding="utf-8")
+        monkeypatch.setattr(authority, "resolve_verified_caller", lambda: caller)
+        save = MagicMock(return_value=True)
+        with (
+            patch("aipass.flow.apps.handlers.plan.restore_ops.PROCESSED_PLANS_DIR", backup_dir),
+            patch("aipass.flow.apps.handlers.plan.restore_ops._PKG_ROOT", tmp_path),
+            patch("aipass.flow.apps.handlers.plan.restore_ops.FLOW_ROOT", tmp_path / "flow"),
+        ):
+            ok, msg = recover_plan_from_backup(
+                "0042", "FPLAN-0042", load_registry=MagicMock(return_value={"plans": {}}), save_registry=save
+            )
+        return ok, msg, save, beta / "FPLAN-0042.md"
+
+    def test_another_branch_is_refused_and_nothing_is_copied(self, tmp_path, monkeypatch, make_seat):
+        ok, msg, save, target = self._recover(tmp_path, monkeypatch, make_seat, "@alpha")
+
+        assert ok is False
+        assert "sits in @beta" in msg and "not recorded on this plan" in msg
+        assert not target.exists()
+        save.assert_not_called()
+
+    def test_the_branch_that_will_hold_it_recovers_it(self, tmp_path, monkeypatch, make_seat):
+        ok, _msg, save, target = self._recover(tmp_path, monkeypatch, make_seat, "@beta")
+
+        assert ok is True and target.exists()
+        save.assert_called_once()

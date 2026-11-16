@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_close_ops_close_all.py
 # Description: Tests for close_all_plans_impl, split from test_close_ops.py (oversize, leg 12)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-06
 # Modified: 2026-11-15
 # =============================================
@@ -391,10 +391,9 @@ class TestExcludeTypeHoldsTypeBack:
 
 
 class TestCloseAllHoldsAnotherBranchsPlans:
-    def test_a_foreign_branch_row_is_held_and_counted_not_closed(self, tmp_path, monkeypatch):
+    def test_a_foreign_branch_row_is_held_and_counted_not_closed(self, tmp_path, monkeypatch, make_seat):
         for name in ("alpha", "beta"):
-            (tmp_path / name / ".trinity").mkdir(parents=True)
-            (tmp_path / name / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+            make_seat(tmp_path / name)
         monkeypatch.setattr(authority, "resolve_verified_caller", lambda: "@alpha")
         own = {
             "subject": "mine",

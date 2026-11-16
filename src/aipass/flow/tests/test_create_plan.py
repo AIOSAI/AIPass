@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_create_plan.py
 # Description: Tests for apps/modules/create_plan.py -- handle_command routing
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/create_plan.py."""
@@ -170,3 +170,15 @@ class TestOperationLogging:
             "plan_created",
             {"command": "create", "args": [".", "My Plan"]},
         )
+
+
+class TestAFailedCreateIsAnError:
+    @patch(f"{_MOD}.create_plan", return_value=(False, 0, "", "", "Refused: inside .git/"))
+    @patch(f"{_MOD}.get_plan_type", return_value={"prefix": "FPLAN", "digits": 4, "default_template": "default"})
+    @patch(f"{_MOD}.parse_create_plan_args", return_value=(".git", "x", "flow_plans"))
+    def test_the_refusal_goes_to_stderr_and_fails_the_command(self, _parse, _type, _create, capsys):
+        assert handle_command("create", [".git", "x"]) is True
+
+        out, err = capsys.readouterr()
+        assert "Refused: inside .git/" in err and "Refused" not in out
+        assert command_failed()
