@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: provider_launch.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Where a provider CLI started from the Bash tool would run, judged against the caller's own branch
 # Branch: hooks
 # Layer: apps/modules
@@ -19,10 +19,11 @@ Python, not through an agent's Bash tool, so they never reach this.
 import glob
 import os
 import re
+import shlex
 from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
-from aipass.hooks.apps.modules import admin_seat
+from aipass.hooks.apps.modules import admin_seat, shell_reader
 from aipass.hooks.apps.modules.shell_programs import PROVIDER_CLIS
 
 CONSOLE = err_console
@@ -40,8 +41,26 @@ _UNIT_DIR = "WorkingDirectory="
 #: systemd-run with no directory runs in / (system) or the home dir (--user), per systemd.exec; -d keeps the cwd.
 _SAME_DIR = frozenset({"-d", "--same-dir"})
 
-#: Launchers that run a command detached or later: the directory it would run in is not followed.
+#: Launchers that run a command detached or later. tmux and screen are read below; at, batch, dtach and
+#: abduco are not installed to read, so a command naming a provider through them stays refused.
 _DEFERRED = frozenset({"tmux", "screen", "at", "batch", "dtach", "abduco"})
+
+#: tmux's own flags that take a value (tmux -h, tmux list-commands). Top-level -c is a shell command.
+_TMUX_VALUED = "cfLST"
+#: The tmux commands that start a command, and their flags that take a value. -c is the start directory;
+#: without it the command runs in the tmux client's cwd (measured, tmux 3.6). Any other command stays refused.
+_TMUX_STARTS = {
+    "new-session": "cefFnstxy",
+    "new": "cefFnstxy",
+    "new-window": "ceFnt",
+    "neww": "ceFnt",
+    "split-window": "ceFlt",
+    "splitw": "ceFlt",
+}
+#: screen runs in the directory it is invoked from (man screen, chdir). -c reads a config that may chdir,
+#: -X sends a command to a running session, -x/-r/-R attach one: none of those directories is read here.
+_SCREEN_VALUED = "STtpehs"
+_SCREEN_UNREAD = frozenset("cXxrR")
 _PROVIDER_WORD = re.compile(r"\b(?:claude|codex|opencode)\b")
 
 _UNFOLDED = frozenset("$`")
@@ -50,17 +69,80 @@ _GLOB = frozenset("*?[")
 
 def foreign_launch(invocations: list, command: str, cwd: str) -> tuple[str, str] | None:
     """(where, why) for the first provider launch outside the caller's own branch; None when every one is inside."""
-    root = admin_seat.branch_root(cwd)
+    return _first_outside(invocations, command, admin_seat.branch_root(cwd))
+
+
+def _first_outside(invocations: list, command: str, root: Path | None) -> tuple[str, str] | None:
     for index, inv in enumerate(invocations):
         if inv.program in _DEFERRED and _PROVIDER_WORD.search(command):
-            return inv.program, f"{inv.program} would start it detached or later, where this gate cannot follow it."
-        if inv.program not in PROVIDER_CLIS:
+            found = _detached_outside(inv, root)
+            if found is not None:
+                return found
+            continue
+        if inv.program not in PROVIDER_CLIS or _DEFERRED & set(inv.via.split()):
             continue
         for text, base in _directories(inv, invocations[:index]):
             found = _outside(text, base, root)
             if found is not None:
                 return found
     return None
+
+
+def _detached_outside(inv, root: Path | None) -> tuple[str, str] | None:
+    """A tmux or screen launch judged where it starts, its command re-read from there; others refused."""
+    readers = {"tmux": _tmux_launch, "screen": _screen_launch}
+    launch = readers[inv.program](inv.argv) if inv.program in readers else None
+    if launch is None:
+        return inv.program, f"{inv.program} would start it where this gate cannot read the directory."
+    start, command = launch
+    if _GLOB & set(start):
+        return start, f"{start} is a pattern, so where {inv.program} would start it is unknown here."
+    found = _outside(start, inv.cwd, root)
+    if found is not None:
+        return found
+    place = str((Path(inv.cwd) / os.path.expanduser(start)).resolve())
+    return _first_outside(shell_reader.invocations(command, place), command, root)
+
+
+def _options(argv: tuple[str, ...], start: int, valued: str) -> tuple[dict[str, str], int]:
+    """getopt over *argv* from *start*: ({flag: value} for valued flags, index of the first operand)."""
+    found: dict[str, str] = {}
+    index = start
+    while index < len(argv) and argv[index].startswith("-") and argv[index] != "-":
+        word = argv[index]
+        index += 1
+        if word == "--":
+            break
+        for at, flag in enumerate(word[1:], 1):
+            if flag in valued:
+                rest = word[at + 1 :]
+                found[flag] = rest if rest else (argv[index] if index < len(argv) else "")
+                index += 0 if rest else 1
+                break
+            found.setdefault(flag, "")
+    return found, index
+
+
+def _tmux_launch(argv: tuple[str, ...]) -> tuple[str, str] | None:
+    """(start directory, shell command) of a tmux command that starts one; None when it is not read."""
+    top, index = _options(argv, 1, _TMUX_VALUED)
+    if "c" in top or index >= len(argv) or argv[index] not in _TMUX_STARTS:
+        return None
+    flags, index = _options(argv, index + 1, _TMUX_STARTS[argv[index]])
+    operands = argv[index:]
+    if not operands or any(word.endswith(";") for word in operands):
+        return None
+    return flags.get("c") or ".", operands[0] if len(operands) == 1 else shlex.join(operands)
+
+
+def _screen_launch(argv: tuple[str, ...]) -> tuple[str, str] | None:
+    """(".", the program and its words) for a screen that starts a program here; None when it is not read."""
+    if any(word in ("-ls", "-list", "-wipe") for word in argv[1:]):
+        return None
+    flags, index = _options(argv, 1, _SCREEN_VALUED)
+    if _SCREEN_UNREAD & set(flags) or index >= len(argv):
+        return None
+    return ".", shlex.join(argv[index:])
 
 
 def _directories(inv, outers: list) -> list[tuple[str, str]]:

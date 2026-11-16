@@ -1001,7 +1001,7 @@
       "file": "apps/handlers/security/rm_gate.py",
       "standard": "fallback",
       "lines": [
-        132
+        134
       ],
       "reason": "Fails closed: an unimportable admin_seat returns (None, False), so no seat is exempted and every delete refusal stands. The refusal is the answer; WARNING names the dark admin lane."
     },
@@ -1818,7 +1818,7 @@
       "file": "apps/handlers/security/rm_gate.py",
       "standard": "fallback",
       "lines": [
-        181
+        185
       ],
       "reason": "Fails closed: the refusal is decided before the ledger is written, so a door that cannot load or write never lets the command through. The refusal then says the recording failed, and an ERROR goes through prax, which @trigger escalates."
     }

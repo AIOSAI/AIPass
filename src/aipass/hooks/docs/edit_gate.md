@@ -46,8 +46,12 @@ or reach lies outside the caller's own branch (the nearest passport directory ab
    (system) or the home dir (`--user`), per `systemd.exec`.
 
 Refused as unknown: a cwd the reader cannot follow, a directory still holding `$` or a backtick, a
-glob that matches nothing. `tmux`, `screen`, `at`, `batch`, `dtach` and `abduco` run a command detached
-or later, so any of them in a command naming a provider is refused, the own branch included. A session
+glob that matches nothing. In a command naming a provider, a detached launcher is read where it starts:
+`tmux new-session`, `new-window` and `split-window` (and their aliases) start at `-c` or, without it,
+at the tmux client's cwd (measured on tmux 3.6), and their shell command is re-read from there; `screen`
+starts its program where it is invoked (`man screen`, chdir). Still refused: any other tmux command
+(`send-keys`, `respawn-pane`, ...), tmux's own `-c`, a `;` chain, screen with `-c`, `-X`, `-x`, `-r`, `-R`
+or `-ls`, and `at`, `batch`, `dtach` and `abduco`, whose help is not on this machine to read. A session
 with no passport above its cwd has no branch and starts none. @devpulse's directory has no special
 rule. The refusal names the caller and the next step (`drone @ai_mail dispatch`); `logs/edit_gate.log`
 gets `provider launch refused: @<caller> -> <dir> | cmd=<command>`. The dispatch services (ai_mail's

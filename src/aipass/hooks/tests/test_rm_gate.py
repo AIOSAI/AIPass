@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_rm_gate.py
-# Version: 3.6.0
+# Version: 3.7.0
 # Description: Tests for rm_gate security handler, the DPLAN-0356 lockdown since 2.0.0
 # Branch: hooks
 # Created: 2026-06-02
@@ -988,8 +988,8 @@ class TestEveryRefusalReachesTheLedger:
     @pytest.mark.parametrize(
         ("command", "reason"),
         (
-            ("rm notes.txt", "raw rm is refused for every seat."),
-            ("shred notes.txt", "shred is a delete only @devpulse may run."),
+            ("rm $X", "raw rm is refused for every seat."),
+            ("shred -n 3 notes.txt", "shred is a delete only @devpulse may run."),
             (
                 "$CMD notes.txt",
                 "it runs what the gates cannot read: the program word $CMD is an expansion this reader cannot fold.",
@@ -1001,6 +1001,33 @@ class TestEveryRefusalReachesTheLedger:
 
         [row] = self._rows(ledger)
         assert (row["requested"], row["path"], row["reason"]) == (command, None, reason)
+
+    @pytest.mark.parametrize(
+        ("command", "paths"),
+        (
+            ("rm a.txt b.txt", ["a.txt", "b.txt"]),
+            ("rm -rf -- -x", ["-x"]),
+            ("rmdir old", ["old"]),
+            ("cd sub && unlink f", ["sub/f"]),
+            ("rm a.txt $X", ["a.txt"]),
+            ("rm a.txt && drone rm ../README.md", ["a.txt", "../README.md"]),
+        ),
+    )
+    def test_each_resolved_target_is_a_row_with_the_command_as_typed(self, tmp_path, ledger, command, paths):
+        seat = Path(_seat(tmp_path, "canary"))
+        (seat / "sub").mkdir()
+        self._run(str(seat), command)
+
+        rows = self._rows(ledger)
+        assert [row["path"] for row in rows] == [str((seat / p).parent.resolve() / Path(p).name) for p in paths]
+        assert {row["requested"] for row in rows} == {command}
+
+    def test_a_link_is_recorded_as_the_link_not_what_it_points_to(self, tmp_path, ledger):
+        seat = Path(_seat(tmp_path, "canary"))
+        (seat / "link").symlink_to(tmp_path)
+        self._run(str(seat), "rm link")
+
+        assert [row["path"] for row in self._rows(ledger)] == [str(seat / "link")]
 
     def test_an_unnamed_caller_is_recorded_as_unknown(self, tmp_path, ledger):
         self._run(str(tmp_path), "rm notes.txt")

@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: rm_gate.py
-# Version: 3.5.0
+# Version: 3.6.0
 # Description: Refuses raw rm, other deletes off the admin seat, and drone rm outside the caller's branch (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
@@ -106,6 +106,8 @@ _HELP_FORMS = (("--help",), ("-h",))
 # The shell may still expand these, so the path drone rm receives is not the word the gate reads.
 _SHELL_EXPANDS = frozenset("$`*?[]{}~")
 
+_TARGET_GRAMMAR = frozenset({"rm", "rmdir", "unlink"})
+
 
 def system_temp() -> Path:
     """The system temp dir, resolved: the one place outside a branch where a citizen's drone rm runs."""
@@ -163,25 +165,53 @@ def _record_move(cmd: str, cwd: str, caller: str | None, count: int, target: str
         )
 
 
-def _ledger(cmd: str, cwd: str, caller: str | None, resolved: str, reason: str) -> str:
-    """One row in the project's deletions ledger through @drone's door; the sentence the refusal ends on.
+def _ledger(cmd: str, cwd: str, caller: str | None, targets: list[str], reason: str) -> str:
+    """A row per resolved target (one with no path when there is none) through @drone's door; the closing sentence.
 
     A row that cannot be written never lets the command through: the refusal stands and says so.
     """
     try:
         project = importlib.import_module(_OWNERSHIP).project_of(Path(cwd)) if cwd else None
-        importlib.import_module(_LEDGER_DOOR).record_gate_refusal(
-            caller=caller or "unknown",
-            cwd=cwd,
-            requested=cmd,
-            resolved=resolved or None,
-            reason=reason,
-            project_root=project.root if project else None,
-        )
+        door = importlib.import_module(_LEDGER_DOOR)
+        for target in targets or [None]:
+            door.record_gate_refusal(
+                caller=caller or "unknown",
+                cwd=cwd,
+                requested=cmd,
+                resolved=target,
+                reason=reason,
+                project_root=project.root if project else None,
+            )
     except Exception as exc:  # the refusal is already decided; a lost row is logged, never an allow
         logger.error("[HOOKS] rm_gate: ledger write failed, the refusal stands: %s", exc)
         return NOT_RECORDED
     return RECORDED
+
+
+def _targets(cmd: str, cwd: str) -> list[str]:
+    """Each operand of rm, rmdir, unlink and drone rm, resolved as the path it names (a link, not what it points to).
+
+    Only these: no option of theirs takes a value. A word the shell still expands names no path here.
+    """
+    reader = _reader()
+    found = []
+    for inv in reader.invocations(cmd, cwd):
+        if inv.program in _TARGET_GRAMMAR:
+            words = inv.argv[1:]
+        elif inv.program == _DRONE and len(inv.argv) > 1 and reader.verb_name(inv.argv[1]) == "rm":
+            words = inv.argv[2:]
+        else:
+            continue
+        operands = False
+        for word in words:
+            if not operands and (word == "--" or word.startswith("-")):
+                operands = word == "--"
+                continue
+            if _SHELL_EXPANDS & set(word) or not (inv.cwd or word.startswith("/")):
+                continue
+            path = Path(inv.cwd) / word
+            found.append(str(path.resolve() if path.name in ("", "..") else path.parent.resolve() / path.name))
+    return list(dict.fromkeys(found))
 
 
 def _classify(cmd: str, cwd: str) -> tuple[int, list, list[str], list[str]]:
@@ -313,12 +343,13 @@ def handle(hook_data: dict) -> dict:
             named = f"@{caller}" if caller else UNNAMED_CALLER.format(cwd=cwd or "(no cwd)")
             what = "; ".join(dict.fromkeys(unread))
             _record(cmd, cwd, caller, {"unread program": len(unread)})
-            recorded = _ledger(cmd, cwd, caller, "", f"it runs what the gates cannot read: {what}.")
+            recorded = _ledger(cmd, cwd, caller, _targets(cmd, cwd), f"it runs what the gates cannot read: {what}.")
             return _block(UNREAD_REFUSED.format(what=what, caller=named, recorded=recorded))
 
         _record(cmd, cwd, caller, {"raw rm": raw, "delete verb": len(others)})
         _record_move(cmd, cwd, caller, len(drones), moved, why or "refused with the delete beside it in this command")
-        recorded = _ledger(cmd, cwd, caller, moved if why else "", _ledger_reason(raw, others, why))
+        targets = ([moved] if moved else []) if why else _targets(cmd, cwd)
+        recorded = _ledger(cmd, cwd, caller, targets, _ledger_reason(raw, others, why))
         return _block(_refusal(raw, others, admin, caller, cwd, why, recorded))
 
     except Exception as exc:  # fail closed on the Bash call this gate guards

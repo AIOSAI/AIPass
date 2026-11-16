@@ -24,6 +24,7 @@ import os
 import sys
 import tempfile
 from datetime import datetime
+from typing import cast
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -1118,7 +1119,7 @@ class TestTheBridgeFailsClosed:
         """A record that hangs can then cost a timeout, never the refusal."""
         bridge = self._bridge("PreToolUse", monkeypatch)
         seen: list[str] = []
-        monkeypatch.setattr(bridge, "_record_break", lambda *_: seen.append(sys.stdout.getvalue()))
+        monkeypatch.setattr(bridge, "_record_break", lambda *_: seen.append(cast(io.StringIO, sys.stdout).getvalue()))
         with pytest.raises(SystemExit):
             bridge.main()
         assert '"decision": "block"' in seen[0]

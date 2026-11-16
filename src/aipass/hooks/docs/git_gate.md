@@ -206,8 +206,11 @@ subprocess never passes through a hook.
 Every refusal, the admin seat's raw `rm` included, is also one row in the project's deletions ledger
 (`.ai_central/deletions.jsonl`), written through @drone's door `door_deletion_log.record_gate_refusal`:
 lane `rm_gate`, outcome `refused`, the caller (`unknown` with no passport), the session cwd, the command
-as typed, the resolved path of a refused `drone rm` target (`null` when there is none or it cannot be
-resolved) and a one-sentence reason. The refusal's last line says so. A row that cannot be written leaves
+as typed in `requested` (the whole Bash command line: the evidence), the resolved target in `path`, and a
+one-sentence reason. There is one row per resolved target: the refused `drone rm` target when that is
+the refusal, else every operand of `rm`, `rmdir`, `unlink` and `drone rm` in the command (a link is
+recorded as the link). A word the shell still expands, and every other delete (whose options can take
+values), give one row with `path` null. The refusal's last line says so. A row that cannot be written leaves
 the refusal standing: its last line then says the recording failed, and an ERROR line
 (`rm_gate: ledger write failed, the refusal stands`) goes through prax. A crashed gate writes no row.
 

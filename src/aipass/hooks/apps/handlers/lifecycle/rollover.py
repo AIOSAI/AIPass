@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: rollover.py
-# Version: 2.4.0
+# Version: 2.5.0
 # Description: Triggers memory rollover via @memory when files are overdue (PreCompact), naming the compacting branch
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-10-28
+# Modified: 2026-11-15
 # =============================================
 
 """Delegates rollover detection to @memory and triggers rollover if overdue.
@@ -57,10 +57,10 @@ def _find_repo_root() -> Path | None:
     return None
 
 
-def _compacting_branch(hook_data: dict) -> str | None:
-    """The branch whose session is compacting, by directory name, or None.
+def _compacting_branch(hook_data: dict) -> Path | None:
+    """The directory of the branch whose session is compacting, or None.
 
-    drone runs here from the repo root, so without --branch @memory resolves no pad to roll.
+    drone runs in it, so the verified-caller rail reads that branch as the caller, not the project.
     """
     cwd = hook_data.get("cwd", "") or str(Path.cwd())
     context_window = importlib.import_module("aipass.hooks.apps.modules.context_window")
@@ -68,7 +68,7 @@ def _compacting_branch(hook_data: dict) -> str | None:
     if branch_dir is None:
         logger.info("[HOOKS] rollover: no branch resolved from cwd=%s — fleet rollover only, no todo pad", cwd)
         return None
-    return branch_dir.name
+    return branch_dir
 
 
 def _branch_args(branch: str | None) -> list[str]:
@@ -99,14 +99,14 @@ def _mark_clean(repo_root: Path, branch: str | None) -> None:
         logger.info("[HOOKS] rollover: clean stamp not written, the next compaction checks again: %s", exc)
 
 
-def _run_check(repo_root: Path, branch: str | None) -> tuple[bool, str]:
+def _run_check(repo_root: Path, branch: str | None, seat: Path) -> tuple[bool, str]:
     try:
         result = subprocess.run(
             ["drone", "@memory", "rollover", "check", *_branch_args(branch)],
             capture_output=True,
             text=True,
             timeout=30,
-            cwd=str(repo_root),
+            cwd=str(seat),
         )
         stdout = result.stdout.strip()
         has_overdue = READY_PHRASE in stdout.lower()
@@ -121,14 +121,14 @@ def _run_check(repo_root: Path, branch: str | None) -> tuple[bool, str]:
         return False, str(exc)
 
 
-def _run_rollover(repo_root: Path, branch: str | None) -> tuple[bool, str]:
+def _run_rollover(branch: str | None, seat: Path) -> tuple[bool, str]:
     try:
         result = subprocess.run(
             ["drone", "@memory", "rollover", "run", *_branch_args(branch)],
             capture_output=True,
             text=True,
             timeout=110,
-            cwd=str(repo_root),
+            cwd=str(seat),
         )
         return result.returncode == 0, result.stdout + result.stderr
     except subprocess.TimeoutExpired:
@@ -147,13 +147,15 @@ def handle(hook_data: dict) -> dict:
             logger.warning("[HOOKS] rollover: no repo root found — cannot check")
         return {"stdout": "", "exit_code": 0}
 
-    branch = _compacting_branch(hook_data)
+    branch_dir = _compacting_branch(hook_data)
+    branch = branch_dir.name if branch_dir else None
+    seat = branch_dir or repo_root
     if _recently_clean(repo_root, branch):
         logger.info(
             "[HOOKS] rollover: checked clean within %d min, skipped (branch=%s)", CHECK_FRESH_SECONDS // 60, branch
         )
         return {"stdout": "", "exit_code": 0}
-    has_overdue, check_output = _run_check(repo_root, branch)
+    has_overdue, check_output = _run_check(repo_root, branch, seat)
     if not has_overdue:
         return {"stdout": "", "exit_code": 0}
 
@@ -164,7 +166,7 @@ def handle(hook_data: dict) -> dict:
         logger.info("[HOOKS] rollover: probe run — check ran, fleet rollover suppressed")
         return {"stdout": "", "exit_code": 0, "sound": "pre compact rollover"}
 
-    success, output = _run_rollover(repo_root, branch)
+    success, output = _run_rollover(branch, seat)
     if success:
         logger.info("[HOOKS] rollover: complete (branch=%s)", branch)
     else:

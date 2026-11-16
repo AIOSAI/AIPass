@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.12.0
+# Version: 1.13.0
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
@@ -1262,8 +1262,21 @@ class TestAProviderSessionStartsOnlyInTheOwnBranch:
         "systemd-run claude -p hi",
         "cd ../other && npx claude",
         "cd ../other && nohup claude -p hi &",
-        "tmux new-session -d claude",
+        "tmux new-session -d -c ../other claude",
         "tmux new -s x 'cd ../other && claude'",
+        "tmux new -dc ../other claude",
+        "tmux -L s new -d -c ../other claude",
+        "tmux new -d -c sub 'cd ../../other && claude'",
+        "cd ../other && tmux new -d claude",
+        "tmux send-keys -t x claude Enter",
+        "tmux respawn-pane -k claude",
+        "tmux -c claude",
+        "tmux -c claude new -d sh",
+        "tmux new -d -c../other claude",
+        "cd $UNSET_DIR && tmux new -d claude",
+        "screen -dmS x -X stuff claude",
+        "screen -c rc -dm claude",
+        "cd ../other && screen -dmS x claude",
         "echo claude | at now",
         "cd $UNSET_DIR && claude",
         "opencode $UNSET_DIR",
@@ -1275,6 +1288,13 @@ class TestAProviderSessionStartsOnlyInTheOwnBranch:
         "codex -C sub exec hi",
         "claude --add-dir sub -p hi",
         "nohup claude -p hi &",
+        "tmux new-session -d claude",
+        "tmux -L s new -d claude",
+        "tmux new -d -s x -c sub 'claude -p hi'",
+        "tmux new-window -c sub claude",
+        "tmux splitw claude --add-dir sub",
+        "tmux new -d -c sub claude --add-dir ../sub",
+        "screen -dmS x claude -p hi",
         "setsid claude -p hi",
         "systemd-run --user -d claude -p hi",
         "opencode sub",
@@ -1293,7 +1313,11 @@ class TestAProviderSessionStartsOnlyInTheOwnBranch:
         assert _run(str(fleet["canary"]), command=command) == {"stdout": "", "exit_code": 0}, command
 
     def test_the_admin_seat_starts_a_session_anywhere(self, fleet: dict, grant_granted):
-        for command in ("cd ../other && claude", "codex -C ../canary exec hi", "tmux new-session -d claude"):
+        for command in (
+            "cd ../other && claude",
+            "codex -C ../canary exec hi",
+            "tmux new-session -d -c ../other claude",
+        ):
             assert _run(str(fleet["devpulse"]), command=command)["exit_code"] == 0, command
 
     def test_a_seat_with_no_passport_starts_no_session(self, fleet: dict, grant_withheld):

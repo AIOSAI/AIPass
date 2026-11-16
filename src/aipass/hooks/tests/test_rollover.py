@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_rollover.py
-# Version: 2.4.0
+# Version: 2.5.0
 # Description: Tests for rollover lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/lifecycle/rollover.py."""
@@ -18,6 +18,7 @@ from unittest.mock import patch, MagicMock
 import os
 import subprocess
 import time
+from pathlib import Path
 
 import pytest
 
@@ -206,10 +207,10 @@ class TestACleanCheckIsTrusted:
 class TestTheCompactingBranchIsNamed:
     """DPLAN-0345 / FPLAN-0590 row 7: @memory rolls ONE branch's todo pad per call.
 
-    drone runs this handler's commands with cwd = repo root and re-stamps
-    AIPASS_CALLER_CWD with that, so memory resolves no branch and rolls no pad
-    unless the hook names one (memory measured it, 2026-09-15). The branch is
-    the compacting session's, read from the PreCompact payload's cwd.
+    drone stamps AIPASS_CALLER_CWD with the cwd it runs in, and @memory's verified-caller
+    rail reads the caller from it. So drone runs in the compacting branch's directory
+    (read from the PreCompact payload's cwd), and --branch still names the pad; a seat in
+    no branch runs from the repo root.
     """
 
     @staticmethod
@@ -231,14 +232,20 @@ class TestTheCompactingBranchIsNamed:
         (tmp_path / "src" / "aipass" / "hooks").mkdir(parents=True)
         monkeypatch.setattr(rollover, "_find_repo_root", lambda: tmp_path)
         rollover.handle({"cwd": str(tmp_path / "src" / "aipass" / "hooks")})
-        assert calls[0] == (["drone", "@memory", "rollover", "check", "--branch", "@hooks"], str(tmp_path))
+        assert calls[0] == (
+            ["drone", "@memory", "rollover", "check", "--branch", "@hooks"],
+            str(tmp_path / "src" / "aipass" / "hooks"),
+        )
 
     def test_run_names_the_branch(self, monkeypatch, tmp_path):
         rollover, calls = self._spy(monkeypatch)
         (tmp_path / "src" / "aipass" / "hooks").mkdir(parents=True)
         monkeypatch.setattr(rollover, "_find_repo_root", lambda: tmp_path)
         rollover.handle({"cwd": str(tmp_path / "src" / "aipass" / "hooks")})
-        assert calls[1] == (["drone", "@memory", "rollover", "run", "--branch", "@hooks"], str(tmp_path))
+        assert calls[1] == (
+            ["drone", "@memory", "rollover", "run", "--branch", "@hooks"],
+            str(tmp_path / "src" / "aipass" / "hooks"),
+        )
 
     def test_handle_reads_the_branch_from_the_payload_cwd(self, monkeypatch, tmp_path):
         """Not the process cwd: the hook runs wherever CC launched the bridge."""
@@ -249,9 +256,9 @@ class TestTheCompactingBranchIsNamed:
 
         rollover.handle({"cwd": str(branch_dir / "apps"), "trigger": "auto"})
 
-        assert [argv for argv, _ in calls] == [
-            ["drone", "@memory", "rollover", "check", "--branch", "@compacting_one"],
-            ["drone", "@memory", "rollover", "run", "--branch", "@compacting_one"],
+        assert calls == [
+            (["drone", "@memory", "rollover", "check", "--branch", "@compacting_one"], str(branch_dir)),
+            (["drone", "@memory", "rollover", "run", "--branch", "@compacting_one"], str(branch_dir)),
         ]
 
     def test_no_branch_still_runs_the_fleet_rollover(self, monkeypatch, tmp_path):
@@ -261,9 +268,9 @@ class TestTheCompactingBranchIsNamed:
 
         rollover.handle({"cwd": str(tmp_path)})
 
-        assert [argv for argv, _ in calls] == [
-            ["drone", "@memory", "rollover", "check"],
-            ["drone", "@memory", "rollover", "run"],
+        assert calls == [
+            (["drone", "@memory", "rollover", "check"], str(tmp_path)),
+            (["drone", "@memory", "rollover", "run"], str(tmp_path)),
         ]
 
     def test_memorys_todos_line_alone_reads_as_overdue(self, monkeypatch, tmp_path):
@@ -325,9 +332,9 @@ class TestProbeSuppression:
     def _patched(self, monkeypatch):
         ran = []
         monkeypatch.setattr(rollover, "_find_repo_root", lambda: MagicMock())
-        monkeypatch.setattr(rollover, "_compacting_branch", lambda hook_data: "hooks")
-        monkeypatch.setattr(rollover, "_run_check", lambda root, branch: (True, CHECK_OVERDUE_OUTPUT))
-        monkeypatch.setattr(rollover, "_run_rollover", lambda root, branch: (ran.append("ran"), (True, ""))[1])
+        monkeypatch.setattr(rollover, "_compacting_branch", lambda hook_data: Path("hooks"))
+        monkeypatch.setattr(rollover, "_run_check", lambda root, branch, seat: (True, CHECK_OVERDUE_OUTPUT))
+        monkeypatch.setattr(rollover, "_run_rollover", lambda branch, seat: (ran.append("ran"), (True, ""))[1])
         return rollover, ran
 
     def test_probe_run_suppresses_the_fleet_rollover(self, monkeypatch):
@@ -348,13 +355,13 @@ class TestProbeSuppression:
         """Suppression is at the mutation, not at the entry — the handler must still work."""
         checked = []
         monkeypatch.setattr(rollover, "_find_repo_root", lambda: MagicMock())
-        monkeypatch.setattr(rollover, "_compacting_branch", lambda hook_data: "hooks")
+        monkeypatch.setattr(rollover, "_compacting_branch", lambda hook_data: Path("hooks"))
         monkeypatch.setattr(
             rollover,
             "_run_check",
-            lambda root, branch: (checked.append("checked"), (True, CHECK_OVERDUE_OUTPUT))[1],
+            lambda root, branch, seat: (checked.append("checked"), (True, CHECK_OVERDUE_OUTPUT))[1],
         )
-        monkeypatch.setattr(rollover, "_run_rollover", lambda root, branch: (True, ""))
+        monkeypatch.setattr(rollover, "_run_rollover", lambda branch, seat: (True, ""))
         monkeypatch.setenv("AIPASS_HOOK_PROBE", "1")
         rollover.handle({})
         assert checked == ["checked"]

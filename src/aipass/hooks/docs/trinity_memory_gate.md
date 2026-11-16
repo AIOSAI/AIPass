@@ -88,7 +88,9 @@ missing canonical field is authored, and refused.
 
 **The todo pad count is advised, never refused.** An 11th todo is legal on disk: the
 oldest roll off to `.backup/todo/<branch>/backlog.json` at that branch's next PreCompact or
-`drone @memory rollover run --branch @<branch>`. The pad size is @memory's own resolver
+`drone @memory rollover run --branch @<branch>`. The PreCompact hook runs that drone call (and its
+`rollover check`) with the compacting branch's directory as its cwd, so @memory's verified-caller rail
+reads the branch as the caller; a session in no branch runs the fleet roll from the repo root. The pad size is @memory's own resolver
 (`config_loader.get_todos_count`), the number its roll applies. A write that leaves the pad over it
 gets an advisory as PreToolUse `hookSpecificOutput.additionalContext`, because the model writing the
 todo is its audience; plain stdout on a PreToolUse exit 0 is shown in the transcript view and never
