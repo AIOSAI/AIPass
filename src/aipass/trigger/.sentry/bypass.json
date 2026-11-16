@@ -130,7 +130,7 @@
       "file": "apps/handlers/error_registry.py",
       "standard": "logged_fallback",
       "lines": [
-        466
+        519
       ],
       "pattern": "update_status returns False on an exception",
       "reason": "The success path returns _save_registry's answer, so False is always a failure: invalid status, not found, save failed or an exception (fleet green leg 4, kept leg 10). Its callers in errors.py (suppress, unsuppress, resolve) print the failure on False and do nothing else, and the warning names the exception.",
@@ -140,7 +140,7 @@
       "file": "apps/handlers/error_registry.py",
       "standard": "logged_fallback",
       "lines": [
-        580
+        633
       ],
       "pattern": "update_source_fix_status returns False on an exception",
       "reason": "Fleet green leg 5, kept leg 10. Its caller, errors suppress, ignores the answer and runs after the suppression write and after the source-fix send. A raise would crash after the mail went, and a distinct value would need that caller changed.",

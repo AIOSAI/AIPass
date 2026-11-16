@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_ci_red.py
 # Description: Tests for the ci_red event handler and medic's dispatch gates it runs
-# Version: 1.1.2
+# Version: 1.2.0
 # Created: 2026-10-23
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/events/ci_red.py and the dispatch gates it runs."""
@@ -15,10 +15,13 @@
 
 import json
 
+from aipass.trigger.apps.handlers import error_registry
 from aipass.trigger.apps.handlers.ci import outbound
 from aipass.trigger.apps.handlers.events import error_detected as medic
 from aipass.trigger.apps.handlers.events.ci_red import handle_ci_red
 from aipass.trigger.apps.modules.core import Trigger
+
+_REAL_GATE = medic.breaker_gate  # captured before ci_lane stubs it
 
 LOG = (
     "sentry-audit\tRun sentry standards audit\t2026-10-23T05:33:48.3Z   hooks: 99%\n"
@@ -104,12 +107,29 @@ class TestGates:
         _fire()
         assert ci_lane.mails == [] and "backing off" in _state(ci_lane)["reason"]
 
-    def test_a_backing_off_red_leaves_the_half_open_probe_unspent(self, ci_lane, monkeypatch):
-        probes = []
-        monkeypatch.setattr(medic, "circuit_breaker_allows", lambda: probes.append(1) or True)
+    def test_a_backing_off_red_never_reaches_the_breaker_gate(self, ci_lane, monkeypatch):
+        gated = []
+        monkeypatch.setattr(medic, "breaker_gate", lambda *gate: gated.append(gate) or "")
         ci_lane.backoff = True
         _fire()
-        assert probes == [] and "backing off" in _state(ci_lane)["reason"]
+        assert gated == [] and "backing off" in _state(ci_lane)["reason"]
+
+    def test_a_medic_storm_from_another_branch_never_gates_a_ci_red(self, ci_lane, monkeypatch):
+        monkeypatch.setattr(medic, "breaker_gate", _REAL_GATE)
+        monkeypatch.setattr(medic, "_send_email", lambda **mail: ci_lane.mails.append(mail) or True)
+        for _ in range(12):
+            row = error_registry.report(error_type="ERROR", message="storm", component="spawn")
+            medic.handle_error_detected(
+                branch="spawn",
+                module="m",
+                message="storm",
+                error_hash=row["id"],
+                fingerprint=row["fingerprint"],
+                count=row["count"],
+            )
+        _fire()
+        assert [m["to_branch"] for m in ci_lane.mails].count("@hooks") == 1
+        assert _state(ci_lane)["state"] == "dispatched"
 
     def test_devpulse_as_owner_is_emailed_and_never_woken(self, ci_lane):
         _fire(owner="devpulse")

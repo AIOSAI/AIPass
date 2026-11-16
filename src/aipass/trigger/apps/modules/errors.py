@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: errors.py
 # Description: Error registry management module for Medic v2 commands
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-02-13
 # Modified: 2026-11-16
 # =============================================
@@ -491,7 +491,8 @@ def _cmd_stats(console, args: list) -> bool:
     console.print("  [bold]Circuit Breaker:[/bold]")
     console.print(f"    State:         [{cc}]{cb_st}[/{cc}]")
     console.print(f"    Cooldown:      {cb.get('cooldown_seconds', 0)}s")
-    console.print(f"    Recent errors: {cb.get('recent_error_count', 0)}")
+    console.print(f"    Recent mails:  {cb.get('recent_send_count', 0)}")
+    console.print(f"    Held mails:    {cb.get('held_count', 0)}")
     console.print()
     return True
 
@@ -515,7 +516,8 @@ def _cmd_circuit_breaker(console, args: list) -> bool:
     console.print()
     console.print(f"  State:           [{cc}]{cb_st}[/{cc}]")
     console.print(f"  Cooldown:        {cb.get('cooldown_seconds', 0)}s")
-    console.print(f"  Recent errors:   {cb.get('recent_error_count', 0)}")
+    console.print(f"  Recent mails:    {cb.get('recent_send_count', 0)}")
+    console.print(f"  Held mails:      {cb.get('held_count', 0)}")
     console.print(f"  Summary sent:    {cb.get('summary_sent', False)}")
     console.print()
 
@@ -523,7 +525,7 @@ def _cmd_circuit_breaker(console, args: list) -> bool:
         console.print("  [dim]Normal operation - all dispatch allowed[/dim]")
     elif cb_st == "open":
         remaining = cb.get("remaining_seconds", 0)
-        error(f"Dispatch paused - {remaining}s remaining until half-open")
+        error(f"Dispatch paused - {remaining}s until the next mail may probe")
         console.print()
         console.print("  [dim]Run 'drone @trigger errors circuit-breaker reset' to force close[/dim]")
     elif cb_st == "half_open":

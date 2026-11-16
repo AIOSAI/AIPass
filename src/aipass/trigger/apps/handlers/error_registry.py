@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: error_registry.py
 # Description: Structured error tracking and registry for Medic v2
-# Version: 2.8.0
+# Version: 2.9.0
 # Created: 2026-02-13
 # Modified: 2026-11-16
 # =============================================
@@ -41,6 +41,13 @@ _USER_ERROR_PATTERNS: re.Pattern = re.compile(
     re.IGNORECASE,
 )
 
+# A line's own identity: fault[KEY], KEY holding no whitespace and no closing bracket. Hooks pins this text.
+FAULT_MARKER: re.Pattern = re.compile(r"fault\[([^\s\]]+)\]")
+
+# Breaker policy: counts would-be mails, never log lines.
+RECIPIENT_CAP = 5
+RECIPIENT_WINDOW_SECONDS = 600
+
 
 @dataclass
 class ErrorEvent:
@@ -71,11 +78,13 @@ class CircuitBreakerState:
     cooldown_seconds: int = 300
     base_cooldown: int = 300
     max_cooldown: int = 3600
-    recent_errors: list = field(default_factory=list)
+    recent_sends: list = field(default_factory=list)
     trip_threshold: int = 10
     trip_window_seconds: int = 60
     summary_sent: bool = False
     half_open_allow: bool = True
+    probe_at: float = 0.0
+    held: dict = field(default_factory=dict)
 
 
 def _save_circuit_breaker_state(breaker: CircuitBreakerState, per_fingerprint: dict) -> None:
@@ -85,9 +94,11 @@ def _save_circuit_breaker_state(breaker: CircuitBreakerState, per_fingerprint: d
             "state": breaker.state,
             "opened_at": breaker.opened_at,
             "cooldown_seconds": breaker.cooldown_seconds,
-            "recent_errors": breaker.recent_errors,
+            "recent_sends": breaker.recent_sends,
             "summary_sent": breaker.summary_sent,
             "half_open_allow": breaker.half_open_allow,
+            "probe_at": breaker.probe_at,
+            "held": breaker.held,
         },
         "per_fingerprint": per_fingerprint,
     }
@@ -116,7 +127,11 @@ def _load_circuit_breaker_state() -> Tuple[CircuitBreakerState, dict]:
         breaker.state = cb_data["state"]
         breaker.opened_at = float(cb_data.get("opened_at", 0.0))
         breaker.cooldown_seconds = int(cb_data.get("cooldown_seconds", breaker.base_cooldown))
-        breaker.recent_errors = [float(t) for t in cb_data.get("recent_errors", [])]
+        # A pre-2.9 file's recent_errors are line times, not sends: they are not carried over.
+        sends = cb_data.get("recent_sends", [])
+        breaker.recent_sends = [[float(t), str(r), str(fp), str(note)] for t, r, fp, note in sends]
+        breaker.held = dict(cb_data.get("held", {}))
+        breaker.probe_at = float(cb_data.get("probe_at", 0.0))
         breaker.summary_sent = bool(cb_data.get("summary_sent", False))
         breaker.half_open_allow = bool(cb_data.get("half_open_allow", True))
     except Exception as exc:
@@ -146,76 +161,109 @@ def _cb_state() -> Iterator[Tuple[CircuitBreakerState, dict]]:
             _save_circuit_breaker_state(breaker, per_fingerprint)
 
 
-def _evaluate_state(breaker: CircuitBreakerState, now: Optional[float] = None) -> None:
-    """Move an open breaker whose cooldown has passed to half_open.
-
-    Runs on status reads too, so the breaker self-heals while medic is off.
-    """
-    if breaker.state != "open":
-        return
-    elapsed = (time.time() if now is None else now) - breaker.opened_at
-    if elapsed >= breaker.cooldown_seconds:
-        breaker.state = "half_open"
-        breaker.half_open_allow = True
-        breaker.summary_sent = False
-
-
 def _close(breaker: CircuitBreakerState) -> None:
-    """Return the breaker to closed with the base cooldown."""
+    """Return the breaker to closed with the base cooldown; held mail stays with its recipient."""
     breaker.state = "closed"
     breaker.opened_at = 0.0
     breaker.cooldown_seconds = breaker.base_cooldown
-    breaker.recent_errors = []
+    breaker.recent_sends = []
     breaker.summary_sent = False
     breaker.half_open_allow = True
 
 
-def circuit_breaker_allows(now: Optional[float] = None) -> bool:
-    """Check if the circuit breaker allows dispatch.
+def _hold(breaker: CircuitBreakerState, recipient: str, fingerprint: str, note: str, now: float) -> None:
+    """Keep a refused mail on its recipient's list, so it rides in that branch's next mail."""
+    row = breaker.held.setdefault(recipient, {}).setdefault(fingerprint, {"note": note, "count": 0, "first_held": now})
+    row["count"] += 1
+    row["note"] = note
 
-    Half-open allows ONE probe; the caller must call circuit_breaker_probe_succeeded() to close.
-    `now` is a test seam; product callers pass None.
+
+def dispatch_gate(recipient: str, fingerprint: str, note: str, now: Optional[float] = None) -> str:
+    """The one breaker gate for every fingerprinted mail; call it only where a mail would go.
+
+    Answers send, probe, held_cap, held_open or tripped (held, and the @devpulse summary is owed).
+    Only this gate moves open to half_open; a status read never does. `now` is a test seam.
     """
+    now = time.time() if now is None else now
     with _cb_state() as (breaker, _):
-        _evaluate_state(breaker, now)
-        if breaker.state == "closed":
-            return True
-        if breaker.state == "half_open" and breaker.half_open_allow:
-            breaker.half_open_allow = False
-            return True
-        return False
-
-
-def circuit_breaker_record_error(now: Optional[float] = None) -> None:
-    """Record a new error occurrence for circuit breaker tracking.
-
-    In half_open, any error re-opens with doubled cooldown. `now` is a test seam.
-    """
-    if now is None:
-        now = time.time()
-    with _cb_state() as (breaker, _):
+        breaker.recent_sends = [s for s in breaker.recent_sends if s[0] >= now - RECIPIENT_WINDOW_SECONDS]
+        if breaker.state == "open" and now - breaker.opened_at >= breaker.cooldown_seconds:
+            breaker.state = "half_open"
+            breaker.half_open_allow = True
+        # A probe whose send never reported back (a raise, a queue) is replaced, or half_open holds forever.
+        lost = breaker.state == "half_open" and not breaker.half_open_allow
+        if lost and now - breaker.probe_at >= breaker.base_cooldown:
+            breaker.half_open_allow = True
+        if breaker.state == "open" or (breaker.state == "half_open" and not breaker.half_open_allow):
+            _hold(breaker, recipient, fingerprint, note, now)
+            return "held_open" if breaker.summary_sent else "tripped"
+        mine = {s[2] for s in breaker.recent_sends if s[1] == recipient}
+        if fingerprint not in mine and len(mine) >= RECIPIENT_CAP:
+            _hold(breaker, recipient, fingerprint, note, now)
+            return "held_cap"
         if breaker.state == "half_open":
-            breaker.state = "open"
-            breaker.opened_at = now
-            breaker.cooldown_seconds = min(breaker.cooldown_seconds * 2, breaker.max_cooldown)
-            breaker.summary_sent = False
-            breaker.recent_errors = [now]
-            return
-
-        cutoff = now - breaker.trip_window_seconds
-        breaker.recent_errors = [t for t in breaker.recent_errors + [now] if t >= cutoff]
-        if len(breaker.recent_errors) >= breaker.trip_threshold:
+            breaker.half_open_allow = False
+            breaker.probe_at = now
+            breaker.recent_sends.append([now, recipient, fingerprint, note])
+            return "probe"
+        fleet = {(s[1], s[2]) for s in breaker.recent_sends if s[0] >= now - breaker.trip_window_seconds}
+        if len(fleet | {(recipient, fingerprint)}) >= breaker.trip_threshold:
             logger.info("Circuit breaker tripped: threshold_exceeded")
             breaker.state = "open"
             breaker.opened_at = now
             breaker.summary_sent = False
+            _hold(breaker, recipient, fingerprint, note, now)
+            return "tripped"
+        breaker.recent_sends.append([now, recipient, fingerprint, note])
+        return "send"
 
 
-def circuit_breaker_probe_succeeded() -> None:
-    """Close the breaker after a successful dispatch during half_open probe."""
+def circuit_breaker_held(recipient: str) -> Dict[str, dict]:
+    """The mails held for this recipient, {fingerprint: {note, count, first_held}}."""
+    return dict(_load_circuit_breaker_state()[0].held.get(recipient, {}))
+
+
+def circuit_breaker_delivered(recipient: str, fingerprints: list) -> None:
+    """A mail went: drop what rode in it from the held list, and a spent probe closes the breaker."""
     with _cb_state() as (breaker, _):
-        if breaker.state == "half_open":
+        held = breaker.held.get(recipient, {})
+        for fingerprint in fingerprints:
+            held.pop(fingerprint, None)
+        if not held:
+            breaker.held.pop(recipient, None)
+        if breaker.state == "half_open" and not breaker.half_open_allow:
             _close(breaker)
+
+
+def circuit_breaker_send_failed(now: Optional[float] = None) -> None:
+    """A failed probe reopens with doubled cooldown; any other failed send leaves the state alone."""
+    with _cb_state() as (breaker, _):
+        if breaker.state == "half_open" and not breaker.half_open_allow:
+            breaker.state = "open"
+            breaker.opened_at = time.time() if now is None else now
+            breaker.cooldown_seconds = min(breaker.cooldown_seconds * 2, breaker.max_cooldown)
+
+
+def circuit_breaker_summary() -> str:
+    """The open breaker's account for @devpulse: the sends that tripped it and every mail it holds."""
+    breaker = _load_circuit_breaker_state()[0]
+    sent = [f"  {s[1]} {s[2][:12]} {s[3]}" for s in breaker.recent_sends]
+    held = [
+        f"  {recipient} {fp[:12]} x{row['count']} {row['note']}"
+        for recipient, rows in breaker.held.items()
+        for fp, row in rows.items()
+    ]
+    return (
+        f"Medic's circuit breaker opened: {breaker.trip_threshold} distinct mails in "
+        f"{breaker.trip_window_seconds}s. Mail is held for {breaker.cooldown_seconds}s, then one probe.\n\n"
+        "Recent sends:\n" + ("\n".join(sent) or "  (none)") + "\n\nHeld:\n" + ("\n".join(held) or "  (none)") + "\n"
+    )
+
+
+def circuit_breaker_summary_sent() -> None:
+    """Mark this opening's summary delivered: one per opening."""
+    with _cb_state() as (breaker, _):
+        breaker.summary_sent = True
 
 
 def circuit_breaker_reset() -> None:
@@ -228,8 +276,8 @@ def get_circuit_breaker_status(now: Optional[float] = None) -> dict:
     """Get current circuit breaker state as a dictionary."""
     if now is None:
         now = time.time()
-    with _cb_state() as (breaker, _):
-        _evaluate_state(breaker, now)
+    # A read, never a transition: only dispatch_gate moves open to half_open.
+    breaker = _load_circuit_breaker_state()[0]
     remaining = 0
     if breaker.state == "open":
         remaining = max(0, int(breaker.cooldown_seconds - (now - breaker.opened_at)))
@@ -237,7 +285,8 @@ def get_circuit_breaker_status(now: Optional[float] = None) -> dict:
         "state": breaker.state,
         "opened_at": breaker.opened_at,
         "cooldown_seconds": breaker.cooldown_seconds,
-        "recent_error_count": len(breaker.recent_errors),
+        "recent_send_count": len(breaker.recent_sends),
+        "held_count": sum(len(rows) for rows in breaker.held.values()),
         "summary_sent": breaker.summary_sent,
         "remaining_seconds": remaining,
     }
@@ -301,7 +350,10 @@ def record_dispatch(fingerprint: str) -> None:
 
 
 def normalize_message(message: str) -> str:
-    """Normalize an error message by stripping variable data."""
+    """Normalize an error message by stripping variable data; a marked line is its marker alone."""
+    marker = FAULT_MARKER.search(message)
+    if marker:
+        return marker.group(0)
     normalized = message
 
     normalized = re.sub(
@@ -368,7 +420,8 @@ def report(error_type: str, message: str, component: str, log_path: str = "", se
     normalized = normalize_message(message)
     fingerprint = compute_fingerprint(error_type, normalized, component)
 
-    is_user_error = bool(_USER_ERROR_PATTERNS.search(message))
+    # A marked line is a fault by declaration, never a user's typo.
+    is_user_error = not FAULT_MARKER.search(message) and bool(_USER_ERROR_PATTERNS.search(message))
 
     with json_file_lock(REGISTRY_FILE):
         registry = _load_registry()

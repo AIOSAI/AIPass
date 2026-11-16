@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_error_detected.py
 # Description: Tests for error_detected event handler with Medic v2 dispatch gating
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-04-25
 # Modified: 2026-11-16
 # =============================================
@@ -35,7 +35,8 @@ from aipass.trigger.apps.handlers import escalation, medic_state
 def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Put the real error_detected module on tmp_path and recording stubs.
     Every outside edge is swapped with monkeypatch.setattr, so teardown restores direct assignments.
-    normalize_message stays real: a mock returns one object for every input, so a shared-signature assertion passes vacuously.
+    normalize_message stays real: a mock returns one object for every input,
+    so a shared-signature assertion passes vacuously.
     """
     json_dir = tmp_path / "trigger_json"
     monkeypatch.setattr(error_registry, "REGISTRY_FILE", json_dir / "error_registry.json")
@@ -46,9 +47,10 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     monkeypatch.setattr(wake, "wake_branch", MagicMock())
 
     monkeypatch.setattr(error_detected, "_send_email", None)
-    monkeypatch.setattr(error_detected, "circuit_breaker_allows", MagicMock(return_value=True))
-    monkeypatch.setattr(error_detected, "circuit_breaker_record_error", MagicMock())
-    monkeypatch.setattr(error_detected, "circuit_breaker_probe_succeeded", MagicMock())
+    monkeypatch.setattr(error_detected, "breaker_gate", MagicMock(return_value=""))
+    monkeypatch.setattr(error_detected, "circuit_breaker_delivered", MagicMock())
+    monkeypatch.setattr(error_detected, "circuit_breaker_send_failed", MagicMock())
+    monkeypatch.setattr(error_detected, "circuit_breaker_held", MagicMock(return_value={}))
     monkeypatch.setattr(error_detected, "registry_should_dispatch", MagicMock(return_value=True))
     monkeypatch.setattr(error_detected, "registry_record_dispatch", MagicMock())
     monkeypatch.setattr(error_detected, "registry_is_suppressed", MagicMock(return_value=False))
@@ -83,11 +85,10 @@ def _setup_happy_path(mod: object) -> MagicMock:
     mod._is_branch_muted = MagicMock(return_value=False)  # type: ignore[attr-defined]
     mod._get_registered_emails = MagicMock(return_value={"@flow", "@spawn"})  # type: ignore[attr-defined]
     mod._send_email = send_mock  # type: ignore[attr-defined]
-    mod.circuit_breaker_allows = MagicMock(return_value=True)  # type: ignore[attr-defined]
+    mod.breaker_gate = MagicMock(return_value="")  # type: ignore[attr-defined]
     mod.registry_should_dispatch = MagicMock(return_value=True)  # type: ignore[attr-defined]
     mod.registry_is_suppressed = MagicMock(return_value=False)  # type: ignore[attr-defined]
     mod.registry_record_dispatch = MagicMock()  # type: ignore[attr-defined]
-    mod.circuit_breaker_record_error = MagicMock()  # type: ignore[attr-defined]
     return send_mock
 
 
@@ -158,7 +159,7 @@ class TestHandleErrorDetectedGates:
         breaker = MagicMock(return_value=True)
         recorded = MagicMock()
         mod._is_medic_enabled = MagicMock(return_value=False)  # type: ignore[attr-defined]
-        mod.circuit_breaker_allows = breaker  # type: ignore[attr-defined]
+        mod.breaker_gate = breaker  # type: ignore[attr-defined]
         mod.registry_record_dispatch = recorded  # type: ignore[attr-defined]
 
         mod.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
@@ -184,7 +185,7 @@ class TestHandleErrorDetectedGates:
         send = _setup_happy_path(mod)
         breaker = MagicMock(return_value=True)
         recorded = MagicMock()
-        mod.circuit_breaker_allows = breaker  # type: ignore[attr-defined]
+        mod.breaker_gate = breaker  # type: ignore[attr-defined]
         mod.registry_record_dispatch = recorded  # type: ignore[attr-defined]
 
         mod.handle_error_detected(
@@ -250,7 +251,7 @@ class TestHandleErrorDetectedGates:
         assert [c.kwargs["to_branch"] for c in send.call_args_list] == ["@spawn", "@flow", "@spawn"]
 
     def test_an_unreadable_medic_state_raises_to_the_bus_and_dispatches_nothing(self, tmp_path: Path) -> None:
-        """A medic state nobody can read may hold a person's 'off': no mail, and the bus is told, not an unread trail."""
+        """A medic state nobody can read may hold a person's 'off': no mail, and the bus is told, not a trail."""
         send = MagicMock(return_value=True)
         error_detected.set_send_email_callback(send)
         registry = {"branches": [{"email": "@flow", "status": "active", "path": "src/aipass/flow"}]}
@@ -341,7 +342,7 @@ class TestHandleErrorDetectedGates:
         """Does not dispatch when circuit breaker is open."""
         mod = _import_module()
         send = _setup_happy_path(mod)
-        mod.circuit_breaker_allows = MagicMock(return_value=False)  # type: ignore[attr-defined]
+        mod.breaker_gate = MagicMock(return_value="Circuit breaker OPEN - held for")  # type: ignore[attr-defined]
 
         mod.handle_error_detected(
             branch="flow",
@@ -738,14 +739,13 @@ class TestBranchMutedFormats:
         send.assert_not_called()
 
 
-class TestProbeSucceeded:
-    """Tests for circuit_breaker_probe_succeeded called after dispatch."""
+class TestDeliveredIsReported:
+    """A delivered mail is reported to the breaker, which closes a spent probe and clears what rode in it."""
 
-    def test_probe_succeeded_called_after_dispatch(self) -> None:
-        """circuit_breaker_probe_succeeded is called after successful dispatch with fingerprint."""
+    def test_a_delivered_mail_reports_its_fingerprint_to_the_breaker(self) -> None:
         mod = _import_module()
         send = _setup_happy_path(mod)
-        mod.circuit_breaker_probe_succeeded = MagicMock()  # type: ignore[attr-defined]
+        mod.circuit_breaker_delivered = MagicMock()  # type: ignore[attr-defined]
 
         mod.handle_error_detected(
             branch="flow",
@@ -758,7 +758,7 @@ class TestProbeSucceeded:
 
         send.assert_called_once()
         mod.registry_record_dispatch.assert_called_once_with("fp_probe")  # type: ignore[attr-defined]
-        mod.circuit_breaker_probe_succeeded.assert_called_once()  # type: ignore[attr-defined]
+        mod.circuit_breaker_delivered.assert_called_once_with("@flow", ["fp_probe"])  # type: ignore[attr-defined]
 
 
 class TestOccurrencesReportsTrueCount:
@@ -968,7 +968,7 @@ class TestEscalationRecording:
         """An error storm opens the breaker — the storm still has to be countable."""
         mod = _import_module()
         send = _setup_happy_path(mod)
-        mod.circuit_breaker_allows = MagicMock(return_value=False)
+        mod.breaker_gate = MagicMock(return_value="Circuit breaker OPEN - held for")
 
         mod.handle_error_detected(
             branch="flow", module="cfg", message="err", error_hash="h1", count=3, fingerprint="fp1"
@@ -1085,38 +1085,158 @@ class TestOneMuteRule:
         send.assert_not_called()
 
 
-class TestHalfOpenProbe:
-    """The breaker's one half-open probe goes to a fingerprint that would be sent."""
+_REAL_GATES = {
+    name: getattr(error_detected, name)
+    for name in (
+        "breaker_gate",
+        "circuit_breaker_delivered",
+        "circuit_breaker_send_failed",
+        "circuit_breaker_held",
+        "registry_should_dispatch",
+        "registry_record_dispatch",
+        "registry_is_suppressed",
+    )
+}
+_REAL_REPORT, _REAL_IS_SUPPRESSED = error_registry.report, error_registry.is_suppressed
 
-    def test_a_backoff_fingerprint_leaves_the_probe_for_a_fresh_one(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Open breaker, cooldown over: a fingerprint in backoff arrives, then a fresh one is still sent.
-        Red first: the backoff fingerprint spent the probe and the fresh one reopened the breaker.
-        """
-        import time
 
-        mod = _import_module()
-        send = _setup_happy_path(mod)
-        later = time.time() + 301
-        monkeypatch.setattr(mod, "circuit_breaker_allows", lambda: error_registry.circuit_breaker_allows(now=later))
-        monkeypatch.setattr(
-            mod, "circuit_breaker_record_error", lambda: error_registry.circuit_breaker_record_error(now=later)
-        )
-        monkeypatch.setattr(mod, "circuit_breaker_probe_succeeded", error_registry.circuit_breaker_probe_succeeded)
-        monkeypatch.setattr(mod, "registry_should_dispatch", lambda fingerprint: fingerprint != "fp_backoff")
-        error_registry.circuit_breaker_reset()
-        for _ in range(10):
-            error_registry.circuit_breaker_record_error()
+@pytest.fixture
+def medic_line(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    """Real registry, backoff and breaker on tmp files, fed the way the watcher feeds them; the clock is pinned."""
+    for name, real in _REAL_GATES.items():
+        monkeypatch.setattr(error_detected, name, real)
+    monkeypatch.setattr(error_registry, "report", _REAL_REPORT)
+    monkeypatch.setattr(error_registry, "is_suppressed", _REAL_IS_SUPPRESSED)
+    monkeypatch.setattr(error_registry, "logger", MagicMock())
+    clock = [1_000_000.0]
+    monkeypatch.setattr(error_registry, "time", SimpleNamespace(time=lambda: clock[0]))
+    mails: List[Dict[str, Any]] = []
+    held: List[str] = []
+    monkeypatch.setattr(error_detected, "_send_email", lambda **kwargs: mails.append(kwargs) or True)
+    monkeypatch.setattr(error_detected, "_get_registered_emails", lambda: {"@hooks", "@memory", "@seed", "@flow"})
+    monkeypatch.setattr(error_detected, "_wake", lambda *args: None)
+    monkeypatch.setattr(error_detected, "_write_suppression_log", lambda reason, *rest: held.append(reason))
 
-        mod.handle_error_detected(
-            branch="flow", module="cfg", message="noisy", error_hash="h1", count=5, fingerprint="fp_backoff"
-        )
-        mod.handle_error_detected(
-            branch="flow", module="cfg", message="fresh", error_hash="h2", count=2, fingerprint="fp_fresh"
-        )
+    def feed(branch: str, message: str, times: int = 1) -> None:
+        for _ in range(times):
+            row = error_registry.report(error_type="ERROR", message=message, component=branch)
+            error_detected.handle_error_detected(
+                branch=branch,
+                module="m",
+                message=message,
+                error_hash=row["id"],
+                fingerprint=row["fingerprint"],
+                registry_id=row["id"],
+                count=row["count"],
+            )
 
-        send.assert_called_once()
-        assert "fresh" in send.call_args.kwargs["message"]
-        assert error_registry.get_circuit_breaker_status(now=later)["state"] == "closed"
+    def trip() -> None:
+        """Ten distinct faults from two branches, each seen twice: the fleet trip."""
+        for branch in ("hooks", "memory"):
+            for n in range(5):
+                feed(branch, f"{branch} fault {chr(97 + n)}", times=2)
+
+    def to(branch: str) -> List[Dict[str, Any]]:
+        return [m for m in mails if m["to_branch"] == branch]
+
+    return SimpleNamespace(feed=feed, trip=trip, to=to, mails=mails, held=held, clock=clock)
+
+
+class TestTheBreakerCountsMailsNotLines:
+    """One fleet breaker, fed only where a mail would go: a storm from one branch never holds another's mail."""
+
+    def test_a_storm_from_one_branch_never_holds_another_branchs_mail(self, medic_line) -> None:
+        medic_line.feed("hooks", "handler error navmap KeyError 'x'", times=12)
+        medic_line.feed("memory", "vector store write failed", times=2)
+
+        assert [m["to_branch"] for m in medic_line.mails] == ["@hooks", "@memory"]
+        assert error_registry.get_circuit_breaker_status()["state"] == "closed"
+
+    def test_faults_from_unregistered_branches_never_count_toward_the_trip(self, medic_line) -> None:
+        for ghost in ("ghost1", "ghost2"):
+            for n in range(5):
+                medic_line.feed(ghost, f"fault {n}", times=2)
+        medic_line.feed("memory", "vector store write failed", times=2)
+
+        assert [m["to_branch"] for m in medic_line.mails] == ["@memory"]
+
+    def test_one_branch_gets_five_faults_and_the_rest_ride_in_its_next_mail(self, medic_line) -> None:
+        for n in range(7):
+            medic_line.feed("hooks", f"fault {chr(97 + n)}", times=2)
+
+        assert len(medic_line.to("@hooks")) == 5
+        holds = [reason for reason in medic_line.held if reason.startswith("Held")]
+        assert holds == ["Held, @hooks had 5 faults mailed in 10 min - held for"] * 2
+        assert error_registry.get_circuit_breaker_status()["state"] == "closed"
+
+        medic_line.clock[0] += 601
+        medic_line.feed("hooks", "fault h", times=2)
+
+        late = medic_line.to("@hooks")[-1]["message"]
+        assert "m: fault f" in late and "m: fault g" in late
+        assert error_registry.circuit_breaker_held("@hooks") == {}
+
+    def test_an_open_breaker_mails_devpulse_one_summary_and_never_wakes_it(self, medic_line) -> None:
+        medic_line.trip()
+        medic_line.feed("seed", "seed fault", times=2)
+
+        summaries = medic_line.to("@devpulse")
+        assert len(summaries) == 1
+        assert summaries[0]["auto_execute"] is False
+        assert "@hooks" in summaries[0]["message"] and "@memory" in summaries[0]["message"]
+        assert len(medic_line.mails) == 10
+        assert error_registry.get_circuit_breaker_status()["summary_sent"] is True
+
+    def test_holds_while_open_never_postpone_recovery(self, medic_line) -> None:
+        medic_line.trip()
+        opened_at = error_registry.get_circuit_breaker_status()["opened_at"]
+        for n in range(49):
+            medic_line.clock[0] += 6
+            medic_line.feed("seed", f"trickle {n}", times=2)
+
+        assert error_registry.get_circuit_breaker_status()["opened_at"] == opened_at
+        medic_line.clock[0] += 7
+        medic_line.feed("flow", "fresh fault", times=2)
+
+        assert len(medic_line.to("@flow")) == 1
+        assert error_registry.get_circuit_breaker_status()["state"] == "closed"
+
+    def test_a_status_read_after_cooldown_moves_nothing_and_the_next_mail_probes(self, medic_line) -> None:
+        medic_line.trip()
+        medic_line.clock[0] += 301
+        before = error_registry.CB_STATE_FILE.read_text(encoding="utf-8")
+
+        assert error_registry.get_circuit_breaker_status()["state"] == "open"
+        assert error_registry.CB_STATE_FILE.read_text(encoding="utf-8") == before
+
+        medic_line.feed("seed", "seed fault", times=2)
+        medic_line.feed("flow", "flow fault", times=2)
+
+        assert len(medic_line.to("@seed")) == 1
+        assert len(medic_line.to("@flow")) == 1
+
+    def test_a_backoff_fingerprint_leaves_the_probe_for_a_fresh_one(self, medic_line) -> None:
+        medic_line.feed("flow", "noisy", times=2)
+        medic_line.clock[0] += 300
+        medic_line.feed("flow", "noisy")  # its second mail: backoff is now 900 s
+        medic_line.trip()
+        medic_line.clock[0] += 301
+        medic_line.feed("flow", "noisy")
+        medic_line.feed("flow", "fresh", times=2)
+
+        assert "fresh" in medic_line.to("@flow")[-1]["message"]
+        assert error_registry.get_circuit_breaker_status()["state"] == "closed"
+
+    def test_a_failed_probe_reopens_with_double_cooldown(self, medic_line, monkeypatch) -> None:
+        medic_line.trip()
+        medic_line.clock[0] += 301
+        monkeypatch.setattr(error_detected, "_send_email", lambda **kwargs: kwargs["to_branch"] == "@devpulse")
+
+        with pytest.raises(RuntimeError, match="Email delivery failed"):
+            medic_line.feed("flow", "flow fault", times=2)
+
+        status = error_registry.get_circuit_breaker_status()
+        assert (status["state"], status["cooldown_seconds"]) == ("open", 600)
 
 
 class TestTheRegisteredGateReadsTheDeclaredFleet:

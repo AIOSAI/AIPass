@@ -3,8 +3,8 @@
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for trigger tests
 # Created: 2025-11-08
-# Modified: 2026-11-15
-# Version: 1.7.0
+# Modified: 2026-11-16
+# Version: 1.8.0
 # Category: trigger/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -390,9 +390,11 @@ def ci_lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
     monkeypatch.setattr(error_detected, "TRIGGER_ROOT", tmp_path)
     lane.breaker_open = False
     lane.backoff = False
-    monkeypatch.setattr(error_detected, "circuit_breaker_record_error", lambda: None)
-    monkeypatch.setattr(error_detected, "circuit_breaker_allows", lambda: not lane.breaker_open)
-    monkeypatch.setattr(error_detected, "circuit_breaker_probe_succeeded", lambda: None)
+    monkeypatch.setattr(
+        error_detected, "breaker_gate", lambda *gate: "Circuit breaker OPEN - held for" if lane.breaker_open else ""
+    )
+    monkeypatch.setattr(error_detected, "circuit_breaker_delivered", lambda *delivered: None)
+    monkeypatch.setattr(error_detected, "circuit_breaker_send_failed", lambda: None)
     monkeypatch.setattr(error_detected, "registry_should_dispatch", lambda fingerprint: not lane.backoff)
     monkeypatch.setattr(error_detected, "registry_record_dispatch", lambda fingerprint: None)
     monkeypatch.setattr(error_registry, "REGISTRY_FILE", tmp_path / "error_registry.json")

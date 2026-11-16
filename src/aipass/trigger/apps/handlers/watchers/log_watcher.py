@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Centralized log file watcher for system_logs directory
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-01-31
 # Modified: 2026-11-16
 # =============================================
@@ -237,38 +237,26 @@ class LogFileWatcher(WatchdogFileSystemEventHandler):
         }
 
         if level == "error":
-            try:
-                from aipass.trigger.apps.handlers.error_registry import report as registry_report
+            # Unreadable registry raises to on_modified, which names it; no unfingerprinted stand-in fire.
+            from aipass.trigger.apps.handlers.error_registry import report as registry_report
 
-                result = registry_report(
-                    error_type="ERROR", message=message, component=branch, log_path=log_file, severity="medium"
-                )
-                error_count = result.get("count", 1)
-                trigger.fire(
-                    "error_detected",
-                    branch=branch,
-                    module=module_name,
-                    message=message,
-                    log_path=log_file,
-                    error_hash=result.get("id", error_hash),
-                    timestamp=timestamp,
-                    fingerprint=result.get("fingerprint", ""),
-                    registry_id=result.get("id", ""),
-                    first_seen=result.get("first_seen", ""),
-                    last_seen=result.get("last_seen", ""),
-                    count=error_count,
-                )
-            except Exception as exc:
-                logger.warning("Registry unavailable, falling back to error_detected: %s", exc)
-                trigger.fire(
-                    "error_detected",
-                    branch=branch,
-                    module=module_name,
-                    message=message,
-                    log_path=log_file,
-                    error_hash=error_hash,
-                    timestamp=timestamp,
-                )
+            result = registry_report(
+                error_type="ERROR", message=message, component=branch, log_path=log_file, severity="medium"
+            )
+            trigger.fire(
+                "error_detected",
+                branch=branch,
+                module=module_name,
+                message=message,
+                log_path=log_file,
+                error_hash=result.get("id", error_hash),
+                timestamp=timestamp,
+                fingerprint=result.get("fingerprint", ""),
+                registry_id=result.get("id", ""),
+                first_seen=result.get("first_seen", ""),
+                last_seen=result.get("last_seen", ""),
+                count=result.get("count", 1),
+            )
             json_handler.log_operation("system_log_event", {"level": level, "module": module_name})
         elif level == "warning":
             trigger.fire("warning_logged", **event_data)

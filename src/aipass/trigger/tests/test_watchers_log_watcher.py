@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_watchers_log_watcher.py
 # Description: Unit tests for centralized system_logs log watcher
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-03
 # Modified: 2026-11-16
 # =============================================
@@ -865,6 +865,27 @@ class TestAFailureReachesTheCallback:
 
         assert watcher.log_positions[str(log_file)] == before
         assert "bus down" in str(log.warning.call_args.args[2])
+
+    def test_an_unreadable_registry_fires_no_unfingerprinted_stand_in(self, tmp_path, monkeypatch):
+        log_file = tmp_path / "system_logs" / "prax_core.log"
+        log_file.parent.mkdir()
+        log_file.write_text("2026-08-04 | mod | INFO | seen\n", encoding="utf-8")
+        watcher = wlw.LogFileWatcher()
+        watcher.initialize_positions()
+        before = watcher.log_positions[str(log_file)]
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write("2026-08-04 | mod | ERROR | disk gone\n")
+        monkeypatch.setattr(error_registry, "report", MagicMock(side_effect=ValueError("registry torn")))
+        bus = MagicMock()
+        monkeypatch.setattr(trigger_core, "trigger", bus)
+        log = MagicMock()
+        monkeypatch.setattr(wlw, "logger", log)
+
+        watcher.on_modified(_modified(log_file))
+
+        bus.fire.assert_not_called()
+        assert watcher.log_positions[str(log_file)] == before
+        assert "registry torn" in str(log.warning.call_args.args[2])
 
     def test_an_unreadable_rotated_backup_is_named_by_the_reader(self, tmp_path, monkeypatch):
         """Pins the default: the drain swallowed its own read error; now it raises to the reader, which names it."""

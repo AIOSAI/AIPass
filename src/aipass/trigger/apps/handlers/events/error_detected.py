@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: error_detected.py
 # Description: Error detected event handler with Medic v2 dispatch gating
-# Version: 2.14.0
+# Version: 2.15.0
 # Created: 2026-02-10
 # Modified: 2026-11-16
 # =============================================
@@ -30,9 +30,14 @@ BRANCH_REGISTRY_FILE = _REPO_ROOT / "AIPASS_REGISTRY.json"
 _send_email: Optional[Callable[..., bool]] = None
 
 from aipass.trigger.apps.handlers.error_registry import (
-    circuit_breaker_allows,
-    circuit_breaker_record_error,
-    circuit_breaker_probe_succeeded,
+    RECIPIENT_CAP,
+    RECIPIENT_WINDOW_SECONDS,
+    circuit_breaker_delivered,
+    circuit_breaker_held,
+    circuit_breaker_send_failed,
+    circuit_breaker_summary,
+    circuit_breaker_summary_sent,
+    dispatch_gate,
     should_dispatch as registry_should_dispatch,
     record_dispatch as registry_record_dispatch,
     is_suppressed as registry_is_suppressed,
@@ -269,6 +274,34 @@ def _write_rate_log(reason: str, detail: str) -> None:
     append_jsonl(TRIGGER_ROOT / "logs" / "rate_limited.jsonl", entry)
 
 
+def breaker_gate(recipient: str, fingerprint: str, note: str) -> str:
+    """The breaker gate medic and ci_red share: empty to send, else the hold reason for the trail.
+
+    Call it only past suppression, backoff and the recipient checks. An owed summary goes to @devpulse
+    as plain mail, never a wake.
+    """
+    verdict = dispatch_gate(recipient, fingerprint, note)
+    if verdict in ("send", "probe"):
+        return ""
+    if verdict == "held_cap":
+        return f"Held, {recipient} had {RECIPIENT_CAP} faults mailed in {RECIPIENT_WINDOW_SECONDS // 60} min - held for"
+    if verdict == "tripped":
+        if _send_email is None:
+            raise RuntimeError("no ai_mail adapter wired: the breaker summary cannot reach @devpulse")
+        sent = _send_email(
+            to_branch="@devpulse",
+            subject="[MEDIC] circuit breaker open: mail held",
+            message=circuit_breaker_summary(),
+            auto_execute=False,
+            reply_to="@trigger",
+            from_branch="@trigger",
+        )
+        if not sent:
+            raise RuntimeError("breaker summary to @devpulse not delivered; the next hold retries it")
+        circuit_breaker_summary_sent()
+    return "Circuit breaker OPEN - held for"
+
+
 def handle_error_detected(
     branch: str | None = None,
     module: str | None = None,
@@ -312,9 +345,6 @@ def handle_error_detected(
         _write_suppression_log(f"First occurrence (count={count}) - waiting for pattern", branch, module, message)
         return
 
-    # The breaker counts at detection time, not dispatch time.
-    circuit_breaker_record_error()
-
     if _send_email is None:
         raise RuntimeError("no ai_mail adapter wired: medic cannot mail anyone")
 
@@ -347,8 +377,9 @@ def handle_error_detected(
                 _write_rate_log("Backoff active", f"fingerprint {fingerprint[:12]}: {recipient} - {module}, skipping")
             return
 
-        if not circuit_breaker_allows():
-            _write_suppression_log("Circuit breaker OPEN - suppressed dispatch for", branch, module, message)
+        hold = breaker_gate(recipient, fingerprint, f"{module}: {message[:160]}")
+        if hold:
+            _write_suppression_log(hold, branch, module, message)
             return
     else:
         recent_count = len(
@@ -386,6 +417,13 @@ def handle_error_detected(
         registry_id=registry_id,
     )
 
+    held = circuit_breaker_held(recipient) if fingerprint else {}
+    held.pop(fingerprint, None)
+    if held:
+        notification_message += "\n\nHeld for you while medic's cap or breaker was shut:\n" + "\n".join(
+            f"  {fp[:12]} x{row['count']} {row['note']}" for fp, row in held.items()
+        )
+
     # Via the callback: trigger is not a branch, so ai_mail's PWD sender detection fails.
     sent = _send_email(
         to_branch=recipient,
@@ -397,13 +435,15 @@ def handle_error_detected(
     )
 
     if not sent:
+        if fingerprint:
+            circuit_breaker_send_failed()
         raise RuntimeError(f"Email delivery failed for {recipient} (fingerprint={fingerprint})")
 
     json_handler.log_operation("dispatch_sent", {"recipient": recipient})
 
     if fingerprint:
         registry_record_dispatch(fingerprint)
-        circuit_breaker_probe_succeeded()
+        circuit_breaker_delivered(recipient, [fingerprint, *held])
     else:
         _record_dispatch(recipient)
 

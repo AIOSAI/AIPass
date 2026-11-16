@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_error_registry.py
 # Description: Unit tests for the error_registry handler
-# Version: 1.3.2
+# Version: 1.4.0
 # Created: 2026-03-24
 # Modified: 2026-11-16
 # =============================================
@@ -267,119 +267,85 @@ def test_update_status_suppressed_stores_reason(tmp_path: Path) -> None:
     assert entry["suppress_reason"] == "known_flaky"
 
 
-def test_circuit_breaker_closed_allows_dispatch(tmp_path: Path) -> None:
-    """Circuit breaker in closed state allows dispatch."""
+_T0 = 1_000_000.0
+
+
+def test_a_closed_breaker_sends(tmp_path: Path) -> None:
     _seed_registry(tmp_path)
     er = _import_registry()
-    er.circuit_breaker_reset()
 
-    assert er.circuit_breaker_allows() is True
-
-
-def _trip(registry) -> None:
-    """Open the breaker the way production does: a threshold of errors inside the trip window."""
-    for _ in range(10):
-        registry.circuit_breaker_record_error()
+    assert er.dispatch_gate("@a", "fp", "n", now=_T0) == "send"
 
 
-def test_circuit_breaker_trips_after_threshold(tmp_path: Path) -> None:
-    """Circuit breaker trips to open after recording threshold errors."""
+def _trip(registry, now: float = _T0) -> list:
+    """Open the breaker the way production does: ten distinct sends, five to @a and five to @b, at one now."""
+    return [registry.dispatch_gate(r, f"fp_{r[1]}{i}", "n", now=now) for r in ("@a", "@b") for i in range(5)]
+
+
+def test_ten_distinct_sends_in_the_window_trip_and_hold_the_tenth(tmp_path: Path) -> None:
     _seed_registry(tmp_path)
     er = _import_registry()
-    er.circuit_breaker_reset()
 
-    for _ in range(11):
-        er.circuit_breaker_record_error()
-
-    status = er.get_circuit_breaker_status()
-    assert status["state"] == "open"
+    assert _trip(er) == ["send"] * 9 + ["tripped"]
+    assert er.get_circuit_breaker_status(now=_T0)["state"] == "open"
 
 
-def test_errors_outside_the_trip_window_do_not_trip_the_breaker(tmp_path: Path) -> None:
-    """Nine errors a window ago and one now are one error in the window, not ten."""
+def test_sends_outside_the_trip_window_do_not_trip_the_breaker(tmp_path: Path) -> None:
+    """Nine sends a window ago and one now are one send in the window, not ten."""
     _seed_registry(tmp_path)
     er = _import_registry()
-    er.circuit_breaker_reset()
-    window = 60  # the default trip_window_seconds; the status does not report it
-    start = 1_000_000.0
+    for r, i in [("@a", i) for i in range(5)] + [("@b", i) for i in range(4)]:
+        er.dispatch_gate(r, f"fp_{i}", "n", now=_T0)
 
-    for _ in range(9):
-        er.circuit_breaker_record_error(now=start)
-    er.circuit_breaker_record_error(now=start + window + 1)
-
-    assert er.get_circuit_breaker_status(now=start + window + 1)["state"] == "closed"
+    assert er.dispatch_gate("@b", "fp_late", "n", now=_T0 + 61) == "send"
+    assert er.get_circuit_breaker_status(now=_T0 + 61)["state"] == "closed"
 
 
-def test_circuit_breaker_open_blocks_dispatch(tmp_path: Path) -> None:
-    """Circuit breaker in open state blocks dispatch."""
+def test_an_open_breaker_holds_the_mail_until_the_summary_is_sent(tmp_path: Path) -> None:
     _seed_registry(tmp_path)
     er = _import_registry()
-    er.circuit_breaker_reset()
     _trip(er)
 
-    assert er.circuit_breaker_allows() is False
+    assert er.dispatch_gate("@c", "fp_c", "the note", now=_T0) == "tripped"
+    er.circuit_breaker_summary_sent()
+    assert er.dispatch_gate("@c", "fp_c", "the note", now=_T0) == "held_open"
+    assert er.circuit_breaker_held("@c") == {"fp_c": {"note": "the note", "count": 2, "first_held": _T0}}
 
 
 def test_circuit_breaker_reset_restores_closed(tmp_path: Path) -> None:
-    """circuit_breaker_reset restores the breaker to closed state."""
     _seed_registry(tmp_path)
     er = _import_registry()
     _trip(er)
     er.circuit_breaker_reset()
 
-    status = er.get_circuit_breaker_status()
-    assert status["state"] == "closed"
-    assert er.circuit_breaker_allows() is True
+    assert er.get_circuit_breaker_status()["state"] == "closed"
+    assert er.dispatch_gate("@c", "fp_c", "n", now=_T0) == "send"
 
 
 def test_circuit_breaker_status_returns_expected_keys(tmp_path: Path) -> None:
-    """get_circuit_breaker_status returns a dict with all expected keys."""
     _seed_registry(tmp_path)
     er = _import_registry()
-    er.circuit_breaker_reset()
 
-    status = er.get_circuit_breaker_status()
-    assert "state" in status
-    assert "opened_at" in status
-    assert "cooldown_seconds" in status
-    assert "recent_error_count" in status
-    assert "summary_sent" in status
+    assert set(er.get_circuit_breaker_status()) == {
+        "state",
+        "opened_at",
+        "cooldown_seconds",
+        "recent_send_count",
+        "held_count",
+        "summary_sent",
+        "remaining_seconds",
+    }
 
 
-def test_circuit_breaker_half_open_allows_one_dispatch(tmp_path: Path) -> None:
-    """Half-open state allows exactly one probe dispatch then blocks."""
+def test_after_the_cooldown_the_gate_gives_one_probe_then_holds(tmp_path: Path) -> None:
     _seed_registry(tmp_path)
     er = _import_registry()
-    er.circuit_breaker_reset()
-
     _trip(er)
+    later = _T0 + 301
 
-    tripped = er.get_circuit_breaker_status()
-    later = tripped["opened_at"] + tripped["cooldown_seconds"] + 1
-
-    assert er.circuit_breaker_allows(now=later) is True
+    assert er.dispatch_gate("@c", "fp_1", "n", now=later) == "probe"
     assert er.get_circuit_breaker_status(now=later)["state"] == "half_open"
-
-    assert er.circuit_breaker_allows(now=later) is False
-
-
-def test_circuit_breaker_half_open_error_reopens_with_doubled_cooldown(tmp_path: Path) -> None:
-    """Error during half_open re-opens breaker with doubled cooldown."""
-    _seed_registry(tmp_path)
-    er = _import_registry()
-    er.circuit_breaker_reset()
-
-    base_cooldown = er.get_circuit_breaker_status()["cooldown_seconds"]
-
-    _trip(er)
-    later = er.get_circuit_breaker_status()["opened_at"] + base_cooldown + 1
-    er.circuit_breaker_allows(now=later)  # Transition to half_open
-
-    er.circuit_breaker_record_error(now=later)
-
-    status = er.get_circuit_breaker_status(now=later)
-    assert status["state"] == "open"
-    assert status["cooldown_seconds"] == base_cooldown * 2
+    assert er.dispatch_gate("@c", "fp_2", "n", now=later) == "tripped"
 
 
 def test_should_dispatch_true_for_new_fingerprint(tmp_path: Path) -> None:
@@ -950,7 +916,7 @@ class TestEmptyJsonResilience:
         state_file.write_text("{torn", encoding="utf-8")
 
         with pytest.raises(RuntimeError, match=r"circuit breaker state unreadable \(trigger_cb_state\.json\)"):
-            er.circuit_breaker_allows()
+            er.dispatch_gate("@a", "fp", "n")
         assert state_file.read_text(encoding="utf-8") == "{torn"
 
     def test_a_breaker_state_that_cannot_be_saved_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -958,7 +924,7 @@ class TestEmptyJsonResilience:
         monkeypatch.setattr(er, "atomic_write_json", MagicMock(side_effect=OSError("disk full")))
 
         with pytest.raises(RuntimeError, match=r"circuit breaker state unsaved \(trigger_cb_state\.json\).*disk full"):
-            er.circuit_breaker_record_error()
+            er.dispatch_gate("@a", "fp", "n")
 
     def test_report_with_empty_registry(self, tmp_path: Path) -> None:
         """report() works when registry file is empty (creates fresh)."""
@@ -1071,155 +1037,123 @@ def test_purge_stale_custom_days(tmp_path: Path) -> None:
     assert er.purge_stale(days=7) == 1
 
 
-def test_evaluate_state_transitions_open_to_half_open_after_cooldown(tmp_path: Path) -> None:
-    """_evaluate_state transitions open -> half_open when cooldown has expired."""
+def test_a_status_read_after_cooldown_leaves_state_and_file_unchanged(tmp_path: Path) -> None:
     _seed_registry(tmp_path)
     er = _import_registry()
-    er.circuit_breaker_reset()
-
     _trip(er)
-    tripped = er.get_circuit_breaker_status()
-    later = tripped["opened_at"] + tripped["cooldown_seconds"] + 10
+    before = er.CB_STATE_FILE.read_bytes()
 
-    status = er.get_circuit_breaker_status(now=later)
-    assert status["state"] == "half_open"
+    status = er.get_circuit_breaker_status(now=_T0 + 10_000)
 
-
-def test_evaluate_state_no_transition_before_cooldown(tmp_path: Path) -> None:
-    """_evaluate_state keeps state open when cooldown has not yet expired."""
-    _seed_registry(tmp_path)
-    er = _import_registry()
-    er.circuit_breaker_reset()
-
-    _trip(er)
-    tripped = er.get_circuit_breaker_status()
-    assert tripped["state"] == "open"
-
-    # One second short of the cooldown it must stay open
-    status = er.get_circuit_breaker_status(now=tripped["opened_at"] + tripped["cooldown_seconds"] - 1)
     assert status["state"] == "open"
+    assert er.CB_STATE_FILE.read_bytes() == before
 
 
-def test_evaluate_state_no_op_when_closed(tmp_path: Path) -> None:
-    """_evaluate_state is a no-op when breaker is already closed."""
+def test_the_gate_holds_one_second_short_of_the_cooldown_without_restamping(tmp_path: Path) -> None:
     _seed_registry(tmp_path)
     er = _import_registry()
-    er.circuit_breaker_reset()
-
-    status = er.get_circuit_breaker_status(now=time.time() + 86400)
-    assert status["state"] == "closed"
-
-
-def test_probe_succeeded_closes_breaker(tmp_path: Path) -> None:
-    """circuit_breaker_probe_succeeded transitions half_open -> closed and resets cooldown."""
-    _seed_registry(tmp_path)
-    er = _import_registry()
-    er.circuit_breaker_reset()
-    base_cooldown = er.get_circuit_breaker_status()["cooldown_seconds"]
-
     _trip(er)
-    later = er.get_circuit_breaker_status()["opened_at"] + base_cooldown + 1
-    er.circuit_breaker_allows(now=later)  # Transitions to half_open
-    assert er.get_circuit_breaker_status(now=later)["state"] == "half_open"
 
-    er.circuit_breaker_probe_succeeded()
+    assert er.dispatch_gate("@c", "fp_c", "n", now=_T0 + 299) == "tripped"
+    status = er.get_circuit_breaker_status(now=_T0 + 299)
+    assert status["state"] == "open"
+    assert status["opened_at"] == _T0
 
-    status = er.get_circuit_breaker_status(now=later)
+
+def test_a_delivered_probe_closes_the_breaker(tmp_path: Path) -> None:
+    _seed_registry(tmp_path)
+    er = _import_registry()
+    _trip(er)
+    assert er.dispatch_gate("@c", "fp_probe", "n", now=_T0 + 301) == "probe"
+
+    er.circuit_breaker_delivered("@c", ["fp_probe"])
+
+    status = er.get_circuit_breaker_status(now=_T0 + 301)
     assert status["state"] == "closed"
-    assert status["cooldown_seconds"] == base_cooldown
+    assert status["cooldown_seconds"] == 300
     assert status["opened_at"] == 0.0
-    assert status["recent_error_count"] == 0
+    assert status["recent_send_count"] == 0
 
 
-def test_probe_succeeded_noop_when_closed(tmp_path: Path) -> None:
-    """circuit_breaker_probe_succeeded is a no-op when breaker is closed."""
+def test_a_delivery_while_open_drops_its_held_row_but_keeps_the_breaker_open(tmp_path: Path) -> None:
     _seed_registry(tmp_path)
     er = _import_registry()
-    er.circuit_breaker_reset()
-
-    assert er.get_circuit_breaker_status()["state"] == "closed"
-
-    er.circuit_breaker_probe_succeeded()
-
-    assert er.get_circuit_breaker_status()["state"] == "closed"
-
-
-def test_probe_succeeded_noop_when_open(tmp_path: Path) -> None:
-    """circuit_breaker_probe_succeeded is a no-op when breaker is open."""
-    _seed_registry(tmp_path)
-    er = _import_registry()
-    er.circuit_breaker_reset()
-
     _trip(er)
-    assert er.get_circuit_breaker_status()["state"] == "open"
+    assert list(er.circuit_breaker_held("@b")) == ["fp_b4"]
 
-    er.circuit_breaker_probe_succeeded()
+    er.circuit_breaker_delivered("@b", ["fp_b4"])
 
-    assert er.get_circuit_breaker_status()["state"] == "open"
+    assert er.circuit_breaker_held("@b") == {}
+    assert er.get_circuit_breaker_status(now=_T0)["state"] == "open"
 
 
 def test_status_returns_remaining_seconds(tmp_path: Path) -> None:
-    """get_circuit_breaker_status returns the remaining cooldown at the reading it is handed."""
     _seed_registry(tmp_path)
     er = _import_registry()
-    er.circuit_breaker_reset()
-
     _trip(er)
-    tripped = er.get_circuit_breaker_status()
 
-    # 100 seconds after the trip, exactly cooldown - 100 remain: the clock is handed in
-    status = er.get_circuit_breaker_status(now=tripped["opened_at"] + 100)
-    assert status["remaining_seconds"] == int(tripped["cooldown_seconds"] - 100)
+    assert er.get_circuit_breaker_status(now=_T0 + 100)["remaining_seconds"] == 200
 
 
 def test_status_remaining_zero_when_closed(tmp_path: Path) -> None:
-    """remaining_seconds is 0 when breaker is closed."""
     _seed_registry(tmp_path)
     er = _import_registry()
-    er.circuit_breaker_reset()
 
-    status = er.get_circuit_breaker_status()
-    assert status["remaining_seconds"] == 0
+    assert er.get_circuit_breaker_status()["remaining_seconds"] == 0
 
 
-def test_breaker_half_open_on_read_then_allows_probe(tmp_path: Path) -> None:
-    """Expired open breaker transitions to half_open on allows() and consumes probe slot."""
+def test_one_recipient_alone_never_trips_the_fleet(tmp_path: Path) -> None:
     _seed_registry(tmp_path)
     er = _import_registry()
-    er.circuit_breaker_reset()
 
+    verdicts = [er.dispatch_gate("@a", f"fp_{i}", "n", now=_T0) for i in range(12)]
+
+    assert verdicts == ["send"] * 5 + ["held_cap"] * 7
+    assert er.get_circuit_breaker_status(now=_T0)["state"] == "closed"
+
+
+def test_a_lost_probe_is_replaced_after_the_base_cooldown(tmp_path: Path) -> None:
+    _seed_registry(tmp_path)
+    er = _import_registry()
     _trip(er)
-    tripped = er.get_circuit_breaker_status()
-    later = tripped["opened_at"] + tripped["cooldown_seconds"] + 1
 
-    result = er.circuit_breaker_allows(now=later)
-    assert result is True
-    assert er.get_circuit_breaker_status(now=later)["state"] == "half_open"
-    assert er.circuit_breaker_allows(now=later) is False
+    assert er.dispatch_gate("@c", "fp_1", "n", now=_T0 + 301) == "probe"
+    assert er.dispatch_gate("@c", "fp_2", "n", now=_T0 + 302) in ("held_open", "tripped")
+    assert er.dispatch_gate("@c", "fp_3", "n", now=_T0 + 301 + 300) == "probe"
 
 
-def test_breaker_closes_after_successful_probe_dispatch(tmp_path: Path) -> None:
-    """Full self-heal cycle: open -> half_open -> probe allowed -> probe_succeeded -> closed."""
+def test_a_failed_probe_reopens_with_double_cooldown(tmp_path: Path) -> None:
     _seed_registry(tmp_path)
     er = _import_registry()
-    er.circuit_breaker_reset()
-
-    base_cooldown = er.get_circuit_breaker_status()["cooldown_seconds"]
-
     _trip(er)
-    tripped = er.get_circuit_breaker_status()
-    assert tripped["state"] == "open"
+    t = _T0 + 301
+    assert er.dispatch_gate("@c", "fp_probe", "n", now=t) == "probe"
 
-    later = tripped["opened_at"] + base_cooldown + 1
+    er.circuit_breaker_send_failed(now=t)
 
-    assert er.circuit_breaker_allows(now=later) is True
-    assert er.get_circuit_breaker_status(now=later)["state"] == "half_open"
+    status = er.get_circuit_breaker_status(now=t)
+    assert (status["state"], status["cooldown_seconds"], status["opened_at"]) == ("open", 600, t)
 
-    er.circuit_breaker_probe_succeeded()
-    status = er.get_circuit_breaker_status(now=later)
-    assert status["state"] == "closed"
-    assert status["cooldown_seconds"] == base_cooldown
-    assert status["opened_at"] == 0.0
+
+def test_a_marked_fault_is_one_row_whatever_its_tail_and_never_a_user_error(tmp_path: Path) -> None:
+    _seed_registry(tmp_path)
+    er = _import_registry()
+    marked = "handler error fault[UserPromptSubmit.h.navmap.handle.KeyError@navmap.py]"
+
+    rows = [
+        er.report("ERROR", marked + " handle line 7", "hooks"),
+        er.report("ERROR", marked + " line 8: 'session_ab'", "hooks"),
+        er.report("ERROR", marked + " line 9: unknown command", "hooks"),
+    ]
+    unmarked = er.report("ERROR", "unknown command x", "hooks")
+
+    assert len({row["fingerprint"] for row in rows}) == 1
+    assert (rows[-1]["count"], rows[-1]["status"]) == (3, "new")
+    assert (unmarked["status"], unmarked["suppress_reason"]) == ("suppressed", "user_error")
+
+
+def test_an_unmarked_line_keeps_todays_normalizer() -> None:
+    assert er.normalize_message("bad at /a/b.py line 7") == "bad at <path> line N"
 
 
 def test_get_dispatch_count_unknown_fingerprint_is_zero(tmp_path: Path) -> None:
@@ -1348,11 +1282,11 @@ class TestBreakerFileIsTheTruth:
 
     def test_a_reset_by_another_process_reopens_dispatch_here(self) -> None:
         _trip(er)
-        assert er.circuit_breaker_allows() is False
+        assert er.dispatch_gate("@c", "fp_c", "n", now=_T0) == "tripped"
 
         _write_other_process_state("closed", {})
 
-        assert er.circuit_breaker_allows() is True
+        assert er.dispatch_gate("@c", "fp_c", "n", now=_T0) == "send"
 
     def test_reset_closes_the_breaker_and_keeps_backoff(self) -> None:
         er.record_dispatch("fp_backed_off")
@@ -1360,15 +1294,13 @@ class TestBreakerFileIsTheTruth:
 
         er.circuit_breaker_reset()
 
-        assert er.circuit_breaker_allows() is True
+        assert er.dispatch_gate("@c", "fp_c", "n", now=_T0) == "send"
         assert er.should_dispatch("fp_backed_off") is False
 
     def test_a_threshold_trip_opens_at_the_handed_in_clock(self) -> None:
-        start = 1_000_000.0
-        for _ in range(10):
-            er.circuit_breaker_record_error(now=start)
+        _trip(er, now=_T0)
 
-        assert er.get_circuit_breaker_status(now=start)["opened_at"] == start
+        assert er.get_circuit_breaker_status(now=_T0)["opened_at"] == _T0
 
 
 def test_a_prefix_matching_two_rows_finds_neither_but_a_full_fingerprint_still_does(tmp_path: Path) -> None:

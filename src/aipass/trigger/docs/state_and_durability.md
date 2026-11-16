@@ -49,7 +49,7 @@ leaves an unreadable legacy file in place for a human rather than guessing.
   Scope: these two helpers serialise trigger's **own** state files — the error registry, the circuit breaker, medic state, escalation state, `.aipass/alerts.json` and `trigger_data.json`. Trio documents under `trigger_json/` are written by the fleet json service, which carries its own durability machinery; trigger's `config.py` is not on that path.
 - **Atomic is not serialised.** `atomic_write_json` stops a *torn* file, not a *lost* one. Two unlocked read-modify-write cycles each produce a whole file and one update vanishes; only the lock prevents that.
 - **Unreadable is not corrupt.** A read that fails raises its `OSError`: an unreadable document is never treated as a corrupt one to be regenerated.
-- **Circuit breaker persistence:** Trip state, recent errors, per-fingerprint tracking all survive restarts via `trigger_cb_state.json`.
+- **Circuit breaker persistence:** Trip state, recent mails, held lists, per-fingerprint tracking all survive restarts via `trigger_cb_state.json`.
 - **Off the trio path:** Hand-written live state uses filenames `json_handler`'s trio machinery does not own — see the trio doctrine above.
 
 
