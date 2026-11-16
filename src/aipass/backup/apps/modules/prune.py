@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: prune.py
 # Description: Prune module — lists, and with --apply removes, stored copies the ignore spec now matches
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-16
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Prune Module — stored copies of paths the ignore spec now matches.
@@ -20,7 +20,7 @@ from aipass.cli.apps.modules import console, error
 from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.cleanup.prune import apply_prune, find_prunable
 from aipass.backup.apps.handlers.path.builder import backup_root
-from aipass.backup.apps.handlers.path.caller import resolve_caller_path
+from aipass.backup.apps.handlers.path.caller import resolve_caller_path, store_delete_refusal
 from aipass.backup.apps.handlers.report.formatter import _human_bytes
 
 MODULE_NAME = "prune"
@@ -119,7 +119,13 @@ def handle_command(command: str, args: list) -> bool:
         error(f"prune takes one project and --apply: got {' '.join(args)}", suggestion=USAGE)
         return True
 
-    run_prune(str(resolve_caller_path(positional[0])), apply="--apply" in args)
+    project_root = resolve_caller_path(positional[0])
+    apply = "--apply" in args
+    refusal = store_delete_refusal("prune --apply", project_root) if apply else None
+    if refusal:
+        error(f"Prune refused: {refusal}")
+        return True
+    run_prune(str(project_root), apply=apply)
     return True
 
 

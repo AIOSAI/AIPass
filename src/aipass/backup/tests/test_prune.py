@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_prune.py
 # Description: Tests for apps/modules/prune.py and the cleanup/prune handler it drives
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-16
-# Modified: 2026-11-02
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/modules/prune.py and the cleanup/prune handler it drives."""
@@ -180,6 +180,43 @@ class TestPruneRefusals:
         _out, err = capsys.readouterr()
         assert "prune takes one project and --apply" in err
         assert _files(backed_up / ".backup") == before
+
+    def test_apply_from_a_citizen_neither_backup_nor_admin_is_refused_and_deletes_nothing(
+        self, backed_up: Path, verified_seat, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        verified_seat.caller, verified_seat.admin = "@grow", False
+        before = _files(backed_up / ".backup")
+
+        assert prune.handle_command("prune", [str(backed_up), "--apply"]) is True
+
+        out, err = capsys.readouterr()
+        assert "Prune refused:" in err and "not @grow" in " ".join(err.split())
+        assert out == ""
+        assert _files(backed_up / ".backup") == before
+        rows = [json.loads(line) for line in trail.log_path().read_text(encoding="utf-8").splitlines()]
+        assert [(r["caller"], bool(r["refused"])) for r in rows if r["operation"] == "prune_fence"] == [("@grow", True)]
+
+    def test_apply_from_backups_own_seat_removes_the_matched_copies(
+        self, backed_up: Path, verified_seat, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        verified_seat.caller, verified_seat.admin = "@backup", False
+
+        prune.handle_command("prune", [str(backed_up), "--apply"])
+
+        out, err = capsys.readouterr()
+        assert err == ""
+        assert out.strip().splitlines()[-1].startswith("Removed 6 stored paths")
+
+    def test_a_dry_run_from_any_citizen_still_lists(
+        self, backed_up: Path, verified_seat, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        verified_seat.caller, verified_seat.admin = "@grow", False
+
+        prune.handle_command("prune", [str(backed_up)])
+
+        out, err = capsys.readouterr()
+        assert err == ""
+        assert "Dry run -- nothing deleted." in out
 
     def test_a_root_with_no_store_says_there_is_nothing_to_prune(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]

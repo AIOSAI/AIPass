@@ -23,7 +23,9 @@ the machine.
 **Drive commands need credentials.** They authenticate through the @api gateway;
 without Google API libraries or credentials they fail loudly rather than
 pretending to sync. `drive_clear` only clears the local dedup tracker — it never
-deletes anything already uploaded to Drive.
+deletes anything already uploaded to Drive. With `--force` it runs for @backup's
+own seat and the verified admin only, the same fence as `prune --apply`
+(`drive_clear_fence` rows).
 
 ## What is verified, and what is not
 

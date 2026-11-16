@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: conftest.py
 # Description: Backup test configuration -- the json seam, Google seal, console pin and module-attribute resync
-# Version: 1.3.5
+# Version: 1.4.0
 # Created: 2026-06-12
-# Modified: 2026-10-17
+# Modified: 2026-11-15
 # =============================================
 
 """Backup test configuration -- the json seam, Google seal, console pin and module-attribute resync."""
@@ -27,6 +27,7 @@ from aipass.backup.apps.handlers.drive import client as drive_client
 from aipass.backup.apps.handlers.drive import upload as drive_upload
 from aipass.backup.apps.handlers.json import json_handler
 from aipass.backup.apps.handlers.state import stop_flag
+from aipass.ai_mail.apps.modules import door_verified_caller
 from aipass.cli.apps.modules import display
 
 BRANCH_MODULE = "aipass.backup"
@@ -87,6 +88,15 @@ def mock_infrastructure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     sandbox = json_handler.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
     return sandbox
+
+
+@pytest.fixture(autouse=True)
+def verified_seat(monkeypatch: pytest.MonkeyPatch) -> types.SimpleNamespace:
+    """Every test runs as the verified admin seat; a fence test sets ``caller`` and ``admin`` itself."""
+    seat = types.SimpleNamespace(caller="@devpulse", admin=True)
+    monkeypatch.setattr(door_verified_caller, "resolve_verified_caller", lambda: seat.caller)
+    monkeypatch.setattr(door_verified_caller, "is_verified_admin_caller", lambda: seat.admin)
+    return seat
 
 
 @pytest.fixture(autouse=True, scope="session")

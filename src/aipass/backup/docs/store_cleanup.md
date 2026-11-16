@@ -45,6 +45,11 @@ left empty are removed, and the last line names what was removed and freed. A
 path that cannot be removed is an error on stderr and the command exits non-zero;
 it is never counted as removed.
 
+`--apply` runs for two callers only, by @ai_mail's verified-caller rail: @backup's
+own seat and the verified admin. Anyone else is refused before the store is read,
+an error on stderr; the dry run stays open to every caller. Each `--apply`
+verdict is one `prune_fence` row naming the caller.
+
 `prune` never touches the remote copy. Drive entries for pruned files are not
 removed from Drive; that remains the owner's by hand.
 

@@ -50,6 +50,21 @@ creating parent directories as needed; diffs are listed, not replayed. A file
 the store does not hold, or a folder with no readable current copy, is named on
 stderr, nothing is written, and the verb exits non-zero.
 
+## Where a restore may write
+
+The output path is resolved first, links followed, then fenced
+(`restore_refusal()` in `handlers/path/caller.py`):
+
+- inside a `.git`, `.trinity`, `.aipass` or `.archive` directory: refused for every caller;
+- inside the caller's own branch (the outermost `.trinity/` above `AIPASS_CALLER_CWD`): written;
+- anywhere else: written only for the verified admin seat, asked of @ai_mail's
+  verified-caller rail on every call. A rail that cannot answer raises, so nothing is written.
+
+A refusal is an error on stderr, nothing is written, and the verb exits non-zero.
+Every verdict, allowed or refused, is one `restore_fence` row in
+`logs/operations.jsonl` naming the caller, and one prax line. A file already at
+the output path is overwritten without a prompt.
+
 ---
 
 [<- Back to BACKUP](../README.md)

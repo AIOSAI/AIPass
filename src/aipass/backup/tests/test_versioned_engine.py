@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_versioned_engine.py
 # Description: Tests for versioned engine — baseline, diff, skip, never-delete, restore
-# Version: 2.1.1
+# Version: 2.2.0
 # Created: 2026-06-12
-# Modified: 2026-11-14
+# Modified: 2026-11-15
 # =============================================
 
 """Tests for apps/handlers/copy/versioned.py and the restore route in apps/modules/restore.py."""
@@ -14,10 +14,14 @@
 # sentry: no-test-needed(constant) — BACKUP_DIR's ".backup" text and the store's "versioned" directory name
 # sentry: no-test-needed(generated) — the dates _make_baseline_name and _copy_changed_file stamp into file names
 
+import json
 import os
 import tempfile
 from pathlib import Path
 
+import pytest
+
+from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.copy.versioned import copy_versioned
 from aipass.backup.apps.handlers.path import builder as path_builder
 from aipass.backup.apps.handlers.diff.generator import generate_diff_content, is_binary_file, should_create_diff
@@ -586,6 +590,86 @@ class TestALongPathIsStored:
 
         assert (result["files_copied"], result["errors"]) == (1, [])
         assert stored.read_text(encoding="utf-8") == "deep"
+
+
+class TestRestoreFence:
+    """restore file writes only inside the caller's own branch, or anywhere bar a protected dir for the verified admin."""
+
+    @pytest.fixture
+    def branches(self, tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
+        """A stored data.txt, the caller's branch (the cwd drone stamps) and a sibling branch."""
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "data.txt").write_text("payload", encoding="utf-8")
+        copy_versioned([(str(project / "data.txt"), "data.txt")], str(project))
+        own, other = tmp_path / "own", tmp_path / "other"
+        for branch in (own, other):
+            (branch / ".trinity").mkdir(parents=True)
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(own))
+        return project, own, other
+
+    @staticmethod
+    def _fence_rows() -> list[dict]:
+        rows = [json.loads(line) for line in trail.log_path().read_text(encoding="utf-8").splitlines()]
+        return [row for row in rows if row["operation"] == "restore_fence"]
+
+    def test_a_citizen_restores_into_its_own_branch_and_the_trail_names_it(self, branches, verified_seat, capsys):
+        project, own, _other = branches
+        verified_seat.caller, verified_seat.admin = "@own", False
+        out_path = own / "docs.local" / "data.txt"
+
+        restore_module.handle_command("restore", [str(project), "file", "data.txt", str(out_path)])
+
+        assert out_path.read_text(encoding="utf-8") == "payload"
+        assert capsys.readouterr().err == ""
+        assert [(r["caller"], r["target"], r["refused"]) for r in self._fence_rows()] == [("@own", str(out_path), None)]
+
+    def test_a_citizen_is_refused_another_branchs_tree_and_nothing_is_written(self, branches, verified_seat, capsys):
+        project, _own, other = branches
+        verified_seat.caller, verified_seat.admin = "@own", False
+        out_path = other / "docs.local" / "data.txt"
+
+        restore_module.handle_command("restore", [str(project), "file", "data.txt", str(out_path)])
+
+        assert not out_path.exists()
+        out, err = capsys.readouterr()
+        assert "Restore refused:" in " ".join(err.split())
+        assert "Restored" not in out
+        assert command_failed() is True
+        assert [(r["caller"], bool(r["refused"])) for r in self._fence_rows()] == [("@own", True)]
+
+    def test_a_link_in_the_callers_branch_into_another_branch_is_followed_and_refused(
+        self, branches, verified_seat, capsys
+    ):
+        project, own, other = branches
+        verified_seat.caller, verified_seat.admin = "@own", False
+        (own / "link").symlink_to(other, target_is_directory=True)
+
+        restore_module.handle_command("restore", [str(project), "file", "data.txt", str(own / "link" / "data.txt")])
+
+        assert not (other / "data.txt").exists()
+        assert "Restore refused:" in " ".join(capsys.readouterr().err.split())
+
+    def test_the_verified_admin_restores_into_another_branch(self, branches, verified_seat, capsys):
+        project, _own, other = branches
+        out_path = other / "docs.local" / "data.txt"
+
+        restore_module.handle_command("restore", [str(project), "file", "data.txt", str(out_path)])
+
+        assert out_path.read_text(encoding="utf-8") == "payload"
+        assert capsys.readouterr().err == ""
+
+    @pytest.mark.parametrize("protected", [".git", ".trinity", ".aipass", ".archive"])
+    def test_not_even_the_verified_admin_restores_into_a_protected_dir(
+        self, branches, verified_seat, capsys, protected
+    ):
+        project, own, _other = branches
+        out_path = own / protected / "data.txt"
+
+        restore_module.handle_command("restore", [str(project), "file", "data.txt", str(out_path)])
+
+        assert not out_path.exists()
+        assert f"inside {protected}/" in " ".join(capsys.readouterr().err.split())
 
 
 # =============================================
