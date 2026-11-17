@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_api.py
 # Description: Tests for the Stage 0 host API's commands — routing, tokens, serve/status/stop, config, the door
-# Version: 1.3.2
+# Version: 1.4.0
 # Created: 2026-08-14
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for the host-api commands in apps/modules/host_api.py, host_serve.py and host_config_cli.py."""
@@ -30,6 +30,7 @@ from unittest.mock import patch
 import pytest
 from keyring.errors import KeyringLocked
 
+import aipass.api as api_door
 from aipass.api.apps.modules.host_api import handle_command
 from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import face as host_face
@@ -1069,52 +1070,33 @@ class TestIntrospection:
 
 
 class TestCrossBranchApi:
-    """The module-level functions other branches would import."""
-
-    def test_issue_and_revoke_round_trip(self, store: Path) -> None:
-        """The public surface mirrors the handler behaviour."""
-        record, raw = host_api_module.issue_token("pixel-8")
-        assert host_tokens.verify_token(raw) is not None
-
-        assert host_api_module.revoke_token(record["id"]) is True
-        assert host_tokens.verify_token(raw) is None
-
-    def test_serve_delegates_to_the_handler(self) -> None:
-        """The module orchestrates; the handler implements."""
-        with patch.object(host_server, "serve") as mock_serve:
-            host_api_module.serve(host="127.0.0.1", port=9000)
-
-        mock_serve.assert_called_once_with(host="127.0.0.1", port=9000)
+    """The host names @aipass's installer reads through aipass.api."""
 
     def test_the_path_settings_door_stores_and_clears_through_the_handler(self, store: Path, tmp_path: Path) -> None:
-        """@aipass sets the face dir and the baud binary through the module, not the handler."""
+        """@aipass sets the face dir and the baud binary through the door, not the handler."""
         bundle = _face_bundle(tmp_path / "face")
         binary = _baud_binary(tmp_path / "bin" / "baud-cli")
 
         with patch(PATCH_CONFIG_LOGGER):
-            assert host_api_module.set_face_dir(bundle) == bundle
-            assert host_api_module.set_baud_bin(binary) == binary
+            assert api_door.set_face_dir(bundle) == bundle
+            assert api_door.set_baud_bin(binary) == binary
 
-            assert host_api_module.face_dir() == host_config.face_dir() == bundle
-            assert host_api_module.baud_bin() == host_config.baud_bin() == binary
-            assert host_api_module.load_config()[host_config.BAUD_BIN_KEY] == str(binary)
+            assert api_door.face_dir() == host_config.face_dir() == bundle
+            assert api_door.baud_bin() == host_config.baud_bin() == binary
+            assert api_door.load_config()[host_config.BAUD_BIN_KEY] == str(binary)
 
-            assert host_api_module.set_baud_bin(None) is None
-            assert host_api_module.set_face_dir(None) is None
+            assert api_door.set_baud_bin(None) is None
+            assert api_door.set_face_dir(None) is None
 
         assert host_config.baud_bin() is None
         assert host_config.face_dir() is None
 
-    def test_the_door_refuses_with_the_handler_exceptions(self, store: Path, tmp_path: Path) -> None:
-        """A caller catching the module's names catches exactly what the handler raises."""
-        assert host_api_module.BaudBinRefused is host_config.BaudBinRefused
-        assert host_api_module.FaceDirRefused is host_config.FaceDirRefused
-
+    def test_a_refused_path_raises_and_stores_nothing(self, store: Path, tmp_path: Path) -> None:
         with patch(PATCH_CONFIG_LOGGER):
-            with pytest.raises(host_api_module.BaudBinRefused, match="does not exist"):
-                host_api_module.set_baud_bin(tmp_path / "no-such-baud-cli")
-            with pytest.raises(host_api_module.FaceDirRefused, match="is not a directory"):
-                host_api_module.set_face_dir(tmp_path / "no-such-face")
+            with pytest.raises(host_config.BaudBinRefused, match="does not exist"):
+                api_door.set_baud_bin(tmp_path / "no-such-baud-cli")
+            with pytest.raises(host_config.FaceDirRefused, match="is not a directory"):
+                api_door.set_face_dir(tmp_path / "no-such-face")
 
         stored = host_config.load_config()
         assert host_config.BAUD_BIN_KEY not in stored
@@ -1123,7 +1105,7 @@ class TestCrossBranchApi:
     def test_set_bind_stores_the_bind_and_reports_what_it_replaced(self, store: Path) -> None:
         """The installer writes the bind in-process, same store as set-config."""
         with patch(PATCH_CONFIG_LOGGER):
-            result = host_api_module.set_bind("127.0.0.1", 9100)
+            result = api_door.set_bind("127.0.0.1", 9100)
             config = host_config.load_config()
 
         assert result == {
@@ -1136,31 +1118,30 @@ class TestCrossBranchApi:
 
     def test_set_bind_refuses_a_wildcard_and_stores_nothing(self, store: Path) -> None:
         with patch(PATCH_CONFIG_LOGGER):
-            with pytest.raises(host_api_module.BindRefused):
-                host_api_module.set_bind("0.0.0.0", 9100)
+            with pytest.raises(api_door.BindRefused):
+                api_door.set_bind("0.0.0.0", 9100)
             config = host_config.load_config()
 
-        assert host_api_module.BindRefused is host_config.BindRefused
         assert (config["host"], config["port"]) == (host_config.DEFAULT_HOST, host_config.DEFAULT_PORT)
 
     def test_set_bind_keeps_a_bind_already_stored_without_writing_it_again(self, store: Path) -> None:
         """Idempotent: a second install on the same bind is a no-op, not a rewrite."""
         with patch(PATCH_CONFIG_LOGGER):
-            host_api_module.set_bind("127.0.0.1", 9100)
+            api_door.set_bind("127.0.0.1", 9100)
             with patch.object(host_config, "save_config") as save:
-                result = host_api_module.set_bind("127.0.0.1", 9100)
+                result = api_door.set_bind("127.0.0.1", 9100)
 
         save.assert_not_called()
         assert result["changed"] is False
         assert result["previous"] == {"host": "127.0.0.1", "port": 9100}
 
-    def test_receipt_path_is_the_token_store_receipt(self, store: Path) -> None:
-        """The installer asks for the path rather than restating it."""
-        assert host_api_module.receipt_path("pixel-8") == host_tokens.receipt_path("pixel-8")
-        assert host_api_module.receipt_path("pixel-8").name == "pixel-8.token"
-
-        with pytest.raises(host_api_module.TokenError):
-            host_api_module.receipt_path("..")
+    @pytest.mark.parametrize(
+        "name",
+        ["issue_token", "serve", "receipt_path", "load_config", "set_bind", "mint_pairing", "TokenError"],
+    )
+    def test_the_module_is_no_second_door(self, name: str) -> None:
+        """aipass.api hands these out from their homes; host_api must not answer them too."""
+        assert not hasattr(host_api_module, name)
 
 
 def _seed_keyring_from_files(store: Path, keyring_store: Any) -> dict:

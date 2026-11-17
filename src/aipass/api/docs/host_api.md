@@ -248,9 +248,8 @@ credential, once, for five minutes.
 
 **The browser extension** pairs by `host-api pair extension`: [host_agent_chat.md](host_agent_chat.md).
 
-The module door: `mint_pairing(label, scope="read", ttl_seconds=300) -> dict`,
-`render_qr(text) -> str` and `PairingError` (a `TokenError`), on
-`aipass.api.apps.modules.host_api`.
+`aipass.api` hands out `mint_pairing(label, scope="read", ttl_seconds=300)
+-> dict`, `render_qr(text) -> str` and `PairingError` (a `TokenError`).
 
 ---
 

@@ -381,13 +381,14 @@ class TestAFailedWriteLeavesNothingBehind:
     """The staged file is cleanup, and cleanup that fails is still reported."""
 
     def test_the_staged_file_does_not_survive_a_failed_write(self, tmp_path) -> None:
-        path = tmp_path / "settings.local.json"
+        # Its own directory: autouse fixtures put their feeds in tmp_path itself.
+        path = tmp_path / ".claude" / "settings.local.json"
 
         with pytest.raises(TypeError):
             host_settings.write_atomically(path, {"unserialisable": object()})
 
         assert not path.exists()
-        assert list(tmp_path.iterdir()) == []
+        assert list(path.parent.iterdir()) == []
 
     def test_a_cleanup_that_itself_fails_is_logged_not_swallowed(self, tmp_path, monkeypatch) -> None:
         """

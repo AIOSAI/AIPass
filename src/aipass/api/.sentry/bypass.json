@@ -319,15 +319,6 @@
         685
       ],
       "reason": "_spawn_pty is called with its close_fd seam so a failed openpty or set_winsize shows which PTY ends were closed and that the reserved slot came back; the same seam as test_host_perf.py's 713 row. open_attach and open_monitor reach _spawn_pty but cannot hand it close_fd, and a public door would exist for these tests alone (api, 2026-10-24). Lines shifted by the Linux-only purge (2026-11-14): 705 -> 691, 691 -> 685 with the straggler sweep."
-    },
-    {
-      "file": "apps/modules/host_api.py",
-      "standard": "unused_function",
-      "functions": [
-        "set_bind",
-        "install_unit"
-      ],
-      "reason": "The installer's doors (docs/host_autostart.md, 'The installer's doors'), called from @aipass, not inside api: aipass/aipass/apps/handlers/baud/phone_setup.py:114/118 (set_bind) and :143/157 (install_unit), on the host_api module handed in by aipass/aipass/apps/modules/baud.py:103. phone_setup reaches them through getattr(host_config, name), so the checker's name search finds no call. NAME-SCOPED so a genuinely dead door here is still caught (api, 2026-10-24)."
     }
   ],
   "notes": {

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_pairing.py
 # Description: Tests for the pairing door — one-use QR codes a phone trades for its bearer
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-10-13
-# Modified: 2026-11-06
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/host/pairings.py, POST /v1/pair, the host-api pair verb and its extension mode."""
@@ -28,13 +28,13 @@ from urllib.error import HTTPError, URLError
 import pytest
 from keyring.errors import KeyringLocked
 
+import aipass.api as api_door
 from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import pairings as host_pairings
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import store as host_store
 from aipass.api.apps.handlers.host import tokens as host_tokens
-from aipass.api.apps.modules import host_api as host_api_module
 from aipass.api.apps.modules.host_api import handle_command
 from aipass.api.tests.support_host_api import TAILNET_SHAPED, FakeBaud, agent_row
 
@@ -91,7 +91,7 @@ def _expire_every_row() -> None:
 
 class TestMintPairing:
     def test_mint_stores_the_codes_hash_and_never_the_code(self, paired: Path) -> None:
-        minted = host_api_module.mint_pairing("phone", "operate")
+        minted = api_door.mint_pairing("phone", "operate")
 
         stored = _entry()
         assert minted["code"] not in stored
@@ -101,7 +101,7 @@ class TestMintPairing:
         assert len(row["sha256"]) == 64
 
     def test_the_url_carries_the_stored_bind_and_the_code_in_the_fragment(self, paired: Path) -> None:
-        minted = host_api_module.mint_pairing("phone")
+        minted = api_door.mint_pairing("phone")
 
         assert minted["url"] == f"http://{TAILNET_SHAPED}:8787/#pair={minted['code']}"
         life = datetime.fromisoformat(minted["expires_at"]) - datetime.now(timezone.utc)
@@ -111,8 +111,8 @@ class TestMintPairing:
         with patch(PATCH_CONFIG_LOGGER):
             host_config.save_config({"host": "0.0.0.0", "port": 8787})
 
-        with pytest.raises(host_api_module.PairingError, match="wildcard"):
-            host_api_module.mint_pairing("phone")
+        with pytest.raises(api_door.PairingError, match="wildcard"):
+            api_door.mint_pairing("phone")
         assert _entry() is None
 
     @pytest.mark.parametrize(
@@ -129,11 +129,11 @@ class TestMintPairing:
         self, paired: Path, label: str, scope: str, ttl: Any
     ) -> None:
         with pytest.raises(host_pairings.PairingError):
-            host_api_module.mint_pairing(label, scope, ttl)
+            api_door.mint_pairing(label, scope, ttl)
         assert _entry() is None
 
     def test_the_mint_asks_the_bind_itself_whether_a_server_answers(self, paired: Path, listener: Any) -> None:
-        host_api_module.mint_pairing("phone")
+        api_door.mint_pairing("phone")
 
         assert listener.call_args.args[0] == f"http://{TAILNET_SHAPED}:8787/"
 
@@ -143,8 +143,8 @@ class TestMintPairing:
         """No QR is minted for a dead server: the refusal names the two commands and stores nothing."""
         listener.side_effect = URLError(ConnectionRefusedError(111, "Connection refused"))
 
-        with pytest.raises(host_api_module.PairingError) as raised:
-            host_api_module.mint_pairing("phone", "operate")
+        with pytest.raises(api_door.PairingError) as raised:
+            api_door.mint_pairing("phone", "operate")
 
         lines = str(raised.value).splitlines()
         assert lines[0].startswith(f"No server answers on {TAILNET_SHAPED}:8787")
@@ -154,21 +154,21 @@ class TestMintPairing:
     def test_a_server_answering_an_error_refuses_and_names_status(self, paired: Path, listener: Any) -> None:
         listener.side_effect = HTTPError(f"http://{TAILNET_SHAPED}:8787/", 503, "Service Unavailable", Message(), None)
 
-        with pytest.raises(host_api_module.PairingError) as raised:
-            host_api_module.mint_pairing("phone")
+        with pytest.raises(api_door.PairingError) as raised:
+            api_door.mint_pairing("phone")
 
         assert "answers 503" in str(raised.value)
         assert str(raised.value).endswith("drone @api host-api status")
         assert _entry() is None
 
     def test_the_door_refusal_is_a_token_error(self) -> None:
-        assert issubclass(host_api_module.PairingError, host_api_module.TokenError)
+        assert issubclass(api_door.PairingError, host_tokens.TokenError)
 
     def test_an_unreadable_store_is_an_error_naming_the_store_never_an_empty_list(self, paired: Path) -> None:
         _write_entry("{not json")
 
         with pytest.raises(host_pairings.PairingError) as raised:
-            host_api_module.mint_pairing("phone")
+            api_door.mint_pairing("phone")
         assert ENTRY in str(raised.value)
 
     def test_a_store_file_that_cannot_be_read_is_a_pairing_error_naming_the_file(self, paired: Path) -> None:
@@ -176,20 +176,20 @@ class TestMintPairing:
         host_store.store_path(host_store.PAIRINGS).mkdir(parents=True)
 
         with pytest.raises(host_pairings.PairingError) as raised:
-            host_api_module.mint_pairing("phone")
+            api_door.mint_pairing("phone")
 
         assert ENTRY in str(raised.value)
         assert str(paired) not in str(raised.value)
 
     def test_a_locked_keyring_does_not_stop_a_mint(self, paired: Path, keyring_store: Any) -> None:
         with patch.object(keyring_store, "get_password", side_effect=KeyringLocked("locked")):
-            minted = host_api_module.mint_pairing("phone")
+            minted = api_door.mint_pairing("phone")
 
         assert [row["id"] for row in _stored_rows()] == [minted["id"]]
         assert keyring_store.entries == {}
 
     def test_the_rows_rest_in_their_own_file_beside_the_config(self, paired: Path) -> None:
-        host_api_module.mint_pairing("phone")
+        api_door.mint_pairing("phone")
 
         assert len(_stored_rows()) == 1
         assert sorted(item.name for item in (paired / "host_api").iterdir()) == ["config.json", "pairings.json"]
@@ -197,7 +197,7 @@ class TestMintPairing:
 
 class TestRedeemPairing:
     def test_a_live_code_buys_a_token_for_its_label_and_scope_and_writes_no_receipt(self, paired: Path) -> None:
-        minted = host_api_module.mint_pairing("phone", "operate")
+        minted = api_door.mint_pairing("phone", "operate")
 
         redeemed = host_pairings.redeem_pairing(minted["code"])
 
@@ -208,7 +208,7 @@ class TestRedeemPairing:
         assert list(paired.rglob("*.token")) == []
 
     def test_the_code_is_marked_used_before_the_token_is_minted(self, paired: Path) -> None:
-        minted = host_api_module.mint_pairing("phone")
+        minted = api_door.mint_pairing("phone")
         seen_at_mint: list = []
         real_issue = host_tokens.issue_token
 
@@ -222,7 +222,7 @@ class TestRedeemPairing:
         assert len(seen_at_mint) == 1 and seen_at_mint[0] is not None
 
     def test_a_second_redeem_of_the_same_code_is_refused(self, paired: Path) -> None:
-        minted = host_api_module.mint_pairing("phone")
+        minted = api_door.mint_pairing("phone")
 
         first = host_pairings.redeem_pairing(minted["code"])
         assert first is not None and first["label"] == "phone"
@@ -230,7 +230,7 @@ class TestRedeemPairing:
         assert len(host_tokens.list_tokens()) == 1
 
     def test_an_expired_code_is_refused_and_mints_nothing(self, paired: Path) -> None:
-        minted = host_api_module.mint_pairing("phone", ttl_seconds=30)
+        minted = api_door.mint_pairing("phone", ttl_seconds=30)
         _expire_every_row()
 
         assert host_pairings.redeem_pairing(minted["code"]) is None
@@ -238,9 +238,9 @@ class TestRedeemPairing:
 
     def test_unknown_expired_and_used_codes_get_one_and_the_same_answer(self, paired: Path) -> None:
         window = host_pairings.AttemptWindow()
-        used = host_api_module.mint_pairing("phone")["code"]
+        used = api_door.mint_pairing("phone")["code"]
         host_pairings.redeem_pairing(used)
-        expired = host_api_module.mint_pairing("tablet")["code"]
+        expired = api_door.mint_pairing("tablet")["code"]
         _expire_every_row()
 
         answers = [host_pairings.answer_pair({"code": code}, "100.64.0.9", window) for code in ("never", expired, used)]
@@ -248,26 +248,26 @@ class TestRedeemPairing:
         assert answers == [(401, {"code": "pairing_refused", "message": host_pairings.REFUSED})] * 3
 
     def test_a_mint_sweeps_used_and_expired_rows(self, paired: Path) -> None:
-        host_pairings.redeem_pairing(host_api_module.mint_pairing("phone")["code"])
-        host_api_module.mint_pairing("tablet")
+        host_pairings.redeem_pairing(api_door.mint_pairing("phone")["code"])
+        api_door.mint_pairing("tablet")
         _expire_every_row()
 
-        kept = host_api_module.mint_pairing("watch")
+        kept = api_door.mint_pairing("watch")
 
         assert [row["id"] for row in _stored_rows()] == [kept["id"]]
 
 
 class TestRenderQr:
     def test_a_url_renders_as_terminal_block_characters_with_no_trailing_newline(self) -> None:
-        rendered = host_api_module.render_qr(f"http://{TAILNET_SHAPED}:8787/#pair=abc")
+        rendered = api_door.render_qr(f"http://{TAILNET_SHAPED}:8787/#pair=abc")
 
         assert set(rendered) <= {"█", "▀", "▄", " ", "\n"}
         assert "█" in rendered and not rendered.endswith("\n")
         assert len({len(line) for line in rendered.splitlines()}) == 1
 
     def test_empty_text_is_refused(self) -> None:
-        with pytest.raises(host_api_module.PairingError):
-            host_api_module.render_qr("  ")
+        with pytest.raises(api_door.PairingError):
+            api_door.render_qr("  ")
 
 
 @pytest.fixture
@@ -282,7 +282,7 @@ def client(paired: Path) -> Any:
 @fastapi_required
 class TestPairRoute:
     def test_a_live_code_is_200_with_a_working_bearer_and_no_auth_header(self, client: Any) -> None:
-        code = host_api_module.mint_pairing("phone", "operate")["code"]
+        code = api_door.mint_pairing("phone", "operate")["code"]
 
         response = client.post("/v1/pair", json={"code": code})
 
@@ -293,7 +293,7 @@ class TestPairRoute:
         assert whoami.json()["id"] == body["id"]
 
     def test_a_used_code_is_401_with_the_one_sentence(self, client: Any) -> None:
-        code = host_api_module.mint_pairing("phone")["code"]
+        code = api_door.mint_pairing("phone")["code"]
         client.post("/v1/pair", json={"code": code})
 
         response = client.post("/v1/pair", json={"code": code})
