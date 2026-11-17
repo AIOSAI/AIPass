@@ -283,11 +283,11 @@ FALLBACK_WARNING = (
 
 
 def _load_checklist_module():
-    """Import @sentry's checklist module, where the finding marker is published.
+    """@sentry's door, which hands out the checklist's markers; each read loads the checklist module.
 
     A seam: tests replace it by name instead of patching importlib.import_module process-wide.
     """
-    return importlib.import_module("aipass.sentry.apps.modules.checklist")
+    return importlib.import_module("aipass.sentry")
 
 
 def _checklist_marker() -> str:
@@ -296,7 +296,8 @@ def _checklist_marker() -> str:
     A restated marker once went stale silently: an empty list reads like a clean file. So the fallback is loud.
     """
     try:
-        checklist = _load_checklist_module()
+        # Read inside the try: the door loads the checklist module on this read, so a missing one raises here.
+        marker = getattr(_load_checklist_module(), "FINDING_MARKER", "")
     except Exception as exc:
         logger.warning(
             "[HOOKS] auto_fix: sentry checklist module unreadable (%s) — using fallback marker %r",
@@ -304,7 +305,6 @@ def _checklist_marker() -> str:
             _CHECKLIST_MARKER_FALLBACK,
         )
         return _CHECKLIST_MARKER_FALLBACK
-    marker = getattr(checklist, "FINDING_MARKER", "")
     if isinstance(marker, str) and marker:
         return marker
     logger.warning(

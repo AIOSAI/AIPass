@@ -206,7 +206,7 @@ reason=… | cmd=…` (`target=-` when the target could not be resolved). Servic
 subprocess never passes through a hook.
 
 Every refusal, the admin seat's raw `rm` included, is also one row in the project's deletions ledger
-(`.ai_central/deletions.jsonl`), written through @drone's door `door_deletion_log.record_gate_refusal`:
+(`.ai_central/deletions.jsonl`), written through @drone's door `aipass.drone.record_gate_refusal`:
 lane `rm_gate`, outcome `refused`, the caller (`unknown` with no passport), the session cwd, the command
 as typed in `requested` (the whole Bash command line: the evidence), the resolved target in `path`, and a
 one-sentence reason. There is one row per resolved target: the refused `drone rm` target when that is

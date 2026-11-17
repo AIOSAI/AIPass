@@ -4,7 +4,7 @@
 # Description: Tests for auto_process lifecycle handler (TDPLAN-0005, DPLAN-0294 phase 1b)
 # Branch: hooks
 # Created: 2026-06-06
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/lifecycle/auto_process.py."""
@@ -28,6 +28,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+from aipass import memory
 from aipass.hooks.apps.handlers.lifecycle import auto_process
 from aipass.hooks.apps.handlers.lifecycle.auto_process import handle
 
@@ -38,8 +39,8 @@ def _kept_redirect() -> dict[str, str]:
 
 
 MODULE = "aipass.hooks.apps.handlers.lifecycle.auto_process"
-# The home, not the door: the door imports it on each read, so a module stood here is what the handler gets.
-_MEMORY_AUTO_PROCESS = "aipass.memory.apps.handlers.intake.auto_process"
+# The door name's home, as the door reports it: the door imports it on each read, so a module stood here is served.
+_MEMORY_AUTO_PROCESS = memory.spawn_background.__module__
 
 
 def _make_mock_module(**spawn_return):

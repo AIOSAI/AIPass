@@ -4,7 +4,7 @@
 # Description: Tests for edit_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py and its PreToolUse sibling settings_backup.py."""
@@ -32,8 +32,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from aipass.ai_mail.apps.handlers.dispatch import grant as dispatch_grant_handler
-from aipass.ai_mail import GRANT_KEY
+from aipass.ai_mail import GRANT_KEY, granted
 from aipass.hooks.apps.handlers.lifecycle import auto_fix
 from aipass.hooks.apps.handlers.security.edit_gate import handle
 from aipass.hooks.apps.handlers.security import git_gate, settings_backup
@@ -607,7 +606,7 @@ def nested_grant(tmp_path: Path, monkeypatch, door_patch) -> SimpleNamespace:
         aipass=aipass, grow=grow, seat=str(seat), seed=seed, register=register, row=row, admin=False
     )
     door_patch("aipass.ai_mail.is_verified_admin_caller", lambda: state.admin)
-    monkeypatch.setattr(dispatch_grant_handler.json_handler, "log_operation", lambda *a, **k: None)
+    monkeypatch.setattr(granted.__globals__["json_handler"], "log_operation", lambda *a, **k: None)
     monkeypatch.setenv("AIPASS_DISPATCH_ID", "g1")
     monkeypatch.setenv("AIPASS_SESSION_TYPE", "daemon")
     return state

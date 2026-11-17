@@ -4,7 +4,7 @@
 # Description: Tests for auto_fix lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/lifecycle/auto_fix.py."""
@@ -44,7 +44,7 @@ from aipass.hooks.apps.handlers.lifecycle.auto_fix import (
     handle,
 )
 from aipass.prax import logger as system_logger
-from aipass.sentry.apps.modules.checklist import ADVICE_MARKER, FINDING_MARKER
+from aipass.sentry import ADVICE_MARKER, FINDING_MARKER
 
 
 def _kept_redirect() -> dict[str, str]:
