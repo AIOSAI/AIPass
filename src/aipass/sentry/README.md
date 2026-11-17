@@ -69,9 +69,8 @@ business-logic module per verb — audit_tests, bypass, checklist, diagnostics_a
 (fleet counts for the front_door standard, per branch and per target), home_paths
 (the developer-home scan the CI gate runs), inbox_audit, inventory, permissions, proof_query,
 ratchet (the weekly execution ratchet), readme_update, sentry_proof, shadow_cycle, standards_audit, standards_query, test_map and
-tests_lane — and two second doors, door_audit (the audit, bypass rules and context ratchets, for
-the CI audit script) and door_trinity (the .trinity/ check, for @memory): a retired pattern the
-front_door row convicts, since a branch has one door, its package top file.
+tests_lane. Other branches reach sentry through its one door, the package top file
+`src/aipass/sentry/__init__.py` (`from aipass.sentry import <name>`).
 `apps/handlers/` holds the implementation,
 grouped one directory per concern: the checker packs (`*_standards/`), the proof pack, the
 audit engine, the bypass and ignore systems, the test lanes, and the json shim every branch

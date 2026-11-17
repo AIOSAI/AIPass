@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Dict, List
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers import registry_scan
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: encapsulation_content.py
 # Description: Encapsulation Standards Content Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-09
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -51,6 +51,12 @@ def get_encapsulation_standards() -> str:
         "  [green]✓[/green] json_handler  - Default JSON operations",
         "  [green]✓[/green] file_handler  - Default file operations",
         "  [green]✓[/green] Same-package relative imports (from .X import Y)",
+        "",
+        "[yellow]The package top file types its door names from their homes:[/yellow]",
+        "  In src/aipass/<branch>/__init__.py, own-handler imports inside a top-level",
+        "  if TYPE_CHECKING: block are acquitted; nothing loads at runtime.",
+        "  [red]✗[/red] A runtime handler import there (it breaks the door's laziness).",
+        "  [red]✗[/red] Another branch's handlers, or a TYPE_CHECKING block in any other file.",
         "",
         f"[dim]{sep}[/dim]",
         "[bold cyan]EXCEPTIONS:[/bold cyan]",

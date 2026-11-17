@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: support_json_handler_contract.py
 # Description: Shared discovery, payloads and redirection for the json_handler contract files (split 2026-10-08)
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-10-08
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Shared helpers for the tests of every branch's apps/handlers/json/json_handler.py (not test_: never collected)."""
@@ -23,7 +23,7 @@ from aipass.prax import logger
 
 # Module level, so a checkout without @memory is tolerated with no product import inside a function.
 try:
-    from aipass.memory.apps.modules.door_registry_scope import fleet_branches
+    from aipass.memory import fleet_branches
 except Exception as exc:  # pragma: no cover - exercised only where @memory is absent
     logger.info("[json_handler_contract] @memory unreachable, the roster is the installed glob alone: %s", exc)
     fleet_branches = None
@@ -33,8 +33,7 @@ PACKAGE_ROOT = Path(aipass.__file__).resolve().parent
 
 HANDLER_RELPATH = Path("apps") / "handlers" / "json" / "json_handler.py"
 
-#: The AIPass repo (src/aipass and projects inside it, such as projects/baud). An external project registered
-#: on this seat runs this contract in its own suite: AIPass's suite gives the same answer here as in CI.
+#: The AIPass repo; an external project on this seat runs the contract in its own suite, so CI agrees here.
 REPO_ROOT = PACKAGE_ROOT.parents[1]
 
 

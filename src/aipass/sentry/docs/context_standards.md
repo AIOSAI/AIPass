@@ -17,15 +17,15 @@ Six files per branch, in **characters** (`wc -m`), each against the cap its OWNE
 | File | Cap | Owner | Where the checker reads it |
 |---|---|---|---|
 | `README.md` | 10,000 | **sentry** | `context_standards/pack.json` → `caps["README.md"].max_chars` |
-| `.aipass/aipass_local_prompt.md` | 9,000 | hooks | `grounding_content.BRANCH_CHAR_BUDGET` |
+| `.aipass/aipass_local_prompt.md` | 9,000 | hooks | `aipass.hooks.BRANCH_CHAR_BUDGET` |
 | `.trinity/local.json` | 25,000 | memory | `memory.config.json` → `entry_limits.file_budgets` |
 | `.trinity/observations.json` | 15,000 | memory | same key |
 | `.trinity/passport.json` | 6,000 file, 600 per string | memory | same key |
-| `DASHBOARD.local.json` | 6,000 | prax | `dashboard.DASHBOARD_CHAR_BUDGET` |
+| `DASHBOARD.local.json` | 6,000 | prax | `aipass.prax.DASHBOARD_CHAR_BUDGET` |
 
 Nothing under `apps/` is opened: this is the cost of a greeting, not the cost of the branch.
 
-**Read, never copied.** Every number is read off the owner's live module or config at call
+**Read, never copied.** Every number is read off the owner's door or config at call
 time. Move a cap at its owner and the next audit moves with it; no file in sentry is edited.
 `external_inputs()` names those owner files so the incremental cache re-scores each branch
 when a cap moves — without it, a branch keeps serving the row it cached against the old
@@ -82,7 +82,7 @@ is under its cap, the commit that pushes it back over turns the job red in the s
 | File | Owner | Cap read from |
 |---|---|---|
 | `README.md` | **sentry** | `context_standards/pack.json` → `caps["README.md"].max_chars` |
-| `.aipass/aipass_local_prompt.md` | **hooks** | `grounding_content.BRANCH_CHAR_BUDGET` |
+| `.aipass/aipass_local_prompt.md` | **hooks** | `aipass.hooks.BRANCH_CHAR_BUDGET` |
 
 Both are **tracked in git**, so a CI checkout measures exactly what a local audit measures.
 That is the whole selection rule.
