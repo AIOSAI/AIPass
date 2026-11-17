@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: front_door_check.py
 # Description: Front Door Standards Checker - a cross-branch import goes through the branch's package top file
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-11-16
 # Modified: 2026-11-16
 # =============================================
@@ -11,6 +11,7 @@
 Reference: front_door.md. One finding per site (line, enclosing function): an import of another
 branch that reaches under its ``apps/``. Detection is ``front_door_count.scan_source``, the same
 reading the ``front-door`` verb counts with. A lines, functions or whole-file bypass row waives.
+A second door (``modules_check.is_second_door``) is one more finding, line 1, that no row waives.
 """
 
 import ast
@@ -25,6 +26,7 @@ from aipass.sentry.apps.handlers.aipass_standards.front_door_count import (
     owner_of_path,
     scan_source,
 )
+from aipass.sentry.apps.handlers.aipass_standards.modules_check import is_second_door
 from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
 from aipass.sentry.apps.handlers.json import json_handler
 
@@ -62,6 +64,22 @@ def _message(file_name: str, reading: Reading) -> str:
     )
 
 
+def _second_door(path: Path) -> Dict:
+    """The finding for a module under apps/modules that hands its branch's handler names outward."""
+    branch = owner_of_path(str(path))
+    return {
+        "name": "Front door",
+        "passed": False,
+        "line": 1,
+        "function": MODULE_LEVEL,
+        "message": (
+            f"{path.name} is a second door (retired pattern): it hands {branch}'s handler names out from apps/modules. "
+            f"A branch has one door, its package top file: from aipass.{branch} import <name>; "
+            f"retire this module once no other branch imports it"
+        ),
+    }
+
+
 def _one_check(passed: bool, message: str) -> List[Dict]:
     """A single-entry checks list."""
     return [{"name": "Front door", "passed": passed, "message": message}]
@@ -82,7 +100,8 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         logger.warning("[front_door] Unparseable %s: %s", module_path, exc)
         return result(False, _one_check(False, f"Cannot be read as Python, imports unjudged: {exc}"), 0, STANDARD)
 
-    checks = []
+    # Never waived: the owner ruled a second door a retired pattern with no exception.
+    checks = [_second_door(path)] if is_second_door(module_path, source) else []
     for reading in readings:
         if reading.kind not in APPS_KINDS:
             continue

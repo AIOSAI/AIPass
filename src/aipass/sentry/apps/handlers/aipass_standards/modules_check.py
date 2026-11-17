@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: modules_check.py
 # Description: Modules Standards Checker Handler
-# Version: 1.6.1
+# Version: 1.7.0
 # Created: 2026-03-05
 # Modified: 2026-11-16
 # =============================================
@@ -76,10 +76,22 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "MODULES",
         }
 
-    # A door is a re-export with no CLI: its own row replaces handle_command; the size and logic rows still stand
-    if path.name.startswith("door_"):
-        checks.append(_waive_file_level(check_door(content, module_path), module_path, bypass_rules))
-    elif not path.name == "__init__.py":
+    # One defect, one report: front_door convicts a second door, so this row does not judge it again.
+    if is_second_door(module_path, content):
+        return {
+            "passed": True,
+            "checks": [
+                {
+                    "name": "Module check",
+                    "passed": True,
+                    "message": "A second door: front_door convicts it (retired pattern), not judged here",
+                    "declined": True,
+                }
+            ],
+            "score": 100,
+            "standard": "MODULES",
+        }
+    if not path.name == "__init__.py":
         handle_cmd_check = check_handle_command(content)
         if handle_cmd_check:
             checks.append(_waive_file_level(handle_cmd_check, module_path, bypass_rules))
@@ -104,11 +116,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     score = int((passed_checks / total_checks * 100)) if total_checks > 0 else 0
 
     overall_passed = score >= 75
-
-    # A door's verdict is its shape: a failing Door shape row fails the file even when the aggregate passes
-    door_fault = [check for check in checks if check["name"] == "Door shape" and not check["passed"]]
-    if door_fault:
-        score, overall_passed = 0, False
 
     json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "modules"})
     return {"passed": overall_passed, "checks": checks, "score": score, "standard": "MODULES"}
@@ -176,11 +183,11 @@ def _door_statement_problem(node: ast.stmt, own_handlers: "re.Pattern[str]", imp
 
 
 def check_door(content: str, module_path: str) -> Dict:
-    """Check that ``apps/modules/door_<subject>.py`` is a door and nothing else.
+    """Whether a source has the second-door shape, a pattern retired by the front_door standard.
 
-    A door imports only from its OWN branch's ``apps.handlers`` (and the stdlib), defines no function or
-    class, and carries an ``__all__`` of names it imported. It is inside-the-branch plumbing: the branch's front
-    door may hand out its names, and another branch never imports it by path.
+    The shape: imports only from its OWN branch's ``apps.handlers`` (and the stdlib), defines no function or
+    class, and carries an ``__all__`` of names it imported. A branch has one door, its package top file;
+    ``is_second_door`` reads this shape and front_door convicts it.
     """
     try:
         tree = ast.parse(content)
@@ -204,8 +211,26 @@ def check_door(content: str, module_path: str) -> Dict:
     return {
         "name": "Door shape",
         "passed": True,
-        "message": f"Door re-exports only its own handlers ({len(exported)} names)",
+        "message": f"Second-door shape: re-exports only its own handlers ({len(exported)} names)",
+        "names": len(exported),
     }
+
+
+def is_second_door(module_path: str, content: str) -> bool:
+    """A file under ``apps/modules`` that hands its branch's handler names outward: named ``door_*`` or door-shaped.
+
+    A package marker is skipped by shape: an ``apps/modules/__init__.py`` re-export is as often the branch's own
+    plumbing, and front_door already convicts each foreign import of it.
+    """
+    path = Path(module_path)
+    if path.parent.name != "modules" or path.parent.parent.name != "apps":
+        return False
+    if path.name.startswith("door_"):
+        return True
+    if path.name == "__init__.py":
+        return False
+    verdict = check_door(content, module_path)
+    return verdict["passed"] and verdict["names"] > 0
 
 
 def check_handle_command(content: str) -> Optional[Dict]:

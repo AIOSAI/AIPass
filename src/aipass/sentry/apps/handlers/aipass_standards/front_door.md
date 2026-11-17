@@ -37,7 +37,16 @@ def __getattr__(name: str) -> Any:
     return value
 ```
 
-The door's own imports of its branch are inside the branch and never findings. A `door_` module under `apps/modules/` is inside-the-branch plumbing: the front door may hand out its names, but another branch does not import it by path.
+The door's own imports of its branch are inside the branch and never findings.
+
+## One door: a second door is convicted
+
+A branch has one door. A module under `apps/modules/` that hands its branch's handler names outward is a second door, a retired pattern, and a finding of its own (line 1, `<module>`), whichever way it is read:
+
+- by name: the file is `door_<anything>.py`, whatever it holds;
+- by shape: its whole body is imports from its own branch's handlers (and the stdlib) plus an `__all__` of names it imported, with no function, class or other statement.
+
+An `apps/modules/__init__.py` is not read by shape: its re-export is as often the branch's own plumbing, and each foreign import of it is already a finding. The cure: the package top file hands out the name, `from aipass.<branch> import <name>`, and the module is retired once no other branch imports it. No bypass row waives a second door, and the modules, imports, introspection and dead_code rows leave it to this one, so one defect is reported once.
 
 ## How a branch decides its public list
 

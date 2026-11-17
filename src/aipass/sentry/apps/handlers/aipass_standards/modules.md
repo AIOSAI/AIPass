@@ -19,17 +19,9 @@ Standards specific to modules (orchestration layer). Modules coordinate workflow
 - **handle_command(args) -> bool pattern** - Standard entry point for drone routing
 - **Each module accepts ONE primary command - no aliases (Session 14 standard)** - Simplify routing logic
 
-### Doors — `apps/modules/door_<subject>.py` (DPLAN-0404, 2026-10-07)
+### Second doors are retired
 
-A door module gathers handler names this branch hands out. It is a thin re-export and nothing else: it imports only from its OWN branch's `apps.handlers` (plus the stdlib) — a handlers package nested anywhere under the branch's tree is its own, so skills' door may re-export `aipass.skills.lib.drone_commands.apps.handlers` while `aipass.daemon.lib.x.apps.handlers` stays foreign (2026-10-08) — defines no function or class, carries `__all__`, and every name in `__all__` is one it imported. The checker reads it as a "Door shape" row in place of `handle_command`, and introspection does not ask a door for `print_introspection`. A door module is inside-the-branch plumbing: the branch's front door (`src/aipass/<branch>/__init__.py`) may hand out its names, and another branch imports them from there, `from aipass.<owner> import <name>` (the `front_door` standard).
-
-```python
-"""Door: memory's entry limits, for other branches."""
-
-from aipass.memory.apps.handlers.json.entry_limits import check_file_budget, load_entry_limits
-
-__all__ = ["load_entry_limits", "check_file_budget"]
-```
+A module that exists to hand this branch's handler names to other branches is a second door: a `door_*.py`, or a module whose whole body re-exports its own handlers with `__all__`. A branch has one door, its package top file (`src/aipass/<branch>/__init__.py`), so the `front_door` row convicts a second door and this row does not judge it again. The cure: the package top file hands out the name, `from aipass.<branch> import <name>`, and the module is retired once no other branch imports it.
 
 ---
 

@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_checkers_batch4.py
 # Description: Unit tests for 5 sentry checker handlers (batch 4)
-# Version: 1.5.1
+# Version: 1.6.0
 # Created: 2026-03-29
 # Modified: 2026-11-16
 # =============================================
@@ -357,21 +357,26 @@ class TestDeadCodeCheck:
         assert "repo_door.py" in result["checks"][0]["message"]
 
     @pytest.mark.parametrize(
-        ("tail", "dead"),
-        [("", False), ("\n\ndef log_more():\n    return log_operation\n", True)],
-        ids=["shaped_door_is_referenced", "door_that_defines_a_function_is_dead"],
+        ("name", "tail", "dead"),
+        [
+            ("door_trail.py", "", False),
+            ("door_trail.py", "\n\ndef log_more():\n    return log_operation\n", False),
+            ("trail_view.py", "", False),
+            ("trail_view.py", "\n\ndef log_more():\n    return log_operation\n", True),
+        ],
+        ids=["second_door_by_name", "second_door_by_name_with_logic", "second_door_by_shape", "unnamed_real_module"],
     )
-    def test_a_door_counts_as_referenced_by_its_shape(self, mock_json, tmp_path: Path, tail: str, dead: bool) -> None:
-        """A door_ module is handed out by the front door, outside apps/, so the corpus may never name it."""
+    def test_a_second_door_is_left_to_front_door(self, mock_json, tmp_path, name, tail, dead) -> None:
+        """front_door convicts a second door (retired pattern); its unreferenced file is the same defect, one report."""
         branch = _make_branch(tmp_path)
         _write_file(branch / "apps" / "handlers" / "trail.py", "def log_operation():\n    return True\n")
         door = f'from aipass.{branch.name}.apps.handlers.trail import log_operation\n\n__all__ = ["log_operation"]\n'
-        _write_file(branch / "apps" / "modules" / "door_trail.py", door + tail)
+        _write_file(branch / "apps" / "modules" / name, door + tail)
         _write_file(branch / "apps" / (branch.name + ".py"), "def handle_command(): pass\n")
 
         result = dead_code_check_branch(str(branch))
 
-        assert ("door_trail.py" in result["checks"][0]["message"]) is dead
+        assert (name in result["checks"][0]["message"]) is dead
 
 
 @patch("aipass.sentry.apps.handlers.aipass_standards.unused_function_check.json_handler")

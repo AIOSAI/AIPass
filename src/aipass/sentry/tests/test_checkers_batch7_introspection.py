@@ -522,3 +522,26 @@ class TestScopedBypassRows:
     def test_a_function_row_on_main_waives_its_dispatch_blocks(self, tmp_path):
         """Mutant: the dispatch ask drops name= — killed."""
         assert self._verdicts(tmp_path, "apps/thing.py", self._ENTRY, functions=["main"])["Correct dispatch"]["passed"]
+
+
+_RE_EXPORT = 'from aipass.memory.apps.handlers.trail import log_operation\n\n__all__ = ["log_operation"]\n'
+
+
+class TestASecondDoorIsLeftToFrontDoor:
+    """front_door convicts a second door (a retired pattern); introspection does not ask it for a CLI."""
+
+    @pytest.mark.parametrize(
+        ("name", "body", "declined"),
+        [
+            ("door_trail.py", _RE_EXPORT + "\n\ndef more():\n    return 1\n", True),
+            ("trail_view.py", _RE_EXPORT, True),
+            ("trail_view.py", _RE_EXPORT + "\n\ndef more():\n    return 1\n", False),
+        ],
+        ids=["by_name", "by_shape", "real_module"],
+    )
+    def test_a_second_door_is_declined(self, tmp_path, name, body, declined):
+        target = tmp_path / "aipass" / "memory" / "apps" / "modules" / name
+        target.parent.mkdir(parents=True)
+        target.write_text(body, encoding="utf-8")
+        checks = introspection_check.check_module(str(target))["checks"]
+        assert (checks[0].get("declined") is True) is declined

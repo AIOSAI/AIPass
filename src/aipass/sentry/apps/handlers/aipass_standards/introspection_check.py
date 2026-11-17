@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: introspection_check.py
 # Description: Introspection Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-08
 # Modified: 2026-11-16
 # =============================================
@@ -19,6 +19,7 @@ from typing import Dict, Optional
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE, is_bypassed
+from aipass.sentry.apps.handlers.aipass_standards.modules_check import is_second_door
 
 # APPLIES_TO: the no-args gate is a module behaviour.
 APPLIES_TO = "production"
@@ -92,8 +93,9 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         }
 
     is_entry_point = _is_entry_point(module_path, path)
-    # A door is a re-export with no CLI: the modules standard reads its shape, there is nothing to introspect
-    is_module = "/modules/" in module_path and path.parent.name == "modules" and not path.name.startswith("door_")
+    # front_door convicts a second door (a retired pattern); asking it for a CLI would report it twice.
+    in_modules = "/modules/" in module_path and path.parent.name == "modules"
+    is_module = in_modules and not is_second_door(module_path, content)
 
     if not is_entry_point and not is_module:
         return {

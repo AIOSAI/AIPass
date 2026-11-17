@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch2.py
 # Description: Tests for checker handlers batch 2
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-03-29
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/error_handling_check.py and seven batch-2 sibling checkers."""
@@ -475,27 +475,34 @@ def record(base):
         assert failed == ["No sys.path hacking"]
 
 
-class TestADoorOwesNoLogger:
-    """A door re-exports and logs nothing, whatever its length (DPLAN-0404)."""
+class TestASecondDoorIsLeftToFrontDoor:
+    """front_door convicts a second door (a retired pattern), so the logger row does not report it twice."""
 
     NAMES = [f"name_{n:02d}" for n in range(20)]
-    # It logs through stdlib, so only the door exemption can keep the logger row from failing.
-    DOOR = (
-        "import logging\n"
+    # The pure re-export: the second-door shape, under any name.
+    SHAPE = (
         "from aipass.spawn.apps.handlers.registry import (\n"
         + "".join(f"    {name},\n" for name in NAMES)
         + ")\n\n__all__ = "
         + repr(NAMES)
-        + "\nlogging.getLogger(__name__).info('loaded')\n"
+        + "\n"
     )
+    # Logs through stdlib: no longer the shape, so only the door_ name keeps the logger row quiet.
+    LOGGING = "import logging\n" + SHAPE + "logging.getLogger(__name__).info('loaded')\n"
 
     @pytest.mark.parametrize(
-        ("name", "rows"), [("door_registry.py", []), ("registry_view.py", ["Prax logger import (recommended)"])]
+        ("name", "body", "rows"),
+        [
+            ("door_registry.py", LOGGING, []),
+            ("registry_view.py", SHAPE, []),
+            ("registry_view.py", LOGGING, ["Prax logger import (recommended)"]),
+        ],
+        ids=["by_name", "by_shape", "real_module"],
     )
-    def test_the_logger_row_reads_the_door_name(self, tmp_path: Path, name: str, rows: list) -> None:
+    def test_the_logger_row_reads_the_second_door(self, tmp_path: Path, name: str, body: str, rows: list) -> None:
         target = tmp_path / "spawn" / "apps" / "modules" / name
         target.parent.mkdir(parents=True)
-        target.write_text(self.DOOR, encoding="utf-8")
+        target.write_text(body, encoding="utf-8")
 
         result = check_imports(str(target))
 

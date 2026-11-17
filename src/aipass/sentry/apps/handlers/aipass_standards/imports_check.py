@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: imports_check.py
 # Description: Imports Standards Checker Handler
-# Version: 2.6.0
+# Version: 2.7.0
 # Created: 2026-03-05
 # Modified: 2026-11-16
 # =============================================
@@ -22,6 +22,7 @@ from aipass.sentry.apps.handlers.aipass_standards import applicability
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
 from aipass.sentry.apps.handlers.aipass_standards.handlers_check import is_foundation_service
+from aipass.sentry.apps.handlers.aipass_standards.modules_check import is_second_door
 from aipass.sentry.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify
 
 # APPLIES_TO: ordering and grouping read the same in a test file. The prax
@@ -87,8 +88,8 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     is_handler = "/handlers/" in module_path
     is_init_file = path.name == "__init__.py"
     is_small_file = len([line for line in lines if line.strip() and not line.strip().startswith("#")]) < 20
-    # A door re-exports and logs nothing, whatever its length.
-    is_door = path.name.startswith("door_") and path.parent.name == "modules"
+    # front_door convicts a second door (a retired pattern); asking it to log would report it twice.
+    is_door = is_second_door(module_path, content)
 
     if not is_init_file:
         checks.append(check_no_aipass_root(import_lines, module_path, bypass_rules))

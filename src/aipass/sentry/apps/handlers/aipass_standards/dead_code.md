@@ -46,7 +46,7 @@ For each collected file, the checker builds a search corpus from ALL `.py` conte
 
 - `__init__.py` (package structure)
 - Entry point files (`apps/{branch}.py`)
-- Doors (`apps/modules/door_*.py`) that pass the modules standard's Door shape row (DPLAN-0404, since 2026-10-08): a door is called from other branches, so its own branch never names it. A `door_` file that fails Door shape is read like any other module
+- Second doors (`apps/modules/door_*.py`, or a module that only re-exports its own handlers): a retired pattern the `front_door` row convicts. Its own branch never naming it is the same defect, so this row does not report it again
 - Glob-discovered patterns (`*_check.py`, `*_content.py`) when a matching glob call exists
 - Direct children of `modules/` when `glob("*.py")` exists in the source
 

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dead_code_check.py
 # Description: Dead Code Standards Checker Handler
-# Version: 1.5.1
+# Version: 1.6.0
 # Created: 2026-03-22
 # Modified: 2026-11-16
 # =============================================
@@ -19,7 +19,7 @@ from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
 from aipass.sentry.apps.handlers.bypass.ignore_handler import is_sentry_ignored, load_ignore_entries
 from aipass.sentry.apps.handlers.aipass_standards.skip_dirs import in_skipped_dir, is_disabled_file
-from aipass.sentry.apps.handlers.aipass_standards.modules_check import check_door
+from aipass.sentry.apps.handlers.aipass_standards.modules_check import is_second_door
 
 # APPLIES_TO: pytest calls test functions by discovery, so every one would read unreferenced.
 APPLIES_TO = "production"
@@ -37,17 +37,15 @@ _INSTALL_CONFIG = Path(".aipass") / "hooks.json"
 _INSTALL_SOURCE = Path("src") / "aipass"
 
 
-def _is_shaped_door(py_file: Path) -> bool:
-    """Whether this is an ``apps/modules/door_*.py`` that passes Door shape (DPLAN-0404).
+def _is_second_door(py_file: Path) -> bool:
+    """Whether front_door already convicts this file as a second door (a retired pattern).
 
-    Inside-the-branch plumbing the front door (top __init__.py, outside apps/) may hand out, so
-    the apps/ corpus may never name it; its shape is its reference, as the entry point's name is.
-    A ``door_`` file that fails Door shape is read like any other module.
+    A second door exists to hand names to other branches, so its own branch never names it: that is
+    the same defect front_door reports, and one defect gets one report.
     """
-    if not (py_file.name.startswith("door_") and py_file.parent.name == "modules"):
+    if py_file.parent.name != "modules":
         return False
-    content = py_file.read_text(encoding="utf-8", errors="ignore")
-    return check_door(content, py_file.as_posix())["passed"]
+    return is_second_door(py_file.as_posix(), py_file.read_text(encoding="utf-8", errors="ignore"))
 
 
 def _should_skip(path: Path, branch_root: Path, ignore_entries: list) -> bool:
@@ -165,7 +163,7 @@ def _check_file_used(
     if py_file.name == f"{entry_point_name}.py" and py_file.parent.name == "apps":
         return True
 
-    if _is_shaped_door(py_file):
+    if _is_second_door(py_file):
         return True
 
     for suffix_pattern in ("_check", "_content"):

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_modules.py
-# Description: modules_check sub-functions and the door shape (split from test_checkers_batch7.py)
-# Version: 1.3.0
+# Description: modules_check sub-functions and the second door it leaves to front_door
+# Version: 1.4.0
 # Created: 2026-10-08
 # Modified: 2026-11-16
 # =============================================
@@ -63,7 +63,7 @@ class TestCheckHandleCommand:
         assert "missing -> bool" in result["message"]
 
 
-# -- doors (apps/modules/door_<subject>.py) ---------------------------------
+# -- second doors (a retired pattern front_door convicts) --------------------
 
 _DOOR = (
     '"""Door: memory\'s entry limits, for other branches."""\n\n'
@@ -73,27 +73,24 @@ _DOOR = (
 )
 
 
-class TestADoorReExportsItsOwnHandlersOnly:
-    """A door is a thin re-export of its own branch's handlers (DPLAN-0404 leg 1)."""
+#: Where a door is seated: memory's modules.
+_DOOR_PATH = "aipass/memory/apps/modules/door_entry_limits.py"
 
-    @staticmethod
-    def _door(tmp_path, body: str) -> str:
-        """Seat a door in memory's modules and return its path."""
-        modules_dir = tmp_path / "aipass" / "memory" / "apps" / "modules"
-        modules_dir.mkdir(parents=True)
-        door = modules_dir / "door_entry_limits.py"
-        door.write_text(body, encoding="utf-8")
-        return str(door)
 
-    def test_the_door_shape_passes_without_a_handle_command(self, tmp_path):
-        """A door carries no CLI, so the handle_command row is not asked of it."""
-        result = modules_check.check_module(self._door(tmp_path, _DOOR))
-        door_row = [check for check in result["checks"] if check["name"] == "Door shape"]
-        assert door_row == [
-            {"name": "Door shape", "passed": True, "message": "Door re-exports only its own handlers (2 names)"}
-        ]
-        assert "handle_command pattern" not in [check["name"] for check in result["checks"]]
-        assert result["score"] == 100
+def _seat(tmp_path, rel: str, body: str) -> str:
+    """Write a body at a path under tmp_path and return it."""
+    target = tmp_path / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(body, encoding="utf-8")
+    return str(target)
+
+
+class TestTheSecondDoorShape:
+    """check_door reads the retired second-door shape: own handlers re-exported, nothing else."""
+
+    def test_the_shape_is_read_and_its_names_counted(self, tmp_path):
+        verdict = modules_check.check_door(_DOOR, _seat(tmp_path, _DOOR_PATH, _DOOR))
+        assert (verdict["passed"], verdict["names"]) == (True, 2)
 
     @pytest.mark.parametrize(
         ("change", "named"),
@@ -114,33 +111,12 @@ class TestADoorReExportsItsOwnHandlersOnly:
             ),
         ],
     )
-    def test_anything_else_in_a_door_is_named(self, tmp_path, change, named):
+    def test_anything_else_in_the_shape_is_named(self, tmp_path, change, named):
         """A foreign import, a non-stdlib import, a def, a missing __all__, an un-imported name."""
-        result = modules_check.check_module(self._door(tmp_path, _DOOR.replace(*change)))
-        [door_row] = [check for check in result["checks"] if check["name"] == "Door shape"]
-        assert door_row["passed"] is False
-        assert named in door_row["message"]
-
-    @pytest.mark.parametrize(
-        "change",
-        [
-            ("__all__ = [", "def helper():\n    return 1\n\n\n__all__ = ["),
-            ("\n\n__all__", "\nfrom aipass.ai_mail.apps.handlers.wake import wake_branch\n\n__all__"),
-            ('"check_file_budget"]', '"check_file_budget", "wake"]'),
-        ],
-    )
-    def test_a_wrong_shaped_door_fails_the_standard_whatever_else_scores(self, tmp_path, change):
-        """The Door shape row is the verdict for a door: an 80 aggregate no longer passes it (DPLAN-0404)."""
-        result = modules_check.check_module(self._door(tmp_path, _DOOR.replace(*change)))
-        assert (result["passed"], result["score"]) == (False, 0)
-
-    def test_the_same_body_under_a_plain_name_keeps_the_aggregate(self, tmp_path):
-        """A non-door modules file at 80 (no handle_command) still passes: the aggregate rule stands."""
-        plain = tmp_path / "aipass" / "memory" / "apps" / "modules" / "entry_limits.py"
-        plain.parent.mkdir(parents=True)
-        plain.write_text(_DOOR, encoding="utf-8")
-        result = modules_check.check_module(str(plain))
-        assert (result["passed"], result["score"]) == (True, 80)
+        body = _DOOR.replace(*change)
+        verdict = modules_check.check_door(body, _seat(tmp_path, _DOOR_PATH, body))
+        assert verdict["passed"] is False
+        assert named in verdict["message"]
 
     @pytest.mark.parametrize(
         ("handlers", "passed"),
@@ -156,16 +132,50 @@ class TestADoorReExportsItsOwnHandlersOnly:
         The owner is the segment after ``aipass.``, as encapsulation reads it; a
         handlers package nested under another branch's tree is still foreign.
         """
-        door = tmp_path / "aipass" / "skills" / "apps" / "modules" / "door_notifier.py"
-        door.parent.mkdir(parents=True)
-        door.write_text(
-            f'"""Door: the notifier."""\n\nfrom {handlers} import send\n\n__all__ = ["send"]\n',
-            encoding="utf-8",
-        )
+        body = f'"""Door: the notifier."""\n\nfrom {handlers} import send\n\n__all__ = ["send"]\n'
+        verdict = modules_check.check_door(body, _seat(tmp_path, "aipass/skills/apps/modules/notifier.py", body))
+        assert verdict["passed"] is passed, verdict["message"]
 
-        [door_row] = [c for c in modules_check.check_module(str(door))["checks"] if c["name"] == "Door shape"]
 
-        assert door_row["passed"] is passed, door_row["message"]
+_HELPER = ("__all__ = [", "def helper():\n    return 1\n\n\n__all__ = [")
+
+
+class TestASecondDoorIsFrontDoorsToConvict:
+    """A second door is a retired pattern: is_second_door names it, front_door convicts, modules does not re-judge."""
+
+    @pytest.mark.parametrize(
+        ("rel", "body", "second"),
+        [
+            (_DOOR_PATH, _DOOR, True),
+            (_DOOR_PATH, _DOOR.replace(*_HELPER), True),
+            ("aipass/memory/apps/modules/entry_limits.py", _DOOR, True),
+            ("aipass/memory/apps/modules/entry_limits.py", _DOOR.replace(*_HELPER), False),
+            ("aipass/memory/apps/modules/__init__.py", _DOOR, False),
+            ("aipass/memory/apps/handlers/door_entry_limits.py", _DOOR, False),
+            ("aipass/memory/apps/modules/empty.py", "__all__ = []\n", False),
+        ],
+        ids=[
+            "by_name",
+            "by_name_with_logic",
+            "by_shape",
+            "real_module",
+            "package_marker",
+            "under_handlers",
+            "no_names",
+        ],
+    )
+    def test_is_second_door_reads_name_or_shape_under_apps_modules(self, tmp_path, rel, body, second):
+        assert modules_check.is_second_door(_seat(tmp_path, rel, body), body) is second
+
+    @pytest.mark.parametrize("rel", [_DOOR_PATH, "aipass/memory/apps/modules/entry_limits.py"])
+    def test_the_modules_row_leaves_a_second_door_to_front_door(self, tmp_path, rel):
+        [check] = modules_check.check_module(_seat(tmp_path, rel, _DOOR))["checks"]
+        assert check["declined"] is True and "front_door convicts it" in check["message"]
+
+    def test_a_real_module_is_still_asked_for_its_handle_command(self, tmp_path):
+        path = _seat(tmp_path, "aipass/memory/apps/modules/entry_limits.py", _DOOR.replace(*_HELPER))
+        names = [check["name"] for check in modules_check.check_module(path)["checks"]]
+        assert "handle_command pattern" in names
 
 
 # -- check_file_size (modules) -----------------------------------------------

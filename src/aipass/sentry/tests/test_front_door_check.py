@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_front_door_check.py
 # Description: front_door_check — the gating row: per-site findings, scoped and whole-file waivers
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-11-16
 # Modified: 2026-11-16
 # =============================================
@@ -100,3 +100,45 @@ class TestBypass:
     def test_a_row_for_another_standard_waives_nothing(self, tmp_path):
         rules = [{"file": REL, "standard": "encapsulation", "reason": "pin"}]
         assert _convicted(checker.check_module(_write(tmp_path, TWO_SITES), rules)) == [1, 5]
+
+
+#: A module whose whole body hands its own handlers' names outward: the retired second-door shape.
+RE_EXPORT = 'from aipass.sentry.apps.handlers.json import json_handler\n\n__all__ = ["json_handler"]\n'
+#: A real module: it imports a handler and does work with it.
+WORKER = (
+    "from aipass.sentry.apps.handlers.json import json_handler\n\n\n"
+    "def handle_command(c, a) -> bool:\n    return bool(json_handler)\n"
+)
+MODULES = "src/aipass/sentry/apps/modules"
+
+
+class TestSecondDoor:
+    @pytest.mark.parametrize(
+        "name, source, convicted",
+        [
+            ("door_audit.py", RE_EXPORT, True),
+            ("door_audit.py", WORKER, True),
+            ("audit_view.py", RE_EXPORT, True),
+            ("audit_view.py", WORKER, False),
+            ("__init__.py", RE_EXPORT, False),
+            ("empty.py", "__all__ = []\n", False),
+        ],
+        ids=["by_name", "by_name_with_logic", "by_shape", "real_module", "package_marker", "nothing_handed_out"],
+    )
+    def test_a_second_door_under_apps_modules_is_convicted_by_name_or_shape(self, tmp_path, name, source, convicted):
+        checks = checker.check_module(_write(tmp_path, source, f"{MODULES}/{name}"))["checks"]
+        assert any("second door" in c["message"] and not c["passed"] for c in checks) is convicted
+
+    def test_the_second_door_finding_names_the_package_top_file_and_retirement(self, tmp_path):
+        check = checker.check_module(_write(tmp_path, RE_EXPORT, f"{MODULES}/door_audit.py"))["checks"][0]
+        assert (check["line"], check["function"]) == (1, "<module>")
+        assert "from aipass.sentry import <name>" in check["message"] and "retire" in check["message"]
+
+    def test_a_door_name_outside_apps_modules_is_not_a_second_door(self, tmp_path):
+        path = _write(tmp_path, RE_EXPORT, "src/aipass/sentry/apps/handlers/door_audit.py")
+        assert checker.check_module(path)["passed"] is True
+
+    def test_no_bypass_row_waives_a_second_door(self, tmp_path):
+        rel = f"{MODULES}/door_audit.py"
+        rules = [{"file": rel, "standard": "front_door", "reason": "pin"}]
+        assert checker.check_module(_write(tmp_path, RE_EXPORT, rel), rules)["score"] == 0
