@@ -52,9 +52,16 @@ reaches medic with the cause at INFO.
 is not such a dict (a directory, unreadable, not JSON, another type) is the comparison failing, as above; a
 store that does not exist, or holds no entry for this call, logs `no snapshot for <id>` at INFO and says
 nothing to the seat, since the snapshot side either refused that call or chose not to watch it. Before the
-call, a damaged store logs a WARNING and starts fresh, and the write replaces it. That drops the snapshots of
-calls still in flight, whose checks then read as no snapshot; refusing instead would refuse every Bash call
-for the rest of the session, because nothing else rewrites the store.
+call, a damaged store starts fresh: refusing would refuse every Bash call for the rest of the session, because
+nothing else rewrites the store. The fresh store carries `_fresh_start`, the time it started. Once the write
+lands, one fixed ERROR line, `[HOOKS] edit_gate tripwire: a damaged snapshot store started fresh, calls in flight
+lost their check`, reaches medic with the cause at INFO; a store the write cannot replace (a directory) refuses
+the call as above. A damaged store cannot say which calls it held, so the stamp stands in: a watched call that
+finds no snapshot of its own while the stamp is younger than 600 seconds (Claude Code's longest Bash timeout,
+so no call in flight outlives it) is the comparison failing, with the ERROR line and `MEMORY CHECK DID NOT RUN`.
+A call the snapshot side chose not to watch (no tool_use_id, no `.trinity` to watch) stays quiet, and a call
+snapshotted after the fresh start is checked as normal. Each later snapshot carries the stamp forward until it
+is 600 seconds old and then drops it, so one damaged store marks ten minutes, not the session.
 
 It watches **every `.trinity` in the project**, not just the seat's, and
 `passport.json` with `local.json` and `observations.json`. A cross-branch shell write is exactly the shape the reader cannot always see. The wording follows

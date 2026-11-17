@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.26.0
+# Version: 1.27.0
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
@@ -22,6 +22,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,10 @@ SNAPSHOT_REFUSED = (
 )
 # The one call a dark snapshot lets through, compared whole: no parser runs, so none can be what broke.
 ROLLBACK_COMMAND = "drone @hooks promote rollback"
+STORE_RESET_LOG = "[HOOKS] edit_gate tripwire: a damaged snapshot store started fresh, calls in flight lost their check"
+# A store that started fresh holds this key, stamped; a no-snapshot check inside the window is a lost snapshot.
+FRESH_START_KEY = "_fresh_start"
+FRESH_START_WINDOW_S = 600  # Claude Code's longest Bash timeout: no call in flight outlives it
 TRIPWIRE_DARK = (
     "MEMORY CHECK DID NOT RUN for this Bash call ({error}): if the command wrote a .trinity file, nothing "
     "measured it. Read your memory files; anything a shell wrote is re-landed with Edit/Write."
@@ -924,15 +929,6 @@ def _load_pending(path: Path) -> dict:
     return data
 
 
-def _read_pending(path: Path) -> dict:
-    """The snapshot side's read: a damaged store starts fresh and says so, as the new write replaces it."""
-    try:
-        return _load_pending(path)
-    except (OSError, ValueError) as exc:
-        logger.warning("[HOOKS] edit_gate tripwire: unreadable snapshot file %s, starting fresh: %s", path, exc)
-        return {}
-
-
 def _runs_memory_verb(command: str, cwd: str) -> bool:
     """True when some segment of *command* is a drone @memory or @spawn verb, the sanctioned writers."""
     bw = _import_module("aipass.hooks.apps.modules.bash_writes")
@@ -1137,15 +1133,26 @@ def tripwire_snapshot(hook_data: dict) -> dict:
             logger.info("[HOOKS] edit_gate tripwire: no tool_use_id in the payload, call unwatched")
             return {"stdout": "", "exit_code": 0}
         path = _tripwire_path(hook_data)
-        pending = _read_pending(path)
+        reset = False
+        pending: dict[str, Any]
+        try:
+            pending = _load_pending(path)
+        except (OSError, ValueError) as exc:  # the ERROR follows the write: a store it cannot replace refuses below
+            logger.info("[HOOKS] edit_gate tripwire: store %s unreadable: %s: %s", path, type(exc).__name__, exc)
+            pending, reset = {FRESH_START_KEY: time.time()}, True
+        fresh = pending.pop(FRESH_START_KEY, None)
         pending.pop(tool_use_id, None)
         # The dir list is stored, not rescanned: the comparison must be against what was measured.
         pending[tool_use_id] = {"trinity": str(dirs[0]), "stats": _memory_stats(dirs)}
         while len(pending) > _TRIPWIRE_PENDING_MAX:
             pending.pop(next(iter(pending)))
+        if isinstance(fresh, (int, float)) and time.time() - fresh < FRESH_START_WINDOW_S:
+            pending[FRESH_START_KEY] = fresh
         scratch = path.with_name(f"{path.name}.{os.getpid()}.tmp")
         scratch.write_text(json.dumps(pending), encoding="utf-8")
         os.replace(scratch, path)
+        if reset:
+            logger.error(STORE_RESET_LOG)
     except Exception as exc:  # declared FAIL_CLOSED: an unwatched call is refused, never let through
         logger.error(SNAPSHOT_FAILED_LOG)
         logger.info("[HOOKS] edit_gate tripwire: snapshot into %s: %s: %s", _TRIPWIRE_DIR, type(exc).__name__, exc)
@@ -1200,9 +1207,15 @@ def tripwire(hook_data: dict) -> dict:
             return {"stdout": "", "exit_code": 0}
         tool_use_id = hook_data.get("tool_use_id")
         # A damaged store raises into the catch below: it is the check failing, never "no snapshot".
-        before = _load_pending(_tripwire_path(hook_data)).get(tool_use_id) if tool_use_id else None
+        store = _load_pending(_tripwire_path(hook_data)) if tool_use_id else {}
+        before = store.get(tool_use_id)
         if not isinstance(before, dict):
-            if _seat_trinity(hook_data.get("cwd", "") or os.getcwd()) is not None:
+            cwd = hook_data.get("cwd", "") or os.getcwd()
+            fresh = store.get(FRESH_START_KEY)
+            if isinstance(fresh, (int, float)) and time.time() - fresh < FRESH_START_WINDOW_S:
+                if _watched_trinity_dirs(cwd):  # a call the snapshot chose not to watch stays quiet
+                    raise LookupError(f"the snapshot of {tool_use_id} was lost when a damaged store started fresh")
+            if _seat_trinity(cwd) is not None:
                 logger.info(
                     "[HOOKS] edit_gate tripwire: no snapshot for %s, cannot tell if memory changed", tool_use_id
                 )

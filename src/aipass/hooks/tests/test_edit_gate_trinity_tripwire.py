@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_trinity_tripwire.py
 # Description: edit_gate's memory tripwire: a .trinity write a shell made is reported at PostToolUse, project-wide
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-10-08
 # Modified: 2026-11-16
 # =============================================
@@ -177,6 +177,41 @@ class TestShellMemoryTripwire:
         context = self._context(result)
         assert context.startswith("MEMORY CHECK DID NOT RUN for this Bash call (KeyError")
         assert [c.args for c in log.error.call_args_list] == [(edit_gate.TRIPWIRE_FAILED_LOG,)]
+
+    def _fresh_start_across(self, tmp_path, monkeypatch):
+        """Call A snapshotted, the store then damaged, call B snapshotted over it: A's snapshot is lost."""
+        seat = self._seat(tmp_path, monkeypatch)
+        store = tmp_path / "aipass-trinity-tripwire-session-1.json"
+        a, b = self._data(seat, "ls", "toolu_a"), self._data(seat, "ls", "toolu_b")
+        assert edit_gate.tripwire_snapshot(a) == self.SILENT
+        store.write_text("{torn", encoding="utf-8")
+        with patch.object(edit_gate, "logger") as log:
+            assert edit_gate.tripwire_snapshot(b) == self.SILENT
+        return seat, store, a, b, [c.args for c in log.error.call_args_list]
+
+    def test_a_damaged_store_starts_fresh_with_one_stable_error(self, tmp_path, monkeypatch):
+        _seat, store, _a, _b, errors = self._fresh_start_across(tmp_path, monkeypatch)
+        assert errors == [(edit_gate.STORE_RESET_LOG,)]
+        assert "toolu_b" in json.loads(store.read_text(encoding="utf-8"))
+
+    def test_a_call_in_flight_across_a_fresh_start_is_told_its_check_did_not_run(self, tmp_path, monkeypatch):
+        _seat, _store, a, b, _errors = self._fresh_start_across(tmp_path, monkeypatch)
+        with patch.object(edit_gate, "logger") as log:
+            context = self._context(edit_gate.tripwire(a))
+        assert context.startswith("MEMORY CHECK DID NOT RUN for this Bash call (LookupError")
+        assert [c.args for c in log.error.call_args_list] == [(edit_gate.TRIPWIRE_FAILED_LOG,)]
+        assert edit_gate.tripwire(b) == self.SILENT, "a call snapshotted after the fresh start is checked as normal"
+
+    def test_the_fresh_start_mark_ends_with_its_window_and_never_touches_unwatched_calls(self, tmp_path, monkeypatch):
+        seat, store, a, _b, _errors = self._fresh_start_across(tmp_path, monkeypatch)
+        unwatched = tmp_path / "elsewhere"
+        unwatched.mkdir()
+        for call in ({**a, "tool_use_id": None}, {**a, "cwd": str(unwatched)}):
+            assert edit_gate.tripwire(call) == self.SILENT
+        monkeypatch.setattr(edit_gate, "FRESH_START_WINDOW_S", 0)
+        assert edit_gate.tripwire(a) == self.SILENT
+        assert edit_gate.tripwire_snapshot(self._data(seat, "ls", "toolu_c")) == self.SILENT
+        assert edit_gate.FRESH_START_KEY not in json.loads(store.read_text(encoding="utf-8"))
 
     @pytest.mark.parametrize(
         ("damage", "cause"),

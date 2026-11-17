@@ -489,11 +489,10 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "logged_fallback",
       "lines": [
-        630,
-        867,
-        933
+        635,
+        872
       ],
-      "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 613: the todos advisory text, never a verdict. 867 _seat_trinity: the tripwire's seat lookup, which decides nothing. 933 _read_pending: the snapshot side's read; the fresh start is followed by the write that replaces the damaged store, and a write that fails refuses the call. The after-call side reads through _load_pending, which raises."
+      "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 613: the todos advisory text, never a verdict. 872 _seat_trinity: the tripwire's seat lookup, which decides nothing."
     },
     {
       "file": "apps/handlers/lifecycle/session_start.py",
@@ -897,7 +896,7 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "fallback",
       "lines": [
-        721
+        726
       ],
       "reason": "Advisory only: the section-count note never blocks, and the caps that do block are judged by _evaluate_limits under the fail-closed refusal. Raising here would turn a dark config door into a refused memory write. It logs at WARNING, which @trigger escalates."
     },
@@ -905,7 +904,7 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "fallback",
       "lines": [
-        822
+        827
       ],
       "reason": "The gate writes nothing: a memory file already unparseable on disk, met by an edit that parses, is the agent's repair, judged as a new file. Refusing it would lock a broken memory file forever. WARNING names the file, and @trigger escalates it."
     },
@@ -913,9 +912,9 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "fallback",
       "lines": [
-        931
+        1140
       ],
-      "reason": "The hook's own per-session /tmp snapshot of in-flight Bash calls; a corrupt copy holds only stale stats. On the snapshot side, starting fresh drops the snapshots of calls still in flight (their after-call checks log no snapshot at INFO); raising would refuse every Bash call for the rest of the session, as nothing else rewrites the store. Logged at WARNING, which @trigger escalates. The after-call side does not start fresh: a damaged store there is the check failing."
+      "reason": "tripwire_snapshot: the hook's own per-session snapshot store of in-flight Bash calls; a damaged copy holds only stale stats. Raising would refuse every Bash call for the rest of the session, as nothing else rewrites the store, so it starts fresh, stamped with FRESH_START_KEY. Once the fresh write lands, STORE_RESET_LOG reaches medic at ERROR (cause at INFO); a store the write cannot replace refuses the call. Calls in flight whose snapshots were lost are told their check did not run, at ERROR, while the stamp is younger than FRESH_START_WINDOW_S."
     },
     {
       "file": "apps/handlers/security/subagent_gate.py",
