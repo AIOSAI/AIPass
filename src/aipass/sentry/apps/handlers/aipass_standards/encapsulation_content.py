@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: encapsulation_content.py
 # Description: Encapsulation Standards Content Handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-09
 # Modified: 2026-11-17
 # =============================================
@@ -22,7 +22,7 @@ def get_encapsulation_standards() -> str:
     lines = [
         f"[dim]{sep}[/dim]",
         "[bold red]ENCAPSULATION STANDARDS[/bold red]",
-        "[dim]Handlers are implementation details. Modules are the public API.[/dim]",
+        "[dim]Handlers are implementation details. The front door is the public API.[/dim]",
         f"[dim]{sep}[/dim]",
         "",
         "[bold cyan]WHY IT MATTERS:[/bold cyan]",
@@ -34,7 +34,7 @@ def get_encapsulation_standards() -> str:
         "",
         "[yellow]RULE 1: No Cross-Branch Handler Imports[/yellow]",
         "  [red]✗[/red] [dim]from aipass.flow.apps.handlers.plan.validator import validate_plan[/dim]",
-        "  [green]✓[/green] [dim]from aipass.flow import validate_plan[/dim]  (the front door)",
+        "  [green]✓[/green] [dim]from aipass.flow import get_open_plans[/dim]  (a name flow's front door hands out)",
         "",
         "[yellow]RULE 2: Inside a Branch, Any Handler May Import Any Handler[/yellow]",
         "  Inside a branch, any handler may import any handler; across branches, only the front door.",
@@ -44,7 +44,7 @@ def get_encapsulation_standards() -> str:
         "[yellow]RULE 3: Entry Points Don't Import Handlers[/yellow]",
         "  Main entry points (branch.py) use modules, not handlers directly.",
         "  [red]✗[/red] [dim]from aipass.api.apps.handlers.openrouter.client import get_response[/dim]",
-        "  [green]✓[/green] [dim]from aipass.api.apps.modules.openrouter_client import get_response[/dim]",
+        "  [green]✓[/green] [dim]from aipass.api import load_config[/dim]  (the front door)",
         "",
         f"[dim]{sep}[/dim]",
         "[bold cyan]HANDLERS AN ENTRY POINT MAY IMPORT:[/bold cyan]",

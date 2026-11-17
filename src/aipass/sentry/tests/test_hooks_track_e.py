@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_hooks_track_e.py
 # Description: DPLAN-0139 Track E — single-path enforcement tests
-# Version: 1.3.2
+# Version: 1.3.3
 # Created: 2026-04-21
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 """Tests for apps/modules/permissions.py and apps/modules/inbox_audit.py, DPLAN-0139 Track E single-path enforcement."""
 
@@ -19,7 +19,6 @@ from unittest.mock import patch
 
 import pytest
 
-from aipass.drone.apps.plugins.devpulse_ops import auth
 from aipass.sentry.apps.modules import CommandRefused, inbox_audit, permissions
 from aipass.sentry.apps.modules.inbox_audit import handle_command
 from aipass.sentry.apps.modules.permissions import TRUSTED_CROSS_WRITERS, identify_caller, is_trusted_caller
@@ -120,13 +119,6 @@ def test_handle_command_claims_its_own_command_and_renders_the_trust_list(capsys
 
     assert permissions.handle_command("permissions", ["--help"]) is True
     assert "TRUSTED_CROSS_WRITERS" in capsys.readouterr().out
-
-
-def test_drone_auth_has_no_hardcoded_caller_list():
-    """Owner-tier git is earned per-repo, never granted by name: no ALLOWED_CALLERS list exists."""
-    assert not hasattr(auth, "ALLOWED_CALLERS")
-    for tier in auth.GIT_ACCESS_TIERS.values():
-        assert "allowed_callers" not in tier
 
 
 def test_inbox_audit_ignores_non_audit_command():

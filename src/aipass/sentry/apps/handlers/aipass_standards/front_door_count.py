@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: front_door_count.py
 # Description: Front-door detection: every cross-branch import that reaches under another branch's apps/
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-11-16
 # Modified: 2026-11-17
 # =============================================
@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, NamedTuple, Optional, Sequence, Set, Tuple
 
 from aipass.prax import logger
-from aipass.sentry.apps.handlers.aipass_standards.applicability import is_test_path
+from aipass.sentry.apps.handlers.aipass_standards.applicability import is_retired_path, is_test_path
 from aipass.sentry.apps.handlers.aipass_standards.check_support import read_text
 from aipass.sentry.apps.handlers.aipass_standards.string_imports import iter_string_imports
 from aipass.sentry.apps.handlers.context_standards.name_ratchet import tracked_files
@@ -202,7 +202,10 @@ def doors(root: Path, errors: List[str]) -> Dict[str, Tuple[str, ...]]:
 
 
 def scan_tracked(root: Path, files: Optional[Sequence[str]] = None) -> Dict:
-    """Every tracked ``.py`` file's cross-branch sites. Never prints; a tree git cannot list is an error."""
+    """Every tracked ``.py`` file's cross-branch sites. Never prints; a tree git cannot list is an error.
+
+    A file in a retired folder (``tests/parked`` among them) is skipped as the audit skips it, and named.
+    """
     errors: List[str] = []
     if files is None:
         files, reason = tracked_files(root)
@@ -210,10 +213,14 @@ def scan_tracked(root: Path, files: Optional[Sequence[str]] = None) -> Dict:
             errors.append(reason)
     sites: List[Site] = []
     unparseable: List[str] = []
+    skipped_retired: List[str] = []
     files_read = 0
     for rel in files:
         path = root / rel
         if not rel.endswith(".py") or not path.is_file():
+            continue
+        if is_retired_path(rel):
+            skipped_retired.append(rel)
             continue
         source = read_text(path, tag=TAG)
         if source is None:
@@ -230,7 +237,14 @@ def scan_tracked(root: Path, files: Optional[Sequence[str]] = None) -> Dict:
         sites.extend(Site(rel, owner or OUTSIDE, is_test_path(rel), r) for r in readings)
     json_handler.log_operation("front_door_scanned", {"files": files_read, "sites": len(sites), "errors": len(errors)})
     found = doors(root, errors)
-    return {"sites": sites, "doors": found, "errors": errors, "unparseable": unparseable, "files_read": files_read}
+    return {
+        "sites": sites,
+        "doors": found,
+        "errors": errors,
+        "unparseable": unparseable,
+        "files_read": files_read,
+        "skipped_retired": skipped_retired,
+    }
 
 
 def target_modules(reading: Reading) -> List[str]:

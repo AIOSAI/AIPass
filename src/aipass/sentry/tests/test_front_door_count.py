@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_front_door_count.py
 # Description: front_door_count — every cross-branch import reaching under apps/, counted; and sentry's own door
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-11-16
 # Modified: 2026-11-17
 # =============================================
@@ -184,6 +184,22 @@ class TestFleet:
         files = _tree(tmp_path, {"src/aipass/alpha/apps/t.py": "from aipass.beta.apps.modules import {{x}}\n"})
         result = fd.scan_tracked(tmp_path, files)
         assert (result["unparseable"], result["sites"]) == (["src/aipass/alpha/apps/t.py"], [])
+
+    def test_a_parked_file_is_skipped_as_the_audit_skips_it_and_named(self, tmp_path):
+        parked = "src/aipass/alpha/tests/parked/old.py"
+        files = _tree(tmp_path, {**self.FILES, parked: "from aipass.beta.apps.modules import x\n"})
+        result = fd.scan_tracked(tmp_path, files)
+        assert branch_audit.applicability.is_retired_path(parked)
+        assert [s.rel for s in result["sites"] if s.rel == parked] == []
+        assert (result["skipped_retired"], result["files_read"]) == ([parked], len(self.FILES))
+
+    def test_the_scan_says_how_many_retired_files_it_skipped(self, tmp_path, monkeypatch, capsys):
+        parked = {"src/aipass/alpha/tests/parked/x.py": "", "src/aipass/beta/tests/parked/y.py": ""}
+        files = _tree(tmp_path, {**self.FILES, **parked})
+        real = fd.scan_tracked
+        monkeypatch.setattr(front_door.front_door_count, "scan_tracked", lambda root: real(tmp_path, files))
+        assert front_door.handle_command("front-door", ["scan"]) is True
+        assert "2 tracked .py files skipped in a retired folder" in capsys.readouterr().out
 
 
 class TestSentrysOwnDoor:

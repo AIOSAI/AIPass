@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_visibility_content.py
 # Description: Log Visibility Standards Content
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -16,7 +16,7 @@ from aipass.sentry.apps.handlers.json import json_handler
 
 _GETLOGGER = "logging" + ".getLogger"
 _FILEHANDLER = "logging" + ".FileHandler"
-_PRAX_IMPORT = "from aipass.prax.apps.modules.logger import system_logger as logger"
+_PRAX_IMPORT = "from aipass.prax import logger"
 
 
 def get_log_visibility_standards() -> str:

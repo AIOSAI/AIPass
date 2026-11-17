@@ -26,7 +26,7 @@ from aipass.flow.apps.handlers.plan.validator import validate_plan
 **GOOD:**
 ```python
 # The front door
-from aipass.flow import validate_plan
+from aipass.flow import get_open_plans   # a name flow's door hands out
 ```
 
 **WHY:** Handlers are internal to their branch. If Flow restructures its handlers, API breaks. The front door provides the stable interface.
@@ -65,7 +65,7 @@ from aipass.api.apps.handlers.openrouter.client import get_response
 **GOOD:**
 ```python
 # In api.py
-from aipass.api.apps.modules.openrouter_client import get_response
+from aipass.api import load_config   # the front door
 ```
 
 **WHY:** Entry points are the first code users see. They should show clean architecture - modules orchestrating, not reaching into handler internals.

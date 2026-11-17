@@ -80,9 +80,9 @@ def handle_command(command: str, args: List[str]) -> bool:
 Modules are the aggregation point for functionality:
 
 ```python
-# Service imports (shared infrastructure)
-from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, header, success, error
+# Service imports (shared infrastructure, through each branch's front door)
+from aipass.prax import logger
+from aipass.cli import console, header, success, error
 
 # Domain handler imports (business logic)
 from aipass.sentry.apps.handlers.json import json_handler
@@ -723,7 +723,7 @@ If using error handling decorators, test they work:
 
 ```python
 # tests/test_decorators.py
-from aipass.cli.apps.modules import track_operation
+from aipass.<branch> import track_operation  # through the front door of the branch that hands it out
 
 def test_track_operation_success():
     """Test decorator handles success"""

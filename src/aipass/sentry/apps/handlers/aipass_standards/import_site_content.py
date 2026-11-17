@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: import_site_content.py
 # Description: Import Site Standards Content Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-21
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -59,7 +59,7 @@ def get_import_site_standards() -> str:
         "  [dim]importlib.reload(trigger_check)[/dim]",
         "",
         "  [green]Good -- the real module at the top, patched at the edge:[/green]",
-        "  [dim]from aipass.flow.apps.modules.list_plans import list_plans[/dim]",
+        "  [dim]from aipass.flow.apps.modules import list_plans as list_plans_mod[/dim]",
         "  [dim]...[/dim]",
         "  [dim]def test_list_plans_prints_the_table(monkeypatch, capsys):[/dim]",
         '  [dim]    monkeypatch.setattr(list_plans_mod, "load_registry", lambda: ROWS)[/dim]',

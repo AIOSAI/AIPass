@@ -14,7 +14,7 @@ One spelling everywhere, so an agent that copies what it sees copies the right t
 
 ## The door file
 
-The door is the branch's `__init__.py`. It names what the branch hands out in `__all__` and loads each name on first access (PEP 562 `__getattr__`), never with an eager import at the top. An eager door imports every module behind it whenever anything imports the package, the branch's own files included, which is how import loops start. prax's door is the model:
+The door is the branch's `__init__.py`, the one door. It holds a name-to-home table, `_HOMES`, and a module `__getattr__` (PEP 562) reads that table on each access: nothing is cached on the package, so a patch on the home reaches every later read, and an unknown name raises AttributeError. It never imports eagerly at the top. An eager door imports every module behind it whenever anything imports the package, the branch's own files included, which is how import loops start. prax's door is the model:
 
 ```python
 import importlib
@@ -23,25 +23,39 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from aipass.prax.apps.modules.logger import system_logger as logger
 
-__all__ = ["logger"]
-
 _LOGGER_MODULE = "aipass.prax.apps.modules.logger"
+
+# Door name -> (home module, attribute there); None hands out the home module itself.
+_HOMES = {"logger": (_LOGGER_MODULE, "system_logger")}
+
+__all__ = sorted(_HOMES)
 
 
 def __getattr__(name: str) -> Any:
-    if name == "logger":
-        value = importlib.import_module(_LOGGER_MODULE).system_logger
-    else:
+    if name not in _HOMES:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    globals()[name] = value
-    return value
+    module_name, attribute = _HOMES[name]
+    home = importlib.import_module(module_name)  # every access, never cached
+    return home if attribute is None else getattr(home, attribute)
 ```
 
 The door's own imports of its branch are inside the branch and never findings.
 
+## Patching a door name in a test
+
+A test patches a door name one of three ways:
+
+- the door itself: `mock.patch("aipass.<branch>.<name>")`;
+- the caller's own bound name: `patch.object(caller_module, "name")`;
+- the home, reached through the name's own module: `patch.object(sys.modules[aipass.<branch>.<name>.__module__], "name")`.
+
+Never `monkeypatch.setattr` on the package (`aipass.<branch>`): its undo leaves the real value bound as a package global, and the door serves that copy from then on, past every later patch on the home.
+
+The event bus is silenced in another branch's test one way: patch `Trigger.fire` on the class, `patch.object(Trigger, "fire")` with `from aipass.trigger import Trigger`.
+
 ## One door: a second door is convicted
 
-A branch has one door. A module under `apps/modules/` that hands its branch's handler names outward is a second door, a retired pattern, and a finding of its own (line 1, `<module>`), whichever way it is read:
+A branch has one door. A module under `apps/modules/` that hands its branch's handler names outward is a second door and a finding of its own, in three shapes. The first two are found at line 1, `<module>`; the third, the mixed kind, below:
 
 - by name: the file is `door_<anything>.py`, whatever it holds;
 - by shape: its whole body is imports from its own branch's handlers (and the stdlib) plus an `__all__` of names it imported, with no function, class or other statement.

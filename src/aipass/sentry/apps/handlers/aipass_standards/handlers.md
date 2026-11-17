@@ -227,7 +227,7 @@ from .formatters import format_result, format_batch_header
 
 ```python
 # modules/imports_standard.py
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.cli import prompts
 from aipass.sentry.apps.handlers.standards import imports_check
@@ -235,28 +235,20 @@ from aipass.sentry.apps.handlers.standards import imports_check
 
 **Why this works:** Dependencies flow ONE way (modules → handlers). Better one module imports 20 handlers than handlers importing each other.
 
-### Package-Level Exceptions
+### Service Providers - No Exception
 
-**Error handlers are system-wide service:**
+**Infrastructure branches are reached through their front door like any other branch:**
 
 ```python
-# Any handler can import error system (current: cli)
-from aipass.cli.apps.handlers.error import track_operation
-from aipass.cli.apps.handlers.error.result_types import OperationResult
-
-@track_operation
-def create_branch(name):
-    # Business logic
-    return True
+# Any handler, any branch: what cli's door hands out
+from aipass.cli import error, fatal, mark_command_failed
+from aipass.prax import logger
 ```
 
-**Why exception:** Error handlers are infrastructure service - three-tier output (JSON log, system log, console). Not domain logic, but framework service.
-
-**Current reality:** Error system lives in `aipass.cli.apps.handlers.error` and is imported by handlers across branches. This creates dependency on cli, but is necessary for consistent error handling across system.
-
-**Current direction:** Error system in `aipass.cli.apps.handlers.error` — clearly infrastructure, not branch-specific.
-
-**Rule:** Service providers (infrastructure shared across ALL branches) can be imported cross-domain.
+**Rule:** There is no service-provider exception. A path under another branch's `apps/`
+(`aipass.cli.apps.handlers...`, `aipass.cli.apps.modules...`) is convicted by the
+`front_door` row, infrastructure or not. A service provider shares a name by listing it in its
+door's `_HOMES` table in `src/aipass/<branch>/__init__.py`.
 
 ---
 
@@ -271,14 +263,15 @@ def create_branch(name):
 ```
 External Branch
       ↓
-  Entry Point (prax.py, drone.py, cli.py)
+  Front door (src/aipass/prax/__init__.py: _HOMES + __getattr__)  ← EXTERNAL STOPS HERE
       ↓
-    Modules (prax/apps/modules/*.py)  ← EXTERNAL STOPS HERE
+    Modules (prax/apps/modules/*.py)  ← NEVER IMPORTED FROM OUTSIDE
       ↓
     Handlers (prax/apps/handlers/*/*.py)  ← NEVER EXPOSED
 ```
 
-**Rule:** External consumers stop at MODULES. They never touch handlers.
+**Rule:** External consumers stop at the package door, `from aipass.<branch> import <name>`.
+They never import a path under `apps/`, modules as much as handlers (`front_door` row).
 
 ### Two Types of Branches
 
@@ -289,7 +282,7 @@ External Branch
 
 2. **Library Services** - Imported by other code
    - Prax (logging), CLI (formatting), API (LLM calls), Memory (vectors)
-   - You `import aipass.prax` then `from aipass.prax.apps.modules.logger import logger`
+   - You `from aipass.prax import logger` (or `from aipass import prax`, then `prax.logger`)
    - **NOTE:** Drone is NOT a library service - it's a CLI router, never imported
 
 ### Same-Branch Handler Imports - ALLOWED
@@ -357,11 +350,8 @@ ACCESS DENIED: Cross-branch handler import blocked
   Blocked:       from aipass.prax.apps.handlers.logging.setup import get_logger
 
   Handlers are internal to their branch.
-  Use the module API instead:
-    from aipass.prax.apps.modules.<module> import <function>
-
-  Example:
-    from aipass.prax.apps.modules.logger import logger
+  Use the package door instead:
+    from aipass.prax import <name>
 
   For full standards guide:
     drone @sentry handlers
@@ -499,7 +489,7 @@ def create_plan(project_path: str, name: str):
 
 **2. Library Services** - Imported by other code:
 - Prax (logging), CLI (formatting), API (LLM calls), Memory (vectors)
-- Usage: `from aipass.prax.apps.modules.logger import logger`
+- Usage: `from aipass.prax import logger` (front door; never a path under `apps/`)
 - Communication: Via Python imports
 - Can be imported by any branch
 
@@ -733,7 +723,7 @@ handlers/
       └── prompts.py        → 59 lines (user prompts)
 ```
 
-**Note:** Spawn handlers currently import from `aipass.cli.apps.handlers.error` for error tracking. This is the service provider exception - error handlers are infrastructure used across all branches.
+**Note:** Spawn reaches cli's error output through cli's door (`from aipass.cli import error`); a path under `aipass.cli.apps` is convicted by the `front_door` row, error handling included.
 
 **Notice:**
 - Each domain self-contained

@@ -16,7 +16,7 @@ CLI `display.py` now has `err_console = Console(stderr=True)`. The functions `er
 ## Correct Pattern
 
 ```python
-from aipass.cli.apps.modules import error, warning, fatal
+from aipass.cli import error, warning, fatal
 
 error('Branch not found', suggestion='Check spelling')   # stderr
 warning('Template mismatch', details='Expected v2')       # stderr
@@ -40,7 +40,7 @@ Console(stderr=True)                                       # Don't create your o
 ## CLI Display Exports
 
 ```python
-from aipass.cli.apps.modules import (
+from aipass.cli import (
     error,        # ❌ message + optional suggestion → stderr
     warning,      # ⚠ message + optional details → stderr
     fatal,        # ❌ message + sys.exit(1) → stderr

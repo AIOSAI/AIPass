@@ -48,7 +48,7 @@ console.print(f"❌ Something went wrong")
 ### Fix
 
 ```python
-from aipass.cli.apps.modules import error, success, warning
+from aipass.cli import error, success, warning
 
 error(f"Error: {msg}")
 error("Failed to process")

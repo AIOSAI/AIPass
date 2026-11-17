@@ -131,8 +131,8 @@ not item 20.
 
 ### Every branch has a console, and it is the same one
 
-**292 import sites** across the 18 branches pull `console` / `err_console` from
-`aipass.cli.apps.modules`. In `display.py`, `console = CONSOLE` — the same object. C1 works
+**292 import sites** across the 18 branches pull `console` / `err_console` from @cli
+(`from aipass.cli import console, err_console`). In `display.py`, `console = CONSOLE` — the same object. C1 works
 fleet-wide because it mutates the shared Console **instance**; which name a branch reaches it
 through is irrelevant to the pin.
 

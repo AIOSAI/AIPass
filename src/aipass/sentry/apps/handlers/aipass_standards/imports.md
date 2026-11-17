@@ -20,10 +20,10 @@ from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 # Prax logger (when the file logs; stdlib logging fails the check)
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
-# Services (CLI, etc.)
-from aipass.cli.apps.modules import console, header, success, error
+# Services (CLI, etc.) - through the branch's front door
+from aipass.cli import console, header, success, error
 
 # Internal/local imports
 from aipass.sentry.apps.handlers.json import json_handler
@@ -44,9 +44,31 @@ from aipass.sentry.apps.handlers.domain1 import ops
 
 **The standard:**
 ```python
-from aipass.{module}.apps.modules.{name} import something
-from aipass.{module}.apps.handlers.{domain} import handler
+# Another branch: through its front door only
+from aipass.<branch> import <name>
+from aipass import <branch>          # then <branch>.<name>
+
+# Your own branch: the apps paths
+from aipass.<self>.apps.modules.<name> import something
+from aipass.<self>.apps.handlers.<domain> import handler
 ```
+
+**The front door (cross-branch rule, `front_door` row):**
+- Another branch is imported only as `from aipass.<branch> import <name>` (or
+  `from aipass import <branch>` then `<branch>.<name>`). Never a path under its `apps/`:
+  `from aipass.prax.apps.modules.logger import system_logger` is convicted, modules as much as handlers.
+- The package top file `src/aipass/<branch>/__init__.py` is the one door. It holds a
+  name-to-home table (`_HOMES`) read on each access by a module `__getattr__` (PEP 562):
+  nothing is cached on the package, and an unknown name raises AttributeError.
+- Second doors are convicted: a `door_*` file under `apps/modules`, a pure re-export
+  module, and a module whose `__all__` hands out handler names.
+- A test patches a door name one of three ways: `mock.patch("aipass.<branch>.<name>")`, the
+  caller's own bound name (`patch.object(caller_module, "name")`), or the home reached through
+  the name's own module (`patch.object(sys.modules[aipass.<branch>.<name>.__module__], ...)`).
+  Never `monkeypatch.setattr` on the package (`aipass.<branch>`): its undo leaves the real
+  value bound as a package global, and the door serves that copy from then on.
+- To silence the event bus in another branch's test: `patch.object(Trigger, "fire")` with
+  `from aipass.trigger import Trigger`.
 
 **WHY namespace imports:**
 - Works across all environments (pip-installed package)
@@ -55,13 +77,13 @@ from aipass.{module}.apps.handlers.{domain} import handler
 
 **Where it's used:**
 ```python
-# Cross-branch service imports
-from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, header
+# Cross-branch service imports (front door)
+from aipass.prax import logger
+from aipass.cli import console, header
 
 # Internal branch imports
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.flow.apps.modules.plans import create_plan
+from aipass.sentry.apps.handlers.domain1 import ops
 ```
 
 **Consistency rule:** Always use `from aipass.{module}...`, never bare imports like `from prax...`
@@ -75,7 +97,7 @@ AIPass is a pip-installable package. All imports use the `aipass.*` namespace an
 ```python
 # No sys.path manipulation required
 # Just import directly:
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
 ```
 
@@ -106,7 +128,7 @@ stdlib logging, never the absence of an import (owner's ruling, 2026-11-15):
 **The most common import in the system:**
 
 ```python
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 ```
 
 **WHY Prax is important:**
@@ -122,16 +144,17 @@ logger.warning("Memory file not found, using defaults")
 logger.error("Failed to backup branch", exc_info=True)
 ```
 
-**All three forms are valid** — this standard is about **routing**, not binding style.
-`@prax` ranked them **2026-08-30**; the ranking is theirs, this check accepts all three:
+**Two forms pass** — this check is about **routing**, not binding style. The full
+`apps` path also routes through prax, but the `front_door` row convicts it as a
+cross-branch import:
 ```python
-# RECOMMENDED — @prax's ruling 2026-08-30. 385 files already use it; all three
-# route identically, so consistency is the tiebreak.
+# RECOMMENDED — @prax's ruling 2026-08-30. Both door forms route identically,
+# so consistency is the tiebreak.
 from aipass.prax import logger
 
-# Full path — valid, but see the warning below: this is the one form that CRASHES
-# under a mocked `aipass.prax`.
-from aipass.prax.apps.modules.logger import system_logger as logger
+# Full path — convicted by front_door, and the one form that CRASHES under a
+# mocked `aipass.prax` (see the warning below).
+from aipass.prax.apps.modules.logger import system_logger as logger  # ✗ front_door
 
 # Module form — valid. Resolves `.logger` at call time (see the testability note),
 # but that alone does not make it mockable.
@@ -172,9 +195,10 @@ arriving at the right answer without publishing it is the same failure mode as t
 standard recommending a form without the technique that goes with it.
 
 The rule underneath is simpler than "rebindable vs not": **the last dot must be resolved
-at call time.** Patching upstream of a binding never reaches past it — and note that
-`aipass/prax/__init__.py` *itself* re-exports by binding (`from ...logger import
-system_logger as logger`), so the freeze happens twice and the deeper targets miss too.
+at call time.** Patching upstream of a binding never reaches past it. The door in
+`aipass/prax/__init__.py` resolves `logger` from its `_HOMES` table on each access, but
+`from aipass.prax import logger` copies the object into the consumer at import time, so
+a later patch on the package or the home misses that copy.
 
 **So if you use an object form — and 385 files do, against 0 using the module form —
 mock it per consumer, by that consumer's own dotted path:**
@@ -191,11 +215,11 @@ attributed by audit hook rather than inferred from a before/after diff — on a 
 machine, ambient writes make that diff unattributable, and the control run drifted just
 as much as the treatment.
 
-This standard does **not** rank the three forms. Which form is *recommended* is `@prax`'s
-logging contract to set; the check accepts all three so that decision is never taken by
-a checker rejecting one of them.
+The logging check does **not** rank the two door forms. Which form is *recommended* is
+`@prax`'s logging contract to set; the logging check accepts both, and the full path is
+convicted by the `front_door` row, not by this check.
 
-**Warning — the full-path form crashes against a mocked `aipass.prax`.** If a fixture
+**Warning — the full-path form (convicted by front_door) crashes against a mocked `aipass.prax`.** If a fixture
 puts a stand-in module in `sys.modules["aipass.prax"]`, the mock has no `apps`
 submodule, so the deep import raises rather than resolving:
 
@@ -274,11 +298,11 @@ from aipass.sentry.apps.handlers.json import json_handler
 import json
 from pathlib import Path
 
-# ✓ ALLOWED - Handler imports Prax service
-from aipass.prax.apps.modules.logger import system_logger as logger
+# ✓ ALLOWED - Handler imports Prax service (front door)
+from aipass.prax import logger
 
-# ✓ ALLOWED - Handler imports CLI service
-from aipass.cli.apps.modules import console, error
+# ✓ ALLOWED - Handler imports CLI service (front door)
+from aipass.cli import console, error
 
 # ✗ FORBIDDEN - Handler imports parent module
 from aipass.sentry.apps.modules.create_thing import something  # BREAKS INDEPENDENCE
@@ -315,9 +339,9 @@ from aipass.sentry.apps.handlers.json import json_handler
 
 **Cross-branch service imports:**
 ```python
-# Services can be imported anywhere (modules or handlers)
-from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, header, success, error
+# Services can be imported anywhere (modules or handlers), through the front door
+from aipass.prax import logger
+from aipass.cli import console, header, success, error
 ```
 
 **Relative imports (avoided):**
@@ -355,11 +379,11 @@ Some AIPass services need to know **which branch is calling them** to provide pr
 
 ```python
 # Prax Logger - context-independent
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 logger.info("Works from anywhere")
 
 # CLI Services - context-independent
-from aipass.cli.apps.modules import console, header
+from aipass.cli import console, header
 console.print("Works from anywhere")
 ```
 
@@ -630,9 +654,10 @@ from aipass.sentry.apps.handlers.json import json_handler
 
 | Import Type | Pattern | Required? |
 |-------------|---------|-----------|
-| Prax logger | `from aipass.prax.apps.modules.logger import system_logger as logger` or `from aipass.prax import logger` | **When the file logs**; an unused one is not required |
-| CLI service | `from aipass.cli.apps.modules import console, header` | When needed |
-| API service | `from aipass.api.apps.modules import llm_call` | When needed |
+| Prax logger | `from aipass.prax import logger` | **When the file logs**; an unused one is not required |
+| CLI service | `from aipass.cli import console, header` | When needed |
+| API service | `from aipass.api import load_config` | When needed |
+| Any other branch | `from aipass.<branch> import <name>` - never a path under its `apps/` | Always (front_door) |
 | **Drone** | `subprocess.run(["drone", "cmd", ...])` | **CLI only - NEVER import** |
 | Standard lib | Grouped by category, alphabetical | Yes |
 | Internal | Absolute imports (not relative) | Yes |
@@ -646,7 +671,9 @@ from aipass.sentry.apps.handlers.json import json_handler
 
 **Namespace pattern:** `from aipass.{module}...` - never bare imports or hardcoded paths
 
-**Prax logger:** Imported by every file that logs - canonical or shorthand form both valid; stdlib `logging` use fails, a file that never logs owes no import
+**Front door:** Another branch only as `from aipass.<branch> import <name>`; its `apps/` paths are convicted
+
+**Prax logger:** Imported by every file that logs - `from aipass.prax import logger` or `from aipass import prax`; stdlib `logging` use fails, a file that never logs owes no import
 
 **Service imports:** CLI, API, Memory imported as libraries; Drone invoked via CLI only
 

@@ -354,13 +354,14 @@ from typing import Dict, List, Optional
 # Third-party imports (if any)
 
 # Internal imports (always use pip namespace)
-from aipass.module.apps.modules import something
+from aipass.<self>.apps.modules import something   # your own branch
+from aipass.<branch> import <name>                 # another branch: front door only
 ```
 
 **Import sections (in order):**
 1. Standard library imports
 2. Third-party imports
-3. Internal imports (always `from aipass.{module}...`)
+3. Internal imports (always `from aipass.{module}...`; another branch only through its front door, never its `apps/`)
 
 **WHY this order:**
 - **Standard library grouped:** Easy to see external dependencies

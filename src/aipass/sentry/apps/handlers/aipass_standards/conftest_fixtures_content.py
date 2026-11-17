@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest_fixtures_content.py
 # Description: Conftest Fixtures Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-11-14
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -76,7 +76,7 @@ def get_conftest_fixtures_standards() -> str:
         "  make_capture_console HELPER. That is a console the test prints to, not a",
         "  pin on the product's, so C1 is not satisfied there.",
         "  [green]292 shared-console import sites[/green] across the 18 branches pull console /",
-        "  err_console from aipass.cli.apps.modules, where console IS CONSOLE. C1",
+        "  err_console from @cli (from aipass.cli import console), where console IS CONSOLE. C1",
         "  works fleet-wide because it mutates the shared Console INSTANCE.",
         "",
         "[bold cyan]THE ONE OPEN TEMPLATE QUESTION:[/bold cyan]",

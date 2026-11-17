@@ -28,7 +28,7 @@ After (event-driven):
 ## Core API
 
 ```python
-from aipass.trigger.apps.modules.core import trigger
+from aipass.trigger import trigger
 
 # Fire an event (branches do this)
 trigger.fire('event_name', **data)
@@ -45,8 +45,12 @@ trigger.status()  # Returns {'startup': 1, 'plan_closed': 2, ...}
 ## Import Patterns
 
 ### Standard Import (Most Modules)
+Trigger's package top file is its one door. Another branch imports trigger only as
+`from aipass.trigger import trigger` (or `Trigger`, the class); a path under
+`aipass.trigger.apps` is convicted by front_door.
+
 ```python
-from aipass.trigger.apps.modules.core import trigger
+from aipass.trigger import trigger
 
 def some_function():
     trigger.fire('event_name', key=value)
@@ -63,7 +67,7 @@ def _ensure_trigger():
     if not _trigger_loaded:
         _trigger_loaded = True
         try:
-            from aipass.trigger.apps.modules.core import trigger as t
+            from aipass.trigger import trigger as t
             _trigger = t
         except ImportError:
             pass  # Trigger not available, silent fallback
@@ -78,6 +82,20 @@ def fire_event(name, **data):
 - `prax/apps/modules/logger.py` - Fires `logging_system_initialized` / `logging_system_shutdown`
   from the two explicit lifecycle doors (it stopped firing `startup` on the first log line of
   every process on 2026-09-12, DPLAN-0339 step 3 — that fire was 94% of the cost of that line)
+
+### Silencing the Bus in Tests
+A test in another branch silences the event bus one way: patch `Trigger.fire` on the class.
+
+```python
+from unittest.mock import patch
+from aipass.trigger import Trigger
+
+with patch.object(Trigger, "fire"):
+    ...  # every trigger.fire(...) in the code under test is a no-op mock
+```
+
+Never `monkeypatch.setattr` on the package (`aipass.trigger`): its undo leaves the real value
+bound as a package global, and the door serves that copy from then on.
 
 ---
 
@@ -243,7 +261,7 @@ def close_plan():
 ### After: Event-Driven
 ```python
 # flow/close_plan.py - CORRECT
-from aipass.trigger.apps.modules.core import trigger
+from aipass.trigger import trigger
 
 def close_plan():
     # ... close logic ...
@@ -383,7 +401,8 @@ belongs elsewhere — a handler the module orchestrates, another branch — that
 
 For branches using Trigger:
 
-- [ ] Import pattern correct (`from aipass.trigger.apps.modules.core import trigger` or lazy-load)
+- [ ] Import pattern correct (`from aipass.trigger import trigger` or lazy-load)
+- [ ] Tests silence the bus with `patch.object(Trigger, "fire")` (`from aipass.trigger import Trigger`)
 - [ ] Events named correctly (lowercase, underscore, past tense)
 - [ ] Handlers have no logger imports
 - [ ] Handlers have no print statements

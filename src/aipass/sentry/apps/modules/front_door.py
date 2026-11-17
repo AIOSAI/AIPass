@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: front_door.py
 # Description: The front-door verb: counts every cross-branch import reaching under another branch's apps/
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-11-16
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """The `front-door` verb: fleet counts for the `front_door` standard, read the same way the
@@ -12,7 +12,8 @@ row reads a file. The verb judges nothing; the audit row scores and waives.
 A bare call describes the verb; `scan` runs it over the tracked tree. `--sites` also prints
 every cross-branch import site with its call. A tree git cannot list or an unreadable file
 exits 2, because "could not measure" is not a count; an unparseable file is named and not
-counted; an unknown argument exits 7.
+counted; a file in a retired folder is skipped as the audit skips it, and the totals count
+them; an unknown argument exits 7.
 """
 
 from pathlib import Path
@@ -151,6 +152,8 @@ def _print_fleet(fleet: Dict, result: Dict) -> None:
         parts += [f"clean door {fleet.get(f'door:{scope}', 0)}", f"elsewhere {fleet.get(f'elsewhere:{scope}', 0)}"]
         _plain(f"{scope:5}: " + " | ".join(parts))
     _plain(f"{result['files_read']} tracked .py files read")
+    skipped = len(result["skipped_retired"])
+    _plain(f"{skipped} tracked .py files skipped in a retired folder (tests/parked, deprecated), as the audit does")
 
 
 def print_help() -> None:
@@ -167,6 +170,8 @@ def print_help() -> None:
     console.print("  import / from-import statements anywhere in the parse tree; TYPE_CHECKING ones as type")
     console.print("  string targets of import_module, resolve_name, patch, <x>.setattr as string")
     console.print("  never a docstring, comment or message; a file's own branch is never counted")
+    console.print("  a file in a retired folder (tests/parked, deprecated, .archive) is skipped as the audit")
+    console.print("  skips it; the totals say how many")
     console.print()
     console.print("[yellow]Exit codes[/yellow]")
     console.print("  0 measured (findings never fail)   2 could not measure   7 an unknown argument")

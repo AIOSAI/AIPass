@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: handlers_content.py
 # Description: Handlers Content
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 
@@ -27,7 +27,7 @@ def get_handlers_standards() -> str:
         "[bold cyan]CORE PRINCIPLE:[/bold cyan]",
         "  [yellow]Handlers are internal to their branch[/yellow]",
         "  • Same-branch handler imports: ALLOWED (even across packages)",
-        "  • Cross-branch handler imports: BLOCKED (use modules instead)",
+        "  • Cross-branch imports: BLOCKED (use the front door: from aipass.<branch> import <name>)",
         "  • Future marketplace: grab handler → drop it in → works",
         "",
         "[bold cyan]KEY RULES:[/bold cyan]",
@@ -54,7 +54,7 @@ def get_handlers_standards() -> str:
         "",
         "[bold]3. Handler Boundaries (External Access)[/bold]",
         "  Handlers are [red]INTERNAL[/red] to their branch.",
-        "  External consumers use [green]MODULES[/green] as the public API.",
+        "  External consumers use the [green]FRONT DOOR[/green] (src/aipass/<branch>/__init__.py).",
         "",
         "  [green]✓ Same-branch imports:[/green] ALLOWED",
         "  [dim]  # flow/apps/handlers/plan/create.py[/dim]",
@@ -64,8 +64,9 @@ def get_handlers_standards() -> str:
         "  [dim]  # flow/apps/modules/list_plans.py[/dim]",
         "  [dim]  from aipass.prax.apps.handlers.logging.setup import get_logger  # BLOCKED[/dim]",
         "",
-        "  [green]✓ Correct pattern:[/green] Import the MODULE (public API)",
-        "  [dim]  from aipass.prax.apps.modules.logger import system_logger as logger  # OK[/dim]",
+        "  [green]✓ Correct pattern:[/green] Import from the branch's front door",
+        "  [dim]  from aipass.prax import logger  # OK[/dim]",
+        "  [red]✗[/red] Another branch's apps/modules path is convicted too (front_door row)",
         "",
         "  [yellow]Special Note - Drone Architecture:[/yellow]",
         "  • Drone is [red]NOT imported[/red] by branches",

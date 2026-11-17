@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: modules_content.py
 # Description: Modules Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -65,8 +65,9 @@ def get_modules_standards() -> str:
         "  • 400+ lines: Consider splitting by domain",
         "",
         "[bold cyan]ESSENTIAL IMPORTS:[/bold cyan]",
-        "  [dim]from aipass.prax.apps.modules.logger import system_logger as logger[/dim]",
-        "  [dim]from aipass.cli.apps.modules import console, header, success, error[/dim]",
+        "  [dim]from aipass.prax import logger[/dim]",
+        "  [dim]from aipass.cli import console, header, success, error[/dim]",
+        "  [dim]Another branch: from aipass.<branch> import <name> only, never its apps/ paths[/dim]",
         "  [dim]from aipass.sentry.apps.handlers.json import json_handler[/dim]",
         "",
         "[bold cyan]WARNINGS:[/bold cyan]",

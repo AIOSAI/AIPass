@@ -71,10 +71,10 @@ AIPass is a pip package. All execution goes through entry points defined in `pyp
 
 **Handler import rules:**
 - ✅ Same-branch handler imports: ALLOWED (even across packages)
-- ❌ Cross-branch handler imports: BLOCKED (use modules instead)
+- ❌ Cross-branch imports under `apps/` (handlers or modules): BLOCKED (use the front door)
 - ❌ Handler imports own-branch modules: FORBIDDEN (circular risk)
 
-**Current reality:** Handlers commonly import from service branches like `prax.apps.modules.logger` for system logging. This is acceptable because Prax is a system-wide service provider, not a module within the same branch.
+**Cross-branch rule:** Handlers reach a service branch only through its front door, `from aipass.<branch> import <name>` (e.g. `from aipass.prax import logger`). The package top file `src/aipass/<branch>/__init__.py` is the one door; a path under another branch's `apps/`, such as `aipass.prax.apps.modules.logger`, is convicted by the `front_door` row, service provider or not.
 
 **Modules CAN import 20+ handlers** - this is by design. Better one module imports many handlers than handlers importing each other. Dependencies flow ONE WAY: modules → handlers.
 
@@ -359,7 +359,7 @@ Handlers
 
 **WRONG:**
 ```python
-# DON'T DO THIS - Drone is NOT a library
+# DON'T DO THIS - Drone is NOT a library (front_door also convicts this path)
 from aipass.drone.apps.modules import resolve_branch
 path = resolve_branch("@sentry")
 ```
