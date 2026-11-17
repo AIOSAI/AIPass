@@ -28,8 +28,8 @@ import time
 import traceback
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import err_console
+from aipass.prax import logger
+from aipass.cli import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config import gates
 from aipass.hooks.apps.handlers.config.diagnostics import log_entry as _log, tail_log

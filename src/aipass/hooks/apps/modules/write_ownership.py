@@ -23,10 +23,10 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from aipass.cli.apps.modules import err_console
+from aipass.cli import err_console
 from aipass.hooks.apps.modules import admin_seat
 from aipass.hooks.apps.modules.bash_writes import HELD_BY_INTERPRETER
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 CONSOLE = err_console
 

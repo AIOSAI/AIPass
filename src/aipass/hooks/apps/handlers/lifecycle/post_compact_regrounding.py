@@ -21,7 +21,7 @@ left; the last part stamps completion so the next turn-0 fire-all stands down.
 import importlib
 import json
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 #: 10% under Claude Code's 10,000-unit limit; the hard ceiling for every fire, headers and markers included.
 REGROUP_FIRE_BUDGET = 9000

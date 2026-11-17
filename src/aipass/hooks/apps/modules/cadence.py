@@ -21,9 +21,9 @@ import time
 from pathlib import Path
 from typing import Any
 
-from aipass.cli.apps.modules import err_console
+from aipass.cli import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.hooks.apps.modules.grounding_content import find_branch_root
 
 import fcntl

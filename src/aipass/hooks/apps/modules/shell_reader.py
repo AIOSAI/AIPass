@@ -39,7 +39,7 @@ import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from aipass.cli.apps.modules import err_console
+from aipass.cli import err_console
 from aipass.hooks.apps.modules.bash_writes import _SOURCE_DELETE_SHAPES, _resolve, verb_name, write_targets
 from aipass.hooks.apps.modules.shell_programs import (
     DELETE_PROGRAMS,
@@ -55,7 +55,7 @@ from aipass.hooks.apps.modules.shell_programs import (
     sed_scripts,
     syntax_check_only,
 )
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 CONSOLE = err_console
 

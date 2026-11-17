@@ -20,8 +20,8 @@ from typing import Any
 
 os.environ.setdefault("AIPASS_BRANCH_NAME", "hooks")
 
-from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, err_console
+from aipass.prax import logger
+from aipass.cli import console, err_console
 
 MODULES_DIR = Path(__file__).parent / "modules"
 _DISABLED_MARK = "(disabled)"

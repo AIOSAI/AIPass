@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 
 from aipass.prax import append_jsonl
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 BRANCH_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _PROD_LOG_FILE = BRANCH_ROOT / "logs" / "engine.jsonl"

@@ -12,10 +12,10 @@
 
 import sys
 
-from aipass.cli.apps.modules import err_console
+from aipass.cli import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config.loader import config_unavailable_reason, find_project_config
-from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: F401
+from aipass.prax import logger  # noqa: F401
 
 CONSOLE = err_console
 

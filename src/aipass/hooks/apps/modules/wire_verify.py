@@ -28,7 +28,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from aipass.cli.apps.modules import err_console
+from aipass.cli import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config import gates
 from aipass.hooks.apps.handlers.config.opencode_paths import opencode_plugin_path
@@ -37,7 +37,7 @@ from aipass.hooks.apps.handlers.config import codex_trust
 from aipass.hooks.apps.modules.context_window import codex_hooks_path
 from aipass.hooks.apps.modules.engine import PROJECT_ROW, own_hooks
 from aipass.hooks.apps.handlers.json import files as json_files
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 CONSOLE = err_console
 

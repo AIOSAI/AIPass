@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 
 from aipass.prax import append_jsonl
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.hooks.apps.handlers.lifecycle.auto_fix import _scratch_ground
 
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}

@@ -25,11 +25,11 @@ import time
 from contextlib import closing
 from pathlib import Path
 
-from aipass.cli.apps.modules import console
+from aipass.cli import console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.modules import context_window
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 HELP_COMMANDS = [("receipt", "Did the grounding entries reach the model, per seat")]
 

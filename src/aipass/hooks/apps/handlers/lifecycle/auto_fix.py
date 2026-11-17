@@ -18,7 +18,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 SKIP_EXTENSIONS = {".md", ".txt", ".log", ".csv", ".html"}

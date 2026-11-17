@@ -19,11 +19,11 @@ import importlib
 import os
 import time
 
-from aipass.cli.apps.modules import console
+from aipass.cli import console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config import ledger_store
 from aipass.hooks.apps.handlers.json import json_handler
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 HELP_COMMANDS = [
     ("ledger", "What this session was told, one line per turn (--session <id>, --last N)"),

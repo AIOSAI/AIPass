@@ -17,7 +17,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.hooks.apps.handlers.config.loader import find_project_config
 from aipass.hooks.apps.handlers.json import json_handler
 

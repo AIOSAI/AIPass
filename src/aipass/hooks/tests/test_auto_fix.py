@@ -43,7 +43,7 @@ from aipass.hooks.apps.handlers.lifecycle.auto_fix import (
     _run_sentry_checklist,
     handle,
 )
-from aipass.prax.apps.modules.logger import system_logger
+from aipass.prax import logger as system_logger
 from aipass.sentry.apps.modules.checklist import ADVICE_MARKER, FINDING_MARKER
 
 

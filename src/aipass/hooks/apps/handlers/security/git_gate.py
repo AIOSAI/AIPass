@@ -21,7 +21,7 @@ import json
 import os
 import re
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 
 # A verb missing here has no drone twin, and the refusal says so.

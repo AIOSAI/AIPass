@@ -19,7 +19,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.hooks.apps.handlers.json import json_handler
 
 _STATE_DIR = Path(tempfile.gettempdir())

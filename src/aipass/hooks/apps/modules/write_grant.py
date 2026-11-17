@@ -16,9 +16,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 
-from aipass.cli.apps.modules import err_console
+from aipass.cli import err_console
 from aipass.hooks.apps.modules.write_ownership import AIPASS_REGISTRY, Project
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 CONSOLE = err_console
 

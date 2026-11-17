@@ -70,7 +70,7 @@ def _block(reason: str) -> dict:
 
 def _log_refusal(message: str, *args: object) -> None:
     """The refusal line in prax, imported here so the allowing path stays stdlib only."""
-    from aipass.prax.apps.modules.logger import system_logger as logger
+    from aipass.prax import logger
 
     logger.warning(message, *args)
 

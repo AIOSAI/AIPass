@@ -22,7 +22,7 @@ import re
 import shlex
 from pathlib import Path
 
-from aipass.cli.apps.modules import err_console
+from aipass.cli import err_console
 from aipass.hooks.apps.modules import admin_seat, shell_reader
 from aipass.hooks.apps.modules.shell_programs import PROVIDER_CLIS
 

@@ -34,8 +34,8 @@ from aipass.hooks.apps.handlers.config.trust_registry import read_registry
 from aipass.hooks.apps.handlers.json import files as json_files
 from aipass.hooks.apps.handlers.parity import runner, smoke
 from aipass.hooks.apps.modules.write_ownership import project_of
-from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, err_console
+from aipass.prax import logger
+from aipass.cli import console, err_console
 
 CONSOLE = err_console
 

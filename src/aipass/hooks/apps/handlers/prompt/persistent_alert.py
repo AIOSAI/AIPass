@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from aipass.hooks.apps.handlers.json import json_handler
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 _GUARD_DIR = Path(tempfile.gettempdir())
 _MAX_ALERTS_SHOWN = 10

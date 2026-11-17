@@ -12,10 +12,10 @@
 
 import json
 
-from aipass.cli.apps.modules import console, err_console
+from aipass.cli import console, err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.sound import is_muted, mute, unmute
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 CONSOLE = err_console
 

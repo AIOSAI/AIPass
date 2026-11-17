@@ -29,7 +29,7 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 import pytest
 
 from aipass.ai_mail.apps.modules import door_dispatch_grant, door_verified_caller
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 from aipass.hooks.apps import sound
 from aipass.hooks.apps.handlers.config import diagnostics, loader, trust_registry
 from aipass.hooks.apps.handlers.json import json_handler

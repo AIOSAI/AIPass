@@ -10,7 +10,7 @@
 
 """Loads .aipass/tier0_kernel.md — tiny always-on identity + reflex block."""
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 
 def _kernel_and_banner(hook_data: dict, cadence_down: str | None = None) -> tuple[str, str]:

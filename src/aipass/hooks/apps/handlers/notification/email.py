@@ -15,7 +15,7 @@ from collections import Counter
 from pathlib import Path
 
 from aipass.ai_mail import mail_kind
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 
 def _find_branch_root() -> Path | None:

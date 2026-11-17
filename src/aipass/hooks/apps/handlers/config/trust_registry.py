@@ -19,7 +19,7 @@ from pathlib import Path
 
 from aipass.hooks.apps.handlers.json import files as json_files
 from aipass.hooks.apps.handlers.json import json_handler
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 REGISTRY_PATH = Path.home() / ".aipass" / "trusted_projects.json"
 REGISTRY_ENV = "AIPASS_TRUST_REGISTRY"

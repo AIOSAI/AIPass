@@ -16,9 +16,9 @@ Transcripts survive Ctrl+C (session files do not); liveness comes from cc_sessio
 import json
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
-from aipass.cli.apps.modules import err_console
+from aipass.cli import err_console
 
 CONSOLE = err_console
 

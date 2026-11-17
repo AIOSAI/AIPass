@@ -16,7 +16,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 
 def _read_last_session(branch_dir: Path) -> str | None:

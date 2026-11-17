@@ -22,7 +22,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 # Contract with @memory's todo_report.READY_PHRASE: the one phrase this handler greps.
 READY_PHRASE = "ready for rollover"

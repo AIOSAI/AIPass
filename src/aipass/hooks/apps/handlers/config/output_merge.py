@@ -15,7 +15,7 @@ Claude Code parses stdout as one document: two JSON objects on two lines fail an
 
 import json
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 
 #: Claude Code persists an additionalContext over this many UTF-16 units and shows a 2,000-char preview.

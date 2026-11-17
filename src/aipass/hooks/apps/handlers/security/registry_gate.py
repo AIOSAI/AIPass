@@ -20,7 +20,7 @@ import json
 import re
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 
 REGISTRY_RE = re.compile(r"\w+_REGISTRY\.json$")

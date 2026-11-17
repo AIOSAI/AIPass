@@ -19,9 +19,9 @@ import re
 import shlex
 from pathlib import Path
 
-from aipass.cli.apps.modules import err_console
+from aipass.cli import err_console
 from aipass.hooks.apps.modules.shell_programs import named_operands, sed_actions, sed_scripts
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 CONSOLE = err_console
 

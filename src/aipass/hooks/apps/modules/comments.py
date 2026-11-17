@@ -15,12 +15,12 @@ import os
 import sys
 from pathlib import Path
 
-from aipass.cli.apps.modules import console, err_console
+from aipass.cli import console, err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.handlers.lifecycle.auto_fix import SCRATCH_DIRS
 from aipass.hooks.apps.modules import comment_scan
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 CONSOLE = console
 SKIP_DIRS = SCRATCH_DIRS | {"node_modules", "__pycache__", "dist", "build"}

@@ -22,7 +22,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 # Log-line only; modules/admin_seat's verified rail decides WHO.

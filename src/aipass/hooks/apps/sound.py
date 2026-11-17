@@ -14,8 +14,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import err_console
+from aipass.prax import logger
+from aipass.cli import err_console
 
 CONSOLE = err_console
 # Sound is the exception: off unless this flag exists. Per-user, outside the temp dir so a reboot keeps it.

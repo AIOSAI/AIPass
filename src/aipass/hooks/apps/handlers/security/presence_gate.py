@@ -20,7 +20,7 @@ import json
 import os
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 _ALLOW = {"exit_code": 0, "stdout": ""}
 _NON_BLOCKING_SESSION_TYPES = frozenset({"dispatched", "daemon"})

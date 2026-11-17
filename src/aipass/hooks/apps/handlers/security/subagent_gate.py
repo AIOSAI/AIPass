@@ -21,7 +21,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 _ALLOW = {"stdout": "", "exit_code": 0}
 # The engine kills this hook at 60s (hooks.json). Two git reads may take 10s each

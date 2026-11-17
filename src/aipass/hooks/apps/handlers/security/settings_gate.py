@@ -28,7 +28,7 @@ import json
 import os
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 DOORS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit", "Bash"})
 CODEX, CLAUDE, WIRING, INSTALLER = "Codex settings", "Claude settings", "AIPass provider wiring", "provider installer"

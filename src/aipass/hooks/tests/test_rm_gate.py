@@ -4,7 +4,7 @@
 # Description: Tests for rm_gate security handler, the DPLAN-0356 lockdown since 2.0.0
 # Branch: hooks
 # Created: 2026-06-02
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/security/rm_gate.py."""
@@ -25,7 +25,7 @@ import pytest
 
 from aipass.hooks.apps.handlers.security import rm_gate
 from aipass.hooks.apps.modules import bash_writes
-from aipass.prax.apps.modules.logger import system_logger
+from aipass.prax import logger as system_logger
 from aipass.hooks.apps.handlers.security.rm_gate import handle
 
 _BRANCH = Path(__file__).resolve().parent.parent

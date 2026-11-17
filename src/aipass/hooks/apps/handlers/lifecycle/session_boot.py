@@ -23,7 +23,7 @@ import sys
 import time
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 _DEFAULT_ARGS = ["--permission-mode", "bypassPermissions"]
 _CHAT_LIMIT = 5

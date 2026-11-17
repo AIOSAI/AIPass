@@ -18,7 +18,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 _GUARD_DIR = Path(tempfile.gettempdir())
 

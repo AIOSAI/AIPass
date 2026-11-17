@@ -18,8 +18,8 @@ import json
 import os
 from pathlib import Path
 
-from aipass.cli.apps.modules import err_console
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.cli import err_console
+from aipass.prax import logger
 
 CONSOLE = err_console
 

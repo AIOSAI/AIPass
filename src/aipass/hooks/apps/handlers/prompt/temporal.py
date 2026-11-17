@@ -17,7 +17,7 @@ provider's own record of the hook, a string the prompt itself does not contain."
 import re
 from datetime import datetime
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 SMOKE_NONCE = re.compile(r"aipass-smoke:([0-9a-f]{12,32})")
 

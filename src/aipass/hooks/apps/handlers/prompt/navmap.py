@@ -14,7 +14,7 @@ import importlib
 import json
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 #: The per-fire budget the file's own header states; injection cuts near 10,000, with no warning at edit time.
 NAVMAP_CHAR_CAP = 8000

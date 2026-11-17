@@ -29,7 +29,7 @@ from pathlib import Path
 
 from aipass.hooks.apps.handlers.config.loader import fleet_rows
 from aipass.hooks.apps.handlers.json import files as json_files
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 _DEFAULT_SUMMARY_CAP = 300
 
