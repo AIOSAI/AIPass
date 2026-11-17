@@ -14,7 +14,7 @@ from typing import Dict
 from pathlib import Path
 
 from aipass.flow.apps.handlers.json import json_handler
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 
 MODULE_NAME = "plan_type_loader"

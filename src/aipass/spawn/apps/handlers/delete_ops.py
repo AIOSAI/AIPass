@@ -13,7 +13,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.aipass.shared.registry_discovery import registries_in
 from aipass.ai_mail.apps.modules.door_verified_caller import is_verified_admin_caller, resolve_verified_caller

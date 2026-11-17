@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 
 # acquire_lock creates the lock empty (O_CREAT|O_EXCL) and fills it with one

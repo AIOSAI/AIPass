@@ -15,7 +15,7 @@ Returns formatted strings - caller handles actual output.
 from pathlib import Path
 from typing import Dict, Any
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.flow.apps.handlers.json import json_handler
 
 

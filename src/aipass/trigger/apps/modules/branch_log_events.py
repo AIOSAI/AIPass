@@ -13,7 +13,7 @@ Branch Log Events Module - Public API for branch log watching
 import sys
 
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers.service_control import service_state
 from aipass.trigger.apps.modules.core import trigger

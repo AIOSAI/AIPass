@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.memory.apps.modules.door_registry_scope import fleet_branches
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root, registries_in

@@ -15,7 +15,7 @@ Returns structured dicts for module-layer rendering; never prints.
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.commons.apps.handlers.database.db import get_db, close_db
 from aipass.commons.apps.handlers.rooms.room_state_ops import get_all_room_state, set_room_state

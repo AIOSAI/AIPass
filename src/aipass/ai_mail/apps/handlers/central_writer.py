@@ -29,7 +29,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List, Tuple
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
 from aipass.ai_mail.apps.handlers.registry.read import check_registry_readable, get_fleet_branches

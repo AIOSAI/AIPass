@@ -14,7 +14,7 @@ from pathlib import Path
 import importlib
 from typing import Any, List
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.cli.apps.modules import console, header, error, reset_command_state, resolve_exit
 from rich.panel import Panel

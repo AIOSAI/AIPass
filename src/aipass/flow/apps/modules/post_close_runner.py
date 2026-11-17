@@ -28,7 +28,7 @@ from aipass.flow.apps.handlers.cli.help_flags import wants_help
 from aipass.flow.apps.handlers.json import json_handler
 from aipass.flow.apps.handlers.mbank.process import process_closed_plans
 from aipass.flow.apps.handlers.runner.lock_ops import acquire_lock, release_lock
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 _PKG_ROOT = Path(__file__).resolve().parents[3]
 FLOW_ROOT = _PKG_ROOT / "flow"

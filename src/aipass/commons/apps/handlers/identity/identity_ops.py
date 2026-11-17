@@ -16,7 +16,7 @@ import json
 from pathlib import Path
 from typing import Callable, Dict, Any, Iterator, Optional, List
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.commons.apps.handlers.json import json_handler
 
 

@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.cli.apps.modules import console, error, warning
 from aipass.ai_mail.apps.handlers.cli.help_flags import wants_help
 from aipass.ai_mail.apps.handlers.dispatch import grant as grant_handler

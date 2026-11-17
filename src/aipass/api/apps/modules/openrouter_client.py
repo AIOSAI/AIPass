@@ -12,7 +12,7 @@
 import sys
 
 from typing import List
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.cli.apps.modules import console, header, success, error, warning
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.auth import keys

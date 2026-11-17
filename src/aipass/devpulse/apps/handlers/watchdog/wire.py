@@ -20,7 +20,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.devpulse.apps.handlers.watchdog import dispatches as _dispatches
 from aipass.devpulse.apps.handlers.watchdog.agent import _find_repo_root as find_repo_root

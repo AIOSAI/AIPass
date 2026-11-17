@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.devpulse.apps.handlers.json import json_handler
 from aipass.devpulse.apps.handlers.owner.guard import owner_address as _owner_address

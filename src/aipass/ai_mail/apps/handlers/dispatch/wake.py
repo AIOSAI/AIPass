@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
 from aipass.ai_mail.apps.handlers.dispatch import session_pointer

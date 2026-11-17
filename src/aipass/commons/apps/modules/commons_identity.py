@@ -14,7 +14,7 @@ Re-exports identity_ops for the callers that import from here; handles whoami.
 
 from typing import List
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.cli.apps.modules import console, error
 
 from aipass.commons.apps.handlers.identity.identity_ops import (

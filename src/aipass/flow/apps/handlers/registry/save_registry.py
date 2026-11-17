@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Iterator
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.flow.apps.handlers.json import json_handler
 from aipass.flow.apps.handlers.runner.lock_ops import os_file_lock
 

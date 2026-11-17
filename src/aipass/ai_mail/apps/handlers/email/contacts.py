@@ -15,7 +15,7 @@ Resolves callers from external projects where CWD-walking cannot identify them.
 from datetime import datetime
 from typing import Dict, Optional
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
 

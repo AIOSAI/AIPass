@@ -12,7 +12,7 @@ Curation Operations Handler
 
 from typing import List
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.commons.apps.handlers.database.db import get_db, close_db
 from aipass.commons.apps.modules.commons_identity import CallerLookupFailed, get_caller_branch

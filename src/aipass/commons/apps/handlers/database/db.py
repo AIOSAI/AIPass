@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from typing import Optional, TypeVar, Callable
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.commons.apps.handlers.json import json_handler
 from aipass.memory.apps.modules.door_registry_scope import fleet_branches
 

@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List
 
 from aipass.flow.apps.handlers.json import json_handler
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.flow.apps.handlers.repo_root import find_repo_root
 

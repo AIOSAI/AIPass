@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.notify import append_jsonl, jsonl_records

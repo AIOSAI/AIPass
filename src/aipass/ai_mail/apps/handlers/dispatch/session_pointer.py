@@ -23,7 +23,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterator, Optional, Tuple
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 
 POINTER_DIR_NAME = ".ai_mail.local"

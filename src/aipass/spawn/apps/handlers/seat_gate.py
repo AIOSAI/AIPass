@@ -11,7 +11,7 @@
 A real run is for this branch's own verified seat or the verified admin seat; a preview stays open to every seat.
 """
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.ai_mail.apps.modules.door_verified_caller import is_verified_admin_caller, resolve_verified_caller
 from aipass.spawn.apps.handlers import MY_BRANCH

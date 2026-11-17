@@ -21,7 +21,7 @@ from aipass.flow.apps.handlers.plan.project_scope import archive_dir_for
 from aipass.flow.apps.handlers.registry.load_registry import load_registry
 from aipass.flow.apps.handlers.registry.save_registry import registry_lock, save_registry
 from aipass.flow.apps.handlers.repo_root import find_repo_root
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 _PKG_ROOT = Path(__file__).resolve().parents[4]
 

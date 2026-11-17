@@ -14,7 +14,7 @@ Reference: docs/watchdog.md.
 import importlib
 from typing import List
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.cli.apps.modules import console, err_console, error
 from aipass.devpulse.apps.handlers.json import json_handler
 from aipass.devpulse.apps.handlers.watchdog import dispatches as _dispatches

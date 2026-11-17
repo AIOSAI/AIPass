@@ -28,7 +28,7 @@ for _script_dir in _script_dirs:
     if _script_dir in sys.path:
         sys.path.remove(_script_dir)
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.cli.apps.modules import console, header, error, warning
 from aipass.cli.apps.modules.display import reset_command_state, resolve_exit
 

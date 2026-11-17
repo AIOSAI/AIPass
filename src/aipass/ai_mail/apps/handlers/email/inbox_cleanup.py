@@ -15,7 +15,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Tuple, Optional, Any
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.email.inbox_ops import count_new
 

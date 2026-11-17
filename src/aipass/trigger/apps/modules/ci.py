@@ -13,7 +13,7 @@ CI red lane - poll dev's runs, wake the owner of a red, gate its cure through @s
 import sys
 from typing import Any, Dict, List
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.trigger.apps.handlers.ci import git_door, ledger, outbound, replies, triage
 from aipass.trigger.apps.handlers.cli.help_flags import wants_help
 from aipass.trigger.apps.handlers.events.ci_red import PAYLOAD_KEYS, is_retried, run_url

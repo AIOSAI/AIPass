@@ -13,7 +13,7 @@ Welcome & Onboarding Handler
 import sqlite3
 from typing import Optional, List
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.commons.apps.handlers.json import json_handler
 
 

@@ -20,7 +20,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.class_registry import resolve_template_class

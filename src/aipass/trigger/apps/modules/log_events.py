@@ -13,7 +13,7 @@ Log Events Module - Public API for log event watching
 import sys
 
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers.service_control import service_state
 

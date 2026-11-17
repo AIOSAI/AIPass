@@ -11,7 +11,7 @@ Core Trigger class - Event bus for AIPass"""
 
 from typing import Callable
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.trigger.apps.handlers import failure_report
 from aipass.trigger.apps.handlers.json import json_handler
 

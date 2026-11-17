@@ -40,7 +40,7 @@ _PKG_ROOT = Path(__file__).resolve().parents[3]  # file.py -> modules/ -> apps/ 
 FLOW_ROOT = _PKG_ROOT / "flow"
 
 from aipass.cli.apps.modules import console, error
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.flow.apps.handlers.cli.arg_gate import UnknownArgument, refuse_unknown
 from aipass.flow.apps.handlers.cli.help_flags import wants_help

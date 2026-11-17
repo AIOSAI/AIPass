@@ -16,7 +16,7 @@ import os
 from pathlib import Path
 from typing import Optional, Tuple
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 
 from .branch_detection import find_branch_root, _CREDENTIAL_SOURCES

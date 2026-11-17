@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.spawn.apps.handlers import class_registry
 from aipass.spawn.apps.handlers.class_registry import (
     get_available_classes,

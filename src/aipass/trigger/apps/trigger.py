@@ -16,7 +16,7 @@ from pathlib import Path
 import importlib
 from typing import List, Any
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.cli.apps.modules import console, header, error, reset_command_state, resolve_exit
 

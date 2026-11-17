@@ -19,7 +19,7 @@ import time
 from collections.abc import Callable
 from datetime import datetime, timedelta
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.devpulse.apps.handlers.watchdog import registry as _registry
 from aipass.devpulse.apps.handlers.watchdog.timer import parse_duration

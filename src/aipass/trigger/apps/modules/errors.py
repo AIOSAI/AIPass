@@ -25,7 +25,7 @@ import sys
 from typing import Optional
 
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers.error_registry import (
     query,

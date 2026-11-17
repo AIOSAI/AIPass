@@ -18,7 +18,7 @@ import uuid
 from pathlib import Path
 from typing import Dict, Tuple, List, Optional, Callable
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import REGISTRY_SUFFIX, find_repo_root, find_project_root, registries_in
 from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable, get_all_branches

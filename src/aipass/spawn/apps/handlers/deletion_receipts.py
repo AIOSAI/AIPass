@@ -14,7 +14,7 @@ drone's door writes the moment it is called, so validation here is what lets a b
 import os
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.drone.apps.modules.door_deletion_log import record_deletion
 from aipass.spawn.apps.handlers.json import json_handler

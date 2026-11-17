@@ -18,7 +18,7 @@ import signal
 from pathlib import Path
 from typing import Any, List
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.cli.apps.modules import console, error, reset_command_state, resolve_exit
 

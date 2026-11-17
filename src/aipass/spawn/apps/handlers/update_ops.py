@@ -17,7 +17,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from aipass.memory.apps.modules.fleet import find_repo_root
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.aipass.shared.json_ops import backup_json, deep_merge
 from aipass.spawn.apps.handlers.class_registry import get_template_dir, resolve_template_class

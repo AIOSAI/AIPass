@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Tuple
 
 from aipass.flow.apps.handlers.json import json_handler
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 # Import the caps, never retype them: `sections.flow` has two writers (prax's refresh and this push).
 from aipass.prax.apps.modules.dashboard import DASHBOARD_CHAR_BUDGET, cap_subject, dashboard_lock

@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.spawn.apps.handlers.registry import (
     _validate_path_containment,

@@ -14,7 +14,7 @@ import sys
 import threading
 
 import aipass.trigger.apps.handlers.reload_sentinel as reload_sentinel
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.trigger.apps.modules.errors import purge_stale
 from aipass.trigger.apps.modules.core import trigger
 from aipass.trigger.apps.modules.medic import run_error_catchup

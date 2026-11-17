@@ -18,7 +18,7 @@ from typing import Callable
 
 from rich.markup import escape
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 from aipass.trigger.apps.handlers.cli.help_flags import wants_help
 from aipass.trigger.apps.handlers.events.startup import run_startup_catchup
 from aipass.trigger.apps.handlers.service_control import (

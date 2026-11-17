@@ -26,7 +26,7 @@ from pathlib import Path
 _PKG_ROOT = Path(__file__).resolve().parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
 FLOW_ROOT = _PKG_ROOT / "flow"
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from aipass.flow.apps.handlers.cli.help_flags import wants_help
 from aipass.flow.apps.handlers.json import json_handler
