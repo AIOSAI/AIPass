@@ -35,7 +35,10 @@ switch:
 A skill that declares nothing still toggles; it simply owns no processes to
 stop. If `switch_state.json` is ever unreadable, skills **refuse to run** rather
 than defaulting to on — defaulting to on would restart exactly what someone
-deliberately switched off.
+deliberately switched off. `on` and `off` refuse too: they write nothing, leave
+the file as it is for repair, and name the fix on stderr — repair the file, or
+`drone rm` it to reset every skill to on. A missing file is a clean start: every
+skill on.
 
 A door that is imported in-process never passes the runner's gate, so it asks
 the switch itself — `machine_vitals()` and `machine_processes()` in the

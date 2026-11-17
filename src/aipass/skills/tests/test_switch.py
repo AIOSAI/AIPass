@@ -37,6 +37,7 @@ from aipass.skills.apps.handlers import registry
 from aipass.skills.apps.handlers import switch_handler as sh
 from aipass.skills.apps.handlers.json import json_handler as jh
 from aipass.skills.apps.modules import runner
+from aipass.skills.apps.modules import switch as switch_module
 
 
 class FakeSystemctl:
@@ -213,7 +214,7 @@ class TestUnreadableStateFailsClosed:
 
         message = str(caught.value)
         assert "switch_state.json" in message
-        assert "delete" in message.lower()
+        assert "drone rm" in message
 
     def test_wrong_shape_is_unreadable_too(self, state_dir):
         (state_dir / "switch_state.json").write_text('["not", "a", "map"]', encoding="utf-8")
@@ -227,20 +228,59 @@ class TestUnreadableStateFailsClosed:
         assert sh.read_state() == {}
 
 
-class TestRewritingOverAnUnreadableDocument:
-    """A write over an unreadable document is the operator's recovery: allowed, and logged as an error for medic."""
+class TestSwitchingOverAnUnreadableDocument:
+    """Switching over an unreadable document refuses: nothing written, the original kept for repair."""
 
-    def test_the_unreadable_document_is_logged_as_an_error_and_replaced(self, state_dir, monkeypatch):
-        (state_dir / "switch_state.json").write_text("{not json at all", encoding="utf-8")
+    CORRUPT = b'{"skills": {"sample": {"enabled": false}}} trailing'
+
+    def test_switching_refuses_and_leaves_the_bytes_untouched(self, state_dir):
+        (state_dir / "switch_state.json").write_bytes(self.CORRUPT)
+
+        with pytest.raises(sh.SwitchStateUnreadable):
+            sh.set_enabled("github", True)
+
+        assert (state_dir / "switch_state.json").read_bytes() == self.CORRUPT
+
+    def test_a_skill_that_was_off_never_reads_as_on_after_a_refused_switch(self, state_dir):
+        (state_dir / "switch_state.json").write_bytes(self.CORRUPT)
+
+        with pytest.raises(sh.SwitchStateUnreadable):
+            sh.set_enabled("github", True)
+
+        with pytest.raises(sh.SwitchStateUnreadable):
+            sh.is_enabled("sample")
+
+    def test_the_off_command_refuses_on_stderr_and_logs_one_error(self, state_dir, monkeypatch, capsys):
+        (state_dir / "switch_state.json").write_bytes(self.CORRUPT)
         errors = []
-        monkeypatch.setattr(sh.logger, "error", lambda msg, *a, **k: errors.append(msg % a))
+        monkeypatch.setattr(switch_module.logger, "error", lambda msg, *a, **k: errors.append(msg % a))
 
-        assert sh.write_state({"sample": {"enabled": False}}) is True
+        assert switch_module.handle_command("off", ["sample"]) is False
 
-        assert len(errors) == 1 and "unreadable switch state" in errors[0]
-        document = json.loads((state_dir / "switch_state.json").read_text(encoding="utf-8"))
-        assert document["skills"] == {"sample": {"enabled": False}}
-        assert document["created"] == document["last_updated"]
+        out, err = capsys.readouterr()
+        assert "switch_state.json" in err and "drone rm" in err
+        assert len(errors) == 1 and "switch_state.json" in errors[0]
+
+
+class TestCreatedDate:
+    """The document's created date is written once and kept by every later write."""
+
+    def test_a_healthy_document_keeps_its_created_date_through_a_switch(self, state_dir):
+        document = {"module_name": "switch", "created": "2026-01-01", "last_updated": "2026-01-01", "skills": {}}
+        (state_dir / "switch_state.json").write_text(json.dumps(document), encoding="utf-8")
+
+        assert sh.set_enabled("sample", False) is True
+
+        written = json.loads((state_dir / "switch_state.json").read_text(encoding="utf-8"))
+        assert written["created"] == "2026-01-01"
+        assert written["skills"]["sample"]["enabled"] is False
+
+    def test_an_absent_document_starts_clean_with_today_as_created(self, state_dir):
+        assert sh.set_enabled("sample", False) is True
+
+        written = json.loads((state_dir / "switch_state.json").read_text(encoding="utf-8"))
+        assert written["created"] == written["last_updated"]
+        assert list(written["skills"]) == ["sample"]
 
 
 class TestTurnOff:

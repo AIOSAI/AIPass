@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: switch.py
 # Description: Per-skill off-switch — on, off, and status
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-18
-# Modified: 2026-10-24
+# Modified: 2026-11-17
 # =============================================
 
 """Skill off-switch module."""
@@ -59,7 +59,10 @@ def print_switch_help():
 
 def switch_on(name: str) -> bool:
     """Switch a skill on and start its declared processes; True only when every unit runs."""
-    result = turn_on(name)
+    try:
+        result = turn_on(name)
+    except SwitchStateUnreadable as exc:
+        return _refuse("on", exc)
     _report(result)
     logger.info("switch: turned '%s' on (success=%s)", name, result["success"])
     json_handler.log_operation("switch_on", {"skill": name, "success": result["success"]})
@@ -68,7 +71,10 @@ def switch_on(name: str) -> bool:
 
 def switch_off(name: str, reason: str | None = None) -> bool:
     """Switch a skill off and stop its declared processes; True only when no unit runs."""
-    result = turn_off(name, reason=reason)
+    try:
+        result = turn_off(name, reason=reason)
+    except SwitchStateUnreadable as exc:
+        return _refuse("off", exc)
     _report(result)
     logger.info("switch: turned '%s' off (success=%s)", name, result["success"])
     json_handler.log_operation("switch_off", {"skill": name, "success": result["success"]})
@@ -103,6 +109,13 @@ def show_switch(name: str | None = None) -> bool:
             warning(f"        STILL RUNNING: {', '.join(row['live_units'])}")
     console.print()
     return True
+
+
+def _refuse(command: str, exc: SwitchStateUnreadable) -> bool:
+    """Surface an unreadable switch state: one ERROR for medic, the fix on stderr, nothing written."""
+    logger.error("Refusing '%s': %s", command, exc)
+    error(f"Error: {exc}")
+    return False
 
 
 def _report(result: dict) -> None:
