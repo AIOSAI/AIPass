@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: compass.py
 # Description: Compass Module — drone command for devpulse's rated decision store
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-06-16
-# Modified: 2026-10-18
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -15,11 +15,9 @@ from typing import List, Optional
 from aipass.prax import logger
 from aipass.cli import err_console, error
 from aipass.devpulse.apps.handlers import compass
-from aipass.devpulse.apps.handlers.compass import mark_surfaced, recall_decisions
 from aipass.devpulse.apps.handlers.json import json_handler
 
-# The cross-branch recall API: other branches import these two from here, never from the handler.
-__all__ = ["handle_command", "mark_surfaced", "recall_decisions"]
+__all__ = ["handle_command"]
 
 console = err_console
 
