@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.13.0
+# Version: 1.14.0
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's scripted lane and apps/modules/bash_writes.py."""
@@ -1351,6 +1351,7 @@ class TestTheLaunchRuleCarriesTheWeightSoReadsPass:
         (
             "claude -p ../other/README.md",
             "awk '{print}' ../other/README.md",
+            "awk '{print $1}' ../other/README.md",
             "awk -F: -v x=1 '{print $1}' ../other/README.md",
             "sed -n '/^r/,/^s/p' ../other/README.md",
         ),
@@ -1368,9 +1369,41 @@ class TestTheLaunchRuleCarriesTheWeightSoReadsPass:
             "awk '{getline line < \"/etc/hostname\"}' ../other/README.md",
             "awk -i inplace '{print}' ../other/README.md",
             "awk -f prog.awk ../other/README.md",
+            "awk '@load \"inplace\"; {print}' ../other/README.md",
+            "awk '@include \"w.awk\"; {print}' ../other/README.md",
+            'awk \'BEGIN {f = "sys" "tem"; @f("true")}\' ../other/README.md',
             "sed -n '/^r/w ../other/x' notes.txt",
             "sed -n '/^r/,/^s/e date' ../other/README.md",
         ),
     )
     def test_a_form_that_can_write_stays_refused(self, fleet: dict, grant_withheld, command: str):
         assert _blocked(_run(str(fleet["canary"]), command=command)), command
+
+
+class TestAProviderFlagValueIsJudged:
+    """codex exec -o FILE: codex writes FILE itself, no hook sees it, so each provider flag's value is judged."""
+
+    @pytest.mark.parametrize(
+        "command",
+        (
+            'codex exec -o ../other/apps/x.py "hi"',
+            'codex exec --output-last-message=../other/apps/x.py "hi"',
+            'codex exec -o../other/README.md "hi"',
+        ),
+    )
+    def test_a_value_in_another_branch_is_refused(self, fleet: dict, grant_withheld, command: str):
+        assert "Cross-branch" in _reason(_run(str(fleet["canary"]), command=command)), command
+
+    def test_a_value_in_another_project_is_refused_by_the_project_fence(self, fleet: dict, grant_withheld):
+        vera = fleet["root"].parent / "Vera"
+        (vera / "src").mkdir(parents=True)
+        (vera / "VERA_REGISTRY.json").write_text("{}", encoding="utf-8")
+        result = _run(str(fleet["canary"]), command=f'codex exec -o {(vera / "src" / "x.py").as_posix()} "hi"')
+        assert "Cross-project write blocked" in _reason(result)
+
+    @pytest.mark.parametrize(
+        "command",
+        ('codex exec "fix ../other"', 'codex exec -o ./notes.txt "hi"', "codex exec --json ../other/README.md"),
+    )
+    def test_a_prompt_or_a_value_at_home_passes(self, fleet: dict, grant_withheld, command: str):
+        assert _run(str(fleet["canary"]), command=command) == {"stdout": "", "exit_code": 0}, command

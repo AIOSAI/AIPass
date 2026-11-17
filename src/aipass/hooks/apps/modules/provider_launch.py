@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: provider_launch.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: Where a provider CLI started from the Bash tool would run, judged against the caller's own branch
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-11-15
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Names a provider session (claude, codex, opencode) that would start outside the caller's own branch.
@@ -25,11 +25,11 @@ from pathlib import Path
 from aipass.cli import err_console
 from aipass.hooks.apps.modules import admin_seat, shell_reader
 from aipass.hooks.apps.modules.shell_programs import PROVIDER_CLIS
+from aipass.hooks.apps.modules.shell_programs import PROVIDER_DIR_FLAGS as _DIR_FLAGS
 
 CONSOLE = err_console
 
-#: Each CLI's own directory flags, read from its --help: codex -C/--cd and --add-dir; claude --add-dir takes several.
-_DIR_FLAGS = ("-C", "--cd", "--add-dir")
+#: claude --add-dir takes several directories.
 _MANY_DIRS = "--add-dir"
 
 #: opencode's positional operand is the directory it starts in; claude's and codex's are prompts.

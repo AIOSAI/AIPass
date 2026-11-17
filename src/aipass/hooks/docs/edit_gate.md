@@ -20,9 +20,13 @@ nobody listed as a writer cannot name another branch's file or a memory file off
 git_gate. `sed` is not read as a filter: its scripts can write. The exception is
 `sed` whose every script is addresses (line numbers, `/regex/`, ranges of either) and `p`, `d`, `q`, `=`
 with only reading flags (`sed -n 68,90p f`, `sed -n '/^## A/,/^## B/p' f`). `awk` reads when its only
-flags are `-F` and `-v` and its program holds no `>`, `|`, `system` or `getline`; `-f`, `-i` or any of
-those makes every operand a write target again. A provider CLI's operands (`claude -p ../x/README.md`)
-are prompts, not write targets: the launch rule below judges where it runs.
+flags are `-F` and `-v` and its program holds no `>`, `|`, `system`, `getline`, gawk's `@load` or
+`@include`, or an indirect call (`@f(`); `-f`, `-i` or any of those makes every operand a write target
+again. A provider CLI's prompt (`claude -p ../x/README.md`) is not a write target, but the value of each
+of its flags is (`codex exec -o FILE` writes FILE itself, unseen by any hook): the word after a flag, the
+part after `=`, or a short flag's attached text, even where no file exists yet. A switch from the CLI's
+`--help` and a prompt flag are passed over, so the word after them is the prompt; the directory flags
+(`-C`, `--cd`, `--add-dir`) are the launch rule's, below, which judges where the session runs.
 Those shapes read anywhere, a memory file included. A `w` or `e` inside any other
 script is not read: its target or command passes unseen. More reads: a shell whose
 options before its script carry `-n` (`bash -n x.sh`, a syntax check; git_gate does not read the
