@@ -97,27 +97,9 @@ The long paths under their `apps/` are `front_door` findings like any other.
 
 ---
 
-## Exception: Trigger Branch
+## No branch is an exception
 
-Trigger is the ONE place where cross-branch handler imports are acceptable:
-
-```python
-# In trigger/apps/handlers/events/startup.py
-from aipass.memory.apps.handlers.rollover import check_and_rollover
-```
-
-**WHY:** Trigger's entire purpose is centralizing cross-branch reaction logic. It's the exception that proves the rule - instead of scattered cross-branch calls, Trigger owns them all in one place.
-
-Configure bypass in `.sentry/bypass.json`:
-```json
-{
-  "bypass": [{
-    "file": "apps/handlers/events/startup.py",
-    "standard": "encapsulation",
-    "reason": "Trigger centralizes cross-branch calls by design"
-  }]
-}
-```
+Trigger is where cross-branch reactions live, and it reaches other branches through their front doors like every other branch. A case a door cannot serve gets its own bypass row, scoped to its lines or function, with the reason written in it.
 
 ---
 
@@ -146,15 +128,15 @@ A handler file is never judged on which of its own branch's handlers it imports.
 
 ## Bypass Configuration
 
-For legitimate architectural exceptions, configure `.sentry/bypass.json`:
+A case no front door can serve gets a row in `.sentry/bypass.json`, scoped to its lines or function, saying why:
 
 ```json
 {
   "bypass": [{
-    "file": "apps/handlers/events/startup.py",
+    "file": "apps/handlers/<concern>/<file>.py",
     "standard": "encapsulation",
-    "lines": [38, 42],
-    "reason": "Trigger centralizes cross-branch handler calls"
+    "lines": [38],
+    "reason": "<branch> has no door name for <name> yet"
   }]
 }
 ```

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: encapsulation_content.py
 # Description: Encapsulation Standards Content Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-09
 # Modified: 2026-11-16
 # =============================================
@@ -60,10 +60,9 @@ def get_encapsulation_standards() -> str:
         "  [green]✓[/green] [dim]from aipass.cli import console, header, success, error[/dim]",
         "  Their long paths under apps/ are front_door findings like any other.",
         "",
-        "[yellow]Trigger Branch (cross-branch handler imports allowed):[/yellow]",
-        "  Trigger centralizes cross-branch reaction logic.",
-        "  Configure bypass in [dim].sentry/bypass.json[/dim]:",
-        '  [dim]{"bypass": [{"file": "...", "standard": "encapsulation", "reason": "..."}]}[/dim]',
+        "[yellow]No branch is an exception:[/yellow]",
+        "  Trigger reaches other branches through their front doors like every branch.",
+        "  A case a door cannot serve gets its own scoped bypass row with its reason.",
         "",
         f"[dim]{sep}[/dim]",
         "[bold cyan]BYPASS CONFIGURATION:[/bold cyan]",

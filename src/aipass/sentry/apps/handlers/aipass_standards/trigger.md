@@ -254,34 +254,17 @@ def close_plan():
 ```python
 # trigger/apps/handlers/events/flow.py - Handlers
 def handle_plan_closed(**kwargs):
-    """React to plan closure"""
-    from aipass.flow.apps.handlers.dashboard.update_local import update_dashboard_local
-    from aipass.flow.apps.handlers.mbank.process import process_closed_plans
+    """React to plan closure, through flow's front door."""
+    from aipass.flow import <name>  # each name flow's package top file hands out
 
-    update_dashboard_local()
-    process_closed_plans()
+    ...
 ```
 
 ---
 
-## Bypass Configuration
+## No exception for Trigger
 
-Some cross-branch handler imports are intentional in Trigger. Configure in `.sentry/bypass.json`:
-
-```json
-{
-  "bypass": [
-    {
-      "file": "apps/handlers/events/startup.py",
-      "standard": "encapsulation",
-      "lines": [38],
-      "reason": "Trigger's purpose is centralizing cross-branch calls. Memory has no modules API."
-    }
-  ]
-}
-```
-
-**Trigger is the ONE place cross-branch handler imports are acceptable** - it's literally the centralization point for these calls.
+Trigger holds the cross-branch reactions and reaches each branch through its front door, `from aipass.<branch> import <name>`, like every branch. Its handlers are judged by encapsulation, handlers and front_door exactly as anyone's. A case a door cannot serve gets its own bypass row, scoped to its lines or function, with the reason written in it.
 
 ---
 
@@ -412,7 +395,7 @@ For Trigger branch itself:
 - [ ] Handler import guard active (blocks external access)
 - [ ] Recursion guard in fire()
 - [ ] Caller introspection logging
-- [ ] Bypass.json documents intentional encapsulation violations
+- [ ] Reaches other branches only through their front doors
 
 ---
 
