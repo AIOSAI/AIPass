@@ -3,7 +3,7 @@
 # Description: Tests for the watchdog module router
 # Version: 1.2.0
 # Created: 2026-04-14
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/watchdog.py, the watchdog module router (Phase 1, FPLAN-0186)."""
@@ -20,7 +20,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import aipass.devpulse.apps.handlers.owner.guard as owner_guard
-from aipass.spawn.apps.modules import door_owner as spawn_registry
 import pytest
 
 from aipass.cli import display as cli_display
@@ -153,7 +152,7 @@ def test_the_refusal_still_refuses_when_the_owner_cannot_be_named(capsys, monkey
     def explode(*_args, **_kwargs):
         raise RuntimeError("registry unreadable")
 
-    monkeypatch.setattr(spawn_registry, "get_owner", explode)
+    monkeypatch.setattr(owner_guard, "get_owner", explode)
 
     wd_mod.handle_command("watchdog", ["baseline"])
 

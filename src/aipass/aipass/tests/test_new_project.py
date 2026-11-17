@@ -3,7 +3,7 @@
 # Description: Tests for aipass new — project creation handler
 # Version: 1.6.1
 # Created: 2026-07-17
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/new_project/__init__.py and apps/modules/new_project.py."""
@@ -33,7 +33,7 @@ from aipass.aipass.apps.handlers.new_project.adopt import adopt_project
 from aipass.aipass.shared import scaffold_content as sc
 from aipass.aipass.shared.registry_discovery import registries_in
 from aipass.aipass.apps.modules.new_project import handle_command
-from aipass.spawn.apps.modules.door_class_registry import (
+from aipass.spawn import (
     LEGACY_CLASSES,
     refuse_retired_or_forbidden,
 )

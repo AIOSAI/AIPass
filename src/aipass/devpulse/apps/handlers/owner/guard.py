@@ -3,7 +3,7 @@
 # Description: Owner-capability caller guard for devpulse owner-only tools
 # Version: 1.5.0
 # Created: 2026-07-10
-# Modified: 2026-10-22
+# Modified: 2026-11-17
 # =============================================
 
 """Owner-capability guard for devpulse's owner-only tools."""
@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 
 from aipass.prax import logger
-from aipass.spawn.apps.modules import door_owner
+from aipass.spawn import find_registry, get_owner, is_owner, registry_is_writable_document
 from aipass.devpulse.apps.handlers.json import json_handler
 from aipass.devpulse.apps.handlers.owner.admin_grant import _resolve_verified_caller
 
@@ -36,16 +36,16 @@ def _owner_decision(email: str, caller_cwd: Path | None) -> bool:
     if caller_cwd is None:
         logger.warning("[owner_guard] no AIPASS_CALLER_CWD rail — refusing")
         return False
-    if door_owner.get_owner(start_path=caller_cwd) is None:
+    if get_owner(start_path=caller_cwd) is None:
         # None also means UNREADABLE; only the unsealed case may reach the heuristic, or any dir named devpulse passes.
-        registry_path = door_owner.find_registry(start_path=caller_cwd)
-        if registry_path is not None and not door_owner.registry_is_writable_document(registry_path):
+        registry_path = find_registry(start_path=caller_cwd)
+        if registry_path is not None and not registry_is_writable_document(registry_path):
             logger.warning("[owner_guard] registry %s exists but cannot be read — refusing", registry_path)
             return False
         logger.info("[owner_guard] no sealed owner at %s — legacy heuristic", caller_cwd)
         return _legacy_devpulse_heuristic(caller_cwd)
 
-    return bool(email) and door_owner.is_owner(email, start_path=caller_cwd)
+    return bool(email) and is_owner(email, start_path=caller_cwd)
 
 
 def owner_address(start_path: Path | None = None) -> str | None:
@@ -56,7 +56,7 @@ def owner_address(start_path: Path | None = None) -> str | None:
     builder must not become a traceback, and a caller can still tell a crashed lookup from an unsealed project.
     """
     try:
-        entry = door_owner.get_owner(start_path=start_path) if start_path is not None else door_owner.get_owner()
+        entry = get_owner(start_path=start_path) if start_path is not None else get_owner()
     except Exception as exc:
         logger.warning("[owner_guard] owner lookup failed: %s", exc)
         return ""

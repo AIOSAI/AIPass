@@ -3,7 +3,7 @@
 # Description: Host API Lifetime Handler — a serve that outlives the shell that started it
 # Version: 1.3.1
 # Created: 2026-08-19
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Set, Tuple
 
-from aipass.drone.apps.modules.config import resolve_aipass_home
+from aipass.drone import resolve_aipass_home
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.host import autostart

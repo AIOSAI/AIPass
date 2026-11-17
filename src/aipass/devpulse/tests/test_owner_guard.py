@@ -3,7 +3,7 @@
 # Description: Tests for the shared owner-capability caller guard (#681)
 # Version: 1.2.0
 # Created: 2026-07-10
-# Modified: 2026-11-14
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/owner/guard.py through guard_owner_caller, against a stubbed sealed registry."""
@@ -13,7 +13,6 @@
 
 import pytest
 
-from aipass.spawn.apps.modules import door_owner as reg
 from aipass.devpulse.apps.handlers.owner import guard as guard_mod
 
 
@@ -46,8 +45,8 @@ def _patch_registry(monkeypatch, owner_email):
             return False
         return _norm(email) == _norm(owner_email)
 
-    monkeypatch.setattr(reg, "get_owner", fake_get_owner)
-    monkeypatch.setattr(reg, "is_owner", fake_is_owner)
+    monkeypatch.setattr(guard_mod, "get_owner", fake_get_owner)
+    monkeypatch.setattr(guard_mod, "is_owner", fake_is_owner)
     return asked
 
 
@@ -61,7 +60,7 @@ class TestOwnerAddress:
         def explode(start_path=None):
             raise RuntimeError("registry unreadable")
 
-        monkeypatch.setattr(reg, "get_owner", explode)
+        monkeypatch.setattr(guard_mod, "get_owner", explode)
         assert guard_mod.owner_address() == ""
 
 

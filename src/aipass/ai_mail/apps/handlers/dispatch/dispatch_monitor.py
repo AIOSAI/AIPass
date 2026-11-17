@@ -3,7 +3,7 @@
 # Description: Agent Lifecycle Monitor
 # Version: 2.17.0
 # Created: 2026-03-02
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -65,7 +65,7 @@ def _connect_broker(repo_root: Path, branch_name: str) -> socket.socket:
 
     Raises on ANY failure — caller must not silently skip the broker.
     """
-    from aipass.drone.apps.modules.door_broker import create_identified_connection
+    from aipass.drone import create_identified_connection
 
     socket_path = repo_root / ".ai_central" / "drone_broker.sock"
     secret_path = repo_root / ".ai_central" / "broker_secret"

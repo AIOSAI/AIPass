@@ -3,7 +3,7 @@
 # Description: Tests for the dispatch monitor's sandbox gate and its broker-fd handshake
 # Version: 1.0.3
 # Created: 2026-10-08
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's sandbox gate and broker handshake (FPLAN-0250)."""
@@ -26,7 +26,7 @@ from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import (
     wrap_for_sandbox,
     main,
 )
-from aipass.drone.apps.modules.door_broker import BrokerDaemon, create_identified_connection
+from aipass.drone import BrokerDaemon, create_identified_connection
 
 pytestmark = pytest.mark.usefixtures("monitor_json_silenced", "monitor_logger_silenced", "monitor_wake_stubbed")
 
