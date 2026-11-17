@@ -3,7 +3,7 @@
 # Description: Pins the public cross-branch gateway for the fleet definition
 # Version: 1.0.1
 # Created: 2026-08-30
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/fleet.py."""

@@ -3,7 +3,7 @@
 # Description: Pins that spawn's own mocking fixtures reach the code they claim to mock
 # Version: 1.0.2
 # Created: 2026-08-30
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests that tests/conftest.py's mocking fixtures actually reach apps/handlers/file_ops.py."""

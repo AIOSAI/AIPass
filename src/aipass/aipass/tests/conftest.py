@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for aipass tests — json redirect, console width, command state
 # Version: 1.8.0
 # Created: 2026-05-04
-# Modified: 2026-11-14
+# Modified: 2026-11-16
 #
 # CHANGELOG (Max 5 entries):
 #   - v1.8.0 (2026-11-14): isolate_profile_store retired with profile.py (FPLAN-0924)

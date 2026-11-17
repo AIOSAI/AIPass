@@ -3,7 +3,7 @@
 # Description: Shared test fixtures for spawn test suite
 # Version: 1.3.1
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Shared test fixtures for spawn test suite."""

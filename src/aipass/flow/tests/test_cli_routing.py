@@ -3,7 +3,7 @@
 # Description: Tests for flow's entry point routing, help and introspection
 # Version: 1.0.0
 # Created: 2026-09-04
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/flow.py, the CLI entry point."""

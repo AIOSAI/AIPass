@@ -3,7 +3,7 @@
 # Description: Tests for CLI routing and help display
 # Version: 1.1.0
 # Created: 2026-03-27
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/ai_mail.py's CLI routing: print_help, print_introspection, route_command, main."""

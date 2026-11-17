@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for ai_mail tests - sandbox redirects, console pin, state reset
 # Version: 1.9.1
 # Created: 2026-03-05
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # Category: ai_mail/tests
 # CHANGELOG (Max 5 entries):
 #   - v1.9.1 (2026-11-15): main_argv stderr is dispatch_stderr.out; monitor_wake_stubbed drops log_wake_result

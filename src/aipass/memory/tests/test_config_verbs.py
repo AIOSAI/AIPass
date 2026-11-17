@@ -3,7 +3,7 @@
 # Description: Tests for the `config` verbs (rollover limit get/set/set-default): writes, display, help, isolation
 # Version: 1.9.0
 # Created: 2026-08-16
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/rollover_config.py — config verbs' writes, display and help, via apps/modules/rollover.py."""

@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for devpulse tests
 # Version: 1.4.0
 # Created: 2025-11-08
-# Modified: 2026-11-14
+# Modified: 2026-11-16
 # =============================================
 
 """Shared pytest fixtures for devpulse tests."""

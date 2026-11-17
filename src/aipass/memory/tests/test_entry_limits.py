@@ -3,7 +3,7 @@
 # Description: entry_limits config reader and the apps/modules/limits.py gateway over it
 # Version: 1.2.0
 # Created: 2026-06-13
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # Category: memory/tests
 # =============================================
 

@@ -3,7 +3,7 @@
 # Description: CLI Routing Tests (adapted for API module structure)
 # Version: 1.0.0
 # Created: 2026-03-27
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/api_key.py's command routing, help and introspection."""

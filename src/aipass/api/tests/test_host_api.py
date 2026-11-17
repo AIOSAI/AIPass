@@ -3,7 +3,7 @@
 # Description: Tests for the Stage 0 host API's commands — routing, tokens, serve/status/stop, config, the door
 # Version: 1.3.2
 # Created: 2026-08-14
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for the host-api commands in apps/modules/host_api.py, host_serve.py and host_config_cli.py."""

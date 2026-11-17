@@ -3,7 +3,7 @@
 # Description: Tests for the dispatch register append-only log
 # Version: 1.2.0
 # Created: 2026-08-22
-# Modified: 2026-11-14
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/dispatch/register.py: the append-only dispatch register, and the grant its rows carry."""

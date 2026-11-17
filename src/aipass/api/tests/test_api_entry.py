@@ -3,7 +3,7 @@
 # Description: Tests for api.py entry point CLI
 # Version: 1.0.2
 # Created: 2026-05-12
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/api.py, the entry point CLI for drone @api."""

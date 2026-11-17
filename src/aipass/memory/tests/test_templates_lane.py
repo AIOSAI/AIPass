@@ -3,7 +3,7 @@
 # Description: Pins for the live templates lane — spawn propagation, receipt status, the bump site, and two refusals
 # Version: 1.0.1
 # Created: 2026-08-27
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/templates.py and the template_bump lane it drives."""

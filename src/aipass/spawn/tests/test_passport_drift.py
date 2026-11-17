@@ -3,7 +3,7 @@
 # Description: DPLAN-0262 — live passport drift vs template contract (permanent canary)
 # Version: 2.0.2
 # Created: 2026-07-27
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/class_registry.py and apps/handlers/registry.py — the passport drift canary (DPLAN-0262)."""

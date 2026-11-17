@@ -3,7 +3,7 @@
 # Description: CLI Routing Tests for DAEMON
 # Version: 1.1.0
 # Created: 2026-03-28
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/daemon.py — the router: help, introspection, unknown commands, the argument gate."""

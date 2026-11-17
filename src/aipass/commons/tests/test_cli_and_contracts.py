@@ -4,7 +4,7 @@
 # Description: main()'s help/introspection/exit-code routing, route_command, and the json shim's contracts
 # Version: 1.3.0
 # Created: 2026-03-28
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):

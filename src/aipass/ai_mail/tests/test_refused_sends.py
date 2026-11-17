@@ -3,7 +3,7 @@
 # Description: Tests for refused-send bookkeeping and the handled-vs-worked routing contract
 # Version: 1.0.4
 # Created: 2026-08-12
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/email/create.py, format.py and send.py."""

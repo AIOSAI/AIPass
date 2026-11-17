@@ -3,7 +3,7 @@
 # Description: Surfacing governance module — state API, rejection paths, command exit seam
 # Version: 1.0.2
 # Created: 2026-07-16
-# Modified: 2026-11-14
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/governance.py (pure state-in/state-out API)."""
