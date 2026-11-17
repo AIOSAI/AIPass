@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch4.py
 # Description: Unit tests for 5 sentry checker handlers (batch 4)
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-03-29
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for 5 checkers: aipass_standards/stderr_routing_check.py, todo, trigger, dead_code, unused_function."""
@@ -106,13 +106,19 @@ class TestStderrRoutingReadsCodeLinesOnly:
         return [c["message"] for c in stderr_check_module(str(py_file))["checks"] if not c["passed"]]
 
     def test_an_error_print_after_a_one_line_docstring_holding_the_other_delimiter_is_found(self, mock_json, tmp_path):
-        source = 'def f():\n    """Quotes \'\'\' here."""\n    console.print("[red]Error: the config failed to load now[/red]")\n'
+        source = (
+            'def f():\n    """Quotes \'\'\' here."""\n'
+            '    console.print("[red]Error: the config failed to load now[/red]")\n'
+        )
         assert self._failed(tmp_path, source) == [
             "subject.py: 1 error print(s) on lines [3] — use error() or fatal() instead"
         ]
 
     def test_an_error_print_inside_a_docstring_past_the_other_delimiter_is_prose(self, mock_json, tmp_path):
-        source = 'def f():\n    """Doc.\n    \'\'\'\n    console.print("[red]Error: the config failed to load now[/red]")\n    """\n'
+        source = (
+            "def f():\n    \"\"\"Doc.\n    '''\n"
+            '    console.print("[red]Error: the config failed to load now[/red]")\n    """\n'
+        )
         assert self._failed(tmp_path, source) == []
 
     def test_a_stderr_console_on_a_line_opening_a_triple_quoted_literal_is_found(self, mock_json, tmp_path):
@@ -212,6 +218,109 @@ class TestTriggerCheck:
         assert result["passed"] is True
 
 
+_LIFECYCLE = "def create_backup(data):\n    pass\n\ndef delete_record(record_id):\n    pass\n\nPath('x').unlink()\n"
+_EVENT_HANDLER = 'from prax import logger\n\ndef event_handler(**kwargs):\n    print("fired")\n'
+_UNIMPORTED_FIRE = 'def do_work():\n    trigger.fire("x")\n'
+
+
+def _trigger_run(tmp_path: Path, rel: str, content: str, rows: list | None) -> dict:
+    """check_module on a real file, every row naming it."""
+    py_file = tmp_path / rel
+    _write_file(py_file, content)
+    rules = [{"file": rel, "standard": "trigger", **row} for row in rows] if rows is not None else None
+    return trigger_check_module(str(py_file), bypass_rules=rules)
+
+
+@patch("aipass.sentry.apps.handlers.aipass_standards.trigger_check.json_handler")
+class TestTriggerSites:
+    """Each finding is a site, at its line inside its function (<file> at module level), waived alone."""
+
+    def test_with_no_row_every_missing_event_is_reported_at_its_line(self, mock_json, tmp_path: Path) -> None:
+        result = _trigger_run(tmp_path, "modules/lifecycle.py", _LIFECYCLE, None)
+        assert result["passed"] is False
+        message = result["checks"][0]["message"]
+        assert "[1]" in message and "[4]" in message and "[7]" in message
+
+    @pytest.mark.parametrize(
+        "row",
+        [{"lines": [1]}, {"functions": ["create_backup"]}],
+        ids=["line_row", "function_row"],
+    )
+    def test_a_scoped_row_waives_its_site_and_the_other_sites_still_fail_the_file(
+        self, mock_json, tmp_path: Path, row: dict
+    ) -> None:
+        result = _trigger_run(tmp_path, "modules/lifecycle.py", _LIFECYCLE, [row])
+        message = result["checks"][0]["message"]
+        assert result["passed"] is False
+        assert "create_*" not in message and "delete_* function on lines [4]" in message and "[7]" in message
+
+    @pytest.mark.parametrize(
+        "row",
+        [{"lines": [1, 4, 7]}, {"functions": ["create_backup", "delete_record", "<file>"]}],
+        ids=["line_row", "function_row"],
+    )
+    def test_a_row_naming_every_site_passes_the_file(self, mock_json, tmp_path: Path, row: dict) -> None:
+        result = _trigger_run(tmp_path, "modules/lifecycle.py", _LIFECYCLE, [row])
+        assert (result["passed"], result["score"]) == (True, 100)
+
+    def test_a_module_level_deletion_is_waived_by_a_file_scope_row_alone(self, mock_json, tmp_path: Path) -> None:
+        result = _trigger_run(tmp_path, "modules/lifecycle.py", _LIFECYCLE, [{"functions": ["<file>"]}])
+        message = result["checks"][0]["message"]
+        assert result["passed"] is False
+        assert ".unlink()" not in message and "create_* function on lines [1]" in message
+
+    @pytest.mark.parametrize(
+        ("row", "open_checks"),
+        [
+            (None, ["No logger imports", "No print statements", "Handler naming"]),
+            ({"lines": [4]}, ["No logger imports", "Handler naming"]),
+            ({"functions": ["event_handler"]}, ["No logger imports"]),
+            ({"functions": ["<file>"]}, ["No print statements", "Handler naming"]),
+            ({"lines": [1, 3, 4]}, []),
+        ],
+        ids=["no_row", "print_line", "handler_function", "file_scope_import", "every_line"],
+    )
+    def test_an_event_handlers_logger_print_and_naming_are_sites(
+        self, mock_json, tmp_path: Path, row: dict | None, open_checks: list
+    ) -> None:
+        rel = "trigger/apps/handlers/events/on_x.py"
+        result = _trigger_run(tmp_path, rel, _EVENT_HANDLER, None if row is None else [row])
+        assert [c["name"] for c in result["checks"] if not c["passed"]] == open_checks
+        assert result["passed"] is (not open_checks)
+
+    @pytest.mark.parametrize(("row", "waived"), [({"lines": [1]}, True), ({"functions": ["<file>"]}, False)])
+    def test_an_unparseable_file_names_no_function_so_only_a_line_row_reaches_its_site(
+        self, mock_json, tmp_path: Path, row: dict, waived: bool
+    ) -> None:
+        result = _trigger_run(tmp_path, "modules/broken.py", "def create_backup(data):\n    pass\n\ndef (\n", [row])
+        assert result["passed"] is waived
+
+    def test_one_waived_print_leaves_the_other_print_failing_the_handler(self, mock_json, tmp_path: Path) -> None:
+        content = 'def handle_a(**kwargs):\n    print("a")\n\ndef handle_b(**kwargs):\n    print("b")\n'
+        rel = "trigger/apps/handlers/events/on_y.py"
+        result = _trigger_run(tmp_path, rel, content, [{"functions": ["handle_a"]}])
+        assert [c["message"] for c in result["checks"] if not c["passed"]] == [
+            "Handler uses print() (must be silent) on lines [5]"
+        ]
+
+    @pytest.mark.parametrize(
+        ("row", "waived"),
+        [
+            (None, False),
+            ({"functions": ["<file>"]}, True),
+            ({"functions": ["do_work"]}, False),
+            ({"lines": [2]}, False),
+        ],
+        ids=["no_row", "file_scope_row", "function_row", "line_row"],
+    )
+    def test_a_missing_import_is_a_whole_file_finding(
+        self, mock_json, tmp_path: Path, row: dict | None, waived: bool
+    ) -> None:
+        result = _trigger_run(tmp_path, "modules/worker.py", _UNIMPORTED_FIRE, None if row is None else [row])
+        assert result["passed"] is waived
+        assert ("Waived by a <file> bypass row" in result["checks"][0]["message"]) is waived
+
+
 @patch("aipass.sentry.apps.handlers.aipass_standards.dead_code_check.json_handler")
 class TestDeadCodeCheck:
     """Tests for the dead_code_check checker."""
@@ -293,6 +402,30 @@ class TestDeadCodeCheck:
         result = dead_code_check_branch(str(branch), bypass_rules=[{"file": spelled, "standard": "dead_code"}])
         message = result["checks"][0]["message"]
         assert "stray.py" in message and "orphan.py" not in message
+
+    @pytest.mark.parametrize(
+        ("rows", "dead"),
+        [
+            ([], ["orphan", "stray"]),
+            ([{"file": "apps/handlers/orphan.py", "functions": ["<file>"]}], ["stray"]),
+            ([{"file": name, "functions": ["<file>"]} for name in ("handlers/orphan.py", "stray.py")], []),
+            ([{"file": "apps/handlers/orphan.py", "functions": ["lonely"]}], ["orphan", "stray"]),
+            ([{"file": "apps/handlers/orphan.py", "lines": [1]}], ["orphan", "stray"]),
+        ],
+        ids=["no_row", "file_scope_row", "both_file_scope", "function_row", "line_row"],
+    )
+    def test_a_dead_file_is_a_whole_file_site_waived_by_a_file_scope_row(
+        self, mock_json, tmp_path: Path, rows: list, dead: list
+    ) -> None:
+        """A dead file has no line and no function: only <file> names it, and only for that file."""
+        branch = _make_branch(tmp_path)
+        _write_file(branch / "apps" / "handlers" / "orphan.py", "def lonely():\n    pass\n")
+        _write_file(branch / "apps" / "handlers" / "stray.py", "def alone():\n    pass\n")
+        _write_file(branch / "apps" / (branch.name + ".py"), "def handle_command(): pass\n")
+        result = dead_code_check_branch(str(branch), bypass_rules=[{"standard": "dead_code", **row} for row in rows])
+        message = result["checks"][0]["message"]
+        assert [name for name in ("orphan", "stray") if f"handlers/{name}.py" in message] == dead
+        assert result["passed"] is (not dead)
 
     def test_dead_code_ignores_tools_dir_by_default(self, mock_json, tmp_path: Path) -> None:
         """Orphan modules under apps/tools/ are skipped via the global .sentryignore default."""
@@ -712,7 +845,10 @@ class TestDeadCodeReadsTheProjectConfig:
         assert _dead(self._project(tmp_path, config)) == ["handlers/security/gate.py"]
 
     def test_a_longer_module_name_does_not_reference_its_prefix(self, tmp_path):
-        config = '{"a": "aipass.mybranch.apps.handlers.lifecycle.boot_extra.handle", "b": "x.aipass.mybranch.apps.handlers.security.gate"}'
+        config = (
+            '{"a": "aipass.mybranch.apps.handlers.lifecycle.boot_extra.handle", '
+            '"b": "x.aipass.mybranch.apps.handlers.security.gate"}'
+        )
         assert _dead(self._project(tmp_path, config)) == ["handlers/lifecycle/boot.py", "handlers/security/gate.py"]
 
     def test_a_config_with_no_registry_root_above_the_branch_references_nothing(self, tmp_path):

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: file_top_check.py
 # Description: Test File Top Standards Checker Handler
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-09-22
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Test File Top Standards Checker Handler
@@ -19,7 +19,7 @@ from typing import Dict, List, Tuple
 
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.aipass_standards.meta_check import META_HEADER, META_HEADER_LEGACY
-from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE, is_bypassed
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.aipass_standards.check_support import read_text, result
 
@@ -110,41 +110,42 @@ def _opener(lines: List[str], doc_line: int) -> str:
     return "code"
 
 
-def _header_findings(lines: List[str], doc_line: int) -> List[str]:
+def _header_findings(lines: List[str], doc_line: int) -> List[Tuple[int | None, str]]:
     """Item 5's message, or nothing when the header is right."""
     first, last = _header_span(lines)
     if not first:
         opener = _opener(lines, doc_line)
-        return [f"item 5 META header: the file opens with {opener} — the header block comes first"]
-    findings = []
+        return [(None, f"item 5 META header: the file opens with {opener} — the header block comes first")]
+    findings: List[Tuple[int | None, str]] = []
     banner_line = lines[first - 1].strip()
     if banner_line not in _ACCEPTED_BANNERS:
-        findings.append(f"item 5 META header: the banner line is `{banner_line}`, not `{META_HEADER}`")
+        findings.append((first, f"item 5 META header: the banner line is `{banner_line}`, not `{META_HEADER}`"))
     missing = _missing_fields(lines, first, last)
     if missing:
-        findings.append(f"item 5 META header: missing {', '.join(missing)}")
+        findings.append((None, f"item 5 META header: missing {', '.join(missing)}"))
     return findings
 
 
-def _docstring_findings(tree: ast.Module, doc_line: int) -> List[str]:
+def _docstring_findings(tree: ast.Module, doc_line: int) -> List[Tuple[int | None, str]]:
     """Item 6's message, or nothing when the docstring is right."""
     text = ast.get_docstring(tree, clean=False)
     if text is None or not doc_line:
-        return ["item 6 subject docstring: missing — one line naming the module this file tests"]
+        return [(None, "item 6 subject docstring: missing — one line naming the module this file tests")]
     body = text.strip()
     count = len(body.splitlines())
     if count != 1:
-        return [f"item 6 subject docstring: {count} lines, not 1 — one line naming the module this file tests"]
+        return [
+            (doc_line, f"item 6 subject docstring: {count} lines, not 1 — one line naming the module this file tests")
+        ]
     if not _SUBJECT_PATH.search(body):
-        return ["item 6 subject docstring: names no path — say which module it tests, as a path"]
+        return [(doc_line, "item 6 subject docstring: names no path — say which module it tests, as a path")]
     return []
 
 
-def _declared_pass_findings(lines: List[str], pass_line: int) -> List[str]:
+def _declared_pass_findings(lines: List[str], pass_line: int) -> List[Tuple[int | None, str]]:
     """Item 7's message, or nothing when the block is there and well formed."""
     if not pass_line:
-        return ["item 7 declared pass: missing — what is NOT tested here, and what covers it"]
-    findings = []
+        return [(None, "item 7 declared pass: missing — what is NOT tested here, and what covers it")]
     for index in range(pass_line, len(lines)):
         stripped = lines[index].strip()
         if not stripped:
@@ -152,19 +153,20 @@ def _declared_pass_findings(lines: List[str], pass_line: int) -> List[str]:
         if not stripped.startswith("#"):
             break
         if not _MARKER.match(stripped):
-            findings.append(f"item 7 declared pass: line {index + 1} is not a sentry: no-test-needed(...) marker")
-            break
-    return findings
+            return [(index + 1, f"item 7 declared pass: line {index + 1} is not a sentry: no-test-needed(...) marker")]
+    return []
 
 
-def _order_findings(doc_line: int, pass_line: int) -> List[str]:
+def _order_findings(doc_line: int, pass_line: int) -> List[Tuple[int | None, str]]:
     """What is out of order, top to bottom.
 
     Only the docstring-to-declared-pass pair is judged here: ``_header_span`` reads the
     first non-blank line, so a docstring above the header already fails item 5.
     """
     if doc_line and pass_line and pass_line < doc_line:
-        return ["item 7 declared pass: the block is above the docstring — header, docstring, declared pass"]
+        return [
+            (pass_line, "item 7 declared pass: the block is above the docstring — header, docstring, declared pass")
+        ]
     return []
 
 
@@ -185,6 +187,11 @@ def holds_tests(tree: ast.Module) -> bool:
 
 def scan(source: str, conftest: bool = False, excuse_plugin: bool = False) -> List[str]:
     """Every finding for one test file's top, in template order."""
+    return [text for _line, text in sites(source, conftest, excuse_plugin)]
+
+
+def sites(source: str, conftest: bool = False, excuse_plugin: bool = False) -> List[Tuple[int | None, str]]:
+    """Every finding as (line, text); line is None when it has no honest line and is the file's own."""
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError) as exc:
@@ -222,6 +229,15 @@ def _clean_message(conftest: bool) -> str:
     return "Header, one-line subject docstring, declared pass — in order"
 
 
+def _open_findings(found: List[Tuple[int | None, str]], module_path: str, bypass_rules: list | None) -> List[str]:
+    """The text of each finding no row waives; every one sits at module level, so its function is FILE_SCOPE."""
+    return [
+        text
+        for line, text in found
+        if not is_bypassed(module_path, STANDARD_KEY, line=line, bypass_rules=bypass_rules, name=FILE_SCOPE)
+    ]
+
+
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     """Check one test file's top against template v1 items 5, 6 and 7."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
@@ -236,10 +252,12 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         return _result(False, _one_check(False, f"Error reading file: {module_path}"), 0)
 
     conftest = is_conftest(module_path)
-    findings = scan(source, conftest=conftest, excuse_plugin=True)
-
-    if not findings:
+    found = sites(source, conftest=conftest, excuse_plugin=True)
+    if not found:
         return _result(True, _one_check(True, _clean_message(conftest)), 100)
+    findings = _open_findings(found, module_path, bypass_rules)
+    if not findings:
+        return _result(True, _one_check(True, f"All {len(found)} findings waived by scoped bypass rows"), 100)
 
     # One line per sub-rule, all inside ONE check: checklist._format_failure prints the
     # FIRST failed check and appends "(+N more)", which would hide two sub-rules.

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: imports_check.py
 # Description: Imports Standards Checker Handler
-# Version: 2.7.0
+# Version: 2.8.0
 # Created: 2026-03-05
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -20,7 +20,8 @@ from typing import Dict, List, Optional
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.aipass_standards import applicability
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE, is_bypassed
+from aipass.sentry.apps.handlers.aipass_standards.check_support import find_enclosing_function
 from aipass.sentry.apps.handlers.aipass_standards.handlers_check import is_foundation_service
 from aipass.sentry.apps.handlers.aipass_standards.modules_check import is_second_door
 from aipass.sentry.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify
@@ -156,25 +157,54 @@ def find_import_section_end(lines: List[str]) -> int:
 #: and ``AIPASS_ROOT_MAP`` never match.
 _AIPASS_ROOT_TOKEN = re.compile(r"\bAIPASS_ROOT\b")
 
+_ALL_WAIVED = "All {} sites waived by scoped bypass rows"
+
+
+def _code_lines(lines: List[str]):
+    """(line number, the code before any ``#``) for every line that is not blank or a whole-line comment."""
+    for i, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            yield i, line.split("#")[0]
+
+
+def _open_lines(
+    sites: List[int], file_path: str, bypass_rules: list | None, tree: ast.Module | None = None
+) -> List[int]:
+    """The site lines no row waives; a row names a site by its line or by the def holding it.
+
+    With no ``tree`` the sites sit in the import section, which ends at the first def or class, so each is
+    module level: FILE_SCOPE.
+    """
+    if not bypass_rules:
+        return list(sites)
+    open_sites = []
+    for line in sites:
+        holder = find_enclosing_function(tree, line) if tree else None
+        name = holder.name if holder else FILE_SCOPE
+        if not is_bypassed(file_path, "imports", line=line, bypass_rules=bypass_rules, name=name):
+            open_sites.append(line)
+    return open_sites
+
 
 def check_no_aipass_root(lines: List[str], file_path: str = "", bypass_rules: list | None = None) -> Dict:
     """Check that file does NOT use AIPASS_ROOT."""
     if is_bypassed(file_path, "imports", None, bypass_rules):
         return {"name": "No AIPASS_ROOT", "passed": True, "message": "Bypassed by bypass rules"}
 
-    for i, line in enumerate(lines, 1):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        code_part = line.split("#")[0] if "#" in line else line
-        if _AIPASS_ROOT_TOKEN.search(code_part):
-            return {
-                "name": "No AIPASS_ROOT",
-                "passed": False,
-                "message": (
-                    f"AIPASS_ROOT found on line {i} (pip packages must not read the AIPASS_ROOT environment variable)"
-                ),
-            }
+    hits = [i for i, code_part in _code_lines(lines) if _AIPASS_ROOT_TOKEN.search(code_part)]
+    open_hits = _open_lines(hits, file_path, bypass_rules)
+    if open_hits:
+        return {
+            "name": "No AIPASS_ROOT",
+            "passed": False,
+            "message": (
+                f"AIPASS_ROOT found on line {open_hits[0]} "
+                "(pip packages must not read the AIPASS_ROOT environment variable)"
+            ),
+        }
+    if hits:
+        return {"name": "No AIPASS_ROOT", "passed": True, "message": _ALL_WAIVED.format(len(hits))}
 
     return {"name": "No AIPASS_ROOT", "passed": True, "message": "No AIPASS_ROOT usage (correct for pip packages)"}
 
@@ -184,17 +214,16 @@ def check_no_sys_path(lines: List[str], file_path: str = "", bypass_rules: list 
     if is_bypassed(file_path, "imports", None, bypass_rules):
         return {"name": "No sys.path hacking", "passed": True, "message": "Bypassed by bypass rules"}
 
-    for i, line in enumerate(lines, 1):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        code_part = line.split("#")[0] if "#" in line else line
-        if re.search(r"sys\.path\.(insert|append)\s*\(", code_part):
-            return {
-                "name": "No sys.path hacking",
-                "passed": False,
-                "message": f"sys.path manipulation found on line {i} (pip packages must not hack sys.path)",
-            }
+    hits = [i for i, code_part in _code_lines(lines) if re.search(r"sys\.path\.(insert|append)\s*\(", code_part)]
+    open_hits = _open_lines(hits, file_path, bypass_rules)
+    if open_hits:
+        return {
+            "name": "No sys.path hacking",
+            "passed": False,
+            "message": f"sys.path manipulation found on line {open_hits[0]} (pip packages must not hack sys.path)",
+        }
+    if hits:
+        return {"name": "No sys.path hacking", "passed": True, "message": _ALL_WAIVED.format(len(hits))}
 
     return {
         "name": "No sys.path hacking",
@@ -221,7 +250,8 @@ def check_prax_logger(lines: List[str], file_path: str = "", bypass_rules: list 
         logger.warning("imports: unparseable, logging routing not judged: %s", exc)
         return {"name": "Prax logger import (recommended)", "passed": False, "message": f"Unparseable source: {exc}"}
 
-    hits = _stdlib_log_lines(tree)
+    found = _stdlib_log_lines(tree)
+    hits = _open_lines(found, file_path, bypass_rules, tree)
     if hits:
         return {
             "name": "Prax logger import (recommended)",
@@ -231,6 +261,8 @@ def check_prax_logger(lines: List[str], file_path: str = "", bypass_rules: list 
                 "('from aipass.prax import logger' or 'from aipass import prax')"
             ),
         }
+    if found:
+        return {"name": "Prax logger import", "passed": True, "message": _ALL_WAIVED.format(len(found))}
     return {"name": "Prax logger import", "passed": True, "message": "No stdlib logging (any log call routes via prax)"}
 
 
@@ -285,6 +317,8 @@ def check_handler_independence(
         return {"name": "Handler independence", "passed": True, "message": "Bypassed by bypass rules"}
 
     parent_branch = _own_branch(module_path)
+    kind = "parent" if parent_branch else "branch"
+    hits = []
 
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
@@ -300,19 +334,18 @@ def check_handler_independence(
             if any(is_foundation_service(target) for target in re.findall(r"aipass(?:\.\w+)+", code_part)):
                 continue
 
-            if parent_branch and f"{parent_branch}.apps.modules" in code_part:
-                return {
-                    "name": "Handler independence",
-                    "passed": False,
-                    "message": f"Handler importing from parent module on line {i} (violates independence rule)",
-                }
+            if not parent_branch or f"{parent_branch}.apps.modules" in code_part:
+                hits.append(i)
 
-            if not parent_branch:
-                return {
-                    "name": "Handler independence",
-                    "passed": False,
-                    "message": f"Handler importing from branch module on line {i} (violates independence rule)",
-                }
+    open_hits = _open_lines(hits, module_path, bypass_rules)
+    if open_hits:
+        return {
+            "name": "Handler independence",
+            "passed": False,
+            "message": f"Handler importing from {kind} module on line {open_hits[0]} (violates independence rule)",
+        }
+    if hits:
+        return {"name": "Handler independence", "passed": True, "message": _ALL_WAIVED.format(len(hits))}
 
     return {"name": "Handler independence", "passed": True, "message": "No forbidden module imports detected"}
 
@@ -371,11 +404,12 @@ def check_import_order(lines: List[str], file_path: str = "", bypass_rules: list
                 first_aipass_line = line_num
 
     if first_aipass_line and last_stdlib_line and first_aipass_line < last_stdlib_line:
-        return {
-            "name": "Import order",
-            "passed": False,
-            "message": f"aipass.* import (line {first_aipass_line}) before stdlib import (line {last_stdlib_line})",
-        }
+        message = f"aipass.* import (line {first_aipass_line}) before stdlib import (line {last_stdlib_line})"
+        # An order is a relation between two lines, not one site: the finding is the file's, waived by FILE_SCOPE.
+        if is_bypassed(file_path, "imports", bypass_rules=bypass_rules, name=FILE_SCOPE):
+            message = f"Waived by a {FILE_SCOPE} bypass row: {message}"
+            return {"name": "Import order", "passed": True, "message": message}
+        return {"name": "Import order", "passed": False, "message": message}
 
     return {"name": "Import order", "passed": True, "message": "Import order correct (stdlib before aipass.*)"}
 
@@ -401,7 +435,7 @@ def check_no_bare_imports(lines: List[str], file_path: str = "", bypass_rules: l
     # "seed" left this set when the Beo project became Seed (seed.seed is a live resident namespace).
     old_namespaces = {"cortex", "nexus", "atlas", "sentinel"}
 
-    violations = []
+    violations: Dict[int, str] = {}
     own_branch = _own_branch(file_path)
 
     for i, line in enumerate(lines, 1):
@@ -429,16 +463,14 @@ def check_no_bare_imports(lines: List[str], file_path: str = "", bypass_rules: l
         first_part = parts[0] if parts else ""
 
         if first_part in ("handlers", "modules"):
-            violations.append(
+            violations[i] = (
                 f'Line {i}: bare import "from {import_path}" '
                 f"(must use aipass.* namespace: from aipass.{own_branch or '<branch>'}.apps.{import_path})"
             )
             continue
 
         if first_part in old_namespaces and len(parts) > 1:
-            violations.append(
-                f'Line {i}: old namespace "from {import_path}" (old namespace, must use aipass.* namespace)'
-            )
+            violations[i] = f'Line {i}: old namespace "from {import_path}" (old namespace, must use aipass.* namespace)'
             continue
 
         if first_part in aipass_modules and len(parts) > 1 and "apps" in parts:
@@ -447,12 +479,15 @@ def check_no_bare_imports(lines: List[str], file_path: str = "", bypass_rules: l
                 if first_part == own_branch
                 else f"another branch: its front door, from aipass.{first_part} import <name>"
             )
-            violations.append(f'Line {i}: bare module import "from {import_path}" (missing aipass. prefix; {cure})')
+            violations[i] = f'Line {i}: bare module import "from {import_path}" (missing aipass. prefix; {cure})'
             continue
 
-    if violations:
-        shown = violations[:3]
-        extra = f" (+{len(violations) - 3} more)" if len(violations) > 3 else ""
+    open_texts = [violations[i] for i in _open_lines(list(violations), file_path, bypass_rules)]
+    if open_texts:
+        shown = open_texts[:3]
+        extra = f" (+{len(open_texts) - 3} more)" if len(open_texts) > 3 else ""
         return {"name": "No bare imports", "passed": False, "message": "; ".join(shown) + extra}
+    if violations:
+        return {"name": "No bare imports", "passed": True, "message": _ALL_WAIVED.format(len(violations))}
 
     return {"name": "No bare imports", "passed": True, "message": "All imports use proper aipass.* namespace"}

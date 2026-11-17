@@ -102,6 +102,21 @@ Add an entry to `.sentry/bypass.json`:
 
 Bypassed files return score 100 automatically.
 
+Or waive single sites. Each commented-out logger line is its own site, inside the function whose
+`def` span holds it (`<file>` at module level):
+
+```json
+{
+    "standard": "commented_logger",
+    "file": "path/to/file.py",
+    "lines": [42]
+}
+```
+
+A row with `"functions": ["load"]` waives the lines inside `load`; `"functions": ["<file>"]` waives
+the module-level ones. Every line no row names still convicts. In a file that does not parse, no
+function can be named, so only a `lines` row reaches its sites.
+
 ---
 
 ## Audit Scope

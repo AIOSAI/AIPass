@@ -1,6 +1,6 @@
 # Fallback Standards
 **Status:** v1, ADVISORY (scored, never gating)
-**Date:** 2026-11-16
+**Date:** 2026-11-17
 
 ---
 
@@ -49,6 +49,7 @@ or a bare string is the stand-in.
 |---|---|
 | a handler that only `continue`s or `break`s, after warning-level log lines if any | the loop tries its next candidate; nothing stands in. An `info`/`debug` line before the skip is read by nobody, so that skip is judged, and an import loop's skip with a log line is judged too: the module's commands vanish |
 | `FileNotFoundError` alone around a read | absence, not corruption: a missing file read as empty is a documented default |
+| `FileNotFoundError` alone around a stat probe: a `try` holding one expression, assignment or return whose every call is `stat`, `lstat`, `os.path.getsize`, `getmtime`, `getatime` or `getctime` | "no such file" is what the probe asked: each of these raises `FileNotFoundError` for a missing path. Caught beside `OSError`, `PermissionError` or `Exception`, around two statements, a loop, or a path another call computes, it is judged as usual. `Path.exists`/`is_file` never raise, so they need no `try` |
 | `ProcessLookupError` alone around `kill`/`killpg`/`_kill`/`send_signal` | "no such process" is the answer: the state a kill wanted, or what a liveness probe (`os.kill(pid, 0)`) asked. Caught beside `OSError`, or around any other call, it is judged as usual |
 | a handler that logs at warning or above and takes none of the first four shapes | `silent_catch` and `logged_fallback` judge it |
 

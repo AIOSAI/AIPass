@@ -1,6 +1,6 @@
 # Dead Code Standard
-**Status:** v1.5
-**Date:** 2026-10-10
+**Status:** v1.6
+**Date:** 2026-11-17
 
 ---
 
@@ -122,6 +122,11 @@ and `handlers/x.py` both match (checker 1.4.0, 2026-10-08). Until then dead_code
 handed the `apps/`-relative path: @hooks' rows written `apps/handlers/lifecycle/session_boot.py`
 silenced nothing, and `bypass prune`'s dead-rule report could not see it because every other
 lane matched them. A rule naming no `file` is inert (owner, 2026-09-25), not branch-wide.
+
+Each unreferenced file is its own site, and a dead file has no line or function: its site is the
+whole file. A row with `"functions": ["<file>"]` waives that file alone, the same as a row with no
+scope. A row with `lines`, or with `functions` naming a function, waives nothing here: dead_code
+judges files, not functions (unused_function judges those). Every other dead file still convicts.
 
 ---
 

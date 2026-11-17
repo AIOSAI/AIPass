@@ -459,3 +459,11 @@ Both checks read the parse tree, never the spelling:
   function.
 - A file that does not parse falls back to a line scan and says so in the message, so a
   fallback never reads like a verdict from the real arm.
+
+## Bypass Rows
+
+A row with no `lines` or `functions` waives the whole file. A scoped row waives sites. Each
+public function missing a docstring is its own site, at its `def` line and under its name: a row
+with `"lines": [12]` or `"functions": ["load"]` waives that function, and every other undocumented
+function still convicts. A missing module docstring is the file's finding: only a row with
+`"functions": ["<file>"]` waives it, and a `lines` row never does.

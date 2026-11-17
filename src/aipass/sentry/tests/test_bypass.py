@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_bypass.py
 # Description: Unit tests for handlers/bypass/
-# Version: 1.6.1
+# Version: 1.7.0
 # Created: 2026-03-24
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/bypass/bypass_handler.py, ignore_handler.py, utils.py and inert.py."""
@@ -430,14 +430,15 @@ def test_inert_scope_support_is_derived_not_hardcoded():
     """The map comes from the checker sources, so it cannot drift from them."""
     support = inert.scope_support()
 
-    # cli threads line= into is_bypassed, handlers line= and name= per site; imports never passes a line.
+    # cli threads line= into is_bypassed, handlers and imports line= and name= per site; todo never passes a line.
     assert "lines" in support["cli"]
     assert support["handlers"] == {"lines", "functions"}
-    assert support["imports"] == set()
+    assert support["imports"] == {"lines", "functions"}
+    assert support["todo"] == set()
 
 
 def test_inert_lines_rule_on_line_blind_standard_is_reported():
-    assert inert.inert_scopes({"file": "a.py", "standard": "imports", "lines": [10]}) == ("lines",)
+    assert inert.inert_scopes({"file": "a.py", "standard": "todo", "lines": [10]}) == ("lines",)
 
 
 def test_inert_lines_rule_on_line_passing_standard_is_not_reported():
@@ -459,7 +460,7 @@ def test_inert_branch_info_names_the_file_and_standard(tmp_path):
 
     (tmp_path / ".sentry").mkdir()
     (tmp_path / ".sentry" / "bypass.json").write_text(
-        json.dumps({"bypass": [{"file": "apps/x.py", "standard": "imports", "lines": [7]}]}), encoding="utf-8"
+        json.dumps({"bypass": [{"file": "apps/x.py", "standard": "todo", "lines": [7]}]}), encoding="utf-8"
     )
 
     lines = inert.check_branch_info(str(tmp_path))
@@ -467,7 +468,7 @@ def test_inert_branch_info_names_the_file_and_standard(tmp_path):
     # Two caveat lines ride ahead of every conclusion (ADVISORY_CAVEAT), then the rule.
     conclusions = lines[len(inert.ADVISORY_CAVEAT) :]
     assert len(conclusions) == 1
-    assert "apps/x.py" in conclusions[0] and "imports" in conclusions[0] and "inert" in conclusions[0]
+    assert "apps/x.py" in conclusions[0] and "todo" in conclusions[0] and "inert" in conclusions[0]
 
 
 def test_inert_branch_info_empty_without_a_bypass_file(tmp_path):
@@ -596,11 +597,18 @@ def test_inert_scope_support_reads_a_standard_passed_as_a_module_constant(tmp_pa
     assert support == {"blind_std": set(), "lined_std": {"lines"}}
 
 
-def test_a_lines_rule_on_sleep_in_test_is_named_inert():
-    """The spawn leg 8 case: sleep_in_test gates file-wide, so a lines rule closes nothing."""
+def test_a_lines_rule_on_sleep_in_test_is_live():
+    """sleep_in_test asks per sleep, at its line, so a lines rule waives that sleep and is not named inert."""
     rule = {"file": "tests/test_x.py", "standard": "sleep_in_test", "lines": [3], "reason": "r"}
 
-    assert inert.inert_notes("tests/test_x.py", "sleep_in_test", [rule]) == [
+    assert inert.inert_notes("tests/test_x.py", "sleep_in_test", [rule]) == []
+
+
+def test_a_lines_rule_on_a_line_blind_standard_is_named_inert():
+    """todo gates file-wide, so a lines rule closes nothing."""
+    rule = {"file": "apps/x.py", "standard": "todo", "lines": [3], "reason": "r"}
+
+    assert inert.inert_notes("apps/x.py", "todo", [rule]) == [
         "bypass rule 'lines' [3] closes nothing: this checker passes no line, so only a file-wide rule bypasses it"
     ]
 
@@ -608,12 +616,11 @@ def test_a_lines_rule_on_sleep_in_test_is_named_inert():
 # The trigger standard's third matcher, folded back into the shared one
 
 
-def test_trigger_standard_is_now_in_the_scope_map_as_line_blind():
-    """trigger_check carried its own matcher, so the map could not see the standard at all."""
+def test_trigger_standard_is_in_the_scope_map_with_its_per_site_scopes():
+    """trigger_check asks per site, at a line inside a function, so neither scope is inert."""
     support = inert.scope_support()
-    assert "trigger" in support, "trigger now routes through the shared matcher"
-    assert "lines" not in support["trigger"], "its one call site gates the whole file"
-    assert inert.inert_scopes({"file": "a.py", "standard": "trigger", "lines": [1]}) == ("lines",)
+    assert support["trigger"] == {"lines", "functions"}
+    assert inert.inert_scopes({"file": "a.py", "standard": "trigger", "lines": [1], "functions": ["f"]}) == ()
 
 
 def _trigger_bypass_message(tmp_path, rules):
@@ -675,7 +682,7 @@ def _advisory(tmp_path, rules):
     return inert.check_branch_info(str(tmp_path))
 
 
-_INERT_SCOPE_RULE = {"file": "apps/x.py", "standard": "imports", "lines": [7]}
+_INERT_SCOPE_RULE = {"file": "apps/x.py", "standard": "todo", "lines": [7]}
 _OUT_OF_SCOPE_RULE = {"file": "tests/test_a.py", "standard": "architecture", "reason": "r"}
 
 
@@ -738,7 +745,7 @@ def test_the_advisory_survives_the_renderer_that_shows_it(tmp_path):
 
     assert "UNVERIFIED" in rendered, rendered
     assert "control" in rendered, rendered
-    assert "imports" in rendered, "the standard name must survive rendering"
+    assert "todo" in rendered, "the standard name must survive rendering"
     assert "apps/x.py" in rendered, rendered
 
 
@@ -896,7 +903,7 @@ def _planted_entry_only(path, bypass_rules=None):
 def test_a_rule_over_a_file_the_audit_never_hands_its_checker_covers_nothing(
     prune_branch, capsys, monkeypatch, rule_file, dead
 ):
-    """An entry_point checker sees only the entry file; prune handing it apps/live.py kept a rule that waives nothing."""
+    """An entry_point checker sees only the entry file; prune handing it apps/live.py kept a rule waiving nothing."""
     bypass_module, bypass_file = prune_branch
     monkeypatch.setattr(
         bypass_module,

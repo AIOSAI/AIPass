@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dead_code_check.py
 # Description: Dead Code Standards Checker Handler
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-03-22
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Dead Code Standards Checker Handler
@@ -16,7 +16,7 @@ from pathlib import Path, PurePath
 
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
-from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE, is_bypassed
 from aipass.sentry.apps.handlers.bypass.ignore_handler import is_sentry_ignored, load_ignore_entries
 from aipass.sentry.apps.handlers.aipass_standards.skip_dirs import in_skipped_dir, is_disabled_file
 from aipass.sentry.apps.handlers.aipass_standards.modules_check import is_second_door
@@ -321,9 +321,10 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
             except ValueError:
                 logger.info("File %s not relative to apps dir, using full path", target)
                 rel = target.as_posix()
-            # The rule is matched against the BRANCH-relative path (apps/...), the spelling
-            # every other checker is handed and dead_rules reads.
-            if not is_bypassed(_branch_relative(target, bp), "dead_code", bypass_rules=bypass_rules):
+            # The rule is matched against the BRANCH-relative path (apps/...), the spelling every other checker
+            # is handed and dead_rules reads. A dead file has no line or function: its site is FILE_SCOPE.
+            site = _branch_relative(target, bp)
+            if not is_bypassed(site, "dead_code", bypass_rules=bypass_rules, name=FILE_SCOPE):
                 dead_files.append(rel)
 
     referenced_files = total_files - len(dead_files)

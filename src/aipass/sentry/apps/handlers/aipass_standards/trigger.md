@@ -1,6 +1,6 @@
 # Trigger Standards
-**Status:** Draft v1
-**Date:** 2025-12-04
+**Status:** Draft v1.1
+**Date:** 2026-11-17
 
 ---
 
@@ -334,6 +334,17 @@ Cure against this text, not against the regex: adding a fire somewhere else in t
 file no longer works, and was never what the standard asked for. If the fire genuinely
 belongs elsewhere — a handler the module orchestrates, another branch — that is a
 `.sentry/bypass.json` entry with a category and a reason, not a silent pass.
+
+### Bypass rows
+
+A row with no `lines` or `functions` waives the whole file and its `category` and `reason` show in
+the result. Otherwise each finding is its own site, at its line, inside the function that holds it
+(`<file>` at module level): a missing event at its `def` (Pattern 10 at the call), a handler's
+Prax logger import or `print()`, a misnamed handler at its `def`. A row with `"lines": [n]` waives
+the site on line n; a row with `"functions": ["save_registry"]` waives the sites inside
+`save_registry`. A `trigger.fire()` with no trigger import is file-level: `"functions": ["<file>"]`
+waives it and a line row does not. In a file that does not parse, no function can be named, so only
+a line row reaches its sites. Every site no row waives still convicts.
 
 ### Function Definitions (Patterns 1-9)
 

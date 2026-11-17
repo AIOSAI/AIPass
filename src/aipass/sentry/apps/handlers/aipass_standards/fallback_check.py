@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: fallback_check.py
 # Description: Fallback Standards Checker Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-11-14
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -58,6 +58,9 @@ GATE_WORDS = re.compile(r"check|gate|lint|valid|verif|guard|protect|trust|allow|
 DISGUISES = re.compile(r"best[ _-]effort|graceful|legacy|compat|fall(?:s|ing)?[ _-]?back", re.IGNORECASE)
 #: "No such process" answers a signal: the state a kill wanted or a probe asked about, never a stand-in.
 SIGNAL_CALLS = frozenset({"kill", "killpg", "_kill", "send_signal"})
+#: Each raises FileNotFoundError for a missing path and nothing else for it: "no such file" is what the probe asked.
+STAT_CALLS = frozenset({"stat", "lstat", "getsize", "getmtime", "getatime", "getctime"})
+PROBE_STATEMENTS = (ast.Expr, ast.Assign, ast.AnnAssign, ast.Return)
 #: Calls that put the failure in front of a person: the handler is loud, not a fallback.
 SHOWN_BY = frozenset({"print", "echo", "error", "fail", "exit", "_exit", "abort"})
 
@@ -209,6 +212,17 @@ def _calls(try_node: ast.Try, names: frozenset) -> bool:
     return any(isinstance(node, ast.Call) and tail_name(node.func) in names for node in _walk(try_node.body))
 
 
+def _is_a_stat_probe(try_node: ast.Try) -> bool:
+    """The protected block is one expression, assignment or return whose every call is a stat."""
+    calls = [node for node in _walk(try_node.body) if isinstance(node, ast.Call)]
+    return (
+        len(try_node.body) == 1
+        and isinstance(try_node.body[0], PROBE_STATEMENTS)
+        and bool(calls)
+        and all(tail_name(call.func) in STAT_CALLS for call in calls)
+    )
+
+
 def _reads_a_file(try_node: ast.Try) -> bool:
     """True when the protected block reads bytes from disk."""
     return any(isinstance(node, ast.Call) and READ_CALLS.search(tail_name(node.func)) for node in _walk(try_node.body))
@@ -220,6 +234,8 @@ def _shape(handler: ast.ExceptHandler, try_node: ast.Try, function: str, lines: 
         return None
     caught = _caught(handler)
     if caught == {"ProcessLookupError"} and _calls(try_node, SIGNAL_CALLS):
+        return None
+    if caught == {"FileNotFoundError"} and _is_a_stat_probe(try_node):
         return None
     if caught & IMPORT_ERRORS or _calls(try_node, IMPORT_CALLS):
         # A module skipped with only a log line loses its commands: only a bare skip tries the next.

@@ -692,6 +692,20 @@ from aipass.sentry.apps.handlers.json import json_handler
 
 ---
 
+## Bypass Rows
+
+A row with no `lines` or `functions` waives the whole file. A scoped row waives sites. Each
+`AIPASS_ROOT` read, `sys.path` hack, handler import of its own branch's modules and bare import is
+its own site at its line; these sit in the import section (before the first `def` or `class`), so
+their function is `<file>`. Each stdlib logging call is a site at its line, inside the function
+that holds it (`<file>` at module level). A row with `"lines": [n]` waives the site on line n;
+`"functions": ["load"]` waives the logging calls inside `load`; `"functions": ["<file>"]` waives
+every module-level site. Import order is a relation between two lines, not one site: only a
+`"functions": ["<file>"]` row waives it, and a `lines` row never does. Every site no row names
+still convicts, and the message names the first open one.
+
+---
+
 ## Comments
 
 #@comments:2025-11-13:claude: Updated examples to use sentry/ instead of fictional old-name references

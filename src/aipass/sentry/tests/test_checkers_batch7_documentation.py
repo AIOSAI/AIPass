@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_documentation.py
 # Description: documentation_check: function and module docstrings by AST (split from test_checkers_batch7.py)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/documentation_check.py."""
@@ -18,6 +18,7 @@ import pytest
 
 from aipass.sentry.apps.handlers.aipass_standards import documentation_check
 from aipass.sentry.apps.handlers.aipass_standards.documentation_check import check_function_docstrings
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE
 
 pytestmark = pytest.mark.usefixtures("_pin_bypass_log")
 
@@ -164,3 +165,61 @@ class TestModuleDocstringReadsThePositionNotTheSpelling:
         result = documentation_check.check_module_docstring(list(source.split("\n")))
         assert result["passed"] is False
         assert "does not parse" in result["message"]
+
+
+_UNDOCUMENTED = "import os\n\n\ndef alpha():\n    return 1\n\n\ndef beta():\n    return 2\n"
+
+
+def _documentation_under(tmp_path, **scope) -> dict:
+    """documentation on apps/mod.py (no module docstring; alpha at line 4, beta at line 8) under one row."""
+    target = tmp_path / "apps" / "mod.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(_UNDOCUMENTED, encoding="utf-8")
+    rules = [{"file": "apps/mod.py", "standard": "documentation", "reason": "t", **scope}] if scope else []
+    return documentation_check.check_module(str(target), bypass_rules=rules)
+
+
+def _verdicts(result) -> dict:
+    return {c["name"]: (c["passed"], c["message"]) for c in result["checks"]}
+
+
+class TestDocumentationAsksTheBypassTablePerSite:
+    """An undocumented function is a site at its def; a missing module docstring is FILE_SCOPE."""
+
+    def test_with_no_row_both_findings_are_reported(self, tmp_path):
+        verdicts = _verdicts(_documentation_under(tmp_path))
+        assert verdicts["Module docstring"][0] is False
+        assert verdicts["Function docstrings"] == (False, "2 public functions missing docstrings: alpha (line 4)")
+
+    def test_a_line_row_waives_its_def_and_the_other_function_still_convicts(self, tmp_path):
+        result = _documentation_under(tmp_path, lines=[4])
+        beta_open = (False, "1 public functions missing docstrings: beta (line 8)")
+        assert _verdicts(result)["Function docstrings"] == beta_open
+        assert (result["passed"], result["score"]) == (False, 0)
+
+    def test_a_function_row_waives_the_functions_it_names_only(self, tmp_path):
+        one = _verdicts(_documentation_under(tmp_path, functions=["beta"]))
+        both = _verdicts(_documentation_under(tmp_path, functions=["alpha", "beta"]))
+        assert one["Function docstrings"] == (False, "1 public functions missing docstrings: alpha (line 4)")
+        assert both["Function docstrings"][0] is True
+        assert both["Module docstring"][0] is False
+
+    def test_a_file_scope_row_waives_the_module_docstring_and_no_function(self, tmp_path):
+        verdicts = _verdicts(_documentation_under(tmp_path, functions=[FILE_SCOPE]))
+        assert (verdicts["Module docstring"][0], FILE_SCOPE in verdicts["Module docstring"][1]) == (True, True)
+        assert verdicts["Function docstrings"][0] is False
+
+    def test_a_line_row_never_reaches_the_module_docstring(self, tmp_path):
+        assert _verdicts(_documentation_under(tmp_path, lines=[1, 4, 8]))["Module docstring"][0] is False
+
+    def test_every_site_waived_passes_and_a_whole_file_row_still_waives_all(self, tmp_path):
+        assert _documentation_under(tmp_path, functions=[FILE_SCOPE, "alpha", "beta"])["score"] == 100
+        assert _documentation_under(tmp_path, lines=None)["checks"][0]["name"] == "Bypassed"
+
+    def test_an_unparseable_file_still_waives_by_line(self, tmp_path):
+        target = tmp_path / "apps" / "mod.py"
+        target.parent.mkdir(parents=True)
+        target.write_text('"""Doc."""\n\ndef alpha():\n    return 1\n\ndef beta(\n', encoding="utf-8")
+        rules = [{"file": "apps/mod.py", "standard": "documentation", "reason": "t", "lines": [3]}]
+        verdicts = _verdicts(documentation_check.check_module(str(target), bypass_rules=rules))
+        assert verdicts["Function docstrings"] == (False, "1 public functions missing docstrings: beta (line 6)")

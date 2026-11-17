@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_fallback_check.py
 # Description: fallback_check — a failure answered with a stand-in, one test per shape on a true corpus site
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-11-14
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/fallback_check.py."""
@@ -298,6 +298,48 @@ def check_pid_alive(pid):
     return True
 """
 
+# hooks/apps/handlers/parity/runner.py:244-248 (_pointer_stamp: an absent pointer is 0.0, never written)
+STAMP_ABSENT = """def pointer_stamp(branch):
+    try:
+        return (branch / "session.json").stat().st_mtime
+    except FileNotFoundError:
+        return 0.0
+"""
+
+# hooks/apps/modules/protected_paths.py:131-139 (_by_identity: a file not yet written has one name)
+NOT_YET_WRITTEN = """import os
+
+from aipass.prax import logger
+
+
+def by_identity(target):
+    info = None
+    try:
+        info = os.stat(target)
+    except FileNotFoundError as exc:
+        logger.debug("no file at %s: %s", target, exc)
+    if info is None or info.st_nlink < 2:
+        return None
+    return info.st_ino
+"""
+
+# hooks/apps/modules/cadence.py:129-138 (transcript size: absent on turn 0, any other stat failure warns)
+NO_TRANSCRIPT_YET = """import os
+
+from aipass.prax import logger
+
+
+def transcript_size(tp):
+    try:
+        return os.path.getsize(tp)
+    except FileNotFoundError:
+        logger.debug("no transcript yet (turn 0): %s", tp)
+        return -1
+    except OSError as exc:
+        logger.warning("transcript stat failed: %s", exc)
+        return -1
+"""
+
 
 def _plant(tmp_path, source, name="site.py"):
     """The path of ``source`` written under apps/."""
@@ -389,8 +431,8 @@ class TestWhatIsNotAFallback:
     def test_a_missing_file_read_as_empty_passes(self, tmp_path):
         assert _message(tmp_path, ABSENT_FILE) == (100, "No unwaived fallback")
 
-    def test_a_file_not_found_around_no_read_still_flags(self, tmp_path):
-        assert _message(tmp_path, VANISHED_DEBUG_SKIP) == (
+    def test_a_file_not_found_around_neither_a_read_nor_a_stat_still_flags(self, tmp_path):
+        assert _message(tmp_path, VANISHED_DEBUG_SKIP.replace("info = path.lstat()", "path.unlink()")) == (
             0,
             f"site.py:9 default with no warning-level log - {checker.CURE}",
         )
@@ -415,6 +457,54 @@ class TestWhatIsNotAFallback:
             0,
             f"site.py:9 default with no warning-level log - {checker.CURE}",
         )
+
+
+class TestAMissingFileIsTheAnswerToAStat:
+    def test_a_path_stat_caught_as_file_not_found_alone_passes(self, tmp_path):
+        assert _message(tmp_path, STAMP_ABSENT) == (100, "No unwaived fallback")
+
+    def test_an_os_stat_caught_as_file_not_found_with_a_debug_line_passes(self, tmp_path):
+        assert _message(tmp_path, NOT_YET_WRITTEN) == (100, "No unwaived fallback")
+
+    def test_an_lstat_skipped_when_the_file_vanished_passes(self, tmp_path):
+        assert _message(tmp_path, VANISHED_DEBUG_SKIP) == (100, "No unwaived fallback")
+
+    def test_a_getsize_answered_beside_a_warning_os_error_handler_passes(self, tmp_path):
+        assert _message(tmp_path, NO_TRANSCRIPT_YET) == (100, "No unwaived fallback")
+
+    def test_a_stat_in_a_check_named_function_passes(self, tmp_path):
+        assert _message(tmp_path, NOT_YET_WRITTEN.replace("def by_identity", "def is_protected")) == (
+            100,
+            "No unwaived fallback",
+        )
+
+    @pytest.mark.parametrize(
+        "caught", ["except OSError:", "except Exception:", "except:", "except (FileNotFoundError, PermissionError):"]
+    )
+    def test_a_stat_caught_wider_than_file_not_found_still_flags(self, tmp_path, caught):
+        assert _message(tmp_path, STAMP_ABSENT.replace("except FileNotFoundError:", caught)) == (
+            0,
+            f"site.py:4 default with no warning-level log - {checker.CURE}",
+        )
+
+    def test_a_stat_followed_by_more_work_in_the_try_still_flags(self, tmp_path):
+        probe = "info = os.stat(target)\n"
+        source = NOT_YET_WRITTEN.replace(probe, probe + "        os.remove(target)\n")
+        assert _message(tmp_path, source) == (0, f"site.py:11 default with no warning-level log - {checker.CURE}")
+
+    def test_two_stats_under_one_catch_still_flag(self, tmp_path):
+        probe = "info = os.stat(target)\n"
+        source = NOT_YET_WRITTEN.replace(probe, probe + "        info = os.stat(target.parent)\n")
+        assert _message(tmp_path, source) == (0, f"site.py:11 default with no warning-level log - {checker.CURE}")
+
+    def test_a_loop_of_stats_under_one_catch_still_flags(self, tmp_path):
+        loop = "for each in target:\n            info = os.stat(each)"
+        source = NOT_YET_WRITTEN.replace("info = os.stat(target)", loop)
+        assert _message(tmp_path, source) == (0, f"site.py:11 default with no warning-level log - {checker.CURE}")
+
+    def test_a_stat_of_a_path_another_call_computes_still_flags(self, tmp_path):
+        source = NOT_YET_WRITTEN.replace("os.stat(target)", "os.stat(os.readlink(target))")
+        assert _message(tmp_path, source) == (0, f"site.py:10 default with no warning-level log - {checker.CURE}")
 
 
 class TestWaiversAreOneRowPerSite:

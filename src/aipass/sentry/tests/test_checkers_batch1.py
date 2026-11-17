@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch1.py
 # Description: Unit tests for 8 aipass_standards checkers
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-29
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/architecture_check.py and seven batch-1 sibling checkers."""
@@ -21,6 +21,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from aipass.sentry.apps.handlers.bypass import utils as _bypass_utils
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE
 from aipass.sentry.apps.handlers.aipass_standards.architecture_check import (
     check_module as check_architecture,
 )
@@ -501,3 +502,57 @@ def test_deep_nesting_with_no_row_names_every_site_and_a_whole_file_row_waives_a
         "deep_one() depth 5 line 4, deep_two() depth 5 line 13"
     )
     assert _deep_nesting(tmp_path, lines=None)["score"] == 100
+
+
+_TWO_COMMENTED = '"""Doc."""\n# logger.info("a")\ndef work():\n    """W."""\n    # logger.warning("b")\n    return 1\n'
+
+
+def _commented_logger(tmp_path, **scope) -> dict:
+    """commented_logger on apps/mod.py (commented calls at line 2, module level, and line 5, in work) under one row."""
+    target = tmp_path / "apps" / "mod.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(_TWO_COMMENTED, encoding="utf-8")
+    rules = [{"file": "apps/mod.py", "standard": "commented_logger", "reason": "t", **scope}] if scope else []
+    return check_commented_logger(str(target), bypass_rules=rules)
+
+
+def _commented_message(tmp_path, **scope) -> tuple:
+    result = _commented_logger(tmp_path, **scope)
+    return result["passed"], result["checks"][0]["message"]
+
+
+def test_commented_logger_with_no_row_names_both_sites(tmp_path):
+    assert _commented_message(tmp_path) == (
+        False,
+        "2 commented-out logger call(s) on lines 2, 5 -- restore or remove",
+    )
+
+
+def test_commented_logger_a_line_row_waives_its_line_and_the_other_still_convicts(tmp_path):
+    assert _commented_message(tmp_path, lines=[2]) == (
+        False,
+        "1 commented-out logger call(s) on lines 5 -- restore or remove",
+    )
+
+
+def test_commented_logger_a_function_row_waives_the_lines_inside_it_only(tmp_path):
+    in_work = _commented_message(tmp_path, functions=["work"])
+    at_module = _commented_message(tmp_path, functions=[FILE_SCOPE])
+    assert in_work[1].startswith("1 commented-out logger call(s) on lines 2 ")
+    assert at_module[1].startswith("1 commented-out logger call(s) on lines 5 ")
+
+
+def test_commented_logger_every_site_waived_passes_and_a_whole_file_row_still_waives_all(tmp_path):
+    every = _commented_logger(tmp_path, lines=[2, 5])
+    assert (every["passed"], every["score"]) == (True, 100)
+    assert _commented_logger(tmp_path, lines=None)["checks"][0]["name"] == "Bypassed"
+
+
+def test_commented_logger_in_an_unparseable_file_only_a_line_row_reaches_a_site(tmp_path):
+    target = tmp_path / "apps" / "mod.py"
+    target.parent.mkdir(parents=True)
+    target.write_text('# logger.info("a")\ndef broken(\n', encoding="utf-8")
+    row = {"file": "apps/mod.py", "standard": "commented_logger", "reason": "t"}
+    by_scope = check_commented_logger(str(target), bypass_rules=[{**row, "functions": [FILE_SCOPE]}])
+    by_line = check_commented_logger(str(target), bypass_rules=[{**row, "lines": [1]}])
+    assert (by_scope["passed"], by_line["passed"]) == (False, True)

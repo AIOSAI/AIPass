@@ -135,6 +135,19 @@ Two branches were audited for real on the day it landed:
 
 ---
 
+## Bypass Rows
+
+Every finding sits at module level, so its function is `<file>`. A finding with a line of its own
+is a site at that line: a wrong banner (the banner line), a docstring that is not one line or names
+no path (the docstring's line), a stray comment in the declared pass (that line), a declared pass
+above the docstring (the block's first line). A row with `"lines": [n]` waives the finding on line
+n. A finding that is an absence has no honest line and is the file's alone: no header first,
+missing header fields, no docstring, no declared pass. Only a row with `"functions": ["<file>"]`
+waives those, and that row waives every finding in the file. A row with no `lines` or `functions`
+waives the whole file.
+
+---
+
 ## Known limits
 
 **A file Python cannot parse yields no findings.** `ruff` already convicts the syntax error, and naming a missing docstring in a file that does not parse sends its author to the wrong place.

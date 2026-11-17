@@ -64,6 +64,16 @@ and fail on another. **There is no threshold and nothing to tune.**
 
 ---
 
+## Bypass Rows
+
+Each sleep call is its own site, at its line, inside the test function that holds it (`<file>`
+at module level). A row with `"lines": [n]` waives the sleep on line n; a row with
+`"functions": ["test_poll"]` waives the sleeps inside `test_poll`. Every other sleep still
+convicts, and the message names only the open ones. A row with no `lines` or `functions` waives
+the whole file.
+
+---
+
 ## Known limits
 
 **`asyncio.sleep` is caught by the same tail-name rule** — its cure is different (an event,

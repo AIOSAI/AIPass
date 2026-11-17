@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_imports.py
 # Description: imports_check and one_logger_check rulings (split from test_checkers_batch7.py)
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-10-08
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/imports_check.py, one_logger_check.py and logging_allowed.py."""
@@ -30,6 +30,7 @@ from aipass.sentry.apps.handlers.aipass_standards.imports_check import (
     filter_docstrings,
     find_import_section_end,
 )
+from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE
 from aipass.sentry.tests.support_checkers_batch7 import _lines
 
 pytestmark = pytest.mark.usefixtures("_pin_bypass_log")
@@ -589,3 +590,79 @@ class TestTheOldLoggingExemptionsReadPraxsList:
         target.parent.mkdir(parents=True)
         target.write_text('import logging\n\nh = logging.FileHandler("x.log")\n', encoding="utf-8")
         assert log_handler_check.check_module(str(target))["passed"] is False
+
+
+_FILLER = "".join(f"x{i} = {i}\n" for i in range(20))  # past the small-file exemption, so prax's rule is asked
+
+
+def _imports_under(tmp_path, source, rel="mybr/apps/modules/mod.py", **scope) -> dict:
+    """imports_check on ``rel`` under one row of this scope (no row when no scope is given)."""
+    target = tmp_path / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(source, encoding="utf-8")
+    rules = [{"file": rel.split("/", 1)[1], "standard": "imports", "reason": "t", **scope}] if scope else []
+    return imports_check.check_module(str(target), bypass_rules=rules)
+
+
+def _named(result, prefix) -> dict:
+    return next(c for c in result["checks"] if c["name"].startswith(prefix))
+
+
+class TestImportsAsksTheBypassTablePerSite:
+    """Each offending line is a site (FILE_SCOPE in the import section); import order is file-level."""
+
+    @pytest.mark.parametrize(
+        ("source", "check"),
+        [
+            ('"""Doc."""\nimport os\nA = os.environ["AIPASS_ROOT"]\nB = os.getenv("AIPASS_ROOT")\n', "No AIPASS_ROOT"),
+            ('"""Doc."""\nimport sys\nsys.path.insert(0, "a")\nsys.path.append("b")\n', "No sys.path hacking"),
+        ],
+        ids=["aipass_root", "sys_path"],
+    )
+    def test_a_line_row_waives_its_line_and_the_next_line_still_convicts(self, tmp_path, source, check):
+        open_row = _named(_imports_under(tmp_path, source), check)
+        one = _imports_under(tmp_path, source, lines=[3])
+        assert (open_row["passed"], "line 3" in open_row["message"]) == (False, True)
+        reported = _named(one, check)
+        assert (reported["passed"], "line 4" in reported["message"], one["score"]) == (False, True, 75)
+        assert _named(_imports_under(tmp_path, source, lines=[3, 4]), check)["passed"] is True
+        assert _named(_imports_under(tmp_path, source, functions=[FILE_SCOPE]), check)["passed"] is True
+
+    def test_handler_independence_reports_the_first_open_line(self, tmp_path):
+        source = '"""Doc."""\nfrom aipass.mybr.apps.modules.a import x\nfrom aipass.mybr.apps.modules.b import y\n'
+        rel = "mybr/apps/handlers/h.py"
+        assert "line 2" in _named(_imports_under(tmp_path, source, rel), "Handler independence")["message"]
+        one = _named(_imports_under(tmp_path, source, rel, lines=[2]), "Handler independence")
+        assert (one["passed"], "line 3" in one["message"]) == (False, True)
+        assert _named(_imports_under(tmp_path, source, rel, functions=[FILE_SCOPE]), "Handler independence")["passed"]
+
+    def test_bare_imports_name_only_the_open_sites(self, tmp_path):
+        source = '"""Doc."""\nfrom handlers.x import y\nfrom modules.z import w\n'
+        assert _named(_imports_under(tmp_path, source), "No bare imports")["message"].count("Line ") == 2
+        one = _named(_imports_under(tmp_path, source, lines=[2]), "No bare imports")
+        assert (one["passed"], one["message"].startswith("Line 3:"), "Line 2" in one["message"]) == (False, True, False)
+        assert _named(_imports_under(tmp_path, source, functions=[FILE_SCOPE]), "No bare imports")["passed"] is True
+
+    def test_prax_logger_sites_are_the_log_lines_inside_their_functions(self, tmp_path):
+        source = '"""Doc."""\nimport logging\n\nlogging.info("a")\n\n\ndef work():\n    logging.info("b")\n' + _FILLER
+
+        def message(**scope):
+            return _named(_imports_under(tmp_path, source, **scope), "Prax logger")["message"]
+
+        assert "lines [4, 8]" in message()
+        assert "lines [4]:" in message(functions=["work"])
+        assert "lines [8]:" in message(lines=[4])
+        assert "lines [8]:" in message(functions=[FILE_SCOPE])
+        assert _named(_imports_under(tmp_path, source, lines=[4, 8]), "Prax logger")["passed"] is True
+
+    def test_import_order_is_file_level_a_file_scope_row_waives_it_and_a_line_row_does_not(self, tmp_path):
+        source = '"""Doc."""\nfrom aipass.prax import logger\nimport os\n'
+        assert _named(_imports_under(tmp_path, source), "Import order")["passed"] is False
+        assert _named(_imports_under(tmp_path, source, lines=[2, 3]), "Import order")["passed"] is False
+        waived = _named(_imports_under(tmp_path, source, functions=[FILE_SCOPE]), "Import order")
+        assert (waived["passed"], FILE_SCOPE in waived["message"]) == (True, True)
+
+    def test_a_whole_file_row_still_waives_every_finding(self, tmp_path):
+        source = '"""Doc."""\nfrom aipass.prax import logger\nimport os\nA = os.environ["AIPASS_ROOT"]\n'
+        result = _imports_under(tmp_path, source, lines=None)
+        assert (result["score"], result["checks"][0]["name"]) == (100, "Bypassed")
