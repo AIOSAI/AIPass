@@ -3,7 +3,7 @@
 # Description: Fence probe for test_handlers_fence.py, run from a kin seat and from foreign copies
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Probe for the handlers fence of apps/handlers/__init__.py (no test_ prefix: never collected).
@@ -19,6 +19,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import aipass
+import aipass.ai_mail as front_door
 
 BRANCH = "ai_mail"
 HANDLERS = f"aipass.{BRANCH}.apps.handlers"
@@ -67,6 +68,12 @@ def _door() -> None:
     importlib.import_module(A_DOOR)
 
 
+def _front() -> None:
+    """The package top file, which loads each name from its handler home on the caller's behalf."""
+    names = ("granted", "is_verified_admin_caller", "wake_branch", "write_pointer")
+    assert all(callable(getattr(front_door, name)) for name in names)
+
+
 def _mock() -> None:
     """mock.patch on a handler path: the import starts in unittest/mock.py and pkgutil."""
     with patch(f"{A_HANDLER}.log_operation"):
@@ -80,6 +87,7 @@ SHAPES = {
     "chain": _chain,
     "sibling": _sibling,
     "door": _door,
+    "front": _front,
     "mock": _mock,
 }
 

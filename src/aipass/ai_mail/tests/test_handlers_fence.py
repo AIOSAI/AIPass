@@ -3,7 +3,7 @@
 # Description: The handlers fence: a foreign importer is refused, kin and the modules door pass (DPLAN-0404)
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/__init__.py, the fence, in a fresh interpreter per case."""
@@ -98,8 +98,12 @@ class TestKinAndTheDoorPass:
         """A foreign seat importing this branch's modules, which import the handlers on its behalf, passes."""
         assert _probe(foreign_seat, "door", tmp_path) == "ALLOWED"
 
+    def test_the_package_front_door_is_open_to_a_foreign_branch(self, foreign_seat, tmp_path):
+        """The top file loads each name's handler home on the foreign caller's behalf."""
+        assert _probe(foreign_seat, "front", tmp_path) == "ALLOWED"
+
     def test_the_apps_package_does_not_import_its_handlers(self):
-        """An apps/__init__.py that imports handlers becomes every foreign import's caller: the fence goes decorative."""
+        """An apps/__init__.py importing handlers becomes every foreign import's caller: the fence goes decorative."""
         apps_init = KIN_PROBE.parents[1] / "apps" / "__init__.py"
         source = apps_init.read_text(encoding="utf-8")
         assert "import handlers" not in source, source
