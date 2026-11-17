@@ -75,6 +75,7 @@ just that one merge commit — **cosmetic and trivially resolved**.
 - [ ] Confirm what's shipping — scan uncommitted changes + already-pushed dev commits ahead of main: `git rev-list --count main..dev` (read git, raw ok)
 - [ ] No surprise files (stray `/tmp` artifacts, test pollution, `.recovery`/`.archive` churn). Clean = archive, never delete.
 - [ ] **Version state check** (informs the bump decision): read the **two** release-tied versions — `grep '^version' pyproject.toml` and `grep __version__ src/aipass/__init__.py` (they should match; if drifted, note it) — and what PyPI already has: `curl -s https://pypi.org/pypi/aipass/json | python3 -c "import sys,json;print(json.load(sys.stdin)['info']['version'])"`. PyPI rejects a duplicate, so the target must be > published.
+- [ ] **Bump the Claude pin in the image:** `claude --version` on the host, then set `ARG CLAUDE_CODE_VERSION` in the repo-root `Dockerfile` to it and commit with the rest. The image installs exactly that version; a stale pin ships an old Claude.
 - [ ] **Release tag: default YES with PATCH bump.** Every dev-to-main merge ships a PATCH bump + tag so PyPI always tracks main (the owner's ruling S318, 2026-07-17 — version numbers carry no significance during beta). Override to MINOR/MAJOR only when warranted; skip only if explicitly told.
 
 ## 2. Verify, commit, CHANGELOG
