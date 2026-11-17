@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: modules_check.py
 # Description: Modules Standards Checker Handler
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-03-05
 # Modified: 2026-11-16
 # =============================================
@@ -179,7 +179,8 @@ def check_door(content: str, module_path: str) -> Dict:
     """Check that ``apps/modules/door_<subject>.py`` is a door and nothing else.
 
     A door imports only from its OWN branch's ``apps.handlers`` (and the stdlib), defines no function or
-    class, and carries an ``__all__`` of names it imported. Foreign handlers may import it: modules are the gateway.
+    class, and carries an ``__all__`` of names it imported. It is inside-the-branch plumbing: the branch's front
+    door may hand out its names, and another branch never imports it by path.
     """
     try:
         tree = ast.parse(content)

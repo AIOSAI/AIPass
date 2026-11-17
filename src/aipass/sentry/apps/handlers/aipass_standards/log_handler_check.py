@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_handler_check.py
 # Description: Log Handler Standards Checker Handler
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-03-05
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -123,7 +123,9 @@ def check_no_raw_file_handler(lines: List[str], file_path: str, bypass_rules: li
         return {
             "name": "No raw FileHandler",
             "passed": False,
-            "message": f"Raw logging.FileHandler on lines {violations[:5]} - use RotatingFileHandler via prax system_logger",
+            "message": (
+                f"Raw logging.FileHandler on lines {violations[:5]} - log through prax: from aipass.prax import logger"
+            ),
         }
 
     return {"name": "No raw FileHandler", "passed": True, "message": "No raw logging.FileHandler found"}
@@ -164,7 +166,10 @@ def check_no_raw_stream_handler(
         return {
             "name": "No raw StreamHandler with file logging",
             "passed": False,
-            "message": f"Raw logging.StreamHandler with file logging on lines {violations[:5]} - use prax system_logger instead",
+            "message": (
+                f"Raw logging.StreamHandler with file logging on lines {violations[:5]} - "
+                "log through prax: from aipass.prax import logger"
+            ),
         }
 
     return {

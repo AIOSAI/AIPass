@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli_check.py
 # Description: CLI Standards Checker Handler
-# Version: 1.1.2
+# Version: 1.2.0
 # Created: 2026-03-05
-# Modified: 2026-11-14
+# Modified: 2026-11-16
 # =============================================
 
 """CLI Standards Checker Handler"""
@@ -58,6 +58,30 @@ def _console_import_line(content: str) -> Optional[int]:
         if module and module.startswith("aipass.cli"):
             best = node.lineno if best is None else min(best, node.lineno)
     return best
+
+
+#: Fallback for a source that does not parse: a cli import at a line start, either spelling.
+_CLI_IMPORT_LINE = re.compile(r"^[ \t]*from aipass\.cli(?:\.apps\.modules(?:\.\w+)*)? import (.+)", re.M)
+
+
+def _cli_imports(content: str) -> Dict[int, str]:
+    """Line -> imported names of each cli import statement, door or long spelling.
+
+    Either spelling means the service is used; whether the spelling is right is front_door's
+    question. Read from the parse tree, so a string or docstring naming the import is not one.
+    """
+    try:
+        tree = ast.parse(content)
+    except (SyntaxError, ValueError) as exc:
+        logger.info("cli: unparseable, cli imports read from line starts: %s", exc)
+        return {content.count("\n", 0, m.start()) + 1: m.group(1) for m in _CLI_IMPORT_LINE.finditer(content)}
+    found = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if module == "aipass.cli" or (module + ".").startswith("aipass.cli.apps.modules."):
+                found.setdefault(node.lineno, ", ".join(alias.name for alias in node.names))
+    return found
 
 
 def _is_pre_console_bootstrap(line_number: int, console_line: Optional[int]) -> bool:
@@ -227,6 +251,7 @@ def check_handler_separation(content: str) -> Dict:
     lines = content.split("\n")
     stderr_prints = _stderr_directed_print_lines(content)
     print_calls = _print_call_lines(content)
+    cli_imports = _cli_imports(content)
 
     prose = _prose(content)
     console_print_lines = []
@@ -258,9 +283,7 @@ def check_handler_separation(content: str) -> Dict:
                 continue
             console_print_lines.append(i)
 
-        if re.search(r"from aipass\.cli\.apps\.modules[\.\s]", stripped) or "from aipass.cli import" in stripped:
-            if '"from aipass.cli' in line or "'from aipass.cli" in line:
-                continue
+        if i in cli_imports:
             cli_import_lines.append(i)
 
         # Look for print() calls. A print DIRECTED AT stderr is a diagnostic,
@@ -298,19 +321,10 @@ def check_cli_imports(content: str, module_path: str = "") -> Optional[Dict]:
     if "/cli/apps/" in module_path:
         return {"name": "CLI service imports", "passed": True, "message": "CLI branch exempt (uses internal imports)"}
 
-    has_cli_imports = (
-        bool(re.search(r"from aipass\.cli\.apps\.modules[\.\s]", content)) or "from aipass.cli import" in content
-    )
-
-    if has_cli_imports:
-        import_match = (
-            re.search(r"from aipass\.cli\.apps\.modules\.\w+ import (.+)", content)
-            or re.search(r"from aipass\.cli\.apps\.modules import (.+)", content)
-            or re.search(r"from aipass\.cli import (.+)", content)
-        )
-        if import_match:
-            imports = import_match.group(1)
-            return {"name": "CLI service imports", "passed": True, "message": f"Using CLI services ({imports})"}
+    cli_imports = _cli_imports(content)
+    if cli_imports:
+        imports = cli_imports[min(cli_imports)]
+        return {"name": "CLI service imports", "passed": True, "message": f"Using CLI services ({imports})"}
 
     has_console_print = "console.print(" in content
     has_print = bool(re.search(r"\bprint\s*\(", content))
@@ -320,7 +334,7 @@ def check_cli_imports(content: str, module_path: str = "") -> Optional[Dict]:
         return {
             "name": "CLI service imports",
             "passed": False,
-            "message": "Has output but missing CLI service imports (import from cli.apps.modules)",
+            "message": "Has output but missing CLI service imports (from aipass.cli import console)",
         }
 
     return {"name": "CLI service imports", "passed": True, "message": "No CLI output needed"}
@@ -492,13 +506,12 @@ def check_duplicate_display_functions(content: str, module_path: str = "") -> Op
     duplicates_found = [name for name in cli_display_functions if name in defined_at_module_level]
 
     if duplicates_found:
+        door = [name for name in duplicates_found if name != "info"]  # cli's door hands out no info()
+        cure = f"use from aipass.cli import {', '.join(door)}" if door else "use from aipass.cli import console"
         return {
             "name": "CLI display functions",
             "passed": False,
-            "message": (
-                f"Defines own {', '.join(duplicates_found)}() - "
-                f"use from cli.apps.modules.display import {', '.join(duplicates_found)}"
-            ),
+            "message": f"Defines own {', '.join(duplicates_found)}() - {cure}",
         }
 
     return {"name": "CLI display functions", "passed": True, "message": "No duplicate CLI display functions defined"}

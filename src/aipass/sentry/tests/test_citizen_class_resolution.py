@@ -1,12 +1,12 @@
 # =================== META ====================
 # Name: test_citizen_class_resolution.py
-# Description: Template baseline resolves class via spawn's modules gateway, never a mirror or a path join
-# Version: 1.0.3
+# Description: Template baseline resolves class via spawn's own functions, never a mirror or a path join
+# Version: 1.0.4
 # Created: 2026-08-28
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
-"""Tests for apps/handlers/aipass_standards/architecture_check.py resolving citizen_class via spawn's gateway."""
+"""Tests for apps/handlers/aipass_standards/architecture_check.py resolving citizen_class through spawn."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(shared) — the baseline's per-item dir and file rows; tests/test_coverage_arch_checklist.py
@@ -23,9 +23,10 @@ import pytest
 
 from aipass.sentry.apps.handlers.aipass_standards import architecture_check
 
-# The gateway is what production imports; spawn's class_registry door enumerates the cases (the retired-name
-# list is spawn's to own) and re-exports the handler's own objects, so identity asserts compare spawn's functions.
-from aipass.spawn.apps import modules as spawn_gateway
+# Production imports spawn's apps.modules by path (a front_door violation, HELD until spawn's door hands out the
+# two names); door_class_registry enumerates the cases (the retired-name list is spawn's to own) and re-exports
+# the handler's own objects, so identity asserts compare spawn's functions.
+from aipass.spawn.apps import modules as spawn_modules
 from aipass.spawn.apps.modules import door_class_registry as class_registry
 
 
@@ -170,19 +171,19 @@ class TestRefusedClassesScoreAViolation:
         assert result[0]["passed"] is False
 
 
-class TestGatewayIsTheOnlySource:
+class TestSpawnIsTheOnlySource:
     """The mirror is retired. Nothing here may answer the class question locally."""
 
-    def test_import_path_is_the_declared_gateway(self):
-        """Production imports the two names from spawn's modules gateway."""
+    def test_spawn_is_reached_by_path_until_its_door_hands_out_the_two_names(self):
+        """A front_door violation, HELD: spawn's door does not hand out get_template_dir or refuse_legacy_class yet."""
         source = Path(architecture_check.__file__).read_text(encoding="utf-8")
         assert "from aipass.spawn.apps.modules import get_template_dir, refuse_legacy_class" in source
         assert "spawn.apps.handlers" not in source
 
     def test_imported_names_are_spawns_own_callables(self):
         """Identity, not equivalence."""
-        assert architecture_check.get_template_dir is spawn_gateway.get_template_dir
-        assert architecture_check.refuse_legacy_class is spawn_gateway.refuse_legacy_class
+        assert architecture_check.get_template_dir is spawn_modules.get_template_dir
+        assert architecture_check.refuse_legacy_class is spawn_modules.refuse_legacy_class
         assert architecture_check.get_template_dir is class_registry.get_template_dir
         assert architecture_check.refuse_legacy_class is class_registry.refuse_legacy_class
 
@@ -212,13 +213,13 @@ class TestGatewayIsTheOnlySource:
         assert not baked, f"{sorted(baked)} baked into sentry code -- spawn's facts to hold, not mine"
 
     def test_the_import_has_no_silent_fallback(self):
-        """A missing gateway must kill the import, not degrade to a guess."""
+        """A missing spawn source must kill the import, not degrade to a guess."""
         source = Path(architecture_check.__file__).read_text(encoding="utf-8")
         assert "except ImportError" not in source
         assert "ModuleNotFoundError" not in source
 
-    def test_a_missing_gateway_fails_loudly_at_import(self):
-        """Behaviour, not just source: block the gateway and the checker must die."""
+    def test_a_missing_spawn_source_fails_loudly_at_import(self):
+        """Behaviour, not just source: block spawn's module and the checker must die."""
         script = textwrap.dedent(
             """
             import sys
@@ -259,7 +260,7 @@ class TestGatewayIsTheOnlySource:
         entry = _branch(tmp_path, "")
         passport = entry.parent.parent / ".trinity" / "passport.json"
         for value in known:
-            expected = spawn_gateway.get_template_dir(value).name if class_registry.validate_class(value) else None
+            expected = spawn_modules.get_template_dir(value).name if class_registry.validate_class(value) else None
             if expected:
                 (templates / expected / "apps").mkdir(parents=True, exist_ok=True)
             passport.write_text(json.dumps({"identity": {"citizen_class": value}}), encoding="utf-8")
@@ -296,7 +297,7 @@ class TestResolutionSeamMatchesSpawn:
         available = class_registry.get_available_classes()
         assert available, "spawn registers no citizen class - there is no root to agree about"
         for citizen_class in available:
-            spawn_dir = spawn_gateway.get_template_dir(citizen_class).resolve()
+            spawn_dir = spawn_modules.get_template_dir(citizen_class).resolve()
             assert spawn_dir.parent == architecture_check.SPAWN_TEMPLATES_DIR.resolve()
 
     def test_checker_does_not_join_the_class_name(self):
@@ -309,6 +310,6 @@ class TestResolutionSeamMatchesSpawn:
         available = class_registry.get_available_classes()
         assert available, "spawn registers no citizen class - no template dir is being checked"
         for citizen_class in available:
-            dir_name = spawn_gateway.get_template_dir(citizen_class).name
+            dir_name = spawn_modules.get_template_dir(citizen_class).name
             live = architecture_check.SPAWN_TEMPLATES_DIR / dir_name
             assert live.is_dir(), f"resolved template dir is missing on disk: {live}"

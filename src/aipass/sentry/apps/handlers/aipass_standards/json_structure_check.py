@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: json_structure_check.py
 # Description: JSON Structure Standards Checker Handler
-# Version: 3.5.0
+# Version: 3.6.0
 # Created: 2026-03-05
 # Modified: 2026-11-16
 # =============================================
@@ -193,8 +193,10 @@ def _declares_no_callable_code(content: str) -> bool:
 #: A runaway guard on the bootstrap walk, not a budget: the fleet's logging chain measures ~150.
 _BOOTSTRAP_WALK_CAP = 2000
 
-#: Prax's door two (its LOGGER_DOORS), the logger made for modules beneath json_handler: importing it is no cycle.
-_TRAIL_DOOR = "aipass.prax.apps.handlers.logging.trail"
+#: Prax's trail, the logger made for modules beneath json_handler: importing it is no cycle. The door form
+#: is the ruled one; the module path is prax's own spelling, and front_door's finding anywhere else.
+_TRAIL_DOOR = "aipass.prax.trail"
+_TRAIL_MODULE = "aipass.prax.apps.handlers.logging.trail"
 
 
 def resolve_relative(module_name: str | None, level: int, package: str | None) -> str | None:
@@ -322,7 +324,9 @@ def _is_prelogging_bootstrap(path: Path, content: str) -> bool:
         # An unreadable file is not a bootstrap module: [] from _aipass_imports() would buy the exemption.
         logger.info("json_structure: unparseable, so not eligible for the bootstrap exemption: %s", exc)
         return False
-    if any(name != _TRAIL_DOOR and not name.startswith(_TRAIL_DOOR + ".") for name in _aipass_imports(content)):
+    imports = _aipass_imports(content)
+    allowed = {_TRAIL_DOOR, _TRAIL_MODULE} | ({"aipass.prax"} if _TRAIL_DOOR in imports else set())
+    if any(name not in allowed and not name.startswith(_TRAIL_MODULE + ".") for name in imports):
         return False
     source_root = _aipass_source_root(path)
     if source_root is None:
@@ -447,7 +451,8 @@ def _check_code_wiring(_path: Path, content: str) -> List[Dict]:
         import_message = "Imports json_handler"
     else:
         import_message = (
-            "Missing json_handler import — add: from aipass.<branch>.apps.handlers.json import json_handler"
+            "Missing json_handler import — add this file's own branch's: "
+            "from aipass.<own branch>.apps.handlers.json import json_handler"
         )
     checks.append(
         {

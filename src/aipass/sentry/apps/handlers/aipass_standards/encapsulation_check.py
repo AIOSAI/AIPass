@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: encapsulation_check.py
 # Description: Handler Encapsulation Standards Checker
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-03-05
 # Modified: 2026-11-16
 # =============================================
@@ -434,9 +434,10 @@ def check_cross_branch_imports(
 def _conviction(violation: Dict) -> str:
     """The message for a cross-branch violation; a string import quotes its line."""
     head = f"Line {violation['line']}: {violation['from_branch']}.apps.handlers imported"
+    cure = f"(use its front door: from aipass.{violation['from_branch']} import <name>)"
     if violation.get("string"):
-        return f"{head} {STRING_IMPORT_NOTE} (use modules entry point): {violation['code']}"
-    return f"{head} (use modules entry point)"
+        return f"{head} {STRING_IMPORT_NOTE} {cure}: {violation['code']}"
+    return f"{head} {cure}"
 
 
 def _target_branch(target: str) -> str:
@@ -641,7 +642,10 @@ def check_direct_handler_imports(lines: List[str], module_path: str, bypass_rule
         return {
             "name": "Direct handler imports",
             "passed": False,
-            "message": f"Line {first['line']}: Handler imported directly (use module entry point)",
+            "message": (
+                f"Line {first['line']}: Handler imported directly (inside its branch, through a module; "
+                "another branch's, through its front door: from aipass.<branch> import <name>)"
+            ),
         }
 
     return {"name": "Direct handler imports", "passed": True, "message": "No direct handler imports from entry point"}

@@ -17,6 +17,7 @@ from typing import List
 
 import pytest
 
+from aipass.sentry.apps.handlers.aipass_standards import architecture_check, imports_check
 from aipass.sentry.apps.handlers.aipass_standards.handlers_check import (
     _branch_before,
     check_auto_detection,
@@ -304,8 +305,8 @@ def test_branch_before_says_none_rather_than_guessing():
     assert _branch_before(".apps.handlers.x", ".apps.handlers") is None
 
 
-def test_no_orchestration_allows_another_branchs_modules_gateway(tmp_path):
-    """Consuming ANOTHER branch's modules/ is the sanctioned door, not orchestration."""
+def test_no_orchestration_leaves_another_branchs_long_path_to_front_door(tmp_path):
+    """A front_door violation (another branch's apps/modules by path), not orchestration: no double conviction."""
     content = '"""Handler."""\nfrom aipass.spawn.apps.modules import get_template_dir\n'
 
     result = check_no_orchestration(
@@ -334,6 +335,34 @@ def test_no_orchestration_unknown_path_stays_strict():
     result = check_no_orchestration(content, _lines(content))
     assert result is not None
     assert result["passed"] is False
+
+
+def test_handler_independence_cure_names_the_front_door():
+    content = "from aipass.flow.apps.handlers.plan import ops\n"
+    result = check_handler_independence(content, _lines(content), "src/aipass/sentry/apps/handlers/x/y.py")
+    assert "(import it through that branch's front door: from aipass.<branch> import <name>)" in result["message"]
+    assert "modules/" not in result["message"]
+
+
+@pytest.mark.parametrize(
+    "module, exempt",
+    [
+        ("aipass.prax.apps.modules.logger", True),
+        ("aipass.cli.apps.modules", True),
+        ("aipass.cli.apps.modules.display", True),
+        ("aipass.prax.apps.modules.dashboard", False),
+        ("aipass.prax.apps.modules", False),
+    ],
+)
+def test_handlers_architecture_and_imports_read_the_foundation_services_one_way(module, exempt):
+    """FPLAN-1024: prax's logger and cli's display, reached from inside their own branch, by one shared reading."""
+    content = f"from {module} import x\n"
+    path = f"src/aipass/{module.split('.')[1]}/apps/handlers/h/x.py"
+    orchestration = check_no_orchestration(content, _lines(content), path)
+    architecture = architecture_check.check_handler_independence(_lines(content), path)
+    imports = imports_check.check_handler_independence(_lines(content), path)
+    assert orchestration is not None and architecture is not None and imports is not None
+    assert (orchestration["passed"], architecture["passed"], imports["passed"]) == (exempt, exempt, exempt)
 
 
 def test_no_orchestration_in_docstring():

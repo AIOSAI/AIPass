@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: handlers_check.py
 # Description: Handlers Standards Checker Handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-05
 # Modified: 2026-11-16
 # =============================================
@@ -95,6 +95,20 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "handlers"})
     return {"passed": overall_passed, "checks": checks, "score": score, "standard": "HANDLERS"}
+
+
+#: prax's logger and cli's display under apps/modules: the foundation services.
+_FOUNDATION_MODULES = ("aipass.prax.apps.modules.logger", "aipass.cli.apps.modules")
+
+
+def is_foundation_service(module: str) -> bool:
+    """Whether a dotted import target is a foundation service's module, the one reading the handler rows share.
+
+    A handler of prax or cli calls its own service from inside its branch, so it is not orchestration. The door
+    spelling (``aipass.prax``, ``aipass.cli``) names no ``apps.modules`` and is never a site; another branch's
+    long path is front_door's to convict.
+    """
+    return any((module + ".").startswith(root + ".") for root in _FOUNDATION_MODULES)
 
 
 def _iter_import_modules(content: str) -> Iterator[Tuple[int, str, List[str]]]:
@@ -199,7 +213,8 @@ def check_handler_independence(
         return {
             "name": "Handler independence",
             "passed": False,
-            "message": "Cross-branch handler imports detected (use that branch's modules/ instead): "
+            "message": "Cross-branch handler imports detected "
+            "(import it through that branch's front door: from aipass.<branch> import <name>): "
             + "; ".join(forbidden_imports),
         }
 
@@ -352,10 +367,10 @@ def check_no_orchestration(
         if "apps.modules" not in module:
             continue
 
-        if "prax.apps.modules.logger" in module or "cli.apps.modules" in module:
+        if is_foundation_service(module):
             continue
 
-        # Allowed: another branch's modules gateway -- its public door
+        # Another branch's apps/modules is not this branch's orchestration; its path is front_door's finding
         imported_branch = _branch_of_modules_import(module)
         if own_branch and imported_branch and imported_branch != own_branch:
             continue

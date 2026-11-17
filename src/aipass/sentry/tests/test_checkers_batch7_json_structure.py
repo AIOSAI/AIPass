@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_json_structure.py
 # Description: json_structure_check: declaration-only and bootstrap modules (split from test_checkers_batch7.py)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-08
 # Modified: 2026-11-16
 # =============================================
@@ -131,8 +131,31 @@ class TestJsonStructureExemptsPreLoggingBootstrapModules:
         )
         assert self._check(boot) is False
 
-    def test_a_module_importing_only_the_trail_door_keeps_the_exemption(self, tmp_path):
+    def test_a_module_importing_only_the_trail_through_prax_s_door_keeps_the_exemption(self, tmp_path):
         """Prax's trail is the logger built for modules beneath json_handler (prax ba4fd567)."""
+        root = self._universe(tmp_path)
+        boot = root / "prax" / "apps" / "handlers" / "boot.py"
+        boot.write_text(
+            "from pathlib import Path\n"
+            "from aipass.prax import trail\n\n"
+            "def find_root():\n    return Path(__file__).parent\n",
+            encoding="utf-8",
+        )
+        assert self._check(boot) is True
+
+    def test_the_trail_door_beside_another_door_name_is_not_exempt(self, tmp_path):
+        root = self._universe(tmp_path)
+        boot = root / "prax" / "apps" / "handlers" / "boot.py"
+        boot.write_text(
+            "from pathlib import Path\n"
+            "from aipass.prax import logger, trail\n\n"
+            "def find_root():\n    return Path(__file__).parent\n",
+            encoding="utf-8",
+        )
+        assert self._check(boot) is False
+
+    def test_a_prax_module_importing_only_its_own_long_trail_path_keeps_the_exemption(self, tmp_path):
+        """Inside prax the long path is its own; in another branch it is front_door's finding, not this row's."""
         root = self._universe(tmp_path)
         boot = root / "prax" / "apps" / "handlers" / "boot.py"
         boot.write_text(
@@ -143,7 +166,7 @@ class TestJsonStructureExemptsPreLoggingBootstrapModules:
         )
         assert self._check(boot) is True
 
-    def test_the_trail_door_beside_any_other_aipass_import_is_not_exempt(self, tmp_path):
+    def test_the_long_trail_path_beside_any_other_aipass_import_is_not_exempt(self, tmp_path):
         root = self._universe(tmp_path)
         boot = root / "prax" / "apps" / "handlers" / "boot.py"
         boot.write_text(
@@ -206,6 +229,18 @@ class TestJsonStructureExemptsPreLoggingBootstrapModules:
         if not target.exists():
             pytest.skip("memory/apps/handlers/repo_root.py not on disk")
         assert self._check(target) is False
+
+
+class TestTheMissingImportHint:
+    def test_the_hint_names_the_files_own_branch_shim(self, tmp_path):
+        target = tmp_path / "apps" / "handlers" / "work" / "unlogged.py"
+        target.parent.mkdir(parents=True)
+        target.write_text('"""Doc."""\n\n\ndef work():\n    return 1\n', encoding="utf-8")
+        messages = [c["message"] for c in json_structure_check.check_module(str(target), bypass_rules=[])["checks"]]
+        assert (
+            "Missing json_handler import — add this file's own branch's: "
+            "from aipass.<own branch>.apps.handlers.json import json_handler"
+        ) in messages
 
 
 class TestTheBootstrapChainSeesRelativeImports:

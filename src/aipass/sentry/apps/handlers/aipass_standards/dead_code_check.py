@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dead_code_check.py
 # Description: Dead Code Standards Checker Handler
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-03-22
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Dead Code Standards Checker Handler
@@ -40,8 +40,8 @@ _INSTALL_SOURCE = Path("src") / "aipass"
 def _is_shaped_door(py_file: Path) -> bool:
     """Whether this is an ``apps/modules/door_*.py`` that passes Door shape (DPLAN-0404).
 
-    A door is called from other branches, never its own, so its branch's corpus
-    never names it; its shape is its reference, the way the entry point's name is.
+    Inside-the-branch plumbing the front door (top __init__.py, outside apps/) may hand out, so
+    the apps/ corpus may never name it; its shape is its reference, as the entry point's name is.
     A ``door_`` file that fails Door shape is read like any other module.
     """
     if not (py_file.name.startswith("door_") and py_file.parent.name == "modules"):

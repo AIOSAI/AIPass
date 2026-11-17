@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch4.py
 # Description: Unit tests for 5 sentry checker handlers (batch 4)
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-03-29
-# Modified: 2026-11-14
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for 5 checkers: aipass_standards/stderr_routing_check.py, todo, trigger, dead_code, unused_function."""
@@ -65,7 +65,7 @@ class TestStderrRoutingCheck:
         _write_file(
             py_file,
             (
-                "from aipass.cli.apps.modules import error, warning\n"
+                "from aipass.cli import error, warning\n"
                 "\n"
                 "def do_work():\n"
                 "    error('Something failed', suggestion='Try again')\n"
@@ -118,7 +118,7 @@ class TestStderrRoutingReadsCodeLinesOnly:
     def test_a_stderr_console_on_a_line_opening_a_triple_quoted_literal_is_found(self, mock_json, tmp_path):
         source = 'def f():\n    return Console(stderr=True), """\n    usage\n    """\n'
         assert self._failed(tmp_path, source) == [
-            "subject.py: Custom Console(stderr=True) on lines [2] — import err_console from aipass.cli.apps.modules"
+            "subject.py: Custom Console(stderr=True) on lines [2] — use from aipass.cli import err_console"
         ]
 
 
@@ -362,7 +362,7 @@ class TestDeadCodeCheck:
         ids=["shaped_door_is_referenced", "door_that_defines_a_function_is_dead"],
     )
     def test_a_door_counts_as_referenced_by_its_shape(self, mock_json, tmp_path: Path, tail: str, dead: bool) -> None:
-        """A door is called from other branches, so its own corpus never names it (DPLAN-0404)."""
+        """A door_ module is handed out by the front door, outside apps/, so the corpus may never name it."""
         branch = _make_branch(tmp_path)
         _write_file(branch / "apps" / "handlers" / "trail.py", "def log_operation():\n    return True\n")
         door = f'from aipass.{branch.name}.apps.handlers.trail import log_operation\n\n__all__ = ["log_operation"]\n'

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trigger_check.py
 # Description: Trigger Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-11-14
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -222,8 +222,15 @@ def _is_trigger_branch(file_path: str) -> bool:
     return "/trigger/apps/" in file_path
 
 
+_DOOR_IMPORT = r"from\s+aipass\.trigger\s+import\s+[^\n#]*\btrigger\b"
+_LONG_IMPORTS = (
+    r"from\s+aipass\.trigger\.apps\.modules\.core\s+import\s+trigger\b",
+    r"from\s+aipass\.trigger\.apps\.modules\s+import\s+(?:core|trigger)\b",
+)
+
+
 def check_trigger_import_pattern(content: str, _lines: List[str], _module_path: str) -> Optional[Dict]:
-    """Check for correct trigger import patterns"""
+    """Check that a file firing trigger events imports trigger: by the door, or by a long path front_door convicts."""
     if "trigger" not in content.lower():
         return None
 
@@ -234,31 +241,29 @@ def check_trigger_import_pattern(content: str, _lines: List[str], _module_path: 
             "message": "Trigger branch file — self-reference, import not required",
         }
 
-    has_trigger_import = False
     has_trigger_fire = "trigger.fire(" in content
+    has_door_import = re.search(_DOOR_IMPORT, content) is not None
+    has_long_import = any(re.search(pattern, content) for pattern in _LONG_IMPORTS) or (
+        "_trigger" in content and "trigger.apps.modules.core" in content
+    )
 
-    valid_patterns = [
-        r"from\s+aipass\.trigger\.apps\.modules\.core\s+import\s+trigger\b",
-        r"from\s+aipass\.trigger\.apps\.modules\s+import\s+(?:core|trigger)\b",
-    ]
+    if has_door_import:
+        return {"name": "Trigger import pattern", "passed": True, "message": "Imports trigger through its front door"}
 
-    for pattern in valid_patterns:
-        if re.search(pattern, content):
-            has_trigger_import = True
-            break
+    if has_long_import:
+        return {
+            "name": "Trigger import pattern",
+            "passed": True,
+            "message": "Imports trigger by a path under trigger's apps/ (front_door judges the form; "
+            "the door form is from aipass.trigger import trigger)",
+        }
 
-    if "_trigger" in content and "trigger.apps.modules.core" in content:
-        has_trigger_import = True
-
-    if has_trigger_fire and not has_trigger_import:
+    if has_trigger_fire:
         return {
             "name": "Trigger import pattern",
             "passed": False,
-            "message": "Uses trigger.fire() but missing proper import",
+            "message": "Uses trigger.fire() but never imports trigger — add: from aipass.trigger import trigger",
         }
-
-    if has_trigger_import:
-        return {"name": "Trigger import pattern", "passed": True, "message": "Correct trigger import pattern"}
 
     return None
 

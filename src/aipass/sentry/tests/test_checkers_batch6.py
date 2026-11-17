@@ -172,7 +172,7 @@ class TestArchHandlerIndependence:
         """Handler without parent module imports passes."""
         lines: list[str] = [
             "from aipass.prax import logger",
-            "from aipass.cli.apps.modules import display",
+            "from aipass.cli import console",
             "",
             "def do_work():",
             "    return True",
@@ -208,10 +208,10 @@ class TestArchHandlerIndependence:
         assert result["passed"] is False
 
     def test_allowed_service_imports_pass(self, tmp_path):
-        """Prax and CLI service imports are allowed in handlers."""
+        """Prax and CLI services through their front doors are allowed in handlers."""
         lines: list[str] = [
-            "from prax.apps.modules.logger import info",
-            "from cli.apps.modules.display import header",
+            "from aipass.prax import logger",
+            "from aipass.cli import header",
         ]
         result = architecture_check.check_handler_independence(
             lines, str(tmp_path / "sentry" / "apps" / "handlers" / "json" / "j.py")
@@ -409,7 +409,7 @@ class TestCheckHandlerSeparation:
 
     def test_cli_import_fails(self):
         """Handler importing CLI services fails separation check."""
-        content = "from aipass.cli.apps.modules.display import header\ndef show():\n    pass\n"
+        content = "from aipass.cli import header\ndef show():\n    pass\n"
         result = cli_check.check_handler_separation(content)
         assert result["passed"] is False
         assert "CLI services" in result["message"]
@@ -435,7 +435,7 @@ class TestCheckCliImports:
 
     def test_has_cli_imports_passes(self, tmp_path):
         """Module with CLI service imports passes."""
-        content = "from aipass.cli.apps.modules.display import header\n"
+        content = "from aipass.cli import header\n"
         result = cli_check.check_cli_imports(content, str(tmp_path / "sentry" / "apps" / "modules" / "audit.py"))
         assert result is not None
         assert result["passed"] is True
@@ -463,13 +463,6 @@ class TestCheckCliImports:
         assert result is not None
         assert result["passed"] is True
         assert "No CLI output needed" in result["message"]
-
-    def test_shortcut_import_passes(self, tmp_path):
-        """Shortcut import via cli __init__ passes."""
-        content = "from aipass.cli import header\n"
-        result = cli_check.check_cli_imports(content, str(tmp_path / "sentry" / "apps" / "modules" / "audit.py"))
-        assert result is not None
-        assert result["passed"] is True
 
 
 # -- check_print_usage -------------------------------------------------------

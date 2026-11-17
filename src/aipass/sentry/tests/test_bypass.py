@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_bypass.py
 # Description: Unit tests for handlers/bypass/
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-03-24
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/bypass/bypass_handler.py, ignore_handler.py, utils.py and inert.py."""
@@ -430,13 +430,14 @@ def test_inert_scope_support_is_derived_not_hardcoded():
     """The map comes from the checker sources, so it cannot drift from them."""
     support = inert.scope_support()
 
-    # cli threads line= into is_bypassed; handlers gates once at the top of check_module.
+    # cli threads line= into is_bypassed, handlers line= and name= per site; imports never passes a line.
     assert "lines" in support["cli"]
-    assert support["handlers"] == set()
+    assert support["handlers"] == {"lines", "functions"}
+    assert support["imports"] == set()
 
 
 def test_inert_lines_rule_on_line_blind_standard_is_reported():
-    assert inert.inert_scopes({"file": "a.py", "standard": "handlers", "lines": [10]}) == ("lines",)
+    assert inert.inert_scopes({"file": "a.py", "standard": "imports", "lines": [10]}) == ("lines",)
 
 
 def test_inert_lines_rule_on_line_passing_standard_is_not_reported():
@@ -458,7 +459,7 @@ def test_inert_branch_info_names_the_file_and_standard(tmp_path):
 
     (tmp_path / ".sentry").mkdir()
     (tmp_path / ".sentry" / "bypass.json").write_text(
-        json.dumps({"bypass": [{"file": "apps/x.py", "standard": "handlers", "lines": [7]}]}), encoding="utf-8"
+        json.dumps({"bypass": [{"file": "apps/x.py", "standard": "imports", "lines": [7]}]}), encoding="utf-8"
     )
 
     lines = inert.check_branch_info(str(tmp_path))
@@ -466,7 +467,7 @@ def test_inert_branch_info_names_the_file_and_standard(tmp_path):
     # Two caveat lines ride ahead of every conclusion (ADVISORY_CAVEAT), then the rule.
     conclusions = lines[len(inert.ADVISORY_CAVEAT) :]
     assert len(conclusions) == 1
-    assert "apps/x.py" in conclusions[0] and "handlers" in conclusions[0] and "inert" in conclusions[0]
+    assert "apps/x.py" in conclusions[0] and "imports" in conclusions[0] and "inert" in conclusions[0]
 
 
 def test_inert_branch_info_empty_without_a_bypass_file(tmp_path):
@@ -674,7 +675,7 @@ def _advisory(tmp_path, rules):
     return inert.check_branch_info(str(tmp_path))
 
 
-_INERT_SCOPE_RULE = {"file": "apps/x.py", "standard": "handlers", "lines": [7]}
+_INERT_SCOPE_RULE = {"file": "apps/x.py", "standard": "imports", "lines": [7]}
 _OUT_OF_SCOPE_RULE = {"file": "tests/test_a.py", "standard": "architecture", "reason": "r"}
 
 
@@ -737,7 +738,7 @@ def test_the_advisory_survives_the_renderer_that_shows_it(tmp_path):
 
     assert "UNVERIFIED" in rendered, rendered
     assert "control" in rendered, rendered
-    assert "handlers" in rendered, "the standard name must survive rendering"
+    assert "imports" in rendered, "the standard name must survive rendering"
     assert "apps/x.py" in rendered, rendered
 
 

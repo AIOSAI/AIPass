@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_visibility_check.py
 # Description: Log Visibility Standards Checker Handler
-# Version: 1.1.3
+# Version: 1.2.0
 # Created: 2026-03-05
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -29,6 +29,11 @@ AUDIT_SCOPE = "all_files"
 # Patterns built via concatenation to avoid self-detection by checkers
 _GETLOGGER_PAT = r"logging" + r"\.getLogger\s*\("
 _FILEHANDLER_PAT = r"logging" + r"\.FileHandler\s*\("
+
+#: prax's logger imported: the door (`from aipass.prax import logger`, parenthesised or not) or the long module path.
+_PRAX_LOGGER_IMPORT = re.compile(
+    r"from\s+aipass\.prax(?:\.apps\.modules\.logger\s+import|\s+import\s+\(?[\w\s,]*\blogger\b)"
+)
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
@@ -127,14 +132,12 @@ def _is_prax_logging_infra(file_path: str) -> bool:
 
 
 def _check_prax_import(lines: List[str], content: str, file_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check 1: Files using stdlib getLogger must also import prax system_logger."""
-    has_prax_import = bool(re.search(r"from\s+aipass\.prax\.apps\.modules\.logger\s+import", content))
-
-    if has_prax_import:
+    """Check 1: Files using stdlib getLogger must also import prax's logger (either spelling: front_door judges it)."""
+    if _PRAX_LOGGER_IMPORT.search(content):
         return {
             "name": "Prax logger imported",
             "passed": True,
-            "message": "File imports prax system_logger alongside stdlib getLogger",
+            "message": "File imports prax's logger alongside stdlib getLogger",
         }
 
     violation_lines = _find_pattern_lines(lines, _GETLOGGER_PAT, file_path, bypass_rules)
@@ -143,7 +146,10 @@ def _check_prax_import(lines: List[str], content: str, file_path: str, bypass_ru
         return {
             "name": "Prax logger imported",
             "passed": False,
-            "message": f"stdlib getLogger() on lines {violation_lines[:5]} without prax system_logger import",
+            "message": (
+                f"stdlib getLogger() on lines {violation_lines[:5]} "
+                "without prax's logger (from aipass.prax import logger)"
+            ),
         }
 
     return {"name": "Prax logger imported", "passed": True, "message": "No stdlib getLogger() violations"}

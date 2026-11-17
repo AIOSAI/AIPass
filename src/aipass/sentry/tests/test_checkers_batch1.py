@@ -105,7 +105,7 @@ def test_cli_check_clean_passes(tmp_path):
     clean_file = modules_dir / "display.py"
     clean_file.write_text(
         '"""Display module."""\n\n'
-        "from aipass.cli.apps.modules.display import console\n\n"
+        "from aipass.cli import console\n\n"
         "def show():\n"
         '    """Show output."""\n'
         '    console.print("hello")\n',

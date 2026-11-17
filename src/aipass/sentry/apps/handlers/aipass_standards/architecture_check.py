@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: architecture_check.py
 # Description: Architecture Standards Checker Handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-05
 # Modified: 2026-11-16
 # =============================================
@@ -14,6 +14,7 @@ primary entry point, also the branch structure against spawn's template baseline
 
 import ast
 import json
+import re
 from pathlib import Path, PurePath
 from typing import Dict, List, Optional
 
@@ -22,11 +23,13 @@ from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE, is_bypassed
 from aipass.sentry.apps.handlers.aipass_standards.check_support import find_enclosing_function
+from aipass.sentry.apps.handlers.aipass_standards.handlers_check import is_foundation_service
 from aipass.sentry.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify, hash_lines
 
-# Spawn's modules gateway is the ONLY source for the class->template question. No
-# fallback on purpose: if this door moves, the checker must die at import with spawn's
-# name in the traceback, not quietly score the fleet against a guess.
+# Spawn is the ONLY source for the class->template question. No fallback on purpose: if
+# these names move, the checker must die at import with spawn's name in the traceback, not
+# quietly score the fleet against a guess. This path reaches under spawn's apps/, a
+# front_door finding, until spawn's door hands out the two names (spawn's call).
 from aipass.spawn.apps.modules import get_template_dir, refuse_legacy_class
 
 AUDIT_SCOPE = "all_files"
@@ -36,7 +39,7 @@ APPLIES_TO = "production"
 PACK_ROOT = Path(__file__).resolve().parent.parent.parent  # aipass_standards/ -> handlers/ -> apps/ -> sentry/
 
 # Spawn templates root. The SUBDIRECTORY under it is never guessed from citizen_class
-# (the class does not name a directory); only spawn's gateway may answer it. The ROOT
+# (the class does not name a directory); only spawn may answer it. The ROOT
 # stays here as the seam tests/test_citizen_class_resolution.py points at a fixture tree.
 _SRC_PKG_ROOT = PACK_ROOT.parent.parent  # apps/ -> sentry/ -> src/aipass/
 SPAWN_TEMPLATES_DIR = _SRC_PKG_ROOT / "spawn" / "templates"
@@ -181,7 +184,10 @@ def check_file_size(lines: List[str], module_path: str) -> Dict:
 
 
 def check_handler_independence(lines: List[str], module_path: str, bypass_rules: list | None = None) -> Optional[Dict]:
-    """Handlers don't import from parent branch modules (prax and cli services allowed); each import is a site."""
+    """Handlers don't import from parent branch modules; each import is a site.
+
+    prax's logger and cli's display are allowed by handlers_check's reading (is_foundation_service).
+    """
     parent_branch = None
     if module_path:
         path_parts = Path(module_path).parts
@@ -210,7 +216,7 @@ def check_handler_independence(lines: List[str], module_path: str, bypass_rules:
                 code_part = line
 
             if ".apps.modules" in code_part:
-                if "prax.apps.modules" in code_part or "cli.apps.modules" in code_part:
+                if any(is_foundation_service(target) for target in re.findall(r"aipass(?:\.\w+)+", code_part)):
                     continue
 
                 if not parent_branch or f"{parent_branch}.apps.modules" in code_part:
@@ -321,7 +327,7 @@ def _get_citizen_class(branch_path: Path) -> Optional[str]:
 
 
 def _resolve_template_dir(citizen_class: str) -> tuple[Optional[str], str]:
-    """Ask spawn's gateway which template directory a citizen_class mints from.
+    """Ask spawn which template directory a citizen_class mints from.
 
     ``refuse_legacy_class`` is asked FIRST and alone: a retired name is a passport waiting
     on the migration, not a typo. Everything else goes to ``get_template_dir``; spawn's

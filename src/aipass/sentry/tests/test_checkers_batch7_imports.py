@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_imports.py
 # Description: imports_check and one_logger_check rulings (split from test_checkers_batch7.py)
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-10-08
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/imports_check.py, one_logger_check.py and logging_allowed.py."""
@@ -232,10 +232,8 @@ class TestImportsHandlerIndependence:
         assert "parent module" in result["message"]
 
     def test_infrastructure_import_passes(self, tmp_path):
-        """Infrastructure imports (aipass.prax, aipass.cli) are allowed."""
-        lines = _lines(
-            "from aipass.prax.apps.modules.logger import info\nfrom aipass.cli.apps.modules.display import header\n"
-        )
+        """prax and cli through their front doors are allowed."""
+        lines = _lines("from aipass.prax import logger\nfrom aipass.cli import header\n")
         result = check_handler_independence(
             lines, (tmp_path / "sentry" / "apps" / "handlers" / "json" / "handler.py").as_posix()
         )
@@ -293,6 +291,37 @@ class TestCheckNoBareImports:
         assert result is not None
         assert result["passed"] is False
         assert "missing aipass." in result["message"]
+
+    @pytest.mark.parametrize(
+        "source, path, cure",
+        [
+            (
+                "from handlers.json import j\n",
+                "src/aipass/sentry/apps/modules/m.py",
+                "(must use aipass.* namespace: from aipass.sentry.apps.handlers.json)",
+            ),
+            (
+                "from handlers.json import j\n",
+                "m.py",
+                "(must use aipass.* namespace: from aipass.<branch>.apps.handlers.json)",
+            ),
+            (
+                "from sentry.apps.modules.audit import run\n",
+                "src/aipass/sentry/apps/modules/m.py",
+                "(missing aipass. prefix; should be from aipass.sentry.apps.modules.audit)",
+            ),
+            (
+                "from drone.apps.modules.commander import route\n",
+                "src/aipass/sentry/apps/modules/m.py",
+                "(missing aipass. prefix; another branch: its front door, from aipass.drone import <name>)",
+            ),
+        ],
+    )
+    def test_the_bare_import_cure_is_the_own_branch_path_or_the_front_door(self, source, path, cure):
+        """FPLAN-1024: inside its branch a file imports any path; another branch through its door."""
+        result = check_no_bare_imports(_lines(source), path)
+        assert result is not None
+        assert result["message"].endswith(cure)
 
     def test_stdlib_import_passes(self, tmp_path):
         """Standard library imports pass."""

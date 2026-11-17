@@ -59,7 +59,9 @@ class TestExtractBranchFromImport:
         violation = check_cross_branch_imports([line], "daemon/apps/handlers/schedule/notifier_use.py", "daemon")
 
         assert extract_branch_from_import(line) == "skills"
-        assert violation["message"] == "Line 1: skills.apps.handlers imported (use modules entry point)"
+        assert violation["message"] == (
+            "Line 1: skills.apps.handlers imported (use its front door: from aipass.skills import <name>)"
+        )
 
 
 class TestGetFileHandlerPackage:
@@ -241,7 +243,8 @@ class TestCheckCrossBranchImports:
             "name": "Cross-branch handler imports",
             "passed": False,
             "message": (
-                "Line 2: memory.apps.handlers imported (string import) (use modules entry point): "
+                "Line 2: memory.apps.handlers imported (string import) "
+                "(use its front door: from aipass.memory import <name>): "
                 'mod = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")'
             ),
         }
@@ -271,7 +274,9 @@ class TestEncapsulationReadsImportLinesOnly:
     def test_an_import_after_a_docstring_closing_mid_line_is_read(self, tmp_path):
         lines = _lines('"""Doc opens\nand closes here."""\nfrom flow.apps.handlers.plan.validator import X\n')
         result = check_cross_branch_imports(lines, tmp_path.joinpath(*self._PATH).as_posix(), "sentry")
-        assert result["message"] == "Line 3: flow.apps.handlers imported (use modules entry point)"
+        assert result["message"] == (
+            "Line 3: flow.apps.handlers imported (use its front door: from aipass.flow import <name>)"
+        )
 
     def test_an_import_named_in_a_docstring_past_the_other_delimiter_is_prose(self, tmp_path):
         lines = _lines('def f():\n    """Doc.\n    \'\'\'\n    from flow.apps.handlers.plan import X\n    """\n')
@@ -286,7 +291,10 @@ class TestEncapsulationReadsImportLinesOnly:
     def test_a_direct_import_after_a_docstring_closing_mid_line_is_read(self, tmp_path):
         lines = _lines('"""Doc opens\nand closes here."""\nfrom sentry.apps.handlers.plan.validator import X\n')
         result = check_direct_handler_imports(lines, tmp_path.joinpath("sentry", "apps", "x.py").as_posix())
-        assert result["message"] == "Line 3: Handler imported directly (use module entry point)"
+        assert result["message"] == (
+            "Line 3: Handler imported directly (inside its branch, through a module; "
+            "another branch's, through its front door: from aipass.<branch> import <name>)"
+        )
 
 
 class TestTestsAreKinToTheirOwnBranchOnly:

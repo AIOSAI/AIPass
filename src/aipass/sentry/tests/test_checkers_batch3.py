@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch3.py
 # Description: Batch 3 tests for 8 sentry checker handlers
-# Version: 1.1.2
+# Version: 1.2.0
 # Created: 2026-03-29
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/log_structure_check.py and seven batch-3 sibling checkers."""
@@ -193,6 +193,29 @@ class TestLogVisibilityCheck:
 
         assert result["score"] == 100
         assert result["passed"] is True
+
+    @pytest.mark.parametrize(
+        "prax_import",
+        [
+            "from aipass.prax import logger\n",
+            "from aipass.prax import (\n    json_handler,\n    logger as log,\n)\n",
+            "from aipass.prax.apps.modules.logger import system_logger\n",
+        ],
+    )
+    def test_prax_logger_in_either_spelling_satisfies_a_get_logger_file(self, tmp_path, prax_import):
+        """FPLAN-1024: the door form is the import the rule asks for; the long form is front_door's to judge."""
+        content = prax_import + "import logging\nmylog = logging.getLogger(__name__)\n"
+        result = log_visibility_check.check_module(_write_temp_py(tmp_path, "door.py", content))
+        rows = {c["name"]: c for c in result["checks"]}
+        assert rows["Prax logger imported"]["passed"] is True
+
+    def test_another_prax_door_name_is_not_the_logger_and_the_cure_names_the_door(self, tmp_path):
+        content = "from aipass.prax import json_handler\nimport logging\nmylog = logging.getLogger(__name__)\n"
+        result = log_visibility_check.check_module(_write_temp_py(tmp_path, "not_logger.py", content))
+        rows = {c["name"]: c for c in result["checks"]}
+        assert rows["Prax logger imported"]["message"] == (
+            "stdlib getLogger() on lines [3] without prax's logger (from aipass.prax import logger)"
+        )
 
 
 class TestLogStructureAndVisibilityReadCodeLinesOnly:

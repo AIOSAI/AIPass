@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: imports_check.py
 # Description: Imports Standards Checker Handler
-# Version: 2.5.3
+# Version: 2.6.0
 # Created: 2026-03-05
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """
@@ -21,6 +21,7 @@ from aipass.prax import logger
 from aipass.sentry.apps.handlers.aipass_standards import applicability
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
+from aipass.sentry.apps.handlers.aipass_standards.handlers_check import is_foundation_service
 from aipass.sentry.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify
 
 # APPLIES_TO: ordering and grouping read the same in a test file. The prax
@@ -266,6 +267,15 @@ def _stdlib_log_lines(tree: ast.AST) -> List[int]:
     return sorted(hits)
 
 
+def _own_branch(module_path: str) -> Optional[str]:
+    """The path segment before the first ``apps``: the branch the file belongs to, or None."""
+    path_parts = Path(module_path).parts if module_path else ()
+    for i, part in enumerate(path_parts):
+        if part == "apps" and i > 0:
+            return path_parts[i - 1]
+    return None
+
+
 def check_handler_independence(
     lines: List[str], module_path: str = "", bypass_rules: list | None = None
 ) -> Optional[Dict]:
@@ -273,13 +283,7 @@ def check_handler_independence(
     if is_bypassed(module_path, "imports", None, bypass_rules):
         return {"name": "Handler independence", "passed": True, "message": "Bypassed by bypass rules"}
 
-    parent_branch = None
-    if module_path:
-        path_parts = Path(module_path).parts
-        for i, part in enumerate(path_parts):
-            if part == "apps" and i > 0:
-                parent_branch = path_parts[i - 1]
-                break
+    parent_branch = _own_branch(module_path)
 
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
@@ -291,8 +295,8 @@ def check_handler_independence(
             if ".apps.modules" not in code_part:
                 continue
 
-            # Allowed: aipass.prax, aipass.cli (infrastructure services)
-            if "aipass.prax" in code_part or "aipass.cli" in code_part:
+            # prax's logger and cli's display: handlers_check's one reading of the foundation services
+            if any(is_foundation_service(target) for target in re.findall(r"aipass(?:\.\w+)+", code_part)):
                 continue
 
             if parent_branch and f"{parent_branch}.apps.modules" in code_part:
@@ -397,6 +401,7 @@ def check_no_bare_imports(lines: List[str], file_path: str = "", bypass_rules: l
     old_namespaces = {"cortex", "nexus", "atlas", "sentinel"}
 
     violations = []
+    own_branch = _own_branch(file_path)
 
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
@@ -425,7 +430,7 @@ def check_no_bare_imports(lines: List[str], file_path: str = "", bypass_rules: l
         if first_part in ("handlers", "modules"):
             violations.append(
                 f'Line {i}: bare import "from {import_path}" '
-                f"(must use aipass.* namespace, e.g. from aipass.sentry.apps.standards.aipass.{import_path})"
+                f"(must use aipass.* namespace: from aipass.{own_branch or '<branch>'}.apps.{import_path})"
             )
             continue
 
@@ -436,10 +441,12 @@ def check_no_bare_imports(lines: List[str], file_path: str = "", bypass_rules: l
             continue
 
         if first_part in aipass_modules and len(parts) > 1 and "apps" in parts:
-            violations.append(
-                f'Line {i}: bare module import "from {import_path}" '
-                f"(missing aipass. prefix, should be from aipass.{import_path})"
+            cure = (
+                f"should be from aipass.{import_path}"
+                if first_part == own_branch
+                else f"another branch: its front door, from aipass.{first_part} import <name>"
             )
+            violations.append(f'Line {i}: bare module import "from {import_path}" (missing aipass. prefix; {cure})')
             continue
 
     if violations:
