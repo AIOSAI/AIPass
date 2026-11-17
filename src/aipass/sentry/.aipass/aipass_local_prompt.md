@@ -26,6 +26,7 @@ sentry shadow-cycle run                          # The three weekly v5 passes
 sentry ratchet pick / run / record @branch      # Execution ratchet: one branch a week, --pseudo-tested, series
 sentry permissions / inbox_audit                 # Settings sweep / mailbox hygiene
 sentry home-paths scan [<root>]                  # developer_home over the tracked tree — the CI gate, red exits 1
+sentry front-door scan [--sites]                 # Cross-branch imports under apps/, counted per branch, never judged
 sentry readme update @branch                     # README auto-update
 ```
 
