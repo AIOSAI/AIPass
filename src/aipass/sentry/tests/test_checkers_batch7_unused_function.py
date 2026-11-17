@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_unused_function.py
 # Description: unused_function_check ruling: the message says what was measured (split from test_checkers_batch7.py)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/unused_function_check.py."""
@@ -99,4 +99,32 @@ class TestCallersOutsideTheBranchAreCallers:
         (other.parent / "tests" / "test_use.py").write_text(
             "from aipass.mine.apps.mod import wired\n\nwired()\n", encoding="utf-8"
         )
+        assert _no_caller(mine) == ["wired"]
+
+
+#: A package top file in the house shape: a name-to-home table, __all__ built from it.
+DOOR = '_HOMES = {"wired": "aipass.mine.apps.mod"}\n__all__ = list(_HOMES)\n'
+
+
+class TestTheBranchsOwnDoorTableIsUse:
+    """A name the branch's own door hands out is in use: the door is how other branches reach it."""
+
+    @pytest.mark.parametrize(
+        "door",
+        [DOOR, DOOR.replace("list(_HOMES)", "[*_HOMES]"), '__all__ = ["wired"]\n'],
+        ids=["list_of_table", "starred_table", "literal_all"],
+    )
+    def test_a_name_in_the_own_door_has_a_caller(self, tmp_path, door):
+        mine, _ = _fleet(tmp_path)
+        (mine / "__init__.py").write_text(door, encoding="utf-8")
+        assert _no_caller(mine) == []
+
+    def test_a_door_that_does_not_list_the_name_leaves_it_without_a_caller(self, tmp_path):
+        mine, _ = _fleet(tmp_path)
+        (mine / "__init__.py").write_text(DOOR.replace('"wired"', '"other_name"'), encoding="utf-8")
+        assert _no_caller(mine) == ["wired"]
+
+    def test_another_branchs_door_listing_the_same_name_is_no_caller(self, tmp_path):
+        mine, other = _fleet(tmp_path)
+        (other.parent / "__init__.py").write_text(DOOR.replace("aipass.mine", "aipass.other"), encoding="utf-8")
         assert _no_caller(mine) == ["wired"]

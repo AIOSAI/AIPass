@@ -28,9 +28,8 @@ from aipass.sentry.apps.handlers.aipass_standards.prose_lines import Unparseable
 
 # Spawn is the ONLY source for the class->template question. No fallback on purpose: if
 # these names move, the checker must die at import with spawn's name in the traceback, not
-# quietly score the fleet against a guess. This path reaches under spawn's apps/, a
-# front_door finding, until spawn's door hands out the two names (spawn's call).
-from aipass.spawn.apps.modules import get_template_dir, refuse_legacy_class
+# quietly score the fleet against a guess.
+from aipass.spawn import get_template_dir, refuse_legacy_class
 
 AUDIT_SCOPE = "all_files"
 # Applies to production source only: a test file has no apps/handlers/modules layering.

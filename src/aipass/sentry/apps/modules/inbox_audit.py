@@ -22,7 +22,7 @@ from typing import List
 
 from aipass.prax import logger
 from aipass.cli import console, header
-from aipass.cli.apps.modules import error, success, warning
+from aipass.cli import error, success, warning
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.bypass.ignore_handler import find_repo_root
 from aipass.sentry.apps.handlers.cli.help_flags import wants_help

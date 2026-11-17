@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_standards_audit.py
 # Description: Unit tests for the standards_audit module and the sentry-audit CI gate
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-03-24
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/standards_audit.py and the sentry-audit CI gate."""
@@ -25,8 +25,8 @@ from typing import cast
 #: The real discovery handler: standards_audit's own `discovery` binding is a per-test stand-in (`_mock_infrastructure`).
 from aipass.sentry.apps.handlers.audit import discovery as real_discovery
 from aipass.sentry.apps.handlers.bypass import bypass_handler
-from aipass.cli.apps.modules import display
-from aipass.cli.apps.modules import warning as real_warning
+from aipass.cli import display
+from aipass.cli import warning as real_warning
 from aipass.sentry.apps.handlers.audit_tests import refusal
 from aipass.sentry.apps.handlers.context_standards import startup_budget_check
 from aipass.sentry.apps.modules import CommandRefused, standards_audit

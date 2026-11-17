@@ -20,8 +20,8 @@ from typing import List, NoReturn
 
 from aipass.prax import logger
 
-from aipass.cli import console, header
-from aipass.cli.apps.modules import error, warning
+from aipass.cli import console, error, header, warning
+from aipass.drone import normalize_branch_arg
 
 from aipass.sentry.apps.handlers.json import json_handler
 
@@ -43,8 +43,6 @@ from aipass.sentry.apps.handlers.audit_tests import refusal
 
 from aipass.sentry.apps.modules import CommandRefused
 from aipass.sentry.apps.modules import audit_tests as lane_verb
-
-from aipass.drone.apps.modules import normalize_branch_arg
 
 
 #: Re-bound from the parser that owns the grammar: the refusal tests reach for this name.

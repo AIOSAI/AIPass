@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for sentry tests
-# Version: 2.4.3
+# Version: 2.4.4
 # Created: 2026-03-05
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Shared pytest fixtures for sentry tests."""
@@ -24,7 +24,7 @@ from typing import Generator, List, Tuple
 import pytest
 from unittest.mock import MagicMock
 
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 from aipass.sentry.apps import sentry as sentry_entry
 from aipass.sentry.apps.handlers.aipass_standards import trinity_check, trinity_groups
 from aipass.sentry.apps.handlers.audit import audit_display, branch_audit
@@ -35,8 +35,8 @@ from aipass.sentry.apps.handlers.bypass.ignore_handler import (
 )
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.tests.support_json_handler_contract import BRANCHES, implementation, redirect_documents
+from aipass.sentry.apps.modules import tests_lane
 from aipass.sentry.tests.support_trinity_check import _CONFIG, _TEMPLATES
-from aipass.trigger.apps.modules import core as trigger_core
 
 # .archive/ holds verbatim disposal copies that must never be collected or rglob-walked.
 collect_ignore_glob = [".archive/*", "**/.archive/*"]
@@ -110,9 +110,9 @@ class BusRecorder:
 @pytest.fixture(autouse=True)
 def bus(monkeypatch) -> BusRecorder:
     """No test fires a real event: a recorder stands where the bus lives."""
-    # ``tests_lane._announce_bump`` reads trigger off core on every call.
+    # trigger's door caches, so the recorder replaces the lane's own name, not trigger's home.
     recorder = BusRecorder()
-    monkeypatch.setattr(trigger_core, "trigger", recorder)
+    monkeypatch.setattr(tests_lane, "trigger", recorder)
     return recorder
 
 

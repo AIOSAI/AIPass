@@ -16,7 +16,7 @@ exit code; a failed score exits 0, because this lane advises and does not gate.
 from typing import Dict, List, NoReturn
 
 from aipass.cli import console
-from aipass.cli.apps.modules import error, success, warning
+from aipass.cli import error, success, warning
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.audit_tests import refusal, render, runner
 from aipass.sentry.apps.handlers.cli.help_flags import wants_help

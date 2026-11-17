@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: unused_function_check.py
 # Description: Unused Function Standards Checker Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-22
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -23,6 +23,7 @@ from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
 from aipass.sentry.apps.handlers.bypass.ignore_handler import find_repo_root, is_sentry_ignored, load_ignore_entries
+from aipass.sentry.apps.handlers.aipass_standards.front_door_count import door_names
 from aipass.sentry.apps.handlers.aipass_standards.skip_dirs import in_skipped_dir, is_disabled_file
 
 # APPLIES_TO: same discovery problem as dead_code - a test function has no caller by name.
@@ -108,6 +109,15 @@ def _outside_callers(branch: Path) -> str:
         handlers = re.findall(r'"handler"\s*:\s*"([\w.]+)"', hooks_json.read_text(encoding="utf-8"))
         parts += [h.rsplit(".", 1)[1] for h in handlers if h.startswith(prefix + ".")]
     return "\n".join(parts)
+
+
+def _own_door_names(branch: Path) -> str:
+    """The names the branch's own package top file hands out: the door is how other branches reach them."""
+    top = branch / "__init__.py"
+    if not top.is_file():
+        return ""
+    # Unparseable raises: a package top file Python cannot read breaks every import of the branch.
+    return " ".join(door_names(top.read_text(encoding="utf-8", errors="ignore")))
 
 
 def _strip_non_code(source: str) -> str:
@@ -441,7 +451,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
             continue
         file_sources[py_file] = _strip_non_code(raw)
 
-    corpus = "\n".join([*file_sources.values(), _outside_callers(branch)])
+    corpus = "\n".join([*file_sources.values(), _outside_callers(branch), _own_door_names(branch)])
 
     all_functions: list[tuple[str, int, int, Path]] = []
     unparsed: list[str] = []

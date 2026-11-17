@@ -15,8 +15,8 @@ from typing import List
 
 from aipass.prax import logger
 
-from aipass.cli import console, header
-from aipass.cli.apps.modules import error, warning
+from aipass.cli import console, error, header, warning
+from aipass.drone import normalize_branch_arg
 
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.audit_tests import refusal
@@ -25,8 +25,6 @@ from aipass.sentry.apps.modules import CommandRefused
 from aipass.sentry.apps.handlers.cli.help_flags import wants_help
 
 from aipass.sentry.apps.handlers.test_map.function_scanner import scan_branch
-
-from aipass.drone.apps.modules import normalize_branch_arg
 
 from aipass.sentry.apps.handlers.audit.discovery import discover_branches
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_front_door_count.py
-# Description: front_door_count — every cross-branch import reaching under apps/, counted, never judged
-# Version: 1.0.0
+# Description: front_door_count — every cross-branch import reaching under apps/, counted; and sentry's own door
+# Version: 1.1.0
 # Created: 2026-11-16
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/front_door_count.py and the front-door verb."""
@@ -13,11 +13,16 @@
 # sentry: no-test-needed(shared) — tracked_files: git is the edge, each test hands scan_tracked its file list
 # sentry: no-test-needed(constant) — print_help, print_introspection: the verb's prose
 
+import types
 from pathlib import Path
 
 import pytest
 
+import aipass.sentry as aipass_sentry
 from aipass.sentry.apps.handlers.aipass_standards import front_door_count as fd
+from aipass.sentry.apps.handlers.aipass_standards import trinity_groups
+from aipass.sentry.apps.handlers.audit import branch_audit
+from aipass.sentry.apps.handlers.context_standards import name_ratchet
 from aipass.sentry.apps.modules import CommandRefused
 from aipass.sentry.apps.modules import front_door
 
@@ -127,6 +132,14 @@ class TestDoors:
     def test_all_wins_over_the_files_other_bindings(self):
         assert fd.door_names('import importlib\n__all__ = ["logger"]\n') == ("logger",)
 
+    @pytest.mark.parametrize(
+        "all_line", ["list(_HOMES)", "[*_HOMES, *_MODULES]"], ids=["list_of_table", "starred_tables"]
+    )
+    def test_a_name_to_home_table_hands_out_its_keys(self, all_line):
+        source = f'_HOMES = {{"logger": "a.b"}}\n_MODULES = {{"trail": "a.c"}}\n__all__ = {all_line}\n'
+        wanted = ("logger", "trail") if "_MODULES" in all_line else ("logger",)
+        assert fd.door_names(source) == wanted
+
     def test_a_marker_file_hands_out_nothing(self):
         assert fd.door_names('"""Package marker."""\n__version__ = "1.0"\n') == ()
 
@@ -171,6 +184,30 @@ class TestFleet:
         files = _tree(tmp_path, {"src/aipass/alpha/apps/t.py": "from aipass.beta.apps.modules import {{x}}\n"})
         result = fd.scan_tracked(tmp_path, files)
         assert (result["unparseable"], result["sites"]) == (["src/aipass/alpha/apps/t.py"], [])
+
+
+class TestSentrysOwnDoor:
+    """Sentry's package top file hands out its public names from their homes, lazily, never cached."""
+
+    def test_each_name_is_its_homes_object(self):
+        assert (aipass_sentry.audit_branch, aipass_sentry.name_ratchet) == (branch_audit.audit_branch, name_ratchet)
+
+    def test_the_door_file_binds_nothing_from_apps_at_import(self):
+        fresh = types.ModuleType("door_copy")
+        exec(compile(Path(aipass_sentry.__file__).read_text(encoding="utf-8"), "door_copy", "exec"), vars(fresh))
+        assert [v.__name__ for v in vars(fresh).values() if isinstance(v, types.ModuleType)] == ["importlib"]
+
+    def test_an_unknown_name_raises_attribute_error(self):
+        with pytest.raises(AttributeError, match="no attribute 'audit'"):
+            aipass_sentry.audit
+
+    def test_a_patch_on_the_home_reaches_the_next_read(self, monkeypatch):
+        assert aipass_sentry.expected_meta_line is trinity_groups.expected_meta_line
+        monkeypatch.setattr(trinity_groups, "expected_meta_line", "patched")
+        assert aipass_sentry.expected_meta_line == "patched"
+
+    def test_dir_lists_every_public_name(self):
+        assert set(aipass_sentry.__all__) <= set(dir(aipass_sentry))
 
 
 class TestVerb:

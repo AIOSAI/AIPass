@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from aipass.cli import console
-from aipass.cli.apps.modules import error, success
+from aipass.cli import error, success
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.aipass_standards import developer_home_check
 from aipass.sentry.apps.handlers.audit_tests import refusal

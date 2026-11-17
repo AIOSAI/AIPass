@@ -18,7 +18,7 @@ from typing import Dict, List, Optional
 from aipass.prax import logger
 
 from aipass.cli import console
-from aipass.cli.apps.modules import error
+from aipass.cli import error
 
 from aipass.sentry.apps.handlers.audit.branch_audit import discover_checkers
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: front_door_count.py
 # Description: Front-door detection: every cross-branch import that reaches under another branch's apps/
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-11-16
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Front-door detection, shared by the ``front_door`` standard and the ``front-door`` verb.
@@ -139,7 +139,20 @@ def owner_of_path(file_path: str) -> str:
 
 
 def _literal_names(value: ast.expr, lists: Dict[str, List[str]]) -> Optional[List[str]]:
-    """The strings a list/tuple literal holds, a ``*NAME`` unpacking an earlier top-level list; else None."""
+    """The strings a list/tuple literal holds, a ``*NAME`` unpacking an earlier top-level list; else None.
+
+    A dict literal holds its string keys, and ``list(NAME)`` the earlier list: a door's name-to-home table.
+    """
+    if isinstance(value, ast.Dict):
+        return [k.value for k in value.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)]
+    if (
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Name)
+        and value.func.id == "list"
+        and len(value.args) == 1
+        and isinstance(value.args[0], ast.Name)
+    ):
+        return lists.get(value.args[0].id)
     if not isinstance(value, (ast.List, ast.Tuple)):
         return None
     names: List[str] = []

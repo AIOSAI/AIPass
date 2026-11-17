@@ -23,7 +23,7 @@ from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
 
 from aipass.cli import console, header
-from aipass.cli.apps.modules import error as display_error, success, warning
+from aipass.cli import error as display_error, success, warning
 
 from aipass.sentry.apps.handlers.audit.branch_audit import discover_checkers, files_handed
 from aipass.sentry.apps.handlers.audit.discovery import discover_branches

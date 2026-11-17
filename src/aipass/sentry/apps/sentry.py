@@ -18,7 +18,7 @@ from typing import List, Any
 
 from aipass.prax import logger
 from aipass.cli import console, header
-from aipass.cli.apps.modules import error
+from aipass.cli import error
 from aipass.sentry.apps.modules import CommandRefused
 from aipass.sentry.apps.modules import standards_audit
 

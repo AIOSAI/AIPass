@@ -31,9 +31,8 @@ from aipass.prax import logger
 
 from aipass.sentry.apps.handlers.json import json_handler
 
-from aipass.cli import console, header
-from aipass.cli.apps.modules import err_console, error as display_error, warning
-from aipass.trigger.apps.modules import core as trigger_core
+from aipass.cli import console, err_console, error as display_error, header, warning
+from aipass.trigger import trigger
 
 from aipass.sentry.apps.handlers.cli.help_flags import wants_help
 from aipass.sentry.apps.handlers.bypass.ignore_handler import find_repo_root
@@ -316,7 +315,7 @@ def _announce_bump(outcome: dict) -> None:
     """
     stamped = [row["branch"] for row in outcome["branches"] if row["action"] == "stamped"]
     try:
-        trigger_core.trigger.fire(
+        trigger.fire(
             template_ops.BUMP_EVENT,
             dry_run=outcome.get("dry_run", True),
             stamped=len(stamped),

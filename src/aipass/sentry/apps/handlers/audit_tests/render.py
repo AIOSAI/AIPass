@@ -16,7 +16,7 @@ group prints its reason (S1), and a nomination never renders as a verdict (M1).
 from typing import Dict, List
 
 from aipass.cli import console
-from aipass.cli.apps.modules import error, success, warning
+from aipass.cli import error, success, warning
 from aipass.sentry.apps.handlers.audit_tests import artifact
 
 #: Terminal preview only; the artifact is always untruncated.

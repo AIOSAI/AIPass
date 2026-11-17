@@ -21,7 +21,7 @@ from rich.table import Table
 from aipass.prax import logger
 
 from aipass.cli import console, header
-from aipass.cli.apps.modules import error, warning
+from aipass.cli import error, warning
 
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.audit_tests import refusal
