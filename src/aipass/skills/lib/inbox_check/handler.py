@@ -16,7 +16,7 @@ Called by: drone @skills run inbox_check <action>
 import json
 from pathlib import Path
 
-from aipass.memory.apps.modules import door_registry_scope
+from aipass.memory import fleet_branches
 
 
 def run(action, args=None, config=None):
@@ -43,7 +43,7 @@ def get_actions():
 
 def _find_inboxes():
     """Yield (branch_name, inbox_path) for every citizen memory's door reports that has an inbox."""
-    for row in door_registry_scope.fleet_branches():
+    for row in fleet_branches():
         inbox = Path(row["path"]) / ".ai_mail.local" / "inbox.json"
         if inbox.is_file():
             yield (row["name"], inbox)
@@ -126,7 +126,7 @@ def _scan_branch(branch_name):
         return {"success": False, "output": "", "error": f"Not a branch name: {branch_name!r}"}
 
     inbox_path = None
-    for row in door_registry_scope.fleet_branches():
+    for row in fleet_branches():
         if row["name"].lower() == branch_name.lower():
             branch_name, inbox_path = row["name"], Path(row["path"]) / ".ai_mail.local" / "inbox.json"
             break

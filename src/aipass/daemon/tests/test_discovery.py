@@ -25,7 +25,7 @@ import pytest
 
 from aipass.daemon.apps.handlers.schedule.command_job import ok_exit_codes_for
 from aipass.daemon.apps.handlers.schedule import discovery
-from aipass.memory.apps.modules import fleet
+from aipass.memory import declared_residency
 from aipass.daemon.apps.handlers.schedule.discovery import (
     PassportUnreadable,
     discover_jobs,
@@ -973,7 +973,7 @@ class TestLiveFleet:
         citizens = [c for c in active_citizens() if c["source"].startswith("projects/")]
         assert citizens, "no projects/ citizen on this machine - the pin proved nothing"
         for citizen in citizens:
-            assert fleet.declared_residency(citizen["path"]) == RESIDENCY_RESIDENT, citizen
+            assert declared_residency(citizen["path"]) == RESIDENCY_RESIDENT, citizen
 
     def test_an_external_citizen_is_labelled_external_never_core(self):
         # The fence. A citizen outside AIPass home may never read as core: the

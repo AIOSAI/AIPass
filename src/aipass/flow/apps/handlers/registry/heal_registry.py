@@ -379,7 +379,7 @@ def _project_root(path: Path) -> Path | None:
 def _declared_root_citizens() -> List[Dict[str, Any]]:
     """Citizens of the declared roots, read through @memory's gateway; [] (logged) when it cannot answer."""
     try:
-        from aipass.memory.apps.modules.door_registry_scope import external_branches
+        from aipass.memory import external_branches
 
         return external_branches(_find_repo_root())
     except Exception as exc:

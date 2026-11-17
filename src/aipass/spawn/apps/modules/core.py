@@ -36,7 +36,7 @@ _META_TAB_KEYS = {"TODOS_META", "KEY_LEARNINGS_META", "SESSIONS_META", "OBSERVAT
 
 def _load_meta_tabs(branch_dir: str | None = None):
     """Load memory meta-tab values from @memory's renderer; @memory ships in the same package, so a failed import raises."""
-    from aipass.memory.apps.modules.door_tab_renderer import render_all_meta_tabs
+    from aipass.memory import render_all_meta_tabs
 
     tabs = render_all_meta_tabs(branch_dir)
     missing = _META_TAB_KEYS - set(tabs or {})

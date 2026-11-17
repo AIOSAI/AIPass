@@ -17,7 +17,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from aipass.memory.apps.modules.fleet import declared_roots
+from aipass.memory import declared_roots
 from aipass.prax import logger
 
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text

@@ -18,7 +18,7 @@ from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
 
 # @memory's PUBLIC fleet gateway: who counts as a citizen is @memory's answer, one registry reader fleet-wide.
-from aipass.memory.apps.modules import fleet
+from aipass.memory import fleet_branches
 
 _REPO_ROOT = Path(__file__).resolve().parents[6]  # src/aipass/daemon/apps/handlers/monitoring -> repo root
 MEMORY_FILE_PATTERNS = ["local.json", "observations.json", "passport.json", "README.md", "DASHBOARD.local.json"]
@@ -27,7 +27,7 @@ CODE_FILE_EXTENSION = ".py"
 
 def get_branch_paths() -> List[Dict[str, str]]:
     """Every citizen in @memory's fleet (core, residents, externals): registry name and absolute path."""
-    return [{"name": b["name"], "path": str(b["path"])} for b in fleet.fleet_branches(_REPO_ROOT, name_from="registry")]
+    return [{"name": b["name"], "path": str(b["path"])} for b in fleet_branches(_REPO_ROOT, name_from="registry")]
 
 
 def _get_file_mtime(file_path: Path) -> Optional[datetime]:

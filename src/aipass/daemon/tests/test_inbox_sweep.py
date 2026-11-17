@@ -317,7 +317,7 @@ class TestSweepScopeIsTheWholeFleet:
     on unread mail for a week.
     """
 
-    FLEET = "aipass.daemon.apps.handlers.schedule.discovery.fleet"
+    FLEET = "aipass.daemon.apps.handlers.schedule.discovery"
 
     def test_a_projects_citizen_is_scanned(self, branch_dir):
         resident = branch_dir / "earmark"
@@ -327,7 +327,7 @@ class TestSweepScopeIsTheWholeFleet:
         fake = [{"name": "earmark", "path": resident, "registry": "EARMARK_REGISTRY.json", "email": "@earmark"}]
         with (
             patch(f"{self.FLEET}.fleet_branches", return_value=fake),
-            patch(f"{self.FLEET}.declared_residency", return_value="resident"),
+            patch("aipass.memory.declared_residency", return_value="resident"),
         ):
             entries = find_stale_inboxes(now=NOW)
 

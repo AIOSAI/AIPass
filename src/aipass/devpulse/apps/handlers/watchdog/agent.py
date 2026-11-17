@@ -22,7 +22,7 @@ from pathlib import Path
 
 from aipass.prax import logger
 
-from aipass.memory.apps.modules import fleet
+from aipass.memory import declared_roots
 from aipass.devpulse.apps.handlers.watchdog import registry as _registry
 from aipass.devpulse.apps.handlers.json import json_handler
 from aipass.ai_mail import (
@@ -120,7 +120,7 @@ def _resolve_branch_path(agent_id: str) -> Path | None:
     if caller_cwd:
         search_roots.append(Path(caller_cwd))
     if repo_root is not None:
-        search_roots.extend(fleet.declared_roots(repo_root))
+        search_roots.extend(declared_roots(repo_root))
 
     seen = set()
     if repo_root:

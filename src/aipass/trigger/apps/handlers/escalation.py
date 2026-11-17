@@ -36,7 +36,7 @@ from aipass.trigger.apps.config import (
 from aipass.trigger.apps.handlers.repo_root import find_repo_root
 from aipass.trigger.apps.handlers.json import config_loader
 from aipass.trigger.apps.handlers.json import json_handler
-from aipass.memory.apps.modules.door_registry_scope import fleet_branches
+from aipass.memory import fleet_branches
 
 STATE_FILE = TRIGGER_JSON_DIR / "escalation_state.json"
 

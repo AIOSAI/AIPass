@@ -147,7 +147,7 @@ def _render_entry_health(branch_name: str) -> str:
     lines: List[str] = ["", "=" * 60, f"MEMORY ENTRY HEALTH: {branch_name} (via @memory)", "=" * 60]
 
     try:
-        from aipass.memory.apps.modules.health import get_branch_health
+        from aipass.memory import get_branch_health
     # OSError too: a cross-branch import can fail on the filesystem, not only on absence.
     except (ImportError, OSError) as e:
         logger.warning("[DAEMON] activity_report: @memory health API unavailable: %s", e)

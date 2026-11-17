@@ -3,7 +3,7 @@
 # Description: Red-first pins for FPLAN-0460 - discovery delegates the fleet definition to @memory
 # Version: 1.0.1
 # Created: 2026-08-30
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/schedule/discovery.py — red-first pins for FPLAN-0460, delegation to registry_scope."""
@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 from aipass.daemon.apps.handlers.schedule.discovery import active_citizens
 
-SCOPE = "aipass.daemon.apps.handlers.schedule.discovery.fleet"
+SCOPE = "aipass.daemon.apps.handlers.schedule.discovery"
 
 
 class TestDelegatesToRegistryScope:

@@ -470,14 +470,14 @@ def load_registry() -> Dict[str, Any]:
 
 
 def _fleet_gateway() -> Any:
-    """@memory's fleet gateway module, imported at CALL time and never at module level.
+    """@memory's external_branches, taken from its front door at CALL time and never at module level.
 
     A failure in @memory's import chain must cost the external tier, not every
     import of drone. A seam for tests: patched here, not on __import__.
     """
-    from aipass.memory.apps.modules import fleet
+    from aipass.memory import external_branches
 
-    return fleet
+    return external_branches
 
 
 def external_branches(repo_root: Optional[Path] = None) -> Optional[List[Dict[str, Any]]]:
@@ -500,7 +500,7 @@ def external_branches(repo_root: Optional[Path] = None) -> Optional[List[Dict[st
     # The import sits inside the guard: @memory's registry_scope can raise at import
     # (ENOENT on a deleted cwd), and that must not take down drone.
     try:
-        records = _fleet_gateway().external_branches(repo_root, name_from="registry")
+        records = _fleet_gateway()(repo_root, name_from="registry")
     except Exception as exc:
         logger.error(
             "External tier unavailable — @memory's fleet gateway raised: %s. "

@@ -19,8 +19,9 @@ from typing import List, Optional
 from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
 
-# @memory's PUBLIC fleet gateway: its handlers/ are private and fail the cross-branch checklist.
-from aipass.memory.apps.modules import fleet
+# @memory's front door: its apps/ are private and fail the cross-branch checklist.
+# RESIDENCY_* are re-exported from @memory rather than re-spelled: two copies of a vocabulary drift silently.
+from aipass.memory import RESIDENCY_CORE as RESIDENCY_CORE, RESIDENCY_RESIDENT as RESIDENCY_RESIDENT, fleet_branches
 from aipass.daemon.apps.handlers.schedule import command_job
 from aipass.daemon.apps.handlers.schedule.runstate import WEEKDAYS
 
@@ -33,10 +34,6 @@ RESIDENT_REGISTRY_GLOB = "*/*_REGISTRY.json"
 SKIP_DIRS = frozenset({"compass", "__pycache__", ".git", ".venv"})
 
 PASSPORT_RELATIVE = Path(".trinity") / "passport.json"
-
-# Re-exported from @memory rather than re-spelled: two copies of a vocabulary drift silently.
-RESIDENCY_CORE = fleet.RESIDENCY_CORE
-RESIDENCY_RESIDENT = fleet.RESIDENCY_RESIDENT
 
 REQUIRED_JOB_KEYS = {"id", "schedule"}
 
@@ -86,7 +83,7 @@ def active_citizens(repo_root: Optional[Path] = None) -> List[dict]:
     # @memory dedupes by path; daemon is email-keyed, so a shared email would double-fire.
     records = []
     seen: dict = {}
-    for citizen in fleet.fleet_branches(root, name_from="registry"):
+    for citizen in fleet_branches(root, name_from="registry"):
         email = citizen.get("email")
         if not email:
             logger.error(

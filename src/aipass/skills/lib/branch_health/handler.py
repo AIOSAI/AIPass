@@ -15,7 +15,7 @@ Called by: drone @skills run branch_health <action>
 
 from pathlib import Path
 
-from aipass.memory.apps.modules import door_registry_scope
+from aipass.memory import fleet_branches
 
 
 def run(action, args=None, config=None):
@@ -44,13 +44,13 @@ def get_actions():
 
 def _find_branches():
     """Yield (branch_name, branch_path) for every citizen memory's door reports."""
-    for row in door_registry_scope.fleet_branches():
+    for row in fleet_branches():
         yield (row["name"], Path(row["path"]))
 
 
 def _door_lookup(name):
     """Return (door_name, path) for the citizen the door answers to name, any case; (name, None) when none."""
-    for row in door_registry_scope.fleet_branches():
+    for row in fleet_branches():
         if row["name"].lower() == name.lower():
             return row["name"], Path(row["path"])
     return name, None

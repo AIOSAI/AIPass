@@ -16,7 +16,7 @@ from typing import Optional, TypeVar, Callable
 
 from aipass.prax import logger
 from aipass.commons.apps.handlers.json import json_handler
-from aipass.memory.apps.modules.door_registry_scope import fleet_branches
+from aipass.memory import fleet_branches
 
 
 def find_branch_root(start_path: Optional[Path] = None) -> Optional[Path]:

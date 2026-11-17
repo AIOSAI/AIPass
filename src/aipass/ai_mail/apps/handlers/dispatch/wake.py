@@ -404,9 +404,9 @@ def _external_citizens(repo_root: Path) -> List[dict]:
     The one entry for the external tier; lazy, by module, so the branch imports without @memory.
     Never read AIPASS_ROOTS.json here: two readers of one anchor drift.
     """
-    from aipass.memory.apps.modules import fleet
+    from aipass.memory import external_branches
 
-    return fleet.external_branches(repo_root=repo_root)
+    return external_branches(repo_root=repo_root)
 
 
 def resolve_branch(branch_email: str, admin: bool = False) -> Optional[Tuple[Path, str]]:

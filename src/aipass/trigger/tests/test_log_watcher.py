@@ -3,7 +3,7 @@
 # Description: Unit tests for the branch log watcher's parsing, detection and line pipeline
 # Version: 1.6.0
 # Created: 2026-04-03
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/log_watcher.py — parsing, detection and the line pipeline that fires events."""
@@ -28,7 +28,7 @@ import aipass.trigger.apps.handlers.json.config_loader as config_loader
 import aipass.trigger.apps.handlers.log_watcher as lw
 from aipass.trigger.apps.handlers import medic_state
 from aipass.trigger.tests.support_log_watcher import _BRANCH_LOG_PATH, _SYNTHETIC_HOME
-from aipass.memory.apps.modules.door_registry_scope import fleet_branches as door_fleet_branches
+from aipass.memory import fleet_branches as door_fleet_branches
 
 pytestmark = pytest.mark.usefixtures("log_watcher_infrastructure")
 

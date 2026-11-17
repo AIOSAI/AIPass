@@ -758,7 +758,7 @@ class TestRoundsScope:
     a projects/* resident and an external-root citizen, all declaring the same class, so only the path decides.
     """
 
-    FLEET = "aipass.daemon.apps.handlers.schedule.discovery.fleet"
+    FLEET = "aipass.daemon.apps.handlers.schedule.discovery"
 
     @pytest.fixture
     def install(self, tmp_path):

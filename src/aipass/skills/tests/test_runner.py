@@ -3,7 +3,7 @@
 # Description: Unit tests for skills runner
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-11-14
+# Modified: 2026-11-16
 # Category: skills/tests
 # =============================================
 
@@ -15,12 +15,13 @@
 import json
 import os
 import subprocess
+import sys
 import time
 from collections import namedtuple
 
 import pytest
 
-from aipass.memory.apps.modules import door_registry_scope
+import aipass.memory
 from aipass.skills.apps.modules.loader import load_skill
 from aipass.skills.apps.modules.runner import handle_command, run_skill
 
@@ -124,7 +125,8 @@ class TestTheFleetComesFromMemorysDoor:
             calls.append(args)
             return [{"name": "grow", "path": grow, "residency": "external"}]
 
-        monkeypatch.setattr(door_registry_scope, "fleet_branches", fake_fleet_branches)
+        # On fleet_branches' home module, not the package: the handler loads per run and reads the door then.
+        monkeypatch.setattr(sys.modules[aipass.memory.fleet_branches.__module__], "fleet_branches", fake_fleet_branches)
         return calls
 
     def test_branch_health_lists_an_external_citizen_and_no_stray_directory(self, fleet):

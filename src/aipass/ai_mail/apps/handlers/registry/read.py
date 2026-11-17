@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 
 from aipass.prax import logger
-from aipass.memory.apps.modules.door_registry_scope import fleet_branches
+from aipass.memory import fleet_branches
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root, registries_in
 
@@ -316,9 +316,9 @@ def get_external_branches(repo_root: Path) -> Dict[str, str]:
 
     Reads @memory's fleet gateway (AIPASS_ROOTS.json). A gateway failure raises, unchanged; it is not "no citizens".
     """
-    from aipass.memory.apps.modules import fleet
+    from aipass.memory import external_branches
 
-    rows = fleet.external_branches(repo_root=repo_root)
+    rows = external_branches(repo_root=repo_root)
     result: Dict[str, str] = {}
     for citizen in rows:
         email = citizen.get("email")

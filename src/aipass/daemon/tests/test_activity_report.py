@@ -14,6 +14,7 @@
 
 import json
 import re
+import sys
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -25,10 +26,12 @@ from aipass.daemon.apps.handlers.cli.arg_gate import UnknownArgument
 from aipass.daemon.apps.handlers.monitoring.activity_collector import scan_branch_activity
 from aipass.daemon.apps.modules import activity_report
 from aipass.daemon.apps.modules.activity_report import handle_command
-from aipass.memory.apps.modules import fleet
-from aipass.memory.apps.modules import health as memory_health
+import aipass.memory
+from aipass.memory import fleet_branches
 
 MODULE = "aipass.daemon.apps.modules.activity_report"
+# get_branch_health's home module, reached through the door rather than by an apps path.
+MEMORY_HEALTH = sys.modules[aipass.memory.get_branch_health.__module__]
 
 
 class TestHandleCommandRouting:
@@ -159,7 +162,7 @@ class TestFleetScope:
         mock_br.assert_called_once_with("GROW", since_hours=24.0)
 
     def test_the_report_and_its_red_flags_carry_the_declared_root_citizen_on_one_fleet_read(self, seed_fleet, capsys):
-        with patch.object(fleet, "fleet_branches", wraps=fleet.fleet_branches) as reads:
+        with patch(f"{COLLECTOR}.fleet_branches", wraps=fleet_branches) as reads:
             assert handle_command("activity-report", ["--json"]) is True
         report = json.loads(capsys.readouterr().out)
         assert sorted(report["branches"]) == ["GROW", "TESTBRANCH"]
@@ -271,7 +274,7 @@ class TestExtractBranchName:
         assert exc.value.token == "-t 12"
 
 
-HEALTH_TARGET = "aipass.memory.apps.modules.health.get_branch_health"
+HEALTH_TARGET = "aipass.memory.get_branch_health"
 
 # SGR codes, colour AND attributes: Rich's ReprHighlighter wraps brackets and numbers on a terminal.
 ANSI_SGR = re.compile(r"\x1b\[[0-9;]*m")
@@ -381,7 +384,7 @@ class TestRenderEntryHealthDegradation:
     def test_memory_branch_unavailable_is_visible(self, monkeypatch):
         """Mutant killed: the ImportError branch returns "" instead of the UNAVAILABLE line."""
         # Deleting the name makes the from-import raise ImportError, as if @memory were absent.
-        monkeypatch.delattr(memory_health, "get_branch_health")
+        monkeypatch.delattr(MEMORY_HEALTH, "get_branch_health")
         out = _render()
 
         assert "unavailable" in out.lower()

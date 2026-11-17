@@ -8,7 +8,7 @@
 
 """Manager discovery for release-notify (DPLAN-0335 leg 1).
 
-Roots are declared, never guessed: memory's door (``fleet.declared_roots``) plus <aipass root>/projects/.
+Roots are declared, never guessed: memory's door (``aipass.memory.declared_roots``) plus <aipass root>/projects/.
 The source repo is skipped: ``aipass init update`` updates FROM it, so it has no scaffold of its own.
 """
 
@@ -17,7 +17,7 @@ import os
 from pathlib import Path
 
 from aipass.prax import logger
-from aipass.memory.apps.modules import fleet
+from aipass.memory import declared_roots as fleet_declared_roots  # aliased: declared_roots() below wraps it
 from aipass.devpulse.apps.handlers.json import json_handler
 
 MODULE_NAME = "release_notify"
@@ -53,7 +53,7 @@ def declared_roots(root: Path) -> tuple[list[Path], list[dict]]:
     The door answers the roots alone and logs each row it refuses (inactive, missing, overlapping home)
     itself, so skipped is always empty: the reasons live in the door's log, not in this list.
     """
-    return fleet.declared_roots(root), []
+    return fleet_declared_roots(root), []
 
 
 def project_roots(root: Path) -> tuple[list[Path], list[dict]]:

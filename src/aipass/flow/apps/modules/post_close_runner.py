@@ -107,10 +107,9 @@ def main(argv: list[str]) -> int:
         process_closed_plans()
 
         try:
-            import importlib
+            from aipass.memory import process_plans
 
-            _plans_mod = importlib.import_module("aipass.memory.apps.modules.door_plans_processor")
-            result = _plans_mod.process_plans()
+            result = process_plans()
             if result.get("success"):
                 logger.info("[%s] Plan vectorization: %s", MODULE_NAME, result)
             else:

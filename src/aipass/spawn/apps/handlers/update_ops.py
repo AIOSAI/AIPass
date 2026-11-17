@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from aipass.memory.apps.modules.fleet import find_repo_root
+from aipass.memory import find_repo_root
 from aipass.prax import logger
 
 from aipass.aipass.shared.json_ops import backup_json, deep_merge

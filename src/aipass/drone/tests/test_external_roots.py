@@ -3,7 +3,7 @@
 # Description: Declared roots are the third resolution source
 # Version: 1.0.4
 # Created: 2026-08-30
-# Modified: 2026-11-14
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/registry_handler.py's declared-roots tier: externals resolve, never over a local."""
@@ -18,11 +18,14 @@ from unittest.mock import patch
 
 import pytest
 
-from aipass.memory.apps.modules import door_registry_scope as registry_scope
-from aipass.memory.apps.modules import fleet
+from aipass.memory import RESIDENCY_EXTERNAL
+from aipass.memory import external_branches as read_external_branches
 from aipass.drone.apps.handlers import registry_handler
 from aipass.drone.apps.handlers.registry_handler import reset_registry_path, set_registry_path
 from aipass.drone.apps.modules.resolver import BranchNotFoundError, resolve_branch
+
+# The gateway as registry_handler reads it at call time: the door hands out its home attribute uncached.
+GATEWAY = "aipass.memory.external_branches"
 
 
 # @memory alone reads AIPASS_ROOTS.json. Declaration is the credential: an external metadata.id never matches.
@@ -114,7 +117,7 @@ class TestTheStandInWorldIsSealed:
     """
 
     def test_a_real_citizen_absent_from_the_stand_in_does_not_resolve(self, local_world):
-        with patch.object(fleet, "external_branches", return_value=[]):
+        with patch(GATEWAY, return_value=[]):
             assert registry_handler.get_branch_by_name("trigger") is None
 
 
@@ -133,7 +136,7 @@ class TestNothingMovesUntilTheOwnerBlesses:
         assert log.error.call_args_list == []
 
     def test_no_external_source_is_consulted_when_nothing_is_declared(self, local_world):
-        with patch.object(fleet, "external_branches", return_value=[]) as gateway:
+        with patch(GATEWAY, return_value=[]) as gateway:
             assert registry_handler.get_branch_by_name("drone") is not None
         assert not gateway.called, "a local hit must never pay for a cross-repo read"
 
@@ -144,17 +147,16 @@ class TestNothingMovesUntilTheOwnerBlesses:
         assert branch["path"] == str(local_world / "src" / "memory")
 
     def test_an_unknown_name_is_still_not_found(self, local_world):
-        with patch.object(fleet, "external_branches", return_value=[]):
+        with patch(GATEWAY, return_value=[]):
             assert registry_handler.get_branch_by_name("nosuchbranch") is None
 
 
 class TestDeclaredRootsResolve:
     def test_an_external_citizen_resolves_through_memorys_real_reader(self, standin):
         """End to end against the gateway, not against a mock of it."""
-        with patch.object(
-            fleet,
-            "external_branches",
-            side_effect=lambda _root=None, **kw: registry_scope.external_branches(standin, **kw),
+        with patch(
+            GATEWAY,
+            side_effect=lambda _root=None, **kw: read_external_branches(standin, **kw),
         ):
             result = registry_handler.get_branch_with_registry("alpha_agent")
 
@@ -164,10 +166,9 @@ class TestDeclaredRootsResolve:
         assert registry_path.name == "ALPHA_REGISTRY.json"
 
     def test_the_external_path_is_absolute_and_inside_its_own_root(self, standin):
-        with patch.object(
-            fleet,
-            "external_branches",
-            side_effect=lambda _root=None, **kw: registry_scope.external_branches(standin, **kw),
+        with patch(
+            GATEWAY,
+            side_effect=lambda _root=None, **kw: read_external_branches(standin, **kw),
         ):
             found = registry_handler.get_branch_with_registry("beta_agent")
 
@@ -178,10 +179,9 @@ class TestDeclaredRootsResolve:
         assert registry_path.parent in path.parents
 
     def test_externals_appear_in_the_enumeration(self, standin):
-        with patch.object(
-            fleet,
-            "external_branches",
-            side_effect=lambda _root=None, **kw: registry_scope.external_branches(standin, **kw),
+        with patch(
+            GATEWAY,
+            side_effect=lambda _root=None, **kw: read_external_branches(standin, **kw),
         ):
             names = {b["name"] for b in registry_handler.get_all_branches()}
 
@@ -198,7 +198,7 @@ def _external(name: str, root: str) -> dict:
         "path": Path(tempfile.gettempdir()) / root / "src" / name,
         "registry": f"{root.upper()}_REGISTRY.json",
         "email": f"@{name}",
-        "residency": fleet.RESIDENCY_EXTERNAL,
+        "residency": RESIDENCY_EXTERNAL,
     }
     # Exactly registry_scope's keys: a stand-in more generous than the real reader hides guards.
 
@@ -206,10 +206,10 @@ def _external(name: str, root: str) -> dict:
 class TestPrecedence:
     def test_aipass_local_always_wins(self, local_world):
         """An external named 'memory' must never shadow the local @memory."""
-        with patch.object(fleet, "external_branches", return_value=[]):
+        with patch(GATEWAY, return_value=[]):
             undisturbed = registry_handler.get_branch_by_name("memory")
 
-        with patch.object(fleet, "external_branches", return_value=[_external("memory", "impostor")]):
+        with patch(GATEWAY, return_value=[_external("memory", "impostor")]):
             branch = registry_handler.get_branch_by_name("memory")
 
         assert undisturbed is not None and branch is not None, "the local @memory stopped resolving"
@@ -221,14 +221,14 @@ class TestPrecedence:
         """Mutant killed: the external tier walked in reverse declaration order."""
         first = _external("shared", "alpha")
         second = _external("shared", "beta")
-        with patch.object(fleet, "external_branches", return_value=[first, second]):
+        with patch(GATEWAY, return_value=[first, second]):
             branch = registry_handler.get_branch_by_name("shared")
 
         assert branch is not None, "a declared citizen did not resolve at all"
         assert Path(branch["path"]) == Path(first["path"]), "the earlier declared root must win"
 
     def test_a_local_external_collision_is_logged_on_both_sides(self, local_world):
-        with patch.object(fleet, "external_branches", return_value=[_external("memory", "impostor")]):
+        with patch(GATEWAY, return_value=[_external("memory", "impostor")]):
             with patch.object(registry_handler, "logger") as log:
                 registry_handler.get_all_branches()
 
@@ -239,11 +239,11 @@ class TestPrecedence:
 
 class TestGatewayFailureIsContained:
     def test_local_resolution_survives_a_broken_gateway(self, local_world):
-        with patch.object(fleet, "external_branches", side_effect=RuntimeError("gateway down")):
+        with patch(GATEWAY, side_effect=RuntimeError("gateway down")):
             assert registry_handler.get_branch_by_name("nosuchbranch") is None
 
     def test_a_broken_gateway_is_loud(self, local_world):
-        with patch.object(fleet, "external_branches", side_effect=RuntimeError("gateway down")):
+        with patch(GATEWAY, side_effect=RuntimeError("gateway down")):
             with patch.object(registry_handler, "logger") as log:
                 registry_handler.get_branch_by_name("nosuchbranch")
 
@@ -254,9 +254,9 @@ class TestGatewayFailureIsContained:
 
         Mutant killed (runner): the gateway failure's None put back to [].
         """
-        with patch.object(fleet, "external_branches", side_effect=RuntimeError("gateway down")):
+        with patch(GATEWAY, side_effect=RuntimeError("gateway down")):
             lost = registry_handler.external_branches()
-        with patch.object(fleet, "external_branches", return_value=[]):
+        with patch(GATEWAY, return_value=[]):
             empty = registry_handler.external_branches()
 
         assert lost is None, "a lost external tier must not read as an empty one"
@@ -275,7 +275,7 @@ class TestGatewayFailureIsContained:
 
         Mutant killed (runner): the lost tier's None handed straight to get_branch_with_registry's loop.
         """
-        with patch.object(fleet, "external_branches", side_effect=RuntimeError("gateway down")):
+        with patch(GATEWAY, side_effect=RuntimeError("gateway down")):
             with pytest.raises(BranchNotFoundError, match="not found in registry"):
                 resolve_branch("@nosuchbranch")
 
@@ -298,14 +298,14 @@ class TestMalformedRecordsAreSkippedNotTrusted:
     )
     def test_a_record_missing_a_required_key_is_dropped(self, broken, local_world):
         """Mutant killed: the required-key check removed."""
-        with patch.object(fleet, "external_branches", return_value=[broken]):
+        with patch(GATEWAY, return_value=[broken]):
             names = {b["name"] for b in registry_handler.get_all_branches()}
 
         assert names == {"drone", "memory"}
 
     def test_the_dropped_record_is_named(self, local_world):
         """Mutant killed: the malformed-record warning removed."""
-        with patch.object(fleet, "external_branches", return_value=[{"name": "a"}]):
+        with patch(GATEWAY, return_value=[{"name": "a"}]):
             with patch.object(registry_handler, "logger") as log:
                 registry_handler.get_all_branches()
 
@@ -315,7 +315,7 @@ class TestMalformedRecordsAreSkippedNotTrusted:
     def test_a_good_record_beside_a_broken_one_still_resolves(self, local_world):
         """Mutant killed: a malformed record ending the walk instead of being skipped."""
         good = _external("keeper", "alpha")
-        with patch.object(fleet, "external_branches", return_value=[{"name": "a"}, good]):
+        with patch(GATEWAY, return_value=[{"name": "a"}, good]):
             names = {b["name"] for b in registry_handler.get_all_branches()}
 
         assert names == {"drone", "memory", "keeper"}
@@ -328,20 +328,18 @@ class TestResolutionEndToEnd:
         _validate_branch_path refuses a path escaping its project root; an external passes only because
         get_branch_with_registry hands back the sealed registry the entry was read from.
         """
-        with patch.object(
-            fleet,
-            "external_branches",
-            side_effect=lambda _root=None, **kw: registry_scope.external_branches(standin, **kw),
+        with patch(
+            GATEWAY,
+            side_effect=lambda _root=None, **kw: read_external_branches(standin, **kw),
         ):
             resolved = resolve_branch("@alpha_agent")
 
         assert Path(resolved).parts[-4:] == ("alpha", "src", "alpha", "worker"), resolved
 
     def test_an_undeclared_repo_is_still_refused(self, standin):
-        with patch.object(
-            fleet,
-            "external_branches",
-            side_effect=lambda _root=None, **kw: registry_scope.external_branches(standin, **kw),
+        with patch(
+            GATEWAY,
+            side_effect=lambda _root=None, **kw: read_external_branches(standin, **kw),
         ):
             with pytest.raises(BranchNotFoundError):
                 resolve_branch("@gamma_agent")
@@ -405,7 +403,7 @@ class TestTheHomeFallbackDoesNotSwallowTheThirdSource:
         (home / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": []}), encoding="utf-8")
         monkeypatch.setenv("AIPASS_HOME", str(home))
 
-        with patch.object(fleet, "external_branches", return_value=[_external("shared", "alpha")]):
+        with patch(GATEWAY, return_value=[_external("shared", "alpha")]):
             branch = registry_handler.get_branch_by_name("shared")
 
         assert branch is not None, "the home registry missed — it did not answer"
@@ -421,7 +419,7 @@ class TestTheHomeFallbackDoesNotSwallowTheThirdSource:
         )
         monkeypatch.setenv("AIPASS_HOME", str(home))
 
-        with patch.object(fleet, "external_branches", return_value=[_external("shared", "alpha")]):
+        with patch(GATEWAY, return_value=[_external("shared", "alpha")]):
             branch = registry_handler.get_branch_by_name("shared")
 
         assert branch is not None, "no source answered for a name two sources declare"
@@ -434,7 +432,7 @@ class TestTheStandInMatchesTheRealReader:
     """The fixture's shape is pinned to @memory's reader, not to my memory of it."""
 
     def test_the_helper_builds_exactly_the_keys_the_gateway_returns(self, standin):
-        produced = registry_scope.external_branches(standin)
+        produced = read_external_branches(standin)
 
         assert produced, "the stand-in declares two roots — the reader found neither"
         assert set(produced[0]) == set(_external("shared", "alpha")), (
