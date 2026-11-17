@@ -38,7 +38,8 @@ def _kept_redirect() -> dict[str, str]:
 
 
 MODULE = "aipass.hooks.apps.handlers.lifecycle.auto_process"
-_MEMORY_AUTO_PROCESS = "aipass.memory.apps.modules.door_auto_process"
+# The home, not the door: the door imports it on each read, so a module stood here is what the handler gets.
+_MEMORY_AUTO_PROCESS = "aipass.memory.apps.handlers.intake.auto_process"
 
 
 def _make_mock_module(**spawn_return):

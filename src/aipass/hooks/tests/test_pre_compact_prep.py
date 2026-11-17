@@ -31,7 +31,7 @@ from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import (
 )
 from aipass.hooks.apps.handlers.json import files as json_files
 from aipass.hooks.apps.modules import context_window
-from aipass.memory.apps.modules import door_registry_scope
+from aipass.memory import fleet_branches
 
 MODULE = "aipass.hooks.apps.handlers.lifecycle.pre_compact_prep"
 
@@ -284,12 +284,10 @@ class TestCountActiveDispatchLocks:
         assert "1 active dispatch(es)" in _snapshot(external_fleet.hooks, repo_root=external_fleet.home)
 
     def test_reads_the_door_once_per_run_not_per_branch(self, external_fleet, monkeypatch):
-        real = door_registry_scope.fleet_branches
         calls = []
-        monkeypatch.setattr(door_registry_scope, "fleet_branches", lambda **kw: calls.append(kw) or real(**kw))
-
-        _snapshot(external_fleet.hooks, repo_root=external_fleet.home)
-        _snapshot(external_fleet.hooks, repo_root=external_fleet.home)
+        with patch("aipass.memory.fleet_branches", lambda **kw: calls.append(kw) or fleet_branches(**kw)):
+            _snapshot(external_fleet.hooks, repo_root=external_fleet.home)
+            _snapshot(external_fleet.hooks, repo_root=external_fleet.home)
 
         assert len(calls) == 1
 
@@ -325,7 +323,8 @@ if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 
 
-_ENTRY_LIMITS = "aipass.memory.apps.modules.door_entry_limits"
+# The home, not the door: a None entry here is memory's cap module missing, the case the fallback answers.
+_ENTRY_LIMITS = "aipass.memory.apps.handlers.json.entry_limits"
 
 
 @contextlib.contextmanager

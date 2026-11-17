@@ -587,7 +587,7 @@ def _session_pointer():
     """
     import importlib
 
-    return importlib.import_module("aipass.ai_mail.apps.modules.door_session_pointer")
+    return importlib.import_module("aipass.ai_mail")
 
 
 def _chat_age(modified: float) -> str:

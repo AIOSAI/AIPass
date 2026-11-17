@@ -22,7 +22,6 @@ import pytest
 
 import aipass.hooks.apps.modules.cadence as cadence_mod
 import aipass.hooks.apps.modules.cc_sessions as cc_sessions_mod
-from aipass.ai_mail.apps.modules import door_session_pointer
 from aipass.hooks.apps.handlers.lifecycle.session_start import handle, handle_culture, handle_session_pointer
 from aipass.hooks.apps.modules.cadence import should_fire
 
@@ -137,11 +136,11 @@ class TestSessionPointer:
         def boom(*_args, **_kwargs):
             raise RuntimeError("door down")
 
-        monkeypatch.setattr(door_session_pointer, "write_pointer", boom)
         branch = _branch(tmp_path)
         handler = f"{SESSION_START}.handle_session_pointer"
         hook_data = {"session_id": "s-claude", "source": "startup", "cwd": str(branch)}
-        faults, (stdout, code) = engine_fault("SessionStart", "session_pointer", handler, hook_data)
+        with patch("aipass.ai_mail.write_pointer", boom):
+            faults, (stdout, code) = engine_fault("SessionStart", "session_pointer", handler, hook_data)
 
         assert code != 2 and stdout == "" and _pointer(branch) is None
         assert len(faults) == 1 and f"fault[SessionStart.session_pointer.{handler}.RuntimeError@" in faults[0]

@@ -50,7 +50,7 @@ def admin_grant():
 
     Patched at @ai_mail's rail, so no test reads this machine's real grant.
     """
-    with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=True):
+    with patch("aipass.ai_mail.is_verified_admin_caller", return_value=True):
         yield
 
 
@@ -644,7 +644,7 @@ class TestOneProgramSpelledManyWays:
             _assert_blocked(_bash(f"git {self.WRITE}"))
 
 
-_RAIL = "aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller"
+_RAIL = "aipass.ai_mail.is_verified_admin_caller"
 
 
 def _seat(root: Path, name: str) -> str:

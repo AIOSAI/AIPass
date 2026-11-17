@@ -13,7 +13,6 @@
 A hook is not drone-invoked, so it stamps AIPASS_CALLER_CWD for @ai_mail's verified rail; fails closed.
 """
 
-import importlib
 import json
 import os
 from pathlib import Path
@@ -26,7 +25,7 @@ CONSOLE = err_console
 # For the log line only: who is admin is decided by the verified rail, never by this string.
 ADMIN_SEAT = "devpulse"
 
-_RAIL = "aipass.ai_mail.apps.modules.door_verified_caller"
+_RAIL = "aipass.ai_mail"
 
 
 def is_admin_seat(cwd: str) -> bool:
@@ -70,7 +69,7 @@ def seat_of(cwd: str) -> tuple[str | None, bool]:
 def _verified(cwd: str) -> bool:
     """Stamp the caller cwd, ask @ai_mail's rail, and never leave the stamp behind."""
     try:
-        vc = importlib.import_module(_RAIL)
+        from aipass.ai_mail import is_verified_admin_caller
     except Exception as exc:
         logger.warning("[HOOKS] admin_seat: admin lane dark — verified-caller rail unavailable: %s", exc)
         return False
@@ -79,7 +78,7 @@ def _verified(cwd: str) -> bool:
     if stamped:
         os.environ["AIPASS_CALLER_CWD"] = cwd
     try:
-        return bool(vc.is_verified_admin_caller())
+        return bool(is_verified_admin_caller())
     # Every caller is a gate: a raising verifier fails closed, and the warning tells it from a no.
     except Exception as exc:
         logger.warning("[HOOKS] admin_seat: admin verification raised (refusing): %s", exc)

@@ -23,8 +23,8 @@ from aipass.prax import logger
 CONSOLE = err_console
 
 DISPATCH_ENV = "AIPASS_DISPATCH_ID"
-_RAIL = "aipass.ai_mail.apps.modules.door_verified_caller"
-_DOOR = "aipass.ai_mail.apps.modules.door_dispatch_grant"
+_RAIL = "aipass.ai_mail"
+_DOOR = "aipass.ai_mail"
 UNREADABLE = "edit_gate could not read the dispatch register ({error}), so this crossing is refused."
 
 

@@ -489,10 +489,10 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "logged_fallback",
       "lines": [
-        635,
-        872
+        636,
+        873
       ],
-      "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 613: the todos advisory text, never a verdict. 872 _seat_trinity: the tripwire's seat lookup, which decides nothing."
+      "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 636: the todos advisory text, never a verdict. 873 _seat_trinity: the tripwire's seat lookup, which decides nothing."
     },
     {
       "file": "apps/handlers/lifecycle/session_start.py",
@@ -611,11 +611,11 @@
       "lines": [
         68,
         131,
-        197,
-        211,
-        244
+        198,
+        212,
+        245
       ],
-      "reason": "Fleet green leg 5: 68 (the fleet door cannot be read) and 131 are counts for the compact snapshot, None renders as unknown, never zero. 200 (the .trinity lock will not open), 214 and 247: the session stamp is skipped and logged at WARNING; the agent's own memory is untouched."
+      "reason": "Fleet green leg 5: 68 (the fleet door cannot be read) and 131 are counts for the compact snapshot, None renders as unknown, never zero. 198 (the .trinity lock will not open), 212 and 245: the session stamp is skipped and logged at WARNING; the agent's own memory is untouched."
     },
     {
       "file": "apps/handlers/lifecycle/session_boot.py",
@@ -863,8 +863,8 @@
       "file": "apps/modules/admin_seat.py",
       "standard": "fallback",
       "lines": [
-        74,
-        84
+        73,
+        83
       ],
       "reason": "Fail-closed admin check: an unimportable or raising verified-caller rail returns False, so every gate refuses the admin exemption; the refusal is the answer, and the WARNING line in the prax system log tells a dark rail from a plain no."
     },
@@ -896,7 +896,7 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "fallback",
       "lines": [
-        726
+        727
       ],
       "reason": "Advisory only: the section-count note never blocks, and the caps that do block are judged by _evaluate_limits under the fail-closed refusal. Raising here would turn a dark config door into a refused memory write. It logs at WARNING, which @trigger escalates."
     },
@@ -904,7 +904,7 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "fallback",
       "lines": [
-        827
+        828
       ],
       "reason": "The gate writes nothing: a memory file already unparseable on disk, met by an edit that parses, is the agent's repair, judged as a new file. Refusing it would lock a broken memory file forever. WARNING names the file, and @trigger escalates it."
     },
@@ -912,7 +912,7 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "fallback",
       "lines": [
-        1140
+        1141
       ],
       "reason": "tripwire_snapshot: the hook's own per-session snapshot store of in-flight Bash calls; a damaged copy holds only stale stats. Raising would refuse every Bash call for the rest of the session, as nothing else rewrites the store, so it starts fresh, stamped with FRESH_START_KEY. Once the fresh write lands, STORE_RESET_LOG reaches medic at ERROR (cause at INFO); a store the write cannot replace refuses the call. Calls in flight whose snapshots were lost are told their check did not run, at ERROR, while the stamp is younger than FRESH_START_WINDOW_S."
     },
@@ -1012,7 +1012,7 @@
       "file": "apps/handlers/lifecycle/pre_compact_prep.py",
       "standard": "fallback",
       "lines": [
-        152
+        153
       ],
       "reason": "The snapshot is still stamped, truncated at the default cap instead of the branch's own; raising here would lose the whole snapshot at compaction. WARNING, which @trigger escalates, names the dark @memory door."
     },

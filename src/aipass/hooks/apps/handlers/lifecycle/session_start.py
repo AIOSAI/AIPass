@@ -87,7 +87,8 @@ def handle_session_pointer(hook_data: dict) -> dict:
     if not _interactive(provider, hook_data):
         logger.info("[HOOKS] session_start: headless %s session %s, pointer left as is", provider, session_id)
         return {"stdout": "", "exit_code": 0}
-    door = importlib.import_module("aipass.ai_mail.apps.modules.door_session_pointer")
-    written = door.write_pointer(branch, session_id, "session-start", provider=provider)
+    from aipass.ai_mail import write_pointer
+
+    written = write_pointer(branch, session_id, "session-start", provider=provider)
     logger.info("[HOOKS] session_start: pointer %s -> %s (%s) written=%s", branch, session_id, provider, written)
     return {"stdout": "", "exit_code": 0}

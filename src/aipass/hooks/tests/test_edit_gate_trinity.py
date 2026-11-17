@@ -4,7 +4,7 @@
 # Description: Tests for edit_gate .trinity char-limit + rollover-budget checks (FPLAN-0270 Phase 4)
 # Branch: hooks
 # Created: 2026-06-13
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's .trinity character-limit check (Write/Edit/MultiEdit)."""
@@ -41,7 +41,7 @@ from aipass.hooks.tests.support_edit_gate_trinity import (
     _mock_entry_limits,
     _mock_importlib_modules,
 )
-from aipass.memory.apps.modules import door_entry_limits as memory_entry_limits
+from aipass import memory as memory_entry_limits
 
 
 def _advisory_context(result):
@@ -185,13 +185,14 @@ class TestTrinityTodosCountAdvisory:
         entry_limits_mock = MagicMock()
         entry_limits_mock.load_entry_limits.return_value = _TEST_LIMITS_WARN
         entry_limits_mock.changed_entries = el_real.changed_entries
+        # The door reads a name's home on access: config_loader missing raises where the gate reads its names.
+        entry_limits_mock.get_todos_count.side_effect = ImportError("no config_loader")
+        entry_limits_mock.section.side_effect = ImportError("no config_loader")
 
         def _side_effect(name):
             """Route importlib calls, failing config_loader."""
-            if "entry_limits" in name:
+            if name == "aipass.memory":
                 return entry_limits_mock
-            if "config_loader" in name:
-                raise ImportError("no config_loader")
             return importlib.import_module(name)
 
         with _imports_via_seam(_side_effect):
@@ -832,12 +833,12 @@ class TestSectionCountGuard:
         entry_limits_mock = MagicMock()
         entry_limits_mock.load_entry_limits.return_value = _TEST_LIMITS_WARN
         entry_limits_mock.changed_entries = el_real.changed_entries
+        entry_limits_mock.get_todos_count.side_effect = ImportError("no config_loader")
+        entry_limits_mock.section.side_effect = ImportError("no config_loader")
 
         def _side_effect(name):
-            if "entry_limits" in name:
+            if name == "aipass.memory":
                 return entry_limits_mock
-            if "config_loader" in name:
-                raise ImportError("no config_loader")
             return importlib.import_module(name)
 
         with _imports_via_seam(_side_effect):

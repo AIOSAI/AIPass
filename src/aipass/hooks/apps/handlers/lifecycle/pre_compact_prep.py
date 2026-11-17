@@ -144,8 +144,9 @@ def _summary_cap(branch: str) -> int:
         fleet going around it.
     """
     try:
-        el = importlib.import_module("aipass.memory.apps.modules.door_entry_limits")
-        limits = el.load_entry_limits(branch)
+        from aipass.memory import load_entry_limits
+
+        limits = load_entry_limits(branch)
         cap = limits["entry_types"]["sessions"]["max_chars"]
         if isinstance(cap, int) and cap > 0:
             return cap

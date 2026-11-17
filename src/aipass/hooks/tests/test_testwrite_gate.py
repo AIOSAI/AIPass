@@ -4,7 +4,7 @@
 # Description: Tests for the test-write gate and its JSON policy switch
 # Branch: hooks
 # Created: 2026-09-01
-# Modified: 2026-11-14
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/security/testwrite_gate.py and its JSON policy switch."""
@@ -27,7 +27,7 @@ from aipass.hooks.apps.handlers.security import testwrite_gate
 from aipass.hooks.apps.handlers.security.testwrite_gate import handle, template_pointer
 from aipass.hooks.apps.modules import bash_writes, testgate_policy, testwrite_targets
 
-_RAIL = "aipass.ai_mail.apps.modules.door_verified_caller"
+_RAIL = "aipass.ai_mail"
 
 
 @pytest.fixture(autouse=True)

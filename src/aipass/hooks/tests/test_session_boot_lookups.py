@@ -4,7 +4,7 @@
 # Description: Tests for session boot's lookups: claude binary, tmux, process tree, labels, home resolution
 # Branch: hooks
 # Created: 2026-10-08
-# Modified: 2026-11-14
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_boot.py: the lookups the menu stands on."""
@@ -20,7 +20,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aipass.ai_mail.apps.modules import door_session_pointer as sp
+from aipass import ai_mail as sp
 from aipass.hooks.apps.handlers.lifecycle import session_boot
 from aipass.hooks.apps.modules import cc_sessions, cc_transcripts
 from aipass.hooks.tests.support_session_boot import (

@@ -33,7 +33,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from aipass.ai_mail.apps.handlers.dispatch import grant as dispatch_grant_handler
-from aipass.ai_mail.apps.modules import door_dispatch_grant, door_verified_caller
+from aipass.ai_mail import GRANT_KEY
 from aipass.hooks.apps.handlers.lifecycle import auto_fix
 from aipass.hooks.apps.handlers.security.edit_gate import handle
 from aipass.hooks.apps.handlers.security import git_gate, settings_backup
@@ -122,9 +122,9 @@ class TestEditGateHandler:
             "tool_input": {"file_path": "/srv/example/AIPass/src/aipass/hooks/apps/test.py"},
             "cwd": "/srv/example/AIPass/src/aipass/devpulse",
         }
-        with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=False):
+        with patch("aipass.ai_mail.is_verified_admin_caller", return_value=False):
             assert handle(data)["exit_code"] == 2
-        with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=True):
+        with patch("aipass.ai_mail.is_verified_admin_caller", return_value=True):
             assert handle(data)["exit_code"] == 0
 
     def test_block_daemon_cross_branch(self):
@@ -236,9 +236,9 @@ class TestEditGateHandler:
     def test_the_registry_owner_row_grants_nothing_the_verified_grant_does(self, registered_projects: dict):
         """DPLAN-0356 item 5: an ``owner: true`` row wrote across its project with no grant."""
         for target in (registered_projects["aipass"] / "README.md", Path(registered_projects["memory"]) / "x.py"):
-            with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=False):
+            with patch("aipass.ai_mail.is_verified_admin_caller", return_value=False):
                 assert _write(registered_projects["devpulse"], target)["exit_code"] == 2
-            with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=True):
+            with patch("aipass.ai_mail.is_verified_admin_caller", return_value=True):
                 assert _write(registered_projects["devpulse"], target)["exit_code"] == 0
 
 
@@ -361,7 +361,7 @@ class TestEditGateProjectBoundary:
         project's files". The seat here is named devpulse and holds no grant:
         the name opens nothing.
         """
-        with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=False):
+        with patch("aipass.ai_mail.is_verified_admin_caller", return_value=False):
             result = handle(
                 {
                     "tool_name": "Edit",
@@ -373,7 +373,7 @@ class TestEditGateProjectBoundary:
         assert "Cross-project" in json.loads(result["stdout"])["reason"]
 
     def test_verified_admin_still_writes_down_into_nested_project(self, nested_projects: dict):
-        with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=True):
+        with patch("aipass.ai_mail.is_verified_admin_caller", return_value=True):
             result = handle(
                 {
                     "tool_name": "Edit",
@@ -390,7 +390,7 @@ class TestEditGateProjectBoundary:
             registered_projects["vera"] / "README.md",
             Path(registered_projects["baud_seat"]) / "app.py",
         )
-        with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=False):
+        with patch("aipass.ai_mail.is_verified_admin_caller", return_value=False):
             for seat in ("sentry", "spawn"):
                 for target in targets:
                     result = _write(registered_projects[seat], target)
@@ -524,14 +524,14 @@ class TestADispatchGrantOpensOnlyItsPaths:
         assert "Dispatch d1's grant was not read: this session stands in no project, so it has no register." in refused
         assert dispatch_grant.calls == []
 
-    def test_a_door_that_raises_refuses_with_a_warning(self, dispatch_grant, monkeypatch, caplog):
-        monkeypatch.setattr(door_dispatch_grant, "granted", Mock(side_effect=OSError("register gone")))
+    def test_a_door_that_raises_refuses_with_a_warning(self, dispatch_grant, door_patch, caplog):
+        door_patch("aipass.ai_mail.granted", Mock(side_effect=OSError("register gone")))
         refused = _refusal(_write(dispatch_grant.seat, dispatch_grant.seed / "README.md"))
         assert "edit_gate could not read the dispatch register (register gone), so this crossing is refused." in refused
         assert "write_grant: grant check for dispatch d1 raised (refusing): register gone" in caplog.text
 
-    def test_a_malformed_decision_is_no_grant(self, dispatch_grant, monkeypatch):
-        monkeypatch.setattr(door_dispatch_grant, "granted", Mock(return_value={"allowed": "yes"}))
+    def test_a_malformed_decision_is_no_grant(self, dispatch_grant, door_patch):
+        door_patch("aipass.ai_mail.granted", Mock(return_value={"allowed": "yes"}))
         assert "the door gave no reason" in _refusal(_write(dispatch_grant.seat, dispatch_grant.seed / "README.md"))
 
     def test_the_register_read_is_the_callers_never_one_planted_under_the_target_root(self, dispatch_grant):
@@ -574,7 +574,7 @@ def _register_row(register: Path, **row) -> None:
 
 
 @pytest.fixture
-def nested_grant(tmp_path: Path, monkeypatch) -> SimpleNamespace:
+def nested_grant(tmp_path: Path, monkeypatch, door_patch) -> SimpleNamespace:
     """@grow seated in projects/grow under the AIPass root, dispatch g1's grant row in the ROOT register only.
 
     @ai_mail's real door reads real register files; only the verified rail is faked, to name @grow.
@@ -598,15 +598,15 @@ def nested_grant(tmp_path: Path, monkeypatch) -> SimpleNamespace:
         "sender": "@devpulse",
         "target": "@grow",
         "monitor_pid": os.getpid(),
-        door_dispatch_grant.GRANT_KEY: {"root": str(seed), "files": [], "dirs": ["src/head"]},
+        GRANT_KEY: {"root": str(seed), "files": [], "dirs": ["src/head"]},
     }
     _register_row(register, **row)
     monkeypatch.setattr(write_grant, "aipass_root", lambda: aipass.resolve())
-    monkeypatch.setattr(door_verified_caller, "resolve_verified_caller", lambda: "@grow")
+    door_patch("aipass.ai_mail.resolve_verified_caller", lambda: "@grow")
     state = SimpleNamespace(
         aipass=aipass, grow=grow, seat=str(seat), seed=seed, register=register, row=row, admin=False
     )
-    monkeypatch.setattr(door_verified_caller, "is_verified_admin_caller", lambda: state.admin)
+    door_patch("aipass.ai_mail.is_verified_admin_caller", lambda: state.admin)
     monkeypatch.setattr(dispatch_grant_handler.json_handler, "log_operation", lambda *a, **k: None)
     monkeypatch.setenv("AIPASS_DISPATCH_ID", "g1")
     monkeypatch.setenv("AIPASS_SESSION_TYPE", "daemon")
@@ -652,7 +652,7 @@ class TestANestedCitizensGrantIsReadWhereItWasRegistered:
         inside.mkdir(parents=True)
         nested_grant.register.write_text("", encoding="utf-8")
         grant = {"root": str(nested_grant.aipass), "files": [], "dirs": ["src/aipass/drone"]}
-        _register_row(nested_grant.register, **{**nested_grant.row, door_dispatch_grant.GRANT_KEY: grant})
+        _register_row(nested_grant.register, **{**nested_grant.row, GRANT_KEY: grant})
         refused = _refusal(_write(nested_grant.seat, inside / "x.py", "Write"))
         assert "Dispatch g1 grants nothing here: dispatch g1 is not open with a grant." in refused
 
@@ -1277,7 +1277,7 @@ class TestEditGateExternalProject:
             assert _write(registered_projects["devpulse"], target)["exit_code"] == 0
 
     def test_the_manager_reaches_nothing_outside_her_project(self, registered_projects: dict):
-        with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=False):
+        with patch("aipass.ai_mail.is_verified_admin_caller", return_value=False):
             for target in (Path(registered_projects["hooks"]) / "x.py", registered_projects["aipass"] / "README.md"):
                 result = _write(registered_projects["vera_seat"], target)
                 assert result["exit_code"] == 2, target

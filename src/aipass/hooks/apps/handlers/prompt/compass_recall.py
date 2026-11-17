@@ -55,7 +55,7 @@ def _load_state(hook_data: dict | None = None) -> dict:
 
 
 def _fresh_state() -> dict:
-    from aipass.memory.apps.modules.governance import new_state
+    from aipass.memory import new_state
 
     return new_state()
 
@@ -117,7 +117,7 @@ def handle(hook_data: dict) -> dict:
 
         state = _open_window(_load_state(hook_data), hook_data)
 
-        from aipass.memory.apps.modules.governance import should_surface, record_message
+        from aipass.memory import should_surface, record_message
 
         state = record_message(state)
 

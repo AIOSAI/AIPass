@@ -4,7 +4,7 @@
 # Description: Tests for compass recall prompt handler
 # Branch: hooks
 # Created: 2026-07-16
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/prompt/compass_recall.py."""
@@ -26,7 +26,7 @@ from aipass.hooks.apps.handlers.lifecycle.compact import handle as pre_compact
 from aipass.hooks.apps.handlers.prompt.compass_recall import handle
 from aipass.hooks.apps.modules.cadence import reset_counter
 from aipass.hooks.apps.modules.engine import dispatch
-from aipass.memory.apps.modules.governance import should_surface as governance_should_surface
+from aipass.memory import should_surface as governance_should_surface
 
 
 @pytest.fixture(autouse=True)
@@ -52,7 +52,7 @@ def _no_real_trust_banners(tmp_path):
     itself (FPLAN-0588): neither may reach the real repo config, the trust
     registry, or a live session's stamp in the temp dir. Memory's governance
     engine logs each surfacing to memory's own files; that is not ours to write.
-    The handler reads governance.should_surface through memory's modules door at
+    The handler reads should_surface through memory's front door at
     call time, so that name is wrapped: memory's real verdict, record=False.
     """
 
@@ -64,7 +64,7 @@ def _no_real_trust_banners(tmp_path):
         patch("aipass.hooks.apps.handlers.config.loader.never_enrolled_banner", return_value=None),
         patch("aipass.hooks.apps.handlers.prompt.compass_recall.find_project_config", return_value=None),
         patch("aipass.hooks.apps.modules.cadence._GUARD_DIR", tmp_path),
-        patch("aipass.memory.apps.modules.governance.should_surface", side_effect=_unrecorded),
+        patch("aipass.memory.should_surface", side_effect=_unrecorded),
     ):
         yield
 
@@ -159,7 +159,7 @@ class TestCompassRecallHandler:
                 return_value=1,
             ) as mock_mark,
             patch(
-                "aipass.memory.apps.modules.governance.should_surface",
+                "aipass.memory.should_surface",
                 return_value=(
                     True,
                     "Ready to surface",
@@ -172,7 +172,7 @@ class TestCompassRecallHandler:
                 ),
             ),
             patch(
-                "aipass.memory.apps.modules.governance.record_message",
+                "aipass.memory.record_message",
                 side_effect=lambda s: {**s, "messages_since_last": s.get("messages_since_last", 0) + 1},
             ),
         ):
@@ -199,7 +199,7 @@ class TestCompassRecallHandler:
                 return_value=1,
             ),
             patch(
-                "aipass.memory.apps.modules.governance.should_surface",
+                "aipass.memory.should_surface",
                 return_value=(
                     True,
                     "Ready",
@@ -212,7 +212,7 @@ class TestCompassRecallHandler:
                 ),
             ),
             patch(
-                "aipass.memory.apps.modules.governance.record_message",
+                "aipass.memory.record_message",
                 side_effect=lambda s: {**s, "messages_since_last": s.get("messages_since_last", 0) + 1},
             ),
         ):
@@ -231,7 +231,7 @@ class TestCompassRecallHandler:
                 return_value=[],
             ),
             patch(
-                "aipass.memory.apps.modules.governance.record_message",
+                "aipass.memory.record_message",
                 side_effect=lambda s: {**s, "messages_since_last": s.get("messages_since_last", 0) + 1},
             ),
         ):
@@ -251,7 +251,7 @@ class TestCompassRecallHandler:
                 return_value=[CANDIDATE_GOOD],
             ),
             patch(
-                "aipass.memory.apps.modules.governance.should_surface",
+                "aipass.memory.should_surface",
                 return_value=(
                     False,
                     "Spacing not met",
@@ -264,7 +264,7 @@ class TestCompassRecallHandler:
                 ),
             ),
             patch(
-                "aipass.memory.apps.modules.governance.record_message",
+                "aipass.memory.record_message",
                 side_effect=lambda s: {**s, "messages_since_last": s.get("messages_since_last", 0) + 1},
             ),
         ):
@@ -280,7 +280,7 @@ class TestCompassRecallHandler:
                 tmp_path,
             ),
             patch(
-                "aipass.memory.apps.modules.governance.record_message",
+                "aipass.memory.record_message",
                 side_effect=lambda s: {**s, "messages_since_last": s.get("messages_since_last", 0) + 1},
             ),
         ):
@@ -338,11 +338,11 @@ class TestCompassRecallHandler:
                 return_value=1,
             ),
             patch(
-                "aipass.memory.apps.modules.governance.should_surface",
+                "aipass.memory.should_surface",
                 return_value=(True, "Ready", updated_state),
             ),
             patch(
-                "aipass.memory.apps.modules.governance.record_message",
+                "aipass.memory.record_message",
                 side_effect=lambda s: {**s, "messages_since_last": s.get("messages_since_last", 0) + 1},
             ),
         ):
@@ -375,11 +375,11 @@ class TestCompassRecallHandler:
                 return_value=1,
             ) as mock_mark,
             patch(
-                "aipass.memory.apps.modules.governance.should_surface",
+                "aipass.memory.should_surface",
                 side_effect=mock_should_surface,
             ),
             patch(
-                "aipass.memory.apps.modules.governance.record_message",
+                "aipass.memory.record_message",
                 side_effect=lambda s: {**s, "messages_since_last": s.get("messages_since_last", 0) + 1},
             ),
         ):
@@ -396,7 +396,7 @@ class TestCompassRecallHandler:
                 tmp_path,
             ),
             patch(
-                "aipass.memory.apps.modules.governance.record_message",
+                "aipass.memory.record_message",
                 side_effect=lambda s: {**s, "messages_since_last": s.get("messages_since_last", 0) + 1},
             ),
         ):
@@ -429,7 +429,7 @@ class TestCompassRecallHandler:
                 return_value=1,
             ),
             patch(
-                "aipass.memory.apps.modules.governance.should_surface",
+                "aipass.memory.should_surface",
                 return_value=(
                     True,
                     "Ready",
@@ -442,7 +442,7 @@ class TestCompassRecallHandler:
                 ),
             ),
             patch(
-                "aipass.memory.apps.modules.governance.record_message",
+                "aipass.memory.record_message",
                 side_effect=lambda s: {**s, "messages_since_last": s.get("messages_since_last", 0) + 1},
             ),
         ):
@@ -468,7 +468,7 @@ class TestCompassRecallHandler:
                 return_value=1,
             ),
             patch(
-                "aipass.memory.apps.modules.governance.should_surface",
+                "aipass.memory.should_surface",
                 return_value=(
                     True,
                     "Ready",
@@ -481,7 +481,7 @@ class TestCompassRecallHandler:
                 ),
             ),
             patch(
-                "aipass.memory.apps.modules.governance.record_message",
+                "aipass.memory.record_message",
                 side_effect=lambda s: {**s, "messages_since_last": s.get("messages_since_last", 0) + 1},
             ),
         ):
@@ -510,8 +510,8 @@ class TestSeatGate:
             patch("aipass.hooks.apps.handlers.prompt.compass_recall._STATE_DIR", tmp_path),
             patch("aipass.devpulse.apps.modules.compass.recall_decisions", return_value=[CANDIDATE_GOOD]) as recall,
             patch("aipass.devpulse.apps.modules.compass.mark_surfaced", return_value=1),
-            patch("aipass.memory.apps.modules.governance.should_surface", return_value=(True, "ok", {})),
-            patch("aipass.memory.apps.modules.governance.record_message", side_effect=lambda s: s),
+            patch("aipass.memory.should_surface", return_value=(True, "ok", {})),
+            patch("aipass.memory.record_message", side_effect=lambda s: s),
         ):
             return handle(payload), recall
 

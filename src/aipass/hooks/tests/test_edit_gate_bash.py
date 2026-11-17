@@ -4,7 +4,7 @@
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's scripted lane and apps/modules/bash_writes.py."""
@@ -31,7 +31,7 @@ from aipass.hooks.apps.modules.bash_writes import write_targets
 # grant, and each granted test has a withheld twin. POSIX literals are test data; a path put into a
 # command uses as_posix() (bash's form on every OS); backslashes are tested only through _win().
 
-_RAIL = "aipass.ai_mail.apps.modules.door_verified_caller"
+_RAIL = "aipass.ai_mail"
 _BASH_WRITES = "aipass.hooks.apps.modules.bash_writes"
 
 

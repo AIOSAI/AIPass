@@ -20,7 +20,7 @@ from unittest.mock import patch
 
 import pytest
 
-from aipass.ai_mail.apps.modules import door_session_pointer as sp
+from aipass import ai_mail as sp
 from aipass.hooks.apps.handlers.lifecycle import session_boot
 from aipass.hooks.apps.modules import cc_sessions
 from aipass.hooks.tests.support_session_boot import (

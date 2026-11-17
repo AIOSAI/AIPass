@@ -78,7 +78,7 @@ def fleet_rows(repo_root: Path) -> list[dict]:
     key = str(repo_root)
     if key not in _fleet_cache:
         # Lazy: only the commands that enumerate citizens pay for the door's import.
-        from aipass.memory.apps.modules.door_registry_scope import fleet_branches
+        from aipass.memory import fleet_branches
 
         _fleet_cache[key] = fleet_branches(repo_root=Path(repo_root), name_from="registry", strict=True)
     return _fleet_cache[key]

@@ -4,7 +4,7 @@
 # Description: Tests for rollover lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/lifecycle/rollover.py."""
@@ -24,7 +24,7 @@ import pytest
 
 from aipass.hooks.apps.handlers.lifecycle import rollover
 from aipass.hooks.apps.handlers.lifecycle.rollover import handle
-from aipass.memory.apps.modules import door_todo_report as todo_report
+from aipass.memory import READY_PHRASE
 
 
 MOD = "aipass.hooks.apps.handlers.lifecycle.rollover"
@@ -279,7 +279,7 @@ class TestTheCompactingBranchIsNamed:
         Built from memory's own constant, so a rename there turns this red here.
         """
         todos_line = (
-            f"No files need rollover\n@hooks todos: pad 12/10 - 2 {todo_report.READY_PHRASE} "
+            f"No files need rollover\n@hooks todos: pad 12/10 - 2 {READY_PHRASE} "
             "(oldest by number -> .backup/todo/hooks/backlog.json)"
         )
         _result, calls, log = _rolled(monkeypatch, tmp_path, check_out=todos_line)

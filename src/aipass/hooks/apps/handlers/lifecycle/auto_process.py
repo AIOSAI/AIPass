@@ -13,7 +13,6 @@
 Inline, vectorize + rollover outlasts the hook timeout and the injection is lost.
 """
 
-import importlib
 import os
 import tempfile
 from pathlib import Path
@@ -56,8 +55,9 @@ def handle(hook_data: dict) -> dict:
         logger.info("[HOOKS] auto_process: probe run — spawn suppressed")
         return {"stdout": "", "exit_code": 0}
 
-    module = importlib.import_module("aipass.memory.apps.modules.door_auto_process")
-    result = module.spawn_background()
+    from aipass.memory import spawn_background
+
+    result = spawn_background()
 
     if not result.get("success"):
         logger.error("[HOOKS] auto_process: spawn failed: %s", result.get("error"))
