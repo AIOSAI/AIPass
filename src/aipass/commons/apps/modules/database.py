@@ -1,26 +1,27 @@
 # =================== AIPass ====================
 # Name: database.py
 # Description: Database Module Layer
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
-"""
-Database Module
-
-Service module: the entry point and other modules import init_db/close_db/get_db from here.
-"""
+"""Database module: schema setup for the entry point, and introspection of handlers/database."""
 
 from typing import List
 
 from aipass.prax import logger  # noqa: F401 - the imports standard requires the prax logger in every module
 from aipass.cli import console
 
-from aipass.commons.apps.handlers.database import init_db, close_db, get_db
+from aipass.commons.apps.handlers.database import init_db, close_db
 from aipass.commons.apps.handlers.json import json_handler
 
-__all__ = ["init_db", "close_db", "get_db", "handle_command"]
+__all__ = ["init_schema", "handle_command"]
+
+
+def init_schema() -> None:
+    """Create the schema and default rooms, then release the connection."""
+    close_db(init_db())
 
 
 def print_introspection():

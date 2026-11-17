@@ -3,7 +3,7 @@
 # Description: Comment and voting operations handler
 # Version: 1.1.1
 # Created: 2026-03-07
-# Modified: 2026-11-14
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -17,7 +17,7 @@ from typing import List, Optional
 from aipass.prax import logger
 
 from aipass.commons.apps.handlers.database.db import get_db, close_db
-from aipass.commons.apps.modules.commons_identity import CallerLookupFailed, get_caller_branch, extract_mentions
+from aipass.commons.apps.handlers.identity.identity_ops import CallerLookupFailed, get_caller_branch, extract_mentions
 from aipass.commons.apps.handlers.json import json_handler
 from aipass.commons.apps.handlers.search.search_queries import sync_comment_to_fts
 from aipass.commons.apps.handlers.profiles.profile_queries import increment_comment_count

@@ -3,7 +3,7 @@
 # Description: Spatial Navigation Module
 # Version: 1.1.1
 # Created: 2026-03-07
-# Modified: 2026-11-14
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -24,7 +24,7 @@ from aipass.commons.apps.handlers.rooms.space_ops import (
     get_visitors_data,
     record_visit,
 )
-from aipass.commons.apps.modules.commons_identity import CallerLookupFailed, get_caller_branch
+from aipass.commons.apps.handlers.identity.identity_ops import CallerLookupFailed, get_caller_branch
 from aipass.commons.apps.handlers.json import json_handler
 
 
@@ -40,10 +40,8 @@ def print_introspection():
     console.print("    - space_ops.py (get_room_look_data — retrieve room data for looking around)")
     console.print("    - space_ops.py (place_decoration — place a decoration in a room)")
     console.print("    - space_ops.py (get_visitors_data — get recent visitors for a room)")
-    console.print()
-    console.print("Connected Modules:")
-    console.print("  modules/")
-    console.print("    - commons_identity.py (get_caller_branch — detect calling branch for decorate)")
+    console.print("  handlers/identity/")
+    console.print("    - identity_ops.py (get_caller_branch — detect calling branch for decorate)")
     console.print()
 
 

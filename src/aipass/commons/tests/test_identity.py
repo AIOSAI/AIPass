@@ -3,7 +3,7 @@
 # Description: Unit tests for identity module and identity_ops handler
 # Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/commons_identity.py and apps/handlers/identity/identity_ops.py."""
@@ -68,13 +68,13 @@ def _make_external_project(root: Path, name: str = "VERA", email: str = "@vera")
 
 def test_extract_mentions_empty_string(initialized_db: sqlite3.Connection):
     """Empty string returns empty list."""
-    result = _id_mod.extract_mentions("")
+    result = _ops.extract_mentions("")
     assert result == []
 
 
 def test_extract_mentions_no_mentions(initialized_db: sqlite3.Connection):
     """Text without @mentions returns empty list."""
-    result = _id_mod.extract_mentions("Hello world, no mentions here")
+    result = _ops.extract_mentions("Hello world, no mentions here")
     assert result == []
 
 
@@ -86,7 +86,7 @@ def test_extract_mentions_single(initialized_db: sqlite3.Connection):
     )
     initialized_db.commit()
 
-    result = _id_mod.extract_mentions("Hey @drone check this out")
+    result = _ops.extract_mentions("Hey @drone check this out")
     assert result == ["drone"]
 
 
@@ -99,13 +99,13 @@ def test_extract_mentions_multiple(initialized_db: sqlite3.Connection):
         )
     initialized_db.commit()
 
-    result = _id_mod.extract_mentions("@flow and @seed please review")
+    result = _ops.extract_mentions("@flow and @seed please review")
     assert result == ["flow", "seed"]
 
 
 def test_extract_mentions_unregistered_filtered(initialized_db: sqlite3.Connection):
     """Mentions of agents not in the DB are filtered out."""
-    result = _id_mod.extract_mentions("@nonexistent_branch please help")
+    result = _ops.extract_mentions("@nonexistent_branch please help")
     assert result == []
 
 
@@ -117,7 +117,7 @@ def test_extract_mentions_case_insensitive(initialized_db: sqlite3.Connection):
     )
     initialized_db.commit()
 
-    result = _id_mod.extract_mentions("Hey @PRAX look at this")
+    result = _ops.extract_mentions("Hey @PRAX look at this")
     assert result == ["prax"]
 
 
@@ -129,7 +129,7 @@ def test_extract_mentions_with_underscores(initialized_db: sqlite3.Connection):
     )
     initialized_db.commit()
 
-    result = _id_mod.extract_mentions("Asking @ai_mail for analysis")
+    result = _ops.extract_mentions("Asking @ai_mail for analysis")
     assert result == ["ai_mail"]
 
 
@@ -141,7 +141,7 @@ def test_extract_mentions_answers_none_when_the_lookup_fails():
         "aipass.commons.apps.handlers.database.db.get_db",
         side_effect=sqlite3.OperationalError("database is locked"),
     ) as failing_get_db:
-        result = _id_mod.extract_mentions("Hey @drone check this out")
+        result = _ops.extract_mentions("Hey @drone check this out")
 
     failing_get_db.assert_called_once_with()
     assert result is None
@@ -156,7 +156,7 @@ def test_find_branch_root_with_trinity(tmp_path: Path):
     sub = tmp_path / "apps" / "handlers"
     sub.mkdir(parents=True)
 
-    result = _id_mod.find_branch_root(sub)
+    result = _ops.find_branch_root(sub)
     assert result is not None
     assert result == tmp_path.resolve()
 
@@ -166,7 +166,7 @@ def test_find_branch_root_no_trinity(tmp_path: Path):
     sub = tmp_path / "deep" / "nested" / "dir"
     sub.mkdir(parents=True)
 
-    result = _id_mod.find_branch_root(sub)
+    result = _ops.find_branch_root(sub)
     assert result is None
 
 
@@ -176,7 +176,7 @@ def test_find_branch_root_at_start(tmp_path: Path):
     trinity_dir.mkdir()
     (trinity_dir / "passport.json").write_text("{}", encoding="utf-8")
 
-    result = _id_mod.find_branch_root(tmp_path)
+    result = _ops.find_branch_root(tmp_path)
     assert result is not None
     assert result == tmp_path.resolve()
 
@@ -184,28 +184,28 @@ def test_find_branch_root_at_start(tmp_path: Path):
 def test_resolve_display_name_no_alias(monkeypatch: pytest.MonkeyPatch):
     """Falls back to branch_name when no alias is cached."""
     monkeypatch.setattr("aipass.commons.apps.handlers.identity.identity_ops._alias_cache", {})
-    result = _id_mod.resolve_display_name("UNKNOWN_BRANCH")
+    result = _ops.resolve_display_name("UNKNOWN_BRANCH")
     assert result == "UNKNOWN_BRANCH"
 
 
 def test_resolve_display_name_with_alias(monkeypatch: pytest.MonkeyPatch):
     """Returns 'Alias (SYSTEM_NAME)' format when alias exists."""
     monkeypatch.setattr("aipass.commons.apps.handlers.identity.identity_ops._alias_cache", {"TEAM_1": "Alpha Team"})
-    result = _id_mod.resolve_display_name("TEAM_1")
+    result = _ops.resolve_display_name("TEAM_1")
     assert result == "Alpha Team (TEAM_1)"
 
 
 def test_resolve_display_name_compact(monkeypatch: pytest.MonkeyPatch):
     """Compact mode returns alias only, no parenthesized system name."""
     monkeypatch.setattr("aipass.commons.apps.handlers.identity.identity_ops._alias_cache", {"TEAM_1": "Alpha Team"})
-    result = _id_mod.resolve_display_name("TEAM_1", compact=True)
+    result = _ops.resolve_display_name("TEAM_1", compact=True)
     assert result == "Alpha Team"
 
 
 def test_resolve_display_name_compact_no_alias(monkeypatch: pytest.MonkeyPatch):
     """Compact mode without alias still falls back to branch_name."""
     monkeypatch.setattr("aipass.commons.apps.handlers.identity.identity_ops._alias_cache", {})
-    result = _id_mod.resolve_display_name("RAW_NAME", compact=True)
+    result = _ops.resolve_display_name("RAW_NAME", compact=True)
     assert result == "RAW_NAME"
 
 
@@ -226,7 +226,7 @@ def test_get_branch_info_by_name_found(tmp_path: Path, monkeypatch: pytest.Monke
         reg_file,
     )
 
-    result = _id_mod.get_branch_info_by_name("drone")
+    result = _ops.get_branch_info_by_name("drone")
     assert result is not None
     assert result["name"] == "DRONE"
     assert result["email"] == "@drone"
@@ -244,7 +244,7 @@ def test_get_branch_info_by_name_case_insensitive(tmp_path: Path, monkeypatch: p
         reg_file,
     )
 
-    result = _id_mod.get_branch_info_by_name("Flow")
+    result = _ops.get_branch_info_by_name("Flow")
     assert result is not None
     assert result["name"] == "FLOW"
 
@@ -261,7 +261,7 @@ def test_get_branch_info_by_name_not_found(tmp_path: Path, monkeypatch: pytest.M
         reg_file,
     )
 
-    result = _id_mod.get_branch_info_by_name("nonexistent")
+    result = _ops.get_branch_info_by_name("nonexistent")
     assert result is None
 
 
@@ -271,7 +271,7 @@ def test_get_branch_info_by_name_missing_file(tmp_path: Path, monkeypatch: pytes
         "aipass.commons.apps.handlers.identity.identity_ops.BRANCH_REGISTRY_PATH",
         tmp_path / "nope.json",
     )
-    result = _id_mod.get_branch_info_by_name("DRONE")
+    result = _ops.get_branch_info_by_name("DRONE")
     assert result is None
 
 
@@ -299,7 +299,7 @@ def test_get_caller_branch_uses_caller_branch_env(
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(no_branch_dir))
     monkeypatch.setenv("AIPASS_CALLER_BRANCH", "drone")
 
-    result = _id_mod.get_caller_branch()
+    result = _ops.get_caller_branch()
     assert result is not None
     assert result["name"] == "drone"
     mock_register.assert_called_once()
@@ -343,7 +343,7 @@ def test_get_caller_branch_prefers_cwd_over_env(
         "aipass.commons.apps.handlers.identity.identity_ops.get_branch_info_from_registry",
         return_value={"name": "FLOW", "email": "@flow"},
     ):
-        result = _id_mod.get_caller_branch()
+        result = _ops.get_caller_branch()
 
     assert result is not None
     assert result["name"] == "flow"
@@ -362,7 +362,7 @@ def test_get_caller_branch_returns_none_when_no_detection(
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(no_branch_dir))
     monkeypatch.delenv("AIPASS_CALLER_BRANCH", raising=False)
 
-    result = _id_mod.get_caller_branch()
+    result = _ops.get_caller_branch()
     assert result is None
 
 
@@ -383,7 +383,7 @@ def test_get_caller_branch_never_reads_the_process_cwd(
         "aipass.commons.apps.handlers.identity.identity_ops.get_branch_info_from_registry",
         return_value={"name": "COMMONS", "email": "@commons"},
     ) as lookup:
-        assert _id_mod.get_caller_branch() is None
+        assert _ops.get_caller_branch() is None
     lookup.assert_not_called()
 
 
@@ -410,7 +410,7 @@ def test_external_citizen_resolves_by_path(tmp_path: Path, monkeypatch: pytest.M
     branch_dir = _make_external_project(project)
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
 
-    result = _id_mod.get_branch_info_from_registry(branch_dir)
+    result = _ops.get_branch_info_from_registry(branch_dir)
 
     assert result is not None, "external citizen resolved to None — the bug this fix closes"
     assert result["name"] == "VERA"
@@ -424,7 +424,7 @@ def test_external_citizen_resolves_by_name(tmp_path: Path, monkeypatch: pytest.M
     branch_dir = _make_external_project(project)
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
 
-    result = _id_mod.get_branch_info_by_name("vera")
+    result = _ops.get_branch_info_by_name("vera")
 
     assert result is not None
     assert result["email"] == "@vera"
@@ -444,7 +444,7 @@ def test_external_citizen_absolute_registry_path(
     )
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
 
-    result = _id_mod.get_branch_info_from_registry(branch_dir)
+    result = _ops.get_branch_info_from_registry(branch_dir)
 
     assert result is not None
     assert result["name"] == "WRITER"
@@ -459,7 +459,7 @@ def test_aipass_registry_wins_over_caller_registry(
     branch_dir = _make_external_project(project, name="DRONE", email="@not-our-drone")
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
 
-    result = _id_mod.get_branch_info_by_name("drone")
+    result = _ops.get_branch_info_by_name("drone")
 
     assert result is not None
     assert result["email"] == "@drone"
@@ -472,7 +472,7 @@ def test_unknown_branch_still_returns_none(tmp_path: Path, monkeypatch: pytest.M
     branch_dir = _make_external_project(project)
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
 
-    assert _id_mod.get_branch_info_by_name("nobody") is None
+    assert _ops.get_branch_info_by_name("nobody") is None
 
 
 @patch("aipass.commons.apps.handlers.identity.identity_ops.json_handler", autospec=True)
@@ -490,7 +490,7 @@ def test_get_caller_branch_end_to_end_for_external_citizen(
     branch_dir = _make_external_project(project)
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
 
-    result = _id_mod.get_caller_branch()
+    result = _ops.get_caller_branch()
 
     assert result is not None
     assert result["name"] == "vera"
@@ -508,8 +508,8 @@ def test_find_caller_registries_skips_the_aipass_registry(
     _write_registry(tmp_path / "VERA-STUDIO_REGISTRY.json", [{"name": "VERA", "path": "vera", "email": "@vera"}])
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
 
-    assert _id_mod.get_branch_info_by_name("ghost") is None
-    result = _id_mod.get_branch_info_by_name("vera")
+    assert _ops.get_branch_info_by_name("ghost") is None
+    result = _ops.get_branch_info_by_name("vera")
     assert result is not None
     assert result["email"] == "@vera"
 
@@ -522,7 +522,7 @@ def test_find_caller_registries_sorted(tmp_path: Path, monkeypatch: pytest.Monke
     _write_registry(tmp_path / "ALPHA_REGISTRY.json", [{"name": "VERA", "path": "vera", "email": "@alpha-vera"}])
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
 
-    result = _id_mod.get_branch_info_by_name("vera")
+    result = _ops.get_branch_info_by_name("vera")
 
     assert result is not None
     assert result["email"] == "@alpha-vera"
@@ -536,7 +536,7 @@ def test_find_caller_registries_without_env(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
     monkeypatch.chdir(branch_dir)
 
-    assert _id_mod.get_branch_info_by_name("vera") is None
+    assert _ops.get_branch_info_by_name("vera") is None
 
 
 def test_branches_from_registry_missing_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -544,7 +544,7 @@ def test_branches_from_registry_missing_file(tmp_path: Path, monkeypatch: pytest
     monkeypatch.setattr(_REGISTRY_ATTR, tmp_path / "nope.json")
     monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
 
-    assert _id_mod.get_branch_info_by_name("vera") is None
+    assert _ops.get_branch_info_by_name("vera") is None
 
 
 def test_branches_from_registry_dict_shape(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, aipass_registry: Path):
@@ -562,7 +562,7 @@ def test_branches_from_registry_dict_shape(tmp_path: Path, monkeypatch: pytest.M
     )
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
 
-    result = _id_mod.get_branch_info_from_registry(branch_dir)
+    result = _ops.get_branch_info_from_registry(branch_dir)
 
     assert result is not None
     assert result["name"] == "VERA"
@@ -583,7 +583,7 @@ def test_a_corrupt_caller_registry_raises_instead_of_answering_not_found(
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
 
     with pytest.raises(json_mod.JSONDecodeError):
-        _id_mod.get_branch_info_from_registry(branch_dir)
+        _ops.get_branch_info_from_registry(branch_dir)
 
 
 @patch("aipass.commons.apps.handlers.identity.identity_ops.json_handler", autospec=True)
@@ -753,7 +753,7 @@ def test_case_folded_registry_cannot_answer_identity(
     _plant_case_folded_decoy(project, branch_dir)
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
 
-    result = _id_mod.get_branch_info_from_registry(branch_dir)
+    result = _ops.get_branch_info_from_registry(branch_dir)
 
     assert result is not None, "external citizen stopped resolving entirely"
     assert result["name"] == "VERA", (
@@ -775,8 +775,8 @@ def test_case_folded_registry_excluded_from_caller_registries(
     _plant_case_folded_decoy(project, branch_dir)
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
 
-    assert _id_mod.get_branch_info_by_name("ghost") is None, "case-folded registry survived the suffix filter"
-    result = _id_mod.get_branch_info_by_name("vera")
+    assert _ops.get_branch_info_by_name("ghost") is None, "case-folded registry survived the suffix filter"
+    result = _ops.get_branch_info_by_name("vera")
     assert result is not None
     assert result["name"] == "VERA"
 
@@ -814,7 +814,7 @@ def test_the_widening_instrument_actually_widens(
     decoy = _plant_case_folded_decoy(project, branch_dir)
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
 
-    result = _id_mod.get_branch_info_by_name("vera")
+    result = _ops.get_branch_info_by_name("vera")
 
     listings = dict(case_insensitive_glob)
     listed = listings.get(project.resolve(), [])
@@ -894,7 +894,7 @@ def test_external_registries_with_lowercase_stems_still_resolve(
     )
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
 
-    result = _id_mod.get_branch_info_from_registry(branch_dir)
+    result = _ops.get_branch_info_from_registry(branch_dir)
 
     assert result is not None, "a lowercase-stem registry was wrongly filtered out"
     assert result["email"] == "@app"

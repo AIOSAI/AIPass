@@ -29,8 +29,11 @@ refusal still returns `True`, because it did handle the command. The exit code i
 decided separately; see [exit_codes.md](exit_codes.md).
 
 Two of the modules are services rather than conversation lanes: `database`
-exposes the connection layer's introspection, and `commons_identity` answers
-`whoami`. See [identity.md](identity.md).
+runs the entry point's schema setup (`init_schema`) and exposes the connection
+layer's introspection, and `commons_identity` answers `whoami`. See
+[identity.md](identity.md). Neither hands out handler names; other branches
+take commons names from the package door, `from aipass.commons import <name>`
+(the list is `aipass.commons.__all__`).
 
 ## Layer 3 -- the handlers
 

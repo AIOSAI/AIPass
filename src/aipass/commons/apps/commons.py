@@ -3,7 +3,7 @@
 # Description: Entry point CLI for drone @commons
 # Version: 1.2.2
 # Created: 2026-03-08
-# Modified: 2026-11-14
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -46,10 +46,9 @@ HELP_AWARE_COMMANDS = frozenset({"activity", "catchup", "digest", "explore", "ro
 def ensure_database() -> bool:
     """Ensure the database is initialized with schema and default rooms."""
     try:
-        from aipass.commons.apps.modules.database import init_db, close_db
+        from aipass.commons.apps.modules.database import init_schema
 
-        conn = init_db()
-        close_db(conn)
+        init_schema()
         return True
     except Exception as e:
         logger.error(f"[commons] Database initialization failed: {e}")

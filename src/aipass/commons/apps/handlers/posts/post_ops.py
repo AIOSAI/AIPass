@@ -3,7 +3,7 @@
 # Description: Post operations handler
 # Version: 1.1.2
 # Created: 2026-03-07
-# Modified: 2026-11-14
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -15,7 +15,7 @@ from typing import List
 from aipass.prax import logger
 
 from aipass.commons.apps.handlers.database.db import get_db, close_db
-from aipass.commons.apps.modules.commons_identity import CallerLookupFailed, get_caller_branch, extract_mentions
+from aipass.commons.apps.handlers.identity.identity_ops import CallerLookupFailed, get_caller_branch, extract_mentions
 from aipass.commons.apps.handlers.json import json_handler
 from aipass.commons.apps.handlers.search.search_queries import sync_post_to_fts
 from aipass.commons.apps.handlers.profiles.profile_queries import increment_post_count

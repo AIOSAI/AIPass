@@ -3,7 +3,7 @@
 # Description: Fence probe for test_handlers_fence.py, run from a kin seat and from foreign copies
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Probe for the handlers fence of apps/handlers/__init__.py (no test_ prefix: never collected).
@@ -24,7 +24,7 @@ import aipass
 BRANCH = "commons"
 HANDLERS = f"aipass.{BRANCH}.apps.handlers"
 A_HANDLER = f"{HANDLERS}.json.json_handler"
-A_DOOR = "aipass.commons.apps.modules.commons_identity"
+A_DOOR = "aipass.commons"
 KIN_PROBE = f"aipass.{BRANCH}.tests.support_fence"
 
 
@@ -62,8 +62,8 @@ def _sibling() -> None:
 
 
 def _door() -> None:
-    """This branch's modules door, which imports the handlers on the caller's behalf."""
-    importlib.import_module(A_DOOR)
+    """This branch's package door: a name read through it loads its handler home on the caller's behalf."""
+    getattr(importlib.import_module(A_DOOR), "get_caller_branch")
 
 
 def _mock() -> None:

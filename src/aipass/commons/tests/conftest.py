@@ -33,7 +33,7 @@ except ImportError:
 from aipass.cli import display
 from aipass.cli import reset_command_state
 from aipass.commons.apps.handlers.json import json_handler
-from aipass.commons.apps.modules.database import close_db, init_db
+from aipass.commons.apps.handlers.database import close_db, init_db
 
 # .archive/ holds old suite copies; collecting a dot-directory yields an invalid dotted module name.
 collect_ignore_glob = [".archive/*", "**/.archive/*"]
