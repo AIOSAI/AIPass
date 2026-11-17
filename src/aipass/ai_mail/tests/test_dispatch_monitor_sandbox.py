@@ -18,7 +18,7 @@ import os
 import subprocess
 import sys
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as mod
 from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import (
@@ -186,17 +186,13 @@ class TestFlagOnSandboxPath:
             call_log.append("resolve_bwrap_command")
             return f"bwrap --ro-bind / / {cmd_str}"
 
-        monkeypatch.setattr("aipass.hooks.apps.modules.sandbox.build_policy", mock_build_policy)
-        monkeypatch.setattr(
-            "aipass.hooks.apps.modules.sandbox.build_srt_config",
-            mock_build_srt_config,
-        )
-        monkeypatch.setattr(
-            "aipass.hooks.apps.modules.sandbox.resolve_bwrap_command",
-            mock_resolve_bwrap,
-        )
-
-        result = wrap_for_sandbox(["claude", "--model", "opus"], tmp_path)
+        # wrap_for_sandbox imports from hooks' door at call time, so a patch on the door name reaches it.
+        with (
+            patch("aipass.hooks.build_policy", mock_build_policy),
+            patch("aipass.hooks.build_srt_config", mock_build_srt_config),
+            patch("aipass.hooks.resolve_bwrap_command", mock_resolve_bwrap),
+        ):
+            result = wrap_for_sandbox(["claude", "--model", "opus"], tmp_path)
 
         assert call_log == ["build_policy", "build_srt_config", "resolve_bwrap_command"]
         assert result[0] == "/bin/bash"

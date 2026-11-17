@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from aipass.hooks.apps.modules import grounding_content
+from aipass.hooks import BRANCH_CHAR_BUDGET
 import aipass.prax
 from aipass.spawn.apps.handlers import delete_ops, mint_ops, receipt_ops, update_ops
 from aipass.spawn.apps.handlers.class_registry import get_available_classes, get_template_dir
@@ -343,7 +343,7 @@ def _readme_cap() -> int:
 def _prompt_cap() -> int:
     """@hooks' cap, read off the module that enforces it at render time."""
 
-    return int(getattr(grounding_content, "BRANCH_CHAR_BUDGET"))
+    return int(BRANCH_CHAR_BUDGET)
 
 
 def _dashboard_cap() -> int:

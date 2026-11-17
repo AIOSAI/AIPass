@@ -3,7 +3,7 @@
 # Description: Host API Settings Handler — the desktop's two gears, served
 # Version: 1.1.0
 # Created: 2026-08-16
-# Modified: 2026-11-01
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -37,7 +37,7 @@ HOOKS_SOUND_TIMEOUT_SECONDS = 30
 HOOKS_SOUND_STATE = [
     sys.executable,
     "-c",
-    "from aipass.hooks.apps import sound; print('muted' if sound.is_muted() else 'active')",
+    "from aipass.hooks import is_muted; print('muted' if is_muted() else 'active')",
 ]
 
 KEY_MODEL = "model"

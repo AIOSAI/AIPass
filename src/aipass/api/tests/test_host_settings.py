@@ -3,7 +3,7 @@
 # Description: Host API settings handler — the desktop's gear rules, held in Python
 # Version: 1.2.0
 # Created: 2026-08-16
-# Modified: 2026-11-14
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/host/settings.py, the desktop's settings lane."""
@@ -23,7 +23,7 @@ import pytest
 
 from aipass.api.apps.handlers.host import settings as host_settings
 
-WHERE_THE_FLAG_LIVES = "from aipass.hooks.apps import sound; print(sound.SOUND_FLAG)"
+WHERE_THE_FLAG_LIVES = "from aipass.hooks import SOUND_FLAG; print(SOUND_FLAG)"
 
 
 def _where_the_door_would_write() -> Path:

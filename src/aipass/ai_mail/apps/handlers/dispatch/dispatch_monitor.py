@@ -51,7 +51,7 @@ def wrap_for_sandbox(cmd: list, branch_path: Path) -> list:
     A door: main() calls it when the sandbox flag is on; @hooks owns the building blocks it calls.
     Raises on ANY failure — caller must not silently fall back to unsandboxed.
     """
-    from aipass.hooks.apps.modules.sandbox import build_policy, build_srt_config, resolve_bwrap_command
+    from aipass.hooks import build_policy, build_srt_config, resolve_bwrap_command
 
     policy = build_policy(branch_path)
     srt_config = build_srt_config(policy)
