@@ -3,7 +3,7 @@
 # Description: Tests for the host API verb lane — wake, kill, lock (FPLAN-0411 Phase 3)
 # Version: 1.3.0
 # Created: 2026-08-14
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/host/verbs.py and agent_route.py: wake, kill, lock, keys, model switches, feed notices."""
@@ -555,7 +555,7 @@ class TestNoMechanismIsReimplementedHere:
             "from aipass.prax import logger",
             "import aipass.drone as drone",
             "from aipass.skills.lib.screen_lock import handler as screen_lock",
-            "from aipass.aipass.apps.modules import new_project as project_door",
+            "import aipass.aipass as project_door",
         ]
 
     def test_every_verb_names_the_branch_that_owns_it(self) -> None:

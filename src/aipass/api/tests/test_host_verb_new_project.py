@@ -3,7 +3,7 @@
 # Description: Tests for POST /v1/verbs/new-project, the phone's new-project door (FPLAN-0649)
 # Version: 1.0.2
 # Created: 2026-10-16
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/host/new_project_route.py and verbs.new_project behind it."""
@@ -13,19 +13,22 @@
 # sentry: no-test-needed(external) — project_door's real create_project, @aipass's; every call to it is patched
 
 import os
+import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 
-from aipass.aipass.apps.modules import new_project as project_door
+from aipass.aipass import create_project
 from aipass.api.apps.handlers.host import denials as host_denials
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.apps.handlers.host import verbs as host_verbs
 
 ROUTE = "/v1/verbs/new-project"
+# The door re-reads both names from their home on every access, so a patch there reaches verbs.py.
+DOOR_HOME = sys.modules[create_project.__module__]
 TEMPLATES = ("empty", "python")
 PATCH_QUIET = (
     "aipass.api.apps.handlers.host.server.logger",
@@ -66,8 +69,8 @@ def seat(tmp_path: Path) -> Path:
 @pytest.fixture
 def door(seat: Path):
     """@aipass's create_project, patched where verbs.py looks it up; never a real project."""
-    with patch.object(project_door, "TEMPLATES", TEMPLATES, create=True):
-        with patch.object(project_door, "create_project", create=True) as create:
+    with patch.object(DOOR_HOME, "TEMPLATES", TEMPLATES):
+        with patch.object(DOOR_HOME, "create_project") as create:
             create.return_value = _result(seat)
             with patch.object(host_verbs.host_reads, "repo_root", return_value=seat):
                 yield create
@@ -189,7 +192,7 @@ class TestTheDoorsRefusalsMapToCodes:
         assert "zork" not in response.text
 
     def test_a_door_without_create_project_is_a_503_never_a_500(self, client: Any, door: Any) -> None:
-        with patch.object(project_door, "create_project", None, create=True):
+        with patch.object(DOOR_HOME, "create_project", None):
             response = _post(client, {"name": "probe"})
 
         assert response.status_code == 503

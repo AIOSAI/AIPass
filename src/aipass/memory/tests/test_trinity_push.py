@@ -3,7 +3,7 @@
 # Description: Red-first pins for the trinity push — the archive-verify-prune law above all
 # Version: 1.4.0
 # Created: 2026-08-27
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/templates/trinity_push.py and the push lane that drives it."""
@@ -33,7 +33,7 @@ from aipass.memory.apps.handlers.rollover import orchestrator
 from aipass.memory.apps.handlers.templates import push_report
 from aipass.memory.apps.handlers.tracking import tab_renderer
 from aipass.memory.apps.modules import push as push_module
-from aipass.sentry.apps.modules.door_trinity import check_branch, expected_meta_line
+from aipass.sentry import check_branch, expected_meta_line
 from aipass.memory.apps.handlers.rollover import todo_roll
 from aipass.memory.apps.handlers.templates import trinity_push as tp
 
@@ -786,7 +786,7 @@ class TestThePushedFileIsCanonical:
     """The output is measured by the standard's own checker, not by opinion."""
 
     def test_a_pushed_branch_satisfies_the_trinity_checker(self, tmp_path, monkeypatch):
-        pytest.importorskip("aipass.sentry.apps.modules.door_trinity")
+        pytest.importorskip("aipass.sentry")
         local = {
             "document_metadata": {"created": "2026-01-01", "status": {"health": "healthy"}},
             "sessions": [_entry(2), _entry(1, findings=["drift"])],

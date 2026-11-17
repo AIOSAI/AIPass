@@ -3,7 +3,7 @@
 # Description: Host API Verb Handler — wake, kill, lock and new-project, each a proxy
 # Version: 1.1.2
 # Created: 2026-08-14
-# Modified: 2026-10-24
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -28,7 +28,7 @@ import aipass.drone as drone
 # @skills' published in-process door; lib/ is their public shape, not internals.
 from aipass.skills.lib.screen_lock import handler as screen_lock
 
-from aipass.aipass.apps.modules import new_project as project_door
+import aipass.aipass as project_door
 
 WAKE_TIMEOUT_SECONDS = 120
 
@@ -171,7 +171,7 @@ PROJECT_NAME_RULE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
 PROJECT_NAME_SENTENCE = "A project name is a letter, then up to 63 more letters, digits, underscores or hyphens"
 PROJECT_EXISTS_PREFIX = "Project already exists"
 REGISTRY_SUFFIX = "_REGISTRY.json"
-SEAM_MISSING = "aipass.aipass.apps.modules.new_project publishes no create_project and TEMPLATES"
+SEAM_MISSING = "aipass.aipass publishes no create_project and TEMPLATES"
 
 
 class ProjectRefused(VerbRefused):
