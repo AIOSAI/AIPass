@@ -9,6 +9,13 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **fleet: one import door per branch** (2026-11-16 and 17; every branch building, devpulse landing). Another branch is imported only as `from aipass.<branch> import <name>`. Each package top file is the door: a name-to-home table read on every access, nothing cached, an unknown name is an `AttributeError`, and a bare import loads nothing under `apps`. Every cross-branch caller and its tests moved to the doors (the fleet scan went from 619 production and 290 test sites to 0 and 0). The 23 `door_*.py` files under `apps/modules` are removed, and modules no longer list handler names in `__all__`. The handlers fence in all 18 branches and in the citizen template tells a refused importer to use the package door.
+- **sentry: the `front_door` standard gates** (2026-11-16 and 17). It convicts a cross-branch import through `apps`, a `door_*` file under `apps/modules`, a pure re-export module, and a module whose `__all__` hands out handler names. `unused_function` counts a name in the branch's own door table as used; `encapsulation` acquits a handler import inside `if TYPE_CHECKING:` in the package top file. The front-door scan skips the retired folders the audit skips (`tests/parked`, `deprecated`) and prints how many. The standards pages state the rule, how a test patches a door name, and that the event bus is silenced by patching `Trigger.fire`.
+
 ## [2026-11-10] — v2.8.37: citizens at any path, the fleet read through memory's door, quieter hooks
 
 ### Added
