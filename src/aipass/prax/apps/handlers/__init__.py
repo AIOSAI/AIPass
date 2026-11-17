@@ -1,4 +1,4 @@
-"""The fence: another branch reaches these handlers only through aipass.prax.apps.modules, never directly.
+"""The fence: another branch reaches these only through the package door, aipass.prax, never directly.
 
 Frames are kin (this branch), transport (importlib, stdlib such as unittest.mock, site-packages) or foreign.
 The first foreign frame is refused unless kin code imported on its behalf and its line does not name the handlers.
@@ -106,8 +106,8 @@ def _guard_branch_access() -> None:
         f"  Blocked:       {import_line or 'unknown'}\n"
         f"\n"
         f"  Handlers are internal to their branch.\n"
-        f"  Use the module API instead:\n"
-        f"    from aipass.{MY_BRANCH}.apps.modules.<module> import <function>\n"
+        f"  Use the package door instead:\n"
+        f"    from aipass.{MY_BRANCH} import <name>\n"
         f"\n"
         f"  For full standards guide:\n"
         f"    drone @sentry handlers\n"
