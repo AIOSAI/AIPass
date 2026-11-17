@@ -18,7 +18,7 @@ from typing import Any, List, Optional
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-from aipass.cli.apps.modules import console, header, error
+from aipass.cli import console, header, error
 
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.fleet import fleet_rows

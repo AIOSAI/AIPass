@@ -14,7 +14,7 @@ import sys
 from typing import List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.cli.help_flags import wants_help
 from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument, refuse

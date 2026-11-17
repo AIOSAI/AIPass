@@ -14,7 +14,7 @@
 
 import pytest
 
-from aipass.cli.apps.modules import reset_command_state, resolve_exit
+from aipass.cli import reset_command_state, resolve_exit
 from aipass.memory.apps.handlers.governance import engine
 from aipass.memory.apps.modules import governance as governance_module
 from aipass.memory.apps.modules.governance import (

@@ -10,7 +10,7 @@
 
 from aipass.prax import logger
 
-from aipass.cli.apps.modules import console, error, warning
+from aipass.cli import console, error, warning
 
 from aipass.spawn.apps.handlers.delete_ops import delete_branch, resolve_path_target
 from aipass.spawn.apps.handlers.json import json_handler

@@ -25,7 +25,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 from aipass.prax.apps.handlers.config import load as config_load
 from aipass.prax.apps.handlers.logging import jsonl_writer
 from aipass.prax.apps.modules import logger as logger_module
@@ -446,6 +446,7 @@ class TestPrintIntrospection:
         """No rich fallback: a broken CLI is an error, not a second console."""
         mod, _mocks = _inject_and_import(monkeypatch, tmp_path)
         monkeypatch.delattr(display, "console")
+        monkeypatch.delattr("aipass.cli.console", raising=False)  # the door caches a name it already handed out
 
         with pytest.raises(ImportError):
             mod.print_introspection()

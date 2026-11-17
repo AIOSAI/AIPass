@@ -18,7 +18,7 @@ from rich.panel import Panel
 from rich import box
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli import caller_gate
 from aipass.memory.apps.handlers.cli.help_flags import wants_help

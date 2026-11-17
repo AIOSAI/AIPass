@@ -30,7 +30,7 @@ from aipass.trigger.apps.modules.log_events import (
 
 def _console():
     """Return the shared CLI console."""
-    from aipass.cli.apps.modules.display import console
+    from aipass.cli import console
 
     return console
 

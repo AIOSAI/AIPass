@@ -104,7 +104,7 @@ def write_text_file(path: Path, content: str, encoding: str = "utf-8") -> None:
 
 def print_introspection():
     """Display module introspection info."""
-    from aipass.cli.apps.modules.display import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]config Module[/bold cyan]")

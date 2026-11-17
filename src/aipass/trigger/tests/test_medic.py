@@ -20,7 +20,7 @@ from unittest.mock import MagicMock, patch
 
 from rich.text import Text
 
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 from aipass.trigger.apps.handlers import service_control
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers.medic_state import parse_duration

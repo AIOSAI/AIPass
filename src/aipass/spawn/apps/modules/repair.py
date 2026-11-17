@@ -12,7 +12,7 @@ from pathlib import Path
 
 from aipass.prax import logger
 
-from aipass.cli.apps.modules import console, header, error, warning
+from aipass.cli import console, header, error, warning
 
 from aipass.spawn.apps.handlers.repair_ops import (
     move_branch,

@@ -23,7 +23,7 @@ from rich import box
 from rich.table import Table
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, reset_command_state, resolve_exit
+from aipass.cli import console, error, reset_command_state, resolve_exit
 
 _PACKAGE_BASE = "aipass.memory.apps.modules"
 

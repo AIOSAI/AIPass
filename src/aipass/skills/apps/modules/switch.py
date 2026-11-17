@@ -8,7 +8,7 @@
 
 """Skill off-switch module."""
 
-from aipass.cli.apps.modules import console, error, escape, warning
+from aipass.cli import console, error, escape, warning
 from aipass.prax import logger
 from aipass.skills.apps.handlers.switch_handler import (
     SwitchStateUnreadable,

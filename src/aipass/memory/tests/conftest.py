@@ -31,7 +31,7 @@ from aipass.prax import json_handler as _prax_json_service
 from aipass.memory.apps.handlers import write_fence as _write_fence
 from aipass.memory.apps.handlers.monitor import registry_scope
 from aipass.memory.apps.handlers.templates import trinity_push
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 from aipass.memory.tests.support_config_verbs import _real_verbs
 
 # Nothing under .archive/ is a test.

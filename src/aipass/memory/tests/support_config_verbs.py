@@ -21,7 +21,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 
 # The registry is MINTED per test: the live one is gitignored and absent on a fresh clone.
 # Mixed casing is deliberate: case-insensitive branch matching is under test.

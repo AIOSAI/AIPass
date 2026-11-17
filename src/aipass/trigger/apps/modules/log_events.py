@@ -27,7 +27,7 @@ from aipass.trigger.apps.handlers.watchers.log_watcher import (
 
 def print_introspection():
     """Display module introspection info."""
-    from aipass.cli.apps.modules.display import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]log_events Module[/bold cyan]")
@@ -70,7 +70,7 @@ def status() -> dict:
 
 def print_help() -> None:
     """Print module help."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
     from rich.panel import Panel
 
     console.print(Panel("Log Events - Centralized Log Watcher", style="bold"))
@@ -98,7 +98,7 @@ def print_help() -> None:
 
 def handle_command(command: str, args: list) -> bool:
     """Handle log_events commands - orchestrate handler calls."""
-    from aipass.cli.apps.modules import console, error, success
+    from aipass.cli import console, error, success
 
     from aipass.trigger.apps.handlers.cli.help_flags import wants_help
 

@@ -9,7 +9,7 @@
 """Skill discovery module."""
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, escape
+from aipass.cli import console, error, escape
 from aipass.skills.apps.handlers.discovery_handler import get_search_paths, discover_skills_in_path
 from aipass.skills.apps.handlers.registry import build_registry
 from aipass.skills.apps.handlers.switch_handler import SwitchStateUnreadable, read_state

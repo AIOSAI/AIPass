@@ -140,7 +140,7 @@ def get_system_status() -> Dict[str, Any]:
 
 def print_introspection():
     """Display module introspection info."""
-    from aipass.cli.apps.modules.display import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]logger Module[/bold cyan]")

@@ -14,7 +14,7 @@ from threading import Lock
 
 from rich.markup import escape
 
-from aipass.cli.apps.modules import console
+from aipass.cli import console
 
 
 _print_lock = Lock()

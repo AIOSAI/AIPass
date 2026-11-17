@@ -453,7 +453,7 @@ if __name__ == "__main__":
     Press Ctrl+C to stop.
     """
     import time
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print("[bold cyan]PRAX Log Watcher Test[/bold cyan]")
     console.print()

@@ -27,7 +27,7 @@ CHANGELOG_NAME = "CHANGELOG.md"
 
 def print_introspection():
     """Display module introspection info."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]ci Module[/bold cyan]")
@@ -47,7 +47,7 @@ def print_introspection():
 
 def print_help() -> None:
     """Display ci command help."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]drone @trigger ci[/bold cyan] — the CI red lane")
@@ -310,7 +310,7 @@ def take_verdict(run_id: str, owner: str, text: str) -> str:
 
 def _print_status() -> None:
     """Render the ledger: the newest runs, then every cure still in the lane."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     data = ledger.load()
     runs = sorted(data["runs"].items(), key=lambda item: item[1].get("created", ""), reverse=True)[:12]
@@ -330,7 +330,7 @@ def _print_status() -> None:
 
 def _run_subcommand(subcommand: str, args: List[str]) -> bool:
     """Run one ci subcommand; a refusal goes out through error() so the exit code says so."""
-    from aipass.cli.apps.modules import console, error, success
+    from aipass.cli import console, error, success
 
     if subcommand == "status":
         _print_status()
@@ -351,7 +351,7 @@ def _run_subcommand(subcommand: str, args: List[str]) -> bool:
 
 def handle_command(command: str, args: list) -> bool:
     """Handle `ci` and its verbs; claims the module name only."""
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     if command != "ci":
         return False

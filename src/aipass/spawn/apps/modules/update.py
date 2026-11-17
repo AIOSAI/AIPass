@@ -13,7 +13,7 @@ Reference: docs/update_engine.md
 
 from aipass.prax import logger
 
-from aipass.cli.apps.modules import console, error, warning
+from aipass.cli import console, error, warning
 
 from aipass.spawn.apps.handlers.update_ops import (
     update_branch,

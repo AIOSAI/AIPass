@@ -30,7 +30,7 @@ from rich.markup import escape
 
 def print_introspection():
     """Display module introspection info."""
-    from aipass.cli.apps.modules.display import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]branch_log_events Module[/bold cyan]")
@@ -85,7 +85,7 @@ def reset_hashes() -> None:
 
 def print_help() -> None:
     """Print module help."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
     from rich.panel import Panel
 
     console.print(Panel("Branch Log Events - Branch Log Watcher", style="bold"))
@@ -118,7 +118,7 @@ def print_help() -> None:
 
 def handle_command(command: str, args: list) -> bool:
     """Handle branch_log_events commands - orchestrate handler calls."""
-    from aipass.cli.apps.modules import console, success, error
+    from aipass.cli import console, success, error
 
     from aipass.trigger.apps.handlers.cli.help_flags import wants_help
 

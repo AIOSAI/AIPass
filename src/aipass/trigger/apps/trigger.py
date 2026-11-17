@@ -18,7 +18,7 @@ from typing import List, Any
 
 from aipass.prax import logger
 
-from aipass.cli.apps.modules import console, header, error, reset_command_state, resolve_exit
+from aipass.cli import console, header, error, reset_command_state, resolve_exit
 
 # Pinned to the README header version by test_trigger_entry.py.
 __version__ = "3.0.0"

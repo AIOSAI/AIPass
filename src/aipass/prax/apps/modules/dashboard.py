@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, error, warning
+from aipass.cli import console, error, warning
 
 from aipass.prax.apps.handlers.dashboard.operations import (
     write_section,  # re-exported: the write-through API other branches call

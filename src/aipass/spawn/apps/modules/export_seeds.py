@@ -15,7 +15,7 @@ import argparse
 
 from aipass.prax import logger
 
-from aipass.cli.apps.modules import console, err_console, error, header
+from aipass.cli import console, err_console, error, header
 
 from aipass.spawn.apps.handlers.json import json_handler
 from aipass.spawn.apps.handlers.seed_ops import SEED_RELATIVE_PATH, export_seeds

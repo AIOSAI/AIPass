@@ -46,7 +46,7 @@ __all__ = [
 
 def print_introspection() -> None:
     """Display module introspection (sentry standard)."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]limits Module[/bold cyan]")
@@ -81,7 +81,7 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     error(f"limits: unknown subcommand '{args[0]}'")
     print_introspection()

@@ -21,7 +21,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aipass.cli.apps.modules import reset_command_state, resolve_exit
+from aipass.cli import reset_command_state, resolve_exit
 from aipass.memory.apps.handlers.json import entry_limits as _entry_limits
 from aipass.memory.apps.handlers.json import lint_handler as _lint_handler
 from aipass.memory.apps.handlers.monitor import detector as _detector

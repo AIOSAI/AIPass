@@ -18,7 +18,7 @@ from aipass.trigger.apps.handlers.json import json_handler
 
 def print_introspection():
     """Display module introspection info."""
-    from aipass.cli.apps.modules.display import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]core Module[/bold cyan]")
@@ -184,7 +184,7 @@ def _coerce_value(val_str: str) -> int | float | str:
 
 def handle_command(command: str, args: list) -> bool:
     """Handle commands routed by the entry point."""
-    from aipass.cli.apps.modules import console, error
+    from aipass.cli import console, error
 
     from aipass.trigger.apps.handlers.cli.help_flags import wants_help
 

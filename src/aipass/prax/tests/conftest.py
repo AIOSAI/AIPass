@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Generator
 from unittest.mock import MagicMock
 
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 from aipass.prax.apps.handlers import fleet as fleet_handler
 from aipass.prax.apps.handlers.config import load as config_load
 from aipass.prax.apps.handlers.logging import trail as trail_mod

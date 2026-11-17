@@ -18,7 +18,7 @@ if _script_dir in sys.path:
     sys.path.remove(_script_dir)
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, escape
+from aipass.cli import console, escape
 
 VERSION = "1.2.1"
 

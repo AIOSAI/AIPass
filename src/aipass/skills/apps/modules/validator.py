@@ -9,7 +9,7 @@
 """Skill validator module."""
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, escape
+from aipass.cli import console, error, escape
 from aipass.skills.apps.modules.loader import load_skill
 from aipass.skills.apps.handlers.validator import validate_skill as _handler_validate
 from aipass.skills.apps.handlers.json import json_handler

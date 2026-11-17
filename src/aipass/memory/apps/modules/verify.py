@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 from typing import List
 
-from aipass.cli.apps.modules import console, error, warning
+from aipass.cli import console, error, warning
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli.help_flags import wants_help

@@ -15,7 +15,7 @@ import argparse
 
 from aipass.prax import logger
 
-from aipass.cli.apps.modules import console, err_console, error, header, warning
+from aipass.cli import console, err_console, error, header, warning
 
 from aipass.spawn.apps.handlers.passport_migration import migrate_fleet
 from aipass.spawn.apps.handlers.json import json_handler

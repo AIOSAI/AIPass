@@ -26,7 +26,7 @@ __all__ = ["should_surface", "record_message", "new_state", "DEFAULT_CONFIG"]
 
 def print_introspection() -> None:
     """Display module introspection (sentry standard)."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]governance Module[/bold cyan]")
@@ -55,7 +55,7 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     error(f"governance: unknown subcommand '{args[0]}'")
     print_introspection()

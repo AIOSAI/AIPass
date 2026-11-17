@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from aipass.cli.apps.modules import reset_command_state, resolve_exit
+from aipass.cli import reset_command_state, resolve_exit
 from aipass.memory.apps import memory
 from aipass.memory.apps.handlers.monitor import registry_scope
 from aipass.memory.apps.modules import fleet

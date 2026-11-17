@@ -9,7 +9,7 @@
 """Skill runner module."""
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 from aipass.skills.apps.modules.loader import load_skill, print_skill_info
 from aipass.skills.apps.handlers.runner_handler import run_handler, run_markdown
 from aipass.skills.apps.handlers.switch_handler import SwitchStateUnreadable, is_enabled, off_reason

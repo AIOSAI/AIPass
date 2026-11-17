@@ -25,7 +25,7 @@ from _pytest.outcomes import Skipped  # what pytest.skip() raises — caught her
 from unittest.mock import MagicMock, patch
 
 # MODULE level on purpose: conftest swaps `handlers.json` for a MagicMock package inside each test.
-from aipass.cli.apps.modules import reset_command_state, resolve_exit
+from aipass.cli import reset_command_state, resolve_exit
 from aipass.memory.apps.handlers.monitor import registry_scope
 from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.templates import trinity_push

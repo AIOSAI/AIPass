@@ -47,7 +47,7 @@ from aipass.trigger.apps.handlers import error_registry, escalation, failure_rep
 from aipass.trigger.apps.handlers.events import error_detected
 import aipass.trigger.apps.handlers.json.config_loader as config_loader
 import aipass.trigger.apps.handlers.log_watcher as lw
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 import aipass.ai_mail as ai_mail_pkg
 from aipass.ai_mail.apps.modules import door_wake
 from aipass.trigger.apps.handlers.ci import git_door, ledger as ci_ledger, outbound

@@ -9,7 +9,7 @@
 """Regenerate template registry — thin CLI layer."""
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 
 from aipass.spawn.apps.handlers.regenerate_registry_ops import regenerate_template_registry
 from aipass.spawn.apps.handlers.class_registry import (

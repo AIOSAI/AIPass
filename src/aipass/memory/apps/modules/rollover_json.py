@@ -17,7 +17,7 @@ import json
 from typing import NamedTuple
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 from aipass.memory.apps.handlers.json import json_handler
 
 

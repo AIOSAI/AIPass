@@ -29,7 +29,7 @@ import pytest
 # The real display module, imported once at the top: nothing in the suite
 # stands it in, conftest imports it the same way, and its consoles are patched
 # at the edge (their width) per test.
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 from aipass.memory.apps.handlers.cli import caller_gate
 from aipass.memory.tests.support_config_verbs import (
     _ANSI,

@@ -24,7 +24,7 @@ from typing import List, Dict, Any
 
 # Service imports
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, header, success, warning
+from aipass.cli import console, error, header, success, warning
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
 

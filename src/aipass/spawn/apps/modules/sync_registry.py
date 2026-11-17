@@ -13,7 +13,7 @@ Reference: docs/registry_and_repair.md
 
 from aipass.prax import logger
 
-from aipass.cli.apps.modules import console, err_console, error, warning
+from aipass.cli import console, err_console, error, warning
 
 from aipass.spawn.apps.handlers.sync_registry_ops import (
     sync_registry,

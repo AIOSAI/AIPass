@@ -22,7 +22,7 @@ from unittest.mock import patch
 
 import aipass.spawn.apps.handlers.file_ops as file_ops
 import aipass.spawn.apps.handlers.seat_gate as seat_gate
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 
 
 def _find_registry_path() -> Path:

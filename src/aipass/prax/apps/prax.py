@@ -17,7 +17,7 @@ from typing import Callable, List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-from aipass.cli.apps.modules import console, error, warning, reset_command_state, resolve_exit
+from aipass.cli import console, error, warning, reset_command_state, resolve_exit
 
 from aipass.prax.apps.modules import (
     UnknownArgument,

@@ -17,7 +17,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import aipass.spawn.apps.handlers.file_ops as file_ops
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 from aipass.spawn.apps.handlers.json import json_handler
 from aipass.trigger.apps.modules import core as trigger_core
 from aipass.spawn.tests import conftest as spawn_conftest

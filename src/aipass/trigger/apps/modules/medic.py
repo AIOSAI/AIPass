@@ -58,7 +58,7 @@ def run_error_catchup(fire_event: Callable[..., object] | None = None) -> None:
 
 def print_introspection():
     """Display module introspection info."""
-    from aipass.cli.apps.modules.display import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]medic Module[/bold cyan]")
@@ -92,7 +92,7 @@ def _extract_branch_name(raw: str) -> str:
 
 def print_help() -> None:
     """Print module help."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
     from rich.panel import Panel
 
     console.print(Panel("Medic - Auto-Healing Error Dispatch", style="bold"))
@@ -220,7 +220,7 @@ def _fmt_remaining(iso_expiry: str) -> str:
 
 def _handle_mute(console, args: list) -> None:
     """Handle 'medic mute @branch [--for <dur>] [--forever]'."""
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     try:
         duration_secs, is_forever, rest = _parse_duration_args(args)
@@ -248,7 +248,7 @@ def _handle_mute(console, args: list) -> None:
 
 def _handle_unmute(console, args: list) -> None:
     """Handle 'medic unmute @branch'."""
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     if not args:
         error("Missing branch name", suggestion="Usage: medic unmute @branch")
@@ -266,7 +266,7 @@ def _handle_unmute(console, args: list) -> None:
 
 def _handle_volume_mute(console, args: list) -> None:
     """Handle 'medic volume-mute @branch [--for <dur>] [--forever]'."""
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     try:
         duration_secs, is_forever, rest = _parse_duration_args(args)
@@ -296,7 +296,7 @@ def _handle_volume_mute(console, args: list) -> None:
 
 def _handle_volume_unmute(console, args: list) -> None:
     """Handle 'medic volume-unmute @branch'."""
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     usage = "Usage: medic volume-unmute @branch"
     if not args:
@@ -383,7 +383,7 @@ def _handle_status(console) -> None:
 def _handle_on(console) -> None:
     """Handle 'medic on' — enable dispatch and start watcher."""
     from rich.panel import Panel
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     if not set_enabled(True):
         error("Failed to enable Medic", suggestion="Check medic_state.json")
@@ -443,7 +443,7 @@ def _stop_watcher() -> str:
 def _handle_off(console, args: list | None = None) -> None:
     """Handle 'medic off [--forever]' — disable dispatch with 24h TTL or permanently."""
     from rich.panel import Panel
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     args = args or []
     is_forever = "--forever" in args
@@ -510,7 +510,7 @@ def handle_command(command: str, args: list) -> bool:
     """
     Handle medic commands - orchestrate toggle operations.
     """
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     if command == "medic":
         if not args:

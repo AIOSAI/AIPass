@@ -12,7 +12,7 @@ import json
 
 from aipass.prax import logger
 
-from aipass.cli.apps.modules import console, error, escape
+from aipass.cli import console, error, escape
 
 from aipass.spawn.apps.handlers.adopt_citizen_ops import apply_adoption, plan_adoption
 from aipass.spawn.apps.handlers.seat_gate import PREVIEW_NOTE, seat_refusal

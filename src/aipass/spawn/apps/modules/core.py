@@ -15,7 +15,7 @@ from typing import List
 
 from aipass.prax import logger
 
-from aipass.cli.apps.modules.display import console
+from aipass.cli import console
 
 # apps/spawn.py imports these two from here, so they are re-exported by name.
 from aipass.spawn.apps.handlers.metadata import (

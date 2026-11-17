@@ -8,7 +8,7 @@
 
 """Skill loader module."""
 
-from aipass.cli.apps.modules import console, error, escape, warning
+from aipass.cli import console, error, escape, warning
 from aipass.prax import logger
 from aipass.skills.apps.modules.discovery import discover_all
 from aipass.skills.apps.handlers.loader_handler import load_skill as _handler_load_skill

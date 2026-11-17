@@ -20,7 +20,7 @@ _SUBCOMMANDS = ["status", "list", "config"]
 
 def print_introspection():
     """Display module introspection info."""
-    from aipass.cli.apps.modules.display import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]escalation Module[/bold cyan]")
@@ -38,7 +38,7 @@ def print_introspection():
 
 def print_help() -> None:
     """Display escalation command help."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]drone @trigger escalation[/bold cyan] — repeat-signature digest lane")
@@ -161,7 +161,7 @@ def _handle_config(console) -> None:
 
 def _run_subcommand(subcommand: str, args: list) -> bool:
     """Run an escalation subcommand."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     from aipass.trigger.apps.handlers.cli.help_flags import wants_help
 

@@ -16,7 +16,7 @@ from typing import List
 
 from aipass.prax.apps.handlers.discovery.scan import run_scan
 from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, success, error, warning
+from aipass.cli import console, success, error, warning
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.cli.arg_gate import refuse
 from aipass.prax.apps.handlers.cli.help_flags import wants_help

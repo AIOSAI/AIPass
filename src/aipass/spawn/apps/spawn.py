@@ -14,7 +14,7 @@ import sys
 import argparse
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, header, error, warning, reset_command_state, resolve_exit
+from aipass.cli import console, header, error, warning, reset_command_state, resolve_exit
 
 
 def print_help():

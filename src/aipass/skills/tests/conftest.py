@@ -35,7 +35,7 @@ from typing import Callable, Generator
 import pytest
 
 # No sys.path hack: prepending src/ would hide a broken install and shadow the wheel e2e measures.
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 from aipass.skills.apps.handlers.json import json_handler
 from aipass.skills.apps.modules import creator
 

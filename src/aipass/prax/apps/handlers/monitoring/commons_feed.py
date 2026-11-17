@@ -30,7 +30,7 @@ from typing import Dict, List, Optional, Tuple
 from rich.markup import escape as rich_escape
 
 from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, header, error, warning
+from aipass.cli import console, header, error, warning
 from aipass.prax.apps.handlers.json import json_handler
 
 # =============================================================================

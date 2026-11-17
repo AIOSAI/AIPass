@@ -9,7 +9,7 @@
 """Skill creator module."""
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 from aipass.skills.apps.handlers.creator_handler import create_skill as _handler_create_skill
 from aipass.skills.apps.handlers.json import json_handler
 from aipass.trigger.apps.modules.core import trigger

@@ -46,7 +46,7 @@ from aipass.trigger.apps.handlers.error_reporter import (  # noqa: F401
 
 def print_introspection():
     """Display module introspection info."""
-    from aipass.cli.apps.modules.display import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]errors Module[/bold cyan]")
@@ -119,7 +119,7 @@ def _fmt_time(iso: str) -> str:
 
 def print_help() -> None:
     """Print module help using Rich formatting."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
     from rich.panel import Panel
 
     console.print(Panel("Error Registry - Medic v2 Error Management", style="bold"))
@@ -168,7 +168,7 @@ def handle_command(command: str, args: list) -> bool:
     Returns:
         True if command was handled, False otherwise
     """
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     from aipass.trigger.apps.handlers.cli.help_flags import wants_help
 
@@ -272,7 +272,7 @@ def _cmd_list(console, args: list) -> bool:
 def _cmd_detail(console, args: list) -> bool:
     """Show full error details for a fingerprint or ID."""
     from rich.panel import Panel
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     if not args:
         error("Missing error ID or fingerprint", suggestion="Usage: drone @trigger errors detail <id_or_fingerprint>")
@@ -332,7 +332,7 @@ def _cmd_detail(console, args: list) -> bool:
 
 def _cmd_suppress(console, args: list) -> bool:
     """Mark error as suppressed with optional reason."""
-    from aipass.cli.apps.modules import error, warning
+    from aipass.cli import error, warning
 
     if not args:
         error(
@@ -376,7 +376,7 @@ def _cmd_unsuppress(console, args: list) -> bool:
     error that was mid-backoff when it got silenced resumes where it left off
     rather than firing immediately.
     """
-    from aipass.cli.apps.modules import error, success
+    from aipass.cli import error, success
 
     if not args:
         error(
@@ -406,7 +406,7 @@ def _cmd_unsuppress(console, args: list) -> bool:
 
 def _cmd_resolve(console, args: list) -> bool:
     """Mark error as resolved."""
-    from aipass.cli.apps.modules import error, success
+    from aipass.cli import error, success
 
     if not args:
         error(
@@ -431,7 +431,7 @@ def _cmd_resolve(console, args: list) -> bool:
 
 def _cmd_clear_resolved(console, args: list) -> bool:
     """Purge old resolved entries. Optional --days=N (default 7)."""
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     days = int(_parse_args(args).get("days", "7"))
     removed = clear_resolved(days=days)
@@ -452,7 +452,7 @@ def _cmd_purge(console, args: list) -> bool:
     days = int(parsed.get("days", "30"))
     removed = purge_stale(days=days)
     if removed < 0:
-        from aipass.cli.apps.modules import error
+        from aipass.cli import error
 
         error("Failed to purge stale errors - the registry could not be read", suggestion="See the trigger log")
         return True
@@ -499,7 +499,7 @@ def _cmd_stats(console, args: list) -> bool:
 
 def _cmd_circuit_breaker(console, args: list) -> bool:
     """Show or reset the circuit breaker."""
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     if args and args[0] == "reset":
         circuit_breaker_reset()

@@ -23,7 +23,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 from aipass.memory.tests.support_config_verbs import (
     _HANDLER_MODULES,
     _ROLLOVER_MODULE,

@@ -98,7 +98,7 @@ def get_branch_health(branch_name: str) -> dict:
 
 def print_introspection() -> None:
     """Display module introspection (sentry standard)."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]health Module[/bold cyan]")
@@ -128,7 +128,7 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    from aipass.cli.apps.modules import error
+    from aipass.cli import error
 
     if not (args[0].startswith("@") and len(args[0]) > 1):
         error(f"health: unknown subcommand '{args[0]}'")
@@ -145,7 +145,7 @@ def handle_command(command: str, args: list) -> bool:
 
 def _print_health(result: dict) -> None:
     """Render one ``get_branch_health`` answer: a refusal through ``error()``, else the facts."""
-    from aipass.cli.apps.modules import console, error, warning
+    from aipass.cli import console, error, warning
 
     if not result.get("success"):
         error(f"health: {result.get('error')}")

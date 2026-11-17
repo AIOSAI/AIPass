@@ -20,7 +20,7 @@ from rich import box
 from rich.panel import Panel
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, warning
+from aipass.cli import console, error, warning
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
 from aipass.memory.apps.handlers.cli.branch_flag import BRANCH_FLAG, read_branch_arg

@@ -21,7 +21,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aipass.cli.apps.modules import resolve_exit
+from aipass.cli import resolve_exit
 
 from aipass.memory.apps.handlers.intake import auto_process
 from aipass.memory.apps.handlers.monitor import detector

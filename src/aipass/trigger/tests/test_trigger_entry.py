@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from aipass.cli.apps.modules import display, error, mark_command_failed
+from aipass.cli import display, error, mark_command_failed
 from aipass.trigger.apps import config, log_watcher_service
 from aipass.trigger.apps import trigger as trigger_entry
 
@@ -437,6 +437,7 @@ class TestUnknownCommandMessage:
 def test_a_module_whose_console_cannot_import_fails_its_introspection(command, monkeypatch):
     """Pins the default: a failed cli console import was swapped for a bare rich Console and the command passed."""
     monkeypatch.delattr(display, "console")
+    monkeypatch.delattr("aipass.cli.console", raising=False)  # the door caches a name it already handed out
 
     assert trigger_entry.main([command]) == 1
 
@@ -444,6 +445,7 @@ def test_a_module_whose_console_cannot_import_fails_its_introspection(command, m
 def test_the_config_and_service_introspection_raise_without_the_cli_console(monkeypatch):
     """Pins the default: config and the log watcher service printed through a rich stand-in when cli was gone."""
     monkeypatch.delattr(display, "console")
+    monkeypatch.delattr("aipass.cli.console", raising=False)  # the door caches a name it already handed out
 
     with pytest.raises(ImportError):
         config.print_introspection()

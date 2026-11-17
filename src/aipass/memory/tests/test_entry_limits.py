@@ -23,7 +23,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from aipass.cli.apps.modules import reset_command_state, resolve_exit
+from aipass.cli import reset_command_state, resolve_exit
 from aipass.memory.apps.handlers.json import entry_limits as _entry_limits
 from aipass.memory.apps.modules import limits as _limits
 

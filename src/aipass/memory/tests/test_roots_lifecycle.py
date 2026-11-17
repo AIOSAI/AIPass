@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from aipass.cli.apps.modules import reset_command_state, resolve_exit
+from aipass.cli import reset_command_state, resolve_exit
 from aipass.memory.apps.handlers.monitor import registry_scope as rs
 from aipass.memory.apps.handlers.monitor import roots_file as rf
 from aipass.memory.apps.modules import fleet, roots

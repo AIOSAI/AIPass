@@ -12,7 +12,7 @@ import sys
 from typing import List
 
 from aipass.prax.apps.modules.logger import get_system_status
-from aipass.cli.apps.modules import console
+from aipass.cli import console
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.cli.arg_gate import refuse
 from aipass.prax.apps.handlers.cli.help_flags import wants_help
