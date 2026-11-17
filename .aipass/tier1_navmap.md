@@ -100,7 +100,7 @@ Save proactively — after milestones, decisions, topic switches.
 # House rules
 
  - Public repo — write as if it ships, because it does. No secrets in the tree, no hardcoded paths (`pathlib`, never `/home/...`), Linux only.
- - No bare imports — always `from aipass.<agent>.apps...`.
+ - Other branch: `from aipass.<branch> import <name>`, never its `apps/`.
  - State lives in `.trinity/` and dashboards, never in prompts. Prompts are signposts; memories record; registries catalog.
  - New test files need permission: a hook gate refuses them by policy (`.aipass/test_write_policy.json`); editing an existing test is fine. Need one? Mail @devpulse the defect it pins.
  - Docs say what exists, in present tense: mechanism, shapes, commands, limits, the reason. Never history, chat or what is to come; never a plan id, `.trinity` entry or untracked file as a pointer: a repo reader cannot open them.
