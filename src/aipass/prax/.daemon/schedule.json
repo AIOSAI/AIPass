@@ -4,7 +4,7 @@
   "jobs": [
     {
       "id": "tmp-sweep-weekly",
-      "enabled": true,
+      "enabled": false,
       "schedule": {
         "type": "interval",
         "interval_minutes": 10080,
@@ -19,7 +19,7 @@
     },
     {
       "id": "module-scan-daily",
-      "enabled": true,
+      "enabled": false,
       "schedule": {
         "type": "interval",
         "interval_minutes": 1440,
