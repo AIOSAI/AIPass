@@ -79,7 +79,8 @@ def print_help():
     console.print("  [green]grant-ci-cure[/green]                  Ceremony: write ci_cure:true onto the trigger entry")
     console.print("  [green]owner[/green] @citizen                 Move a project's owner seat (preview; add --apply)")
     console.print(
-        "  [green]adopt-citizen[/green] @name <root>      Move a citizen whole into another project (preview; add --apply)"
+        "  [green]adopt-citizen[/green] @name <root>      "
+        "Move a citizen whole into another project (preview; add --apply)"
     )
     console.print()
     console.print("[bold cyan]CITIZEN CLASSES:[/bold cyan]")
@@ -275,8 +276,8 @@ def _dry_run_create(target_path, citizen_class, parsed, template_dir=None):
         get_default_class,
         normalize_branch_name,
         INCOMPLETE_MARKER,
+        find_registry,
     )
-    from aipass.spawn.apps.modules.door_owner import find_registry
 
     target = Path(target_path).resolve()
     template = Path(template_dir) if template_dir else get_template_dir(citizen_class or get_default_class())
@@ -341,19 +342,23 @@ def print_introspection():
     console.print("    [dim]- update: update.py (handle_update — single/all branch updates)[/dim]")
     console.print("    [dim]- delete: delete.py (handle_delete — archive and deregister branch)[/dim]")
     console.print(
-        "    [dim]- retire-project: retire_project.py (handle_retire_project — retire a whole project, admin seat)[/dim]"
+        "    [dim]- retire-project: retire_project.py "
+        "(handle_retire_project — retire a whole project, admin seat)[/dim]"
     )
     console.print("    [dim]- sync-registry: sync_registry.py (handle_sync_registry — registry repair)[/dim]")
     console.print(
-        "    [dim]- regenerate-registry: regenerate_registry.py (handle_regenerate_registry — regenerate template registry)[/dim]"
+        "    [dim]- regenerate-registry: regenerate_registry.py "
+        "(handle_regenerate_registry — regenerate template registry)[/dim]"
     )
     console.print("    [dim]- repair: repair.py (handle_repair — project structure repair)[/dim]")
     console.print(
-        "    [dim]- migrate-passports: migrate_passports.py (handle_migrate_passports — passport 2.0 fleet migration)[/dim]"
+        "    [dim]- migrate-passports: migrate_passports.py "
+        "(handle_migrate_passports — passport 2.0 fleet migration)[/dim]"
     )
     console.print("    [dim]- export-seeds: export_seeds.py (handle_export_seeds — tracked passport seed export)[/dim]")
     console.print(
-        "    [dim]- grant-admin, grant-ci-cure: grant_admin.py (handle_grant_admin, handle_grant_ci_cure — registry seat flag ceremonies)[/dim]"
+        "    [dim]- grant-admin, grant-ci-cure: grant_admin.py "
+        "(handle_grant_admin, handle_grant_ci_cure — registry seat flag ceremonies)[/dim]"
     )
     console.print("    [dim]- owner: grant_admin.py (handle_owner — moves a project's owner seat)[/dim]")
     console.print(

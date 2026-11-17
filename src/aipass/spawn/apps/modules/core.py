@@ -30,12 +30,13 @@ from aipass.spawn.apps.handlers.class_registry import (
     refuse_retired_or_forbidden as refuse_retired_or_forbidden,
 )
 from aipass.spawn.apps.handlers.mint_ops import INCOMPLETE_MARKER as INCOMPLETE_MARKER, spawn_at
+from aipass.spawn.apps.handlers.registry import find_registry as find_registry
 
 _META_TAB_KEYS = {"TODOS_META", "KEY_LEARNINGS_META", "SESSIONS_META", "OBSERVATIONS_META"}
 
 
 def _load_meta_tabs(branch_dir: str | None = None):
-    """Load memory meta-tab values from @memory's renderer; @memory ships in the same package, so a failed import raises."""
+    """Load memory meta-tab values from @memory's renderer; @memory ships in this package, so a failed import raises."""
     from aipass.memory import render_all_meta_tabs
 
     tabs = render_all_meta_tabs(branch_dir)

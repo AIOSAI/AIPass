@@ -51,15 +51,26 @@ because the parser is built with `add_help=False`.
 
 ---
 
-## The class registry — the gateway other branches import through
+## The package door — what other branches import
 
 `apps/handlers/` is internal to this branch; its `__init__` refuses cross-branch imports and
-points callers here. Other branches that need to resolve a `citizen_class` read spawn's
-registry through the modules gateway rather than mirroring the class table — a mirror makes
-the reader a fleet-wide single point of failure the moment spawn renames a class.
+points callers at the package door, `src/aipass/spawn/__init__.py`. The door hands out each
+name from its home on every access (PEP 562 `__getattr__` over a name-to-home table, no cache),
+so a bare `import aipass.spawn` loads nothing under `apps/`, and a patch on the home reaches
+every caller that reads through the door. `apps/modules/__init__.py` re-exports nothing.
+
+| Names | Home |
+|---|---|
+| `spawn_agent` | `apps/modules/core.py` |
+| `CITIZEN_CLASSES`, `FORBIDDEN_CLASSES`, `LEGACY_CLASSES`, `get_available_classes`, `get_template_dir`, `refuse_legacy_class`, `refuse_retired_or_forbidden`, `validate_class` | `apps/handlers/class_registry.py` |
+| `find_registry`, `get_owner`, `is_owner`, `registry_is_writable_document` | `apps/handlers/registry.py` |
+
+Other branches that need to resolve a `citizen_class` read spawn's registry through the door
+rather than mirroring the class table — a mirror makes the reader a fleet-wide single point
+of failure the moment spawn renames a class.
 
 ```python
-from aipass.spawn.apps.modules import get_template_dir, refuse_legacy_class
+from aipass.spawn import get_template_dir, refuse_legacy_class
 
 get_template_dir("specialist")           # -> Path to the one citizen template
 get_template_dir("aipass_framework")     # -> ValueError naming the retired name AND 'specialist'
@@ -79,7 +90,8 @@ spawn's own fence (`apps/handlers/__init__.py`, v2.1) in a fresh interpreter per
 case. Every newborn is born with the same fence: `templates/citizen/apps/handlers/__init__.py`
 is devpulse's fence template verbatim, placeholders intact, and the template ships the pair
 `tests/test_handlers_fence.py` and `tests/support_fence.py` so a newborn pins its own fence
-from its first run. `tests/test_template_import_guard.py` pins the template's fence before
+from its first run. The fence's refusal names the package door, `from aipass.<branch> import
+<name>`. `tests/test_template_import_guard.py` pins the template's fence before
 any mint: a foreign seat refused by name, an outside seat refused as unknown, kin and the
 modules door allowed, a dead cwd survived, and a cwd inside the newborn buying a foreign seat
 nothing.
@@ -89,11 +101,11 @@ nothing.
 ## The docs page skeleton — one source, read live
 
 Every branch's `docs/*.md` pages share one shape, scored by @sentry's `docs_page` standard.
-The skeleton that shows the shape is `templates/docs_page.md`, and sentry renders it through
-the same gateway on every call — neither side keeps a copy.
+The skeleton that shows the shape is `templates/docs_page.md`, read live by
+`apps/handlers/docs_page.py`. The reader is not on the package door: no other branch imports it.
 
 ```python
-from aipass.spawn.apps.modules import docs_page_template
+from aipass.spawn.apps.handlers.docs_page import docs_page_template   # inside spawn only
 
 docs_page_template()   # -> the skeleton text, read from disk on this call
                        # -> OSError when it cannot be read; there is no fallback shape
@@ -103,11 +115,11 @@ The skeleton sits beside `templates/citizen/`, never inside it. Everything in th
 tree is stamped into every newborn, so a skeleton there would arrive as a placeholder page in
 every branch; beside it, no walk reaches it — not the copy, not the manifest a mint is
 verified against, not the update engine. The handler reads and returns and performs no
-operation of its own, so it logs nothing; the render is sentry's operation.
+operation of its own, so it logs nothing.
 
 What a newborn does carry is the index: `templates/citizen/docs/README.md` is a back-link,
 a title and one line, and it names the standard rather than the size cap, which sentry owns.
-`tests/test_modules_gateway.py` pins the door, `tests/test_template_hygiene.py` pins the
+`tests/test_modules_gateway.py` pins the reader, `tests/test_template_hygiene.py` pins the
 skeleton's shape and that no mint carries it, and `tests/test_birth_receipt.py` pins that the
 index copies no cap.
 

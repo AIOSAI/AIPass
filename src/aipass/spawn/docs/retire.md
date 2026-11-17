@@ -97,7 +97,7 @@ count, the archive path, whether this seat could run `--yes`, and writes nothing
 ## Receipts
 
 Every removal writes rows to the fleet deletion trail, `<AIPass>/.ai_central/deletions.jsonl`,
-through `@drone`'s `door_deletion_log.record_deletion`, beside `drone rm`'s own rows. Rows are
+through `@drone`'s `record_foreign_deletion` (`from aipass.drone import record_foreign_deletion`), beside `drone rm`'s own rows. Rows are
 measured and validated before anything is removed: drone's door writes on call and refuses a
 row missing `lane`, `outcome`, `caller`, `resolved` or `target`, so a row that would be
 refused stops the removal instead.

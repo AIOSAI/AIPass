@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: support_fence.py
 # Description: Fence probe for test_handlers_fence.py, run from a kin seat and from foreign copies
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Probe for the handlers fence of apps/handlers/__init__.py (no test_ prefix: never collected).
@@ -23,7 +23,7 @@ import aipass
 BRANCH = "spawn"
 HANDLERS = f"aipass.{BRANCH}.apps.handlers"
 A_HANDLER = f"{HANDLERS}.json.json_handler"
-A_DOOR = "aipass.spawn.apps.modules.door_owner"
+A_DOOR = f"aipass.{BRANCH}"
 KIN_PROBE = f"aipass.{BRANCH}.tests.support_fence"
 
 
@@ -63,8 +63,8 @@ def _sibling() -> None:
 
 
 def _door() -> None:
-    """This branch's modules door, which imports the handlers on the caller's behalf."""
-    importlib.import_module(A_DOOR)
+    """The package door reading a handler-homed name, importing the handler on the caller's behalf."""
+    getattr(importlib.import_module(A_DOOR), "get_owner")
 
 
 def _mock() -> None:

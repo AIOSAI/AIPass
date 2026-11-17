@@ -34,7 +34,7 @@ comments. One number, one method, produced live.
 | `test_lifecycle.py` | End-to-end spawn lifecycle workflows |
 | `test_json_handler.py` | The shim's wiring to the fleet json service — the seam, the binding, the bool contract |
 | `test_handlers.py` | Handler function behaviour and integration |
-| `test_modules_gateway.py` | The modules-package gateway other branches import through |
+| `test_modules_gateway.py` | The package door (`__init__.py`): each name from its home, lazy, uncached; `apps/modules` re-exports nothing |
 | `test_passport_migration.py` | Passport 1.x → 2.0 fleet migration: order, drops, renames, idempotency |
 | `test_passport_birth_schema.py` | The 2.0 block and key order on a newly minted passport |
 | `test_regenerate_registry_ops.py` | Template registry regeneration |

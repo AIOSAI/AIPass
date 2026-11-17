@@ -50,7 +50,7 @@ apps/
 ├── handlers/
 │   ├── class_registry.py        # class → template dir, retired names refuse
 │   ├── file_ops.py              # template copy and path rename
-│   ├── docs_page.py             # docs page skeleton read, sentry's door
+│   ├── docs_page.py             # docs page skeleton read, live
 │   ├── placeholders.py          # {{PLACEHOLDER}} engine
 │   ├── meta_ops.py              # branch meta, template registry, hashes
 │   ├── mint_verify.py           # a mint is verified against the manifest
@@ -80,7 +80,7 @@ tests/ · docs/ · docs.local/ · dropbox/ · artifacts/ · spawn_json/ · tools
 # Integration
 
  - Depends on: @prax for logging and the json service, @cli for console and exit state, aipass.shared for merge and registry discovery, @memory (optional, guarded) for meta tabs
- - Serves: every branch — creation, updates, retirement, citizenship, and the class-registry gateway other branches import through
+ - Serves: every branch — creation, updates, retirement, citizenship, and the package door (`from aipass.spawn import <name>`) for the class registry and owner check
 
 # Working Habits
 

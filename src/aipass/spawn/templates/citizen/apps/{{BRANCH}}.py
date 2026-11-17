@@ -20,7 +20,7 @@ from typing import Any, List, Tuple
 # so a later setdefault would name the wrong branch in every log line.
 os.environ.setdefault("AIPASS_BRANCH_NAME", "{{BRANCH}}")
 
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 from aipass.prax import logger
 
 __version__ = "1.0.0"

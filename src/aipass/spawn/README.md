@@ -85,9 +85,9 @@ flags before parsing, routes a verb to the first module that claims it, and reso
 exit code so a refusal can never leave as success. `apps/modules/` holds one coordinator per
 surface — `core` (mint and adopt), `update`, `delete`, `retire_project`, `sync_registry`,
 `regenerate_registry`, `migrate_passports`, `export_seeds`, `repair`, `adopt_citizen` and `grant_admin` —
-each parsing arguments and delegating. Two door modules, `door_owner` and
-`door_class_registry`, are no commands: they re-export handler names for other branches,
-because `apps/handlers/__init__.py` is a fence that refuses a foreign importer.
+each parsing arguments and delegating. Other branches import from the package door,
+`from aipass.spawn import <name>`, because `apps/handlers/__init__.py` is a fence that
+refuses a foreign importer.
 `apps/handlers/` holds the implementation, grouped by
 concern: the template lanes (`file_ops`, `placeholders`, `meta_ops`, `mint_verify`,
 `class_registry`, `docs_page`), the identity lanes (`registry`, `passport_migration`, `seed_ops`,
@@ -138,12 +138,10 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 ### Provides To
 
 - Every branch — creation, template updates, retirement, and citizenship itself
-- Every branch — the class-registry gateway for resolving a `citizen_class`
-- **@sentry** — the docs page skeleton its `docs_page` standard renders, read live through
-  the same gateway
+- Every branch — the class registry for resolving a `citizen_class`, through the package door
 - Registry CRUD on `AIPASS_REGISTRY.json` and any project's own `*_REGISTRY.json`
-- **@devpulse** — the owner check behind admin dispatch, through `door_owner`
-- **@aipass**, **@sentry** — the citizen classes and their refusals, through `door_class_registry`
+- **@devpulse** — the owner check behind admin dispatch, through the package door
+- **@aipass**, **@sentry** — the citizen classes and their refusals, through the package door
 
 ---
 
