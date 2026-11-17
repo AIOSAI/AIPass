@@ -1,12 +1,12 @@
 # =================== META ====================
 # Name: test_modules_gateway.py
-# Description: Tests for the apps.modules package gateway re-exports
-# Version: 1.1.3
+# Description: Tests for spawn's front door (__init__.py) and the apps.modules gateway re-exports
+# Version: 1.2.0
 # Created: 2026-08-28
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
-"""Tests for apps/modules/__init__.py's gateway re-exports (DPLAN-0319 wave 3)."""
+"""Tests for __init__.py (the front door) and apps/modules/__init__.py's gateway re-exports."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(documentation) — docstrings on get_template_dir, refuse_legacy_class and docs_page_template
@@ -20,7 +20,10 @@ from pathlib import Path
 
 import pytest
 
+import aipass.spawn as front_door
 from aipass.spawn.apps import modules
+from aipass.spawn.apps.handlers import class_registry, registry
+from aipass.spawn.apps.modules import core
 from aipass.spawn.apps.handlers import docs_page
 from aipass.spawn.apps.handlers.class_registry import get_template_dir as _class_registry_get_template_dir
 from aipass.spawn.apps.handlers.class_registry import refuse_legacy_class as _class_registry_refuse_legacy_class
@@ -288,3 +291,74 @@ class TestHandlerGuard:
         assert "ACCESS DENIED" in result.stderr, result.stderr[-600:]
         assert "Caller branch: unknown" in result.stderr, result.stderr[-600:]
         assert result.stdout == ""
+
+
+FRONT_DOOR_HOMES = {
+    "spawn_agent": core,
+    "CITIZEN_CLASSES": class_registry,
+    "FORBIDDEN_CLASSES": class_registry,
+    "LEGACY_CLASSES": class_registry,
+    "get_available_classes": class_registry,
+    "get_template_dir": class_registry,
+    "refuse_legacy_class": class_registry,
+    "refuse_retired_or_forbidden": class_registry,
+    "validate_class": class_registry,
+    "find_registry": registry,
+    "get_owner": registry,
+    "is_owner": registry,
+    "registry_is_writable_document": registry,
+}
+
+
+class TestFrontDoor:
+    """from aipass.spawn import <name>: each name read live from its home, nothing loaded until asked."""
+
+    def test_the_public_list_is_exactly_the_homes_table(self):
+        assert sorted(front_door.__all__) == sorted(FRONT_DOOR_HOMES)
+        assert set(FRONT_DOOR_HOMES) <= set(dir(front_door))
+
+    @pytest.mark.parametrize("name", sorted(FRONT_DOOR_HOMES))
+    def test_each_name_is_the_object_its_home_defines(self, name):
+        assert getattr(front_door, name) is getattr(FRONT_DOOR_HOMES[name], name)
+
+    def test_an_unknown_name_raises_attribute_error_with_no_fallback(self):
+        with pytest.raises(AttributeError, match="no attribute 'door_owner'"):
+            getattr(front_door, "door_owner")
+
+    def test_a_patch_on_the_home_reaches_the_next_read_through_the_door(self, monkeypatch):
+        def sentinel(start_path=None):
+            return {"email": "@patched"}
+
+        assert front_door.get_owner is registry.get_owner
+        monkeypatch.setattr(registry, "get_owner", sentinel)
+        assert front_door.get_owner is sentinel
+
+    def test_a_bare_import_loads_nothing_under_apps_and_one_name_loads_only_its_home(self):
+        probe = (
+            "import sys, aipass.spawn as door\n"
+            "print(sorted(m for m in sys.modules if m.startswith('aipass.spawn.apps')))\n"
+            "door.LEGACY_CLASSES\n"
+            "print('aipass.spawn.apps.handlers.class_registry' in sys.modules,"
+            " 'aipass.spawn.apps.handlers.registry' in sys.modules,"
+            " 'aipass.spawn.apps.modules.core' in sys.modules)\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8", cwd=str(REPO_ROOT)
+        )
+
+        assert result.returncode == 0, result.stderr[-600:]
+        assert result.stdout.splitlines() == ["[]", "True False False"]
+
+    def test_an_outside_caller_passes_the_handlers_fence_through_the_door(self, tmp_path):
+        probe = tmp_path / "probe_front_door_from_outside.py"
+        probe.write_text(
+            "from aipass.spawn import LEGACY_CLASSES, get_owner, get_template_dir\n"
+            'print(callable(get_owner), bool(LEGACY_CLASSES), get_template_dir("specialist").name)\n',
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [sys.executable, str(probe)], capture_output=True, text=True, encoding="utf-8", cwd=str(tmp_path)
+        )
+
+        assert result.returncode == 0, result.stderr[-600:]
+        assert result.stdout.split() == ["True", "True", "citizen"]
