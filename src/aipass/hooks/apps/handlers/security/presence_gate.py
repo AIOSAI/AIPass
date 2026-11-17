@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: presence_gate.py
-# Version: 3.3.4
+# Version: 3.4.0
 # Description: Single-session gate — blocks duplicate Claude runtimes per branch
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-06-29
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Single-session gate — blocks duplicate Claude runtimes per branch.
@@ -20,6 +20,7 @@ import json
 import os
 from pathlib import Path
 
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 _ALLOW = {"exit_code": 0, "stdout": ""}
@@ -126,7 +127,17 @@ def _describe_arriver(session: dict | None, pid: int | None) -> str:
 
 
 def handle(hook_data: dict) -> dict:
-    """UserPromptSubmit gate — enforce one live session per branch. FAIL_OPEN: a raise is the engine's ERROR."""
+    """UserPromptSubmit gate, one live session per branch; each call leaves a json trail entry. FAIL_OPEN."""
+    result = _decide(hook_data)
+    payload = hook_data if isinstance(hook_data, dict) else {}
+    tool = payload.get("tool_name") or payload.get("hook_event_name", "")
+    verdict = "refuse" if result.get("exit_code") == 2 else "allow"
+    json_handler.log_operation("check", {"tool": tool, "verdict": verdict, "seat": payload.get("cwd", "")})
+    return result
+
+
+def _decide(hook_data: dict) -> dict:
+    """Enforce one live session per branch. FAIL_OPEN: a raise is the engine's ERROR."""
     agent_type = hook_data.get("agent_type", "")
     if agent_type in _SUB_AGENT_TYPES:
         return _ALLOW

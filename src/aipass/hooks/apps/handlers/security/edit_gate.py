@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.27.0
+# Version: 1.28.0
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Blocks unsafe edits: inbox, cross-project, cross-branch and shell-to-memory writes, daemon confinement, diagnostics
@@ -26,6 +26,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 
@@ -972,7 +973,17 @@ def _measure_memory_file(path: Path) -> list[str]:
 
 
 def handle(hook_data: dict) -> dict:
-    """Apply edit security gates and return block or allow decision."""
+    """Apply edit security gates and return block or allow decision; each call leaves one json trail entry."""
+    result = _decide(hook_data)
+    payload = hook_data if isinstance(hook_data, dict) else {}
+    tool = payload.get("tool_name") or payload.get("hook_event_name", "")
+    verdict = "refuse" if result.get("exit_code") == 2 else "allow"
+    json_handler.log_operation("check", {"tool": tool, "verdict": verdict, "seat": payload.get("cwd", "")})
+    return result
+
+
+def _decide(hook_data: dict) -> dict:
+    """The verdict on one hook event."""
     tool_name = hook_data.get("tool_name", "") if isinstance(hook_data, dict) else ""
     try:
         tool_input = hook_data.get("tool_input", {})

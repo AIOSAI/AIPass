@@ -104,46 +104,10 @@
       "reason": "Uses stdlib json.dumps for hookSpecificOutput.additionalContext hook protocol responses — same profile as auto_watchdog.py — no JSON file ops needing json_handler."
     },
     {
-      "file": "apps/handlers/security/edit_gate.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
-    },
-    {
-      "file": "apps/handlers/security/git_gate.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
-    },
-    {
-      "file": "apps/handlers/security/settings_gate.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "json.dumps builds the hook's answer on stdout (the block decision, the PreToolUse ask document): the provider's hook protocol, not branch JSON storage. The gate reads and writes no JSON file."
-    },
-    {
       "file": "apps/handlers/security/settings_backup.py",
       "standard": "json_structure",
       "functions": ["<file>"],
       "reason": "Stdlib only by contract (FPLAN-0645): the receipt line in ~/.claude/.backup/settings/receipts.jsonl is a shape shared with @aipass's Python doors, not branch operational JSON, and a gate that cannot import blocks every edit on the machine."
-    },
-    {
-      "file": "apps/handlers/security/rm_gate.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
-    },
-    {
-      "file": "apps/handlers/security/subagent_gate.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
-    },
-    {
-      "file": "apps/handlers/security/registry_gate.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/lifecycle/auto_fix.py",
@@ -322,12 +286,6 @@
       "reason": "Read-only passport.json check in _is_devpulse() to detect branch role for policy generation — not a file-write operation, not a handler-level concern. Module reads sibling passports to determine writable/RO map."
     },
     {
-      "file": "apps/handlers/security/presence_gate.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
-    },
-    {
       "file": "apps/modules/cc_sessions.py",
       "standard": "json_structure",
       "functions": ["<file>"],
@@ -421,12 +379,6 @@
       "standard": "modules",
       "functions": ["<file>", "write_targets_by_segment"],
       "reason": "Not a drone command surface: it is the write-target reader consumed by handlers/security/edit_gate.py inside a PreToolUse hook, where there is no CLI caller to route. Same pattern as grounding_content.py (consumed by 5 handlers) and cadence.py. print_introspection() IS provided, so the module still answers for itself."
-    },
-    {
-      "file": "apps/handlers/security/testwrite_gate.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler. Identical to the edit_gate/rm_gate/registry_gate bypasses above."
     },
     {
       "file": "apps/modules/testwrite_targets.py",
@@ -570,10 +522,10 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "logged_fallback",
       "lines": [
-        636,
-        873
+        637,
+        874
       ],
-      "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 636: the todos advisory text, never a verdict. 873 _seat_trinity: the tripwire's seat lookup, which decides nothing."
+      "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 637: the todos advisory text, never a verdict. 874 _seat_trinity: the tripwire's seat lookup, which decides nothing."
     },
     {
       "file": "apps/handlers/lifecycle/session_start.py",
@@ -989,7 +941,7 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "fallback",
       "lines": [
-        727
+        728
       ],
       "reason": "Advisory only: the section-count note never blocks, and the caps that do block are judged by _evaluate_limits under the fail-closed refusal. Raising here would turn a dark config door into a refused memory write. It logs at WARNING, which @trigger escalates."
     },
@@ -997,7 +949,7 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "fallback",
       "lines": [
-        828
+        829
       ],
       "reason": "The gate writes nothing: a memory file already unparseable on disk, met by an edit that parses, is the agent's repair, judged as a new file. Refusing it would lock a broken memory file forever. WARNING names the file, and @trigger escalates it."
     },
@@ -1005,7 +957,7 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "fallback",
       "lines": [
-        1141
+        1152
       ],
       "reason": "tripwire_snapshot: the hook's own per-session snapshot store of in-flight Bash calls; a damaged copy holds only stale stats. Raising would refuse every Bash call for the rest of the session, as nothing else rewrites the store, so it starts fresh, stamped with FRESH_START_KEY. Once the fresh write lands, STORE_RESET_LOG reaches medic at ERROR (cause at INFO); a store the write cannot replace refuses the call. Calls in flight whose snapshots were lost are told their check did not run, at ERROR, while the stamp is younger than FRESH_START_WINDOW_S."
     },
@@ -1013,7 +965,7 @@
       "file": "apps/handlers/security/subagent_gate.py",
       "standard": "fallback",
       "lines": [
-        192
+        193
       ],
       "reason": "A timed-out checklist is handed on, not passed: the file goes on the unchecked list, which is logged at WARNING (escalated by @trigger) and named in the block text. The gate fails OPEN by decision (gates.FAIL_OPEN): a stop it cannot finish must not trap the sub-agent."
     },
@@ -1021,7 +973,7 @@
       "file": "apps/handlers/security/testwrite_gate.py",
       "standard": "fallback",
       "lines": [
-        292
+        303
       ],
       "reason": "Spelling only: with no project root the line names the test file by its absolute path instead of a project-relative one. The pointer still lands on the same file and no decision rests on it."
     },
@@ -1029,7 +981,7 @@
       "file": "apps/handlers/security/presence_gate.py",
       "standard": "fallback",
       "lines": [
-        76
+        77
       ],
       "reason": "Display only: an unreadable start leaves the age out of the refusal text (\"\" or None both drop the \"old\" part). No decision rests on the age; ranking uses _session_start."
     },
@@ -1037,7 +989,7 @@
       "file": "apps/handlers/security/presence_gate.py",
       "standard": "fallback",
       "lines": [
-        95
+        96
       ],
       "reason": "None is handed on as \"cannot rank\", never as \"younger\": _we_are_the_incumbent then answers False, so an unreadable start keeps the refusal of the newer seat. The refusal is the answer."
     },
@@ -1045,7 +997,7 @@
       "file": "apps/handlers/security/git_gate.py",
       "standard": "fallback",
       "lines": [
-        209
+        210
       ],
       "reason": "Fails closed: an unimportable admin_seat leaves the answer (None, False), so the caller is unnamed and never the admin seat, and every git refusal stands. The refusal is the answer; WARNING names the dark admin lane."
     },
@@ -1053,7 +1005,7 @@
       "file": "apps/handlers/security/rm_gate.py",
       "standard": "fallback",
       "lines": [
-        134
+        135
       ],
       "reason": "Fails closed: an unimportable admin_seat returns (None, False), so no seat is exempted and every delete refusal stands. The refusal is the answer; WARNING names the dark admin lane."
     },
@@ -1737,7 +1689,7 @@
       "file": "apps/handlers/security/rm_gate.py",
       "standard": "fallback",
       "lines": [
-        185
+        186
       ],
       "reason": "Fails closed: the refusal is decided before the ledger is written, so a door that cannot load or write never lets the command through. The refusal then says the recording failed, and an ERROR goes through prax, which @trigger escalates."
     }

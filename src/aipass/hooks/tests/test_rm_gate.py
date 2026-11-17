@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_rm_gate.py
-# Version: 3.7.0
+# Version: 3.8.0
 # Description: Tests for rm_gate security handler, the DPLAN-0356 lockdown since 2.0.0
 # Branch: hooks
 # Created: 2026-06-02
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/security/rm_gate.py."""
@@ -186,6 +186,36 @@ class TestHandle:
 
     def test_block_variable_target(self):
         self._assert_blocked(self._bash("rm -rf $DIR"))
+
+
+class TestEveryCallLeavesATrailEntry:
+    """Each handle() call appends one entry to rm_gate's own json trail, an allow as well as a refusal."""
+
+    CWD = str(_BRANCH)
+
+    @pytest.fixture
+    def trail(self, tmp_path, monkeypatch) -> Path:
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+        return tmp_path / "hooks" / "hooks_json" / "rm_gate_log.json"
+
+    def _bash(self, command: str) -> dict:
+        return handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": self.CWD})
+
+    def test_an_allow_and_a_refusal_each_write_their_verdict(self, trail: Path):
+        assert self._bash("ls")["exit_code"] == 0
+        assert self._bash("rm file.txt")["exit_code"] == 2
+        entries = json.loads(trail.read_text(encoding="utf-8"))
+        assert [(entry["operation"], entry["data"]) for entry in entries] == [
+            ("check", {"tool": "Bash", "verdict": "allow", "seat": self.CWD}),
+            ("check", {"tool": "Bash", "verdict": "refuse", "seat": self.CWD}),
+        ]
+
+    def test_a_trail_that_cannot_be_written_changes_no_verdict(self, trail: Path):
+        with patch.object(rm_gate.json_handler, "log_operation", return_value=False) as logged:
+            assert self._bash("ls")["exit_code"] == 0
+            assert self._bash("rm file.txt")["exit_code"] == 2
+        assert logged.call_count == 2
+        assert not trail.exists()
 
 
 class TestDeletionRecord:

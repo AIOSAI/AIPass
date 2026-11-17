@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: rm_gate.py
-# Version: 3.6.0
+# Version: 3.7.0
 # Description: Refuses raw rm, other deletes off the admin seat, and drone rm outside the caller's branch (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-06-02
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Refuses deletes on the agent Bash tool, and writes every refused one down.
@@ -25,6 +25,7 @@ import json
 import tempfile
 from pathlib import Path
 
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 
@@ -310,6 +311,16 @@ def _ledger_reason(raw: int, others: list[str], why: str) -> str:
 
 
 def handle(hook_data: dict) -> dict:
+    """Refuse raw rm and, off the admin seat, other deletes; each call leaves one json trail entry."""
+    result = _decide(hook_data)
+    payload = hook_data if isinstance(hook_data, dict) else {}
+    tool = payload.get("tool_name") or payload.get("hook_event_name", "")
+    verdict = "refuse" if result.get("exit_code") == 2 else "allow"
+    json_handler.log_operation("check", {"tool": tool, "verdict": verdict, "seat": payload.get("cwd", "")})
+    return result
+
+
+def _decide(hook_data: dict) -> dict:
     """Refuse raw rm; off the admin seat any other delete, unreadable program, or drone rm outside the own branch."""
     if not isinstance(hook_data, dict) or hook_data.get("tool_name", "") != "Bash":
         return _BLOCK_ALLOW

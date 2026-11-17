@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: subagent_gate.py
-# Version: 1.0.5
+# Version: 1.1.0
 # Description: Checks modified Python files against sentry standards on SubagentStop
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-22
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Checks modified Python files against sentry standards and blocks on violations.
@@ -21,6 +21,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 _ALLOW = {"stdout": "", "exit_code": 0}
@@ -207,7 +208,17 @@ def _check_within_budget(modified: list[str], repo_root: Path) -> tuple[dict[str
 
 
 def handle(hook_data: dict) -> dict:
-    """Check modified files against sentry standards on subagent stop."""
+    """Check modified files against sentry standards on subagent stop; each call leaves one json trail entry."""
+    result = _decide(hook_data)
+    payload = hook_data if isinstance(hook_data, dict) else {}
+    tool = payload.get("tool_name") or payload.get("hook_event_name", "")
+    verdict = "refuse" if result.get("exit_code") == 2 else "allow"
+    json_handler.log_operation("check", {"tool": tool, "verdict": verdict, "seat": payload.get("cwd", "")})
+    return result
+
+
+def _decide(hook_data: dict) -> dict:
+    """The verdict on one subagent stop."""
     try:
         agent_type = hook_data.get("agent_type", "")
         if not agent_type:

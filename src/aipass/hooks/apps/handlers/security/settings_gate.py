@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: settings_gate.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Description: No AI changes a provider's settings alone: Claude asks the owner; Codex, OpenCode, headless deny
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-10-25
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """The provider-settings gate (DPLAN-0424): the owner accepts every change to a CLI's own settings.
@@ -28,6 +28,7 @@ import json
 import os
 from pathlib import Path
 
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 DOORS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit", "Bash"})
@@ -189,6 +190,16 @@ def _branch(cwd: str) -> str:
 
 
 def handle(hook_data: dict) -> dict:
+    """Ask or deny a write to a provider's settings, allow the rest; each call leaves one json trail entry."""
+    result = _decide(hook_data)
+    payload = hook_data if isinstance(hook_data, dict) else {}
+    tool = payload.get("tool_name") or payload.get("hook_event_name", "")
+    verdict = "refuse" if result.get("exit_code") == 2 else "ask" if '"ask"' in result.get("stdout", "") else "allow"
+    json_handler.log_operation("check", {"tool": tool, "verdict": verdict, "seat": payload.get("cwd", "")})
+    return result
+
+
+def _decide(hook_data: dict) -> dict:
     """Ask (interactive Claude) or deny (Codex, OpenCode, headless) a write to a provider's settings; allow the rest."""
     tool_name = hook_data.get("tool_name", "") if isinstance(hook_data, dict) else ""
     if tool_name not in DOORS:
