@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_front_door_check.py
 # Description: front_door_check — the gating row: per-site findings, scoped and whole-file waivers
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-11-16
 # Modified: 2026-11-17
 # =============================================
@@ -14,6 +14,7 @@
 
 import pytest
 
+from aipass.sentry.apps.handlers.aipass_standards import encapsulation_check
 from aipass.sentry.apps.handlers.aipass_standards import front_door_check as checker
 
 #: Where every specimen is written, so its owner is sentry.
@@ -196,3 +197,100 @@ class TestAModuleHandingOutHandlerNames:
         rel = f"{MODULES}/reader.py"
         rules = [{"file": rel, "standard": "front_door", "reason": "pin"}]
         assert checker.check_module(_write(tmp_path, HANDS_OUT, rel), rules)["score"] == 0
+
+
+DOOR_REL = "src/aipass/sentry/__init__.py"
+SERVE = "    return getattr(importlib.import_module(_HOMES[name]), name)\n"
+GUARD = "    if name not in _HOMES:\n        raise AttributeError(name)\n"
+#: The door model: a table, __all__ built from it, a guarded uncached __getattr__, a __dir__.
+DOOR = (
+    'import importlib\nimport sys\n\n_HOMES = {"read": "aipass.sentry.apps.modules.reader"}\n\n'
+    "__all__ = list(_HOMES)\n\n\ndef __getattr__(name):\n" + GUARD + SERVE + "\n\n"
+    "def __dir__():\n    return sorted(set(globals()) | set(__all__))\n"
+)
+STORE = "    value = getattr(importlib.import_module(_HOMES[name]), name)\n    {}\n    return value\n"
+HELPER = (
+    DOOR.replace(SERVE, "    return _load(name)\n") + "\n\ndef _load(name):\n" + STORE.format("globals()[name] = value")
+)
+
+
+def _door_findings(tmp_path, source):
+    """(line, first words) of each door-model finding; cross-branch sites are not in these sources."""
+    outcome = checker.check_module(_write(tmp_path, source, DOOR_REL))
+    return [(c["line"], " ".join(c["message"].split()[:3])) for c in outcome["checks"] if not c["passed"]]
+
+
+def _at(source, text):
+    return source.splitlines().index(text) + 1
+
+
+class TestTheDoorModel:
+    """A package top file with a __getattr__ is a door: uncached, unknown names raise, __all__ and __dir__ present."""
+
+    def test_the_model_door_passes(self, tmp_path):
+        assert _door_findings(tmp_path, DOOR) == []
+
+    @pytest.mark.parametrize(
+        "store",
+        ["globals()[name] = value", "setattr(sys.modules[__name__], name, value)", "_SEEN[name] = value"],
+        ids=["globals", "setattr_on_the_package", "memo_dict"],
+    )
+    def test_a_door_that_stores_what_it_serves_is_convicted_at_the_write(self, tmp_path, store):
+        source = DOOR.replace(SERVE, STORE.format(store)).replace("\n\n__all__", "\n_SEEN = {}\n\n__all__")
+        assert _door_findings(tmp_path, source) == [(_at(source, f"    {store}"), "the door caches:")]
+
+    def test_a_cache_in_a_helper_getattr_calls_is_convicted(self, tmp_path):
+        assert _door_findings(tmp_path, HELPER) == [(_at(HELPER, "    globals()[name] = value"), "the door caches:")]
+
+    @pytest.mark.parametrize(
+        "old, new, at",
+        [
+            (GUARD, "", SERVE[:-1]),
+            (GUARD + SERVE, "    _HOMES.get(name)\n", "def __getattr__(name):"),
+            (SERVE, SERVE.replace("), name)", "), name, None)"), SERVE.replace("), name)", "), name, None)")[:-1]),
+            (GUARD, "    if name in _HOMES:\n" + "    " + SERVE + "    return None\n", "    return None"),
+            (SERVE, "    try:\n    " + SERVE + "    except Exception:\n        return None\n", "        return None"),
+        ],
+        ids=["no_guard", "falls_off_the_end", "getattr_default", "returns_for_unknown", "except_returns"],
+    )
+    def test_a_door_that_answers_an_unknown_name_is_convicted(self, tmp_path, old, new, at):
+        source = DOOR.replace(old, new, 1)
+        assert _door_findings(tmp_path, source) == [(_at(source, at), "the door answers")]
+
+    @pytest.mark.parametrize(
+        "all_line, convicted",
+        [
+            ("", True),
+            ('__all__ = ["read"]', True),
+            ("__all__ = sorted(_HOMES)", False),
+            ('__all__ = ["helper", *_HOMES]', False),
+        ],
+        ids=["no_all", "hand_written", "sorted_table", "own_defs_and_table"],
+    )
+    def test_all_is_built_from_the_table(self, tmp_path, all_line, convicted):
+        source = DOOR.replace("__all__ = list(_HOMES)", all_line)
+        found = _door_findings(tmp_path, source)
+        assert [words for _, words in found] == (["the door's __all__"] if convicted else [])
+
+    def test_a_door_with_no_dir_is_convicted(self, tmp_path):
+        source = DOOR.split("\n\n\ndef __dir__")[0] + "\n"
+        assert _door_findings(tmp_path, source) == [(_at(source, "def __getattr__(name):"), "the door has")]
+
+    @pytest.mark.parametrize(
+        "rel, source",
+        [(DOOR_REL, '"""Package marker."""\n'), (f"{MODULES}/reader.py", DOOR.replace(GUARD, ""))],
+        ids=["bare_marker", "not_a_package_top_file"],
+    )
+    def test_only_a_package_top_file_with_getattr_is_judged_as_a_door(self, tmp_path, rel, source):
+        assert _convicted(checker.check_module(_write(tmp_path, source, rel))) == []
+
+    def test_no_bypass_row_waives_the_door_model(self, tmp_path):
+        rules = [{"file": DOOR_REL, "standard": "front_door", "reason": "pin"}]
+        assert checker.check_module(_write(tmp_path, DOOR.replace(GUARD, ""), DOOR_REL), rules)["score"] == 0
+
+    def test_an_eager_own_handler_import_in_a_door_is_still_encapsulations(self, tmp_path):
+        (tmp_path / "src" / "aipass" / "sentry" / "apps").mkdir(parents=True)
+        source = "from aipass.sentry.apps.handlers.json import json_handler\n" + DOOR
+        target = _write(tmp_path, source, DOOR_REL)
+        assert encapsulation_check.check_module(target)["passed"] is False
+        assert _door_findings(tmp_path, source) == []

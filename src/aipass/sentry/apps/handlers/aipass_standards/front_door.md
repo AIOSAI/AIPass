@@ -45,7 +45,18 @@ def __dir__() -> list:
 
 `__all__` is built from the table, so the public list and the names the door serves cannot drift, and `__dir__` lists every door name before any has been read. The door's own imports of its branch are inside the branch and never findings.
 
-What a check enforces and what this page only states: the encapsulation row convicts a runtime import of the branch's own handlers in the door (a `TYPE_CHECKING` import is acquitted), and unused_function and the front-door verb read `__all__` (a literal list, `*NAME` spreads, `list`/`sorted` of the table, and a table built from `**dict.fromkeys(...)`). No check reads whether a door caches, defines `__dir__`, or raises on an unknown name; those are the model, stated here.
+### The door model, checked
+
+A package top file that defines a module-level `__getattr__` is a door, and this row checks its model. Each broken fact is a finding at the line that breaks it, with its cure, and no bypass row waives it:
+
+- **A cache.** In `__getattr__` or any function of the file it calls: a write to `globals()[...]` or `vars()[...]`, `setattr(sys.modules[...], ...)`, a write into a module-level dict (`_SEEN[name] = ...`, `.update`, `.setdefault`), a `global` statement, or a `cache` decorator. Cure: return it, store nothing; a patch on the home must reach the next reader.
+- **An answered unknown name.** `getattr(home, name, default)`, an `except` that does not raise, or a path an unknown name takes to a `return` (or off the end, which returns None) before `raise AttributeError`. The path is followed through `if name in`/`name ==` branches, which serve known names, to the `if name not in ...: raise AttributeError(...)` guard.
+- **`__all__`.** Missing; or a list that leaves out a table `__getattr__` reads names from (`name in TABLE`, `TABLE[...]`), so the list and the served names can drift. A door's own defs may sit beside the table: `["helper", *_HOMES]`.
+- **`__dir__`.** Missing.
+
+A package top file with no `__getattr__` is not a door and is not judged by these. Forms the reader does not follow are left unjudged, never guessed: an `if` on anything but the name, or a loop, `try` or `with` block, before the guard; an `__all__` assigned more than once, extended with `+=`, or built by anything but a literal list or tuple of strings and `*NAME` spreads, a name, or `list`/`sorted`/`tuple`/`set` of a name.
+
+The encapsulation row convicts a runtime import of the branch's own handlers in the door (a `TYPE_CHECKING` import is acquitted). unused_function and the front-door verb read the door's `__all__`.
 
 ## Patching a door name in a test
 

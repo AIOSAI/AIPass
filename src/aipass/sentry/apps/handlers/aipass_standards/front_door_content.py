@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: front_door_content.py
 # Description: Front Door Standards Content Handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-11-16
 # Modified: 2026-11-17
 # =============================================
@@ -29,6 +29,13 @@ def get_front_door_standards() -> str:
         "  Second doors under apps/modules/ are convicted, never waived: a door_*.py, a pure",
         "  re-export module (line 1), and a real module whose __all__ hands out handler names",
         "  (at that line, each name and its handler listed; __all__ keeps only own defs).",
+        "",
+        "[bold cyan]THE DOOR MODEL (checked, never waived):[/bold cyan]",
+        "  A package top file with a __getattr__ is a door. Convicted at the breaking line:",
+        "  a cache (globals()/vars() write, setattr on sys.modules[...], a module-level memo, global),",
+        "  an answered unknown name (getattr default, except that returns, a return before the",
+        "  AttributeError guard), __all__ missing or not built from the table, no __dir__.",
+        "  A shape the reader does not follow is left unjudged, never guessed.",
         "",
         "[bold cyan]TESTS:[/bold cyan]",
         "  Patch a door name via mock.patch('aipass.<branch>.<name>'), the caller's bound name,",

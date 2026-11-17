@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: front_door_check.py
 # Description: Front Door Standards Checker - a cross-branch import goes through the branch's package top file
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-11-16
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Front Door Standards Checker
@@ -13,6 +13,8 @@ branch that reaches under its ``apps/``. Detection is ``front_door_count.scan_so
 reading the ``front-door`` verb counts with. A lines, functions or whole-file bypass row waives.
 A second door (``modules_check.is_second_door``) is one more finding, line 1, that no row waives; so is a
 module whose ``__all__`` hands out its own handlers' names (``handed_out_handler_names``), at the ``__all__`` line.
+A package top file with a ``__getattr__`` is a door, and each broken fact of the door model
+(``door_model.findings``: a cache, an answered unknown name, ``__all__``, ``__dir__``) is a finding no row waives.
 """
 
 import ast
@@ -21,6 +23,8 @@ from typing import Dict, List, Tuple
 
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.aipass_standards.check_support import read_text, result
+from aipass.sentry.apps.handlers.aipass_standards.door_model import findings as door_findings
+from aipass.sentry.apps.handlers.aipass_standards.door_model import is_package_top
 from aipass.sentry.apps.handlers.aipass_standards.front_door_count import (
     APPS_KINDS,
     Reading,
@@ -100,6 +104,17 @@ def _handed_out(path: Path, line: int, names: List[Tuple[str, str]]) -> Dict:
     }
 
 
+def _door_finding(line: int, message: str, functions: List[ast.FunctionDef | ast.AsyncFunctionDef]) -> Dict:
+    """One broken fact of the door model, at the line that breaks it."""
+    return {
+        "name": "Front door",
+        "passed": False,
+        "line": line,
+        "function": _function_at(functions, line),
+        "message": message,
+    }
+
+
 def _one_check(passed: bool, message: str) -> List[Dict]:
     """A single-entry checks list."""
     return [{"name": "Front door", "passed": passed, "message": message}]
@@ -126,6 +141,9 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     else:
         handed = handed_out_handler_names(module_path, source)
         checks = [_handed_out(path, *handed)] if handed else []
+    # Never waived either: the door model is the one shape every branch's door takes.
+    if is_package_top(path):
+        checks += [_door_finding(line, message, functions) for line, message in door_findings(source)]
     for reading in readings:
         if reading.kind not in APPS_KINDS:
             continue
