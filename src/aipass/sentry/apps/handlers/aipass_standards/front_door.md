@@ -37,9 +37,15 @@ def __getattr__(name: str) -> Any:
     module_name, attribute = _HOMES[name]
     home = importlib.import_module(module_name)  # every access, never cached
     return home if attribute is None else getattr(home, attribute)
+
+
+def __dir__() -> list:
+    return sorted(set(globals()) | set(__all__))
 ```
 
-The door's own imports of its branch are inside the branch and never findings.
+`__all__` is built from the table, so the public list and the names the door serves cannot drift, and `__dir__` lists every door name before any has been read. The door's own imports of its branch are inside the branch and never findings.
+
+What a check enforces and what this page only states: the encapsulation row convicts a runtime import of the branch's own handlers in the door (a `TYPE_CHECKING` import is acquitted), and unused_function and the front-door verb read `__all__` (a literal list, `*NAME` spreads, `list`/`sorted` of the table, and a table built from `**dict.fromkeys(...)`). No check reads whether a door caches, defines `__dir__`, or raises on an unknown name; those are the model, stated here.
 
 ## Patching a door name in a test
 

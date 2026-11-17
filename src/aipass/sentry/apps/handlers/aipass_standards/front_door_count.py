@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: front_door_count.py
 # Description: Front-door detection: every cross-branch import that reaches under another branch's apps/
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-11-16
 # Modified: 2026-11-17
 # =============================================
@@ -31,6 +31,8 @@ APPS_KINDS = ("modules", "handlers", "other")
 VIAS = ("statement", "type_only", "string")
 _PACKAGE_TAILS = frozenset({"apps", "modules", "handlers"})
 OUTSIDE = "(no branch)"
+#: Calls that copy a door's name list without changing it: ``__all__ = sorted(_HOMES)``.
+_COPIES = frozenset({"list", "sorted", "tuple", "set", "frozenset"})
 
 
 class Reading(NamedTuple):
@@ -141,18 +143,26 @@ def owner_of_path(file_path: str) -> str:
 def _literal_names(value: ast.expr, lists: Dict[str, List[str]]) -> Optional[List[str]]:
     """The strings a list/tuple literal holds, a ``*NAME`` unpacking an earlier top-level list; else None.
 
-    A dict literal holds its string keys, and ``list(NAME)`` the earlier list: a door's name-to-home table.
+    A dict literal holds its string keys plus each ``**`` spread it reads, ``dict.fromkeys(<list>, ...)``
+    the list's names, and ``list``/``sorted``/``tuple``/``set`` of an earlier name that name's list.
     """
+    if isinstance(value, ast.Name):
+        return lists.get(value.id)
     if isinstance(value, ast.Dict):
-        return [k.value for k in value.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)]
-    if (
-        isinstance(value, ast.Call)
-        and isinstance(value.func, ast.Name)
-        and value.func.id == "list"
-        and len(value.args) == 1
-        and isinstance(value.args[0], ast.Name)
-    ):
-        return lists.get(value.args[0].id)
+        keys: List[str] = []
+        for key, held in zip(value.keys, value.values):
+            if key is None:
+                keys += _literal_names(held, lists) or []
+            elif isinstance(key, ast.Constant) and isinstance(key.value, str):
+                keys.append(key.value)
+        return keys
+    if isinstance(value, ast.Call) and value.args:
+        func = value.func
+        if isinstance(func, ast.Attribute) and func.attr == "fromkeys" and ast.unparse(func.value) == "dict":
+            return _literal_names(value.args[0], lists)
+        if isinstance(func, ast.Name) and func.id in _COPIES and len(value.args) == 1:
+            return _literal_names(value.args[0], lists)
+        return None
     if not isinstance(value, (ast.List, ast.Tuple)):
         return None
     names: List[str] = []

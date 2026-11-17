@@ -275,15 +275,15 @@ They never import a path under `apps/`, modules as much as handlers (`front_door
 
 ### Two Types of Branches
 
-1. **CLI Tools** - Used via command line, not imported
+1. **CLI Tools** - Used via command line first
    - Flow, Sentry, AI_Mail, Spawn, Drone
-   - You run `drone @flow create`, you don't `import flow` or `import drone`
-   - Drone is a CLI router that resolves @ and routes commands to branches
+   - You run `drone @flow create`, you don't `import flow` to reach Flow
+   - Drone is a command router that resolves @ and routes commands to branches
 
 2. **Library Services** - Imported by other code
    - Prax (logging), CLI (formatting), API (LLM calls), Memory (vectors)
    - You `from aipass.prax import logger` (or `from aipass import prax`, then `prax.logger`)
-   - **NOTE:** Drone is NOT a library service - it's a CLI router, never imported
+   - **NOTE:** Drone is a command router first; a name its package door hands out is imported as `from aipass.drone import <name>`
 
 ### Same-Branch Handler Imports - ALLOWED
 
@@ -385,7 +385,7 @@ Each library service defines what it exposes:
 
 **Modules are the contract. Handlers are the implementation.**
 
-**NOTE:** Drone is NOT in this table because it's a CLI router, not a library service. Branches receive commands FROM Drone (via CLI), they never import it.
+**NOTE:** Drone is not in this table because it's a command router first. Branches receive commands FROM Drone (via CLI); a name its package door hands out (e.g. `normalize_branch_arg`) is imported as `from aipass.drone import <name>`.
 
 ### Transitive Dependencies
 
@@ -397,15 +397,15 @@ Example with library services:
 
 **You import the service that owns the capability.** You don't care about its internal dependencies.
 
-**Important:** CLI branches like Flow, Sentry, AI_Mail don't import each other or Drone. They're invoked via `drone @branch command`, not imported.
+**Important:** CLI branches like Flow, Sentry, AI_Mail reach each other via `drone @branch command`, not by importing drone. A drone door name is imported as `from aipass.drone import <name>`.
 
 ---
 
-## Drone Architecture - CLI Router, Not Library
+## Drone Architecture - a Command Router with a Package Door
 
-**Status:** ✅ Critical Architecture Rule (2025-11-29)
+**Status:** ✅ Critical Architecture Rule
 
-**Core principle:** Drone is a CLI router that resolves @ symbols and routes commands to branches. It is NEVER imported as a library.
+**Core principle:** Drone is a command router first: it resolves @ symbols and routes commands to branches. A branch reaches another branch through `drone @branch command`; a name drone's door hands out is imported as `from aipass.drone import <name>`, never from `aipass.drone.apps...`.
 
 ### What Drone Does
 
@@ -424,7 +424,7 @@ When a branch is invoked via Drone:
 1. Drone has already resolved all @ symbols in the command
 2. Branch receives clean arguments without @ symbols
 3. Branch never sees or handles @ resolution
-4. Branch never imports Drone
+4. Branch does not import drone to resolve @
 
 **Example:**
 ```bash
@@ -445,6 +445,7 @@ sys.argv = ["flow.py", "create", "<project_root>/projects/project1", "--name", "
 
 ```python
 # ❌ WRONG - Branch should NEVER handle @ resolution
+# ❌ WRONG - under drone's apps/, convicted by front_door; use from aipass.drone import <name>
 from aipass.drone.apps.modules.resolve import resolve_path
 
 def some_function(path_arg):
@@ -455,11 +456,11 @@ def some_function(path_arg):
 **Why this is wrong:**
 1. Drone resolves @ BEFORE calling the branch
 2. Branch never receives @ symbols (already resolved)
-3. Importing Drone creates unnecessary coupling
+3. Importing drone's apps/ is convicted by front_door, and re-resolving @ creates unnecessary coupling
 4. Violates single responsibility (routing vs execution)
 
 **If a branch has @ handling code:**
-- It's legacy from before Drone architecture was clarified
+- It's architectural debt
 - Should be removed
 - Branch should expect pre-resolved paths
 
@@ -481,11 +482,11 @@ def create_plan(project_path: str, name: str):
 
 ### Two Types of Branches (Updated)
 
-**1. CLI Tools** - Invoked via Drone, never imported:
+**1. CLI Tools** - Invoked via Drone first:
 - Flow, Sentry, AI_Mail, Spawn, **Drone itself**
 - Usage: `drone @branch command`
 - Communication: Via CLI arguments (@ pre-resolved)
-- Never import each other
+- Reach each other through `drone @branch command`; a door name only as `from aipass.<branch> import <name>`
 
 **2. Library Services** - Imported by other code:
 - Prax (logging), CLI (formatting), API (LLM calls), Memory (vectors)
@@ -493,13 +494,13 @@ def create_plan(project_path: str, name: str):
 - Communication: Via Python imports
 - Can be imported by any branch
 
-**Drone is special:** It's a CLI tool that routes TO other CLI tools, but is never imported.
+**Drone is special:** It's a command router first that routes TO other CLI tools; its package door hands out names such as `resolve_branch`, `normalize_branch_arg`, `route_command`, imported as `from aipass.drone import <name>`.
 
 ### Summary
 
-- **Drone = CLI router** (resolves @, routes commands)
+- **Drone = command router first** (resolves @, routes commands), with a package door
 - **Branches = CLI executors** (receive pre-resolved paths)
-- **If branch imports Drone** = architectural debt
+- **If branch imports from `aipass.drone.apps...`** = convicted by front_door; use `from aipass.drone import <name>`
 - **If branch handles @** = architectural debt
 - **@ resolution happens ONCE** (in Drone, before branch invocation)
 

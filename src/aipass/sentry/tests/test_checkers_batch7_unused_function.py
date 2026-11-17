@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_unused_function.py
 # Description: unused_function_check ruling: the message says what was measured (split from test_checkers_batch7.py)
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-10-08
 # Modified: 2026-11-17
 # =============================================
@@ -111,8 +111,14 @@ class TestTheBranchsOwnDoorTableIsUse:
 
     @pytest.mark.parametrize(
         "door",
-        [DOOR, DOOR.replace("list(_HOMES)", "[*_HOMES]"), '__all__ = ["wired"]\n'],
-        ids=["list_of_table", "starred_table", "literal_all"],
+        [
+            DOOR,
+            DOOR.replace("list(_HOMES)", "[*_HOMES]"),
+            '__all__ = ["wired"]\n',
+            DOOR.replace("list(_HOMES)", "sorted(_HOMES)"),
+            '_HOMES = {**dict.fromkeys(("wired",), "aipass.mine.apps.mod")}\n__all__ = ["display", *_HOMES]\n',
+        ],
+        ids=["list_of_table", "starred_table", "literal_all", "sorted_table", "fromkeys_spread_table"],
     )
     def test_a_name_in_the_own_door_has_a_caller(self, tmp_path, door):
         mine, _ = _fleet(tmp_path)

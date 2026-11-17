@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_front_door_count.py
 # Description: front_door_count — every cross-branch import reaching under apps/, counted; and sentry's own door
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-11-16
 # Modified: 2026-11-17
 # =============================================
@@ -133,12 +133,21 @@ class TestDoors:
         assert fd.door_names('import importlib\n__all__ = ["logger"]\n') == ("logger",)
 
     @pytest.mark.parametrize(
-        "all_line", ["list(_HOMES)", "[*_HOMES, *_MODULES]"], ids=["list_of_table", "starred_tables"]
+        "all_line",
+        ["list(_HOMES)", "[*_HOMES, *_MODULES]", "sorted(_HOMES)"],
+        ids=["list_of_table", "starred_tables", "sorted_table"],
     )
     def test_a_name_to_home_table_hands_out_its_keys(self, all_line):
         source = f'_HOMES = {{"logger": "a.b"}}\n_MODULES = {{"trail": "a.c"}}\n__all__ = {all_line}\n'
         wanted = ("logger", "trail") if "_MODULES" in all_line else ("logger",)
         assert fd.door_names(source) == wanted
+
+    def test_a_table_spread_from_fromkeys_hands_out_every_key(self):
+        source = (
+            '_HOMES = {**dict.fromkeys(("console", "error"), "a.b"), **dict.fromkeys(("operation_start",), "a.c")}\n'
+            '__all__ = ["display", *_HOMES]\n'
+        )
+        assert fd.door_names(source) == ("console", "display", "error", "operation_start")
 
     def test_a_marker_file_hands_out_nothing(self):
         assert fd.door_names('"""Package marker."""\n__version__ = "1.0"\n') == ()

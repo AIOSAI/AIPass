@@ -367,11 +367,11 @@ Some AIPass services need to know **which branch is calling them** to provide pr
 - **API** - LLM calls and AI interactions
 - **Memory** - Vector storage and search
 
-**Router Services (CLI Invocation Only):**
-- **Drone** - NOT a library service, it's a CLI router
+**Router Services (CLI First, Package Door for Names):**
+- **Drone** - a command router first, with a package door
   - Resolves `@` targets before passing commands to branches
-  - Branches NEVER import from `aipass.drone.apps.modules`
-  - Invoked via subprocess: `subprocess.run(["drone", "command", ...])`
+  - Reach another branch through `drone @branch command`: `subprocess.run(["drone", "command", ...])`
+  - A name drone's door hands out is imported as `from aipass.drone import <name>`, never from `aipass.drone.apps...`
 
 ### Context-Independent Services (Import & Use Anywhere)
 
@@ -389,9 +389,9 @@ console.print("Works from anywhere")
 
 **Why they work anywhere:** These services don't need to know who's calling them. They provide generic functionality.
 
-### Drone: CLI Router Pattern (NOT for Import)
+### Drone: a Command Router with a Package Door
 
-**Drone is NOT a library service.** It's a CLI router that:
+**Drone is a command router first.** It:
 1. Resolves `@` targets to actual branch paths
 2. Routes commands to the appropriate branch
 3. Handles context switching and invocation
@@ -406,9 +406,14 @@ subprocess.run(["drone", "log", "show"])
 subprocess.run(["drone", "@sentry", "some-command"])
 ```
 
-**✗ FORBIDDEN - Never import from Drone:**
+**✓ CORRECT - A name from drone's package door:**
 ```python
-# ✗ WRONG - Drone is not a library service
+from aipass.drone import normalize_branch_arg, route_command
+```
+
+**✗ FORBIDDEN - Never import from drone's apps/:**
+```python
+# ✗ WRONG - under drone's apps/, convicted by front_door; use from aipass.drone import <name>
 from aipass.drone.apps.modules import resolve_target  # NO!
 from aipass.drone.apps.modules.router import route_command  # NO!
 
@@ -418,7 +423,7 @@ from aipass.drone.apps.modules.router import route_command  # NO!
 
 **Why Drone is different:**
 - **Prax/CLI/API/Memory**: Library services providing functionality via imports
-- **Drone**: CLI router that resolves targets and invokes other tools
+- **Drone**: command router first that resolves targets and invokes other tools; its door hands out names such as `resolve_branch`, `normalize_branch_arg`, `route_command` and the registry errors
 - Branches receive already-resolved paths/commands from Drone
 - Branches don't need @ handling code - Drone does that BEFORE calling them
 
@@ -658,7 +663,7 @@ from aipass.sentry.apps.handlers.json import json_handler
 | CLI service | `from aipass.cli import console, header` | When needed |
 | API service | `from aipass.api import load_config` | When needed |
 | Any other branch | `from aipass.<branch> import <name>` - never a path under its `apps/` | Always (front_door) |
-| **Drone** | `subprocess.run(["drone", "cmd", ...])` | **CLI only - NEVER import** |
+| **Drone** | `subprocess.run(["drone", "cmd", ...])`; door names via `from aipass.drone import <name>` | **Routed via CLI first; never `aipass.drone.apps...`** |
 | Standard lib | Grouped by category, alphabetical | Yes |
 | Internal | Absolute imports (not relative) | Yes |
 | Handler→Module | **FORBIDDEN** (breaks independence) | Never |
@@ -675,9 +680,9 @@ from aipass.sentry.apps.handlers.json import json_handler
 
 **Prax logger:** Imported by every file that logs - `from aipass.prax import logger` or `from aipass import prax`; stdlib `logging` use fails, a file that never logs owes no import
 
-**Service imports:** CLI, API, Memory imported as libraries; Drone invoked via CLI only
+**Service imports:** CLI, API, Memory imported as libraries; Drone routed via CLI first, door names via `from aipass.drone import <name>`
 
-**Drone is special:** NOT a library service - it's a CLI router. Never import from aipass.drone.apps.modules
+**Drone is special:** a command router first, with a package door. Never import from aipass.drone.apps...
 
 **Handler independence:** Same-branch handler→handler ✓, Handler→service (Prax/CLI/API/Memory) ✓, Handler→own-branch-module ✗
 
@@ -692,9 +697,6 @@ from aipass.sentry.apps.handlers.json import json_handler
 #@comments:2025-11-13:claude: Updated examples to use sentry/ instead of fictional old-name references
 #@comments:2025-11-13:claude: Added Services import section (CLI) to match actual codebase patterns
 #@comments:2025-11-13:claude: Toned down "critical" language around Prax to "nearly always" for accuracy
-#@comments:2025-11-29:claude: Added Service Categories section clarifying Drone is NOT a library service
-#@comments:2025-11-29:claude: Added explicit "Drone: CLI Router Pattern" section with FORBIDDEN import examples
-#@comments:2025-11-29:claude: Clarified that branches should NEVER import from aipass.drone.apps.modules - Drone resolves @ before calling them
 #@comments:2026-03-07:claude: Cleaned old references - updated to AIPass namespace imports, removed sys.path/AIPASS_ROOT patterns, fixed hardcoded home paths, old->sentry naming
 #@comments:2026-03-08:claude: Resolved the user's "whole file needs updating" flag - fixed old branch names (3 occurrences), removed stale AIPASS_ROOT reference, corrected handler independence summary to reflect that handlers CAN import cross-branch services, bumped to Draft v2
 #@comments:2026-03-31:claude: Cleaned stale references in comments and docs throughout sentry standards
