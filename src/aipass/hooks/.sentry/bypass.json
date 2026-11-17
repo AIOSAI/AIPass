@@ -10,196 +10,235 @@
     {
       "file": "apps/handlers/config/opencode_paths.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Path arithmetic and one read-only sqlite connect for OpenCode's store and plugin; no JSON operations to log."
     },
     {
       "file": "apps/handlers/bridges/claude.py",
       "standard": "handlers",
+      "functions": ["main"],
       "reason": "Bridges import engine module by design — that is their entire purpose."
     },
     {
       "file": "apps/handlers/bridges/claude.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Thin entry point, no JSON operations to log."
     },
     {
       "file": "apps/handlers/bridges/claude.py",
       "standard": "architecture",
+      "functions": ["main"],
       "reason": "Bridge importing engine module is its architectural purpose."
     },
     {
       "file": "apps/handlers/bridges/mount.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Stdlib-only by necessity (DPLAN-0356 item 3): it runs BEFORE aipass.hooks.apps exists in the hook process, and importing json_handler would import the source tree it is mounting the promoted copy in place of."
     },
     {
       "file": "apps/handlers/bridges/codex.py",
       "standard": "handlers",
+      "functions": ["_run_calls"],
       "reason": "Bridges import engine module by design — that is their entire purpose."
     },
     {
       "file": "apps/handlers/bridges/codex.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Thin entry point using stdlib json for Codex protocol envelope — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/bridges/codex.py",
       "standard": "architecture",
+      "functions": ["_run_calls"],
       "reason": "Bridge importing engine module is its architectural purpose."
     },
     {
       "file": "apps/handlers/prompt/identity.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Uses stdlib json.loads to read passport.json — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/prompt/branch_loader.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "No JSON operations — reads markdown files and outputs text."
     },
     {
       "file": "apps/handlers/prompt/tier0_kernel.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "No JSON operations - reads markdown file (.aipass/tier0_kernel.md) and outputs text."
     },
     {
       "file": "apps/handlers/prompt/navmap.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "No JSON operations - reads markdown file (.aipass/tier1_navmap.md) and outputs text."
     },
     {
       "file": "apps/handlers/prompt/temporal.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "No JSON operations - reads the system clock and outputs text. Wired in UserPromptSubmit.temporal (FPLAN-0348)."
     },
     {
       "file": "apps/modules/grounding_content.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Shared loader for kernel/navmap/branch/identity content (DPLAN-0276) — uses stdlib json.loads to read passport.json and reads markdown files. No JSON file ops needing json_handler, same profile as identity.py/tier0_kernel.py/navmap.py/branch_loader.py which it consolidates."
     },
     {
       "file": "apps/modules/grounding_content.py",
       "standard": "modules",
+      "functions": ["<file>", "load_branch", "load_identity", "load_kernel", "load_navmap"],
       "reason": "Shared content-loading service consumed by 4 UserPromptSubmit handlers (identity, tier0_kernel, navmap, branch_loader) and the PostToolUse post_compact_regrounding backstop — module IS the loader service, same pattern as cadence.py."
     },
     {
       "file": "apps/handlers/lifecycle/post_compact_regrounding.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Uses stdlib json.dumps for hookSpecificOutput.additionalContext hook protocol responses — same profile as auto_watchdog.py — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/security/git_gate.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/security/settings_gate.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "json.dumps builds the hook's answer on stdout (the block decision, the PreToolUse ask document): the provider's hook protocol, not branch JSON storage. The gate reads and writes no JSON file."
     },
     {
       "file": "apps/handlers/security/settings_backup.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Stdlib only by contract (FPLAN-0645): the receipt line in ~/.claude/.backup/settings/receipts.jsonl is a shape shared with @aipass's Python doors, not branch operational JSON, and a gate that cannot import blocks every edit on the machine."
     },
     {
       "file": "apps/handlers/security/rm_gate.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/security/subagent_gate.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/security/registry_gate.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/lifecycle/auto_fix.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Diagnostics handler uses stdlib json for hook protocol responses and state file — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/lifecycle/compact.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Uses stdlib json.loads for local.json reading — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/lifecycle/rollover.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Uses stdlib json.loads for registry and memory file checks — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/lifecycle/auto_process.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Delegates to @memory's auto_process() via importlib — no direct JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/lifecycle/session_start.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Delegates to cadence.reset_counter() via importlib — no direct JSON file ops needing json_handler."
     },
     {
       "file": "apps/modules/cadence.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Uses stdlib json for /tmp state file (turn counter) and hooks_json/custom_config/cadence_config.json config loading — lightweight ephemeral state, not branch data storage."
     },
     {
       "file": "apps/handlers/notification/announce.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Sound handler — no JSON operations, plays WAV files."
     },
     {
       "file": "apps/handlers/notification/email.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Uses stdlib json.loads for inbox parsing — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/notification/stop_sound.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Sound handler — no JSON operations, plays WAV files."
     },
     {
       "file": "apps/handlers/notification/tool_sound.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Sound handler — no JSON operations, plays WAV files."
     },
     {
       "file": "apps/handlers/config/loader.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Config loader does $AIPASS_HOME variable expansion before JSON parse — json_handler does not support this."
     },
     {
       "file": "apps/handlers/config/diagnostics.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "JSONL append-only diagnostic log — different pattern from branch json_handler storage."
     },
     {
       "file": "apps/modules/engine.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Engine uses JSONL diagnostic logging, not branch json_handler — different purpose."
     },
     {
       "file": "apps/modules/engine.py",
       "standard": "modules",
+      "functions": ["<file>", "_load_budget_state", "_save_budget_state", "dispatch"],
       "reason": "dispatch() is the engine's core purpose: it IS the module's primary function, not a handler that belongs elsewhere. Its stdlib json is the stdin payload, handler stdouts and the per-seat budget state, never branch data. Moving dispatch to handlers/ would leave an empty module."
     },
     {
       "file": "apps/modules/hook_test.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Uses stdlib json.dumps to serialize mock event data for engine dispatch — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/modules/hooksound.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Sound toggle: touches the ~/.aipass sound flag file only, no JSON operations or json_handler storage."
     },
     {
@@ -215,16 +254,19 @@
     {
       "file": "apps/modules/hookstatus.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Read-only config viewer — delegates JSON loading to config/loader.py, no direct JSON file ops."
     },
     {
       "file": "apps/modules/wire_verify.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Reads ~/.claude/settings.json (external provider settings) through handlers/json/files; stdlib json only names the decode error — not branch data storage needing json_handler."
     },
     {
       "file": "apps/modules/cadence.py",
       "standard": "modules",
+      "functions": ["<file>", "_load_config", "_open_state", "_read_last_mail_turn", "_stamp_window", "_write_last_mail_turn", "consume_regroup_pending", "pop_regroup_part", "print_introspection", "queue_regroup_parts", "reset_counter", "should_fire", "should_fire_advisory", "should_fire_mail", "stamp_regroup_complete", "window_opened_at"],
       "reason": "Cadence reads its per-session turn, fire and window state and hooks_json/custom_config/cadence_config.json with stdlib json: ephemeral session state and tunable knobs, not persistent branch data for json_handler."
     },
     {
@@ -240,6 +282,7 @@
     {
       "file": "apps/modules/sandbox.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Uses stdlib json.dump to write ephemeral srt config to a NamedTemporaryFile — not a tracked JSON resource needing json_handler."
     },
     {
@@ -275,26 +318,31 @@
     {
       "file": "apps/modules/sandbox.py",
       "standard": "modules",
+      "functions": ["_is_devpulse", "build_policy", "resolve_bwrap_command"],
       "reason": "Read-only passport.json check in _is_devpulse() to detect branch role for policy generation — not a file-write operation, not a handler-level concern. Module reads sibling passports to determine writable/RO map."
     },
     {
       "file": "apps/handlers/security/presence_gate.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/modules/cc_sessions.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Reads CC-native ~/.claude/sessions/*.json (external files, not branch data) with stdlib json — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/modules/cc_sessions.py",
       "standard": "modules",
+      "functions": ["_proc_start_ticks", "read_all_sessions"],
       "reason": "Direct file ops on ~/.claude/sessions/*.json — external CC-native session files, not branch data. The module IS the CC session reader service; json_handler is for branch-managed JSON, not external platform files."
     },
     {
       "file": "apps/handlers/lifecycle/session_boot.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Boot wrapper has no JSON file ops — delegates to cc_sessions module for session reads. No json_handler needed."
     },
     {
@@ -318,26 +366,31 @@
     {
       "file": "apps/modules/context_window.py",
       "standard": "modules",
+      "functions": ["_codex_config_int", "_read_text"],
       "reason": "Reads Codex's ~/.codex/config.toml (two int keys) with stdlib tomllib: an external CLI's TOML file, not branch JSON, so json_handler cannot read it. The module IS the transcript/window reader service; the read is one call in _codex_config_int."
     },
     {
       "file": "apps/modules/context_window.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Reads external state (session transcript JSONL via tail with stdlib json, branch .claude/settings.local.json through handlers/json/files) — not branch data storage needing json_handler. The module IS the transcript/window reader service (DPLAN-0253), same pattern as cc_sessions.py."
     },
     {
       "file": "apps/handlers/lifecycle/pre_compact_prep.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Uses stdlib json for .trinity/local.json read+stamp (own branch's memory file, DPLAN-0253) plus inbox.json/memory.config.json reads (external system + other branches' state) — not this branch's own hooks_json/ triplet storage. Matches compact.py precedent (same local.json access)."
     },
     {
       "file": "apps/handlers/prompt/context_gauge.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Delegates to context_window module for transcript/settings reads — no direct JSON file ops needing json_handler. Same pattern as session_start.py delegating to cadence."
     },
     {
       "file": "apps/modules/diagnostics_state.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Reads/writes the per-seat diagnostics cache files under STATE_DIR with stdlib json, the same profile already bypassed on its writer, apps/handlers/lifecycle/auto_fix.py. Routing one end through json_handler and not the other is the writer/reader drift this module exists to prevent."
     },
     {
@@ -348,141 +401,169 @@
     {
       "file": "apps/modules/cc_transcripts.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Reads CC-native ~/.claude/projects/*.jsonl (external files, not branch data) with stdlib json — no JSON file ops needing json_handler. Same species as cc_sessions.py, same already-ruled reason."
     },
     {
       "file": "apps/modules/cc_transcripts.py",
       "standard": "modules",
+      "functions": ["<file>"],
       "reason": "Direct file ops on ~/.claude/projects/*.jsonl — external CC-native transcript files, not branch data. The module IS the CC transcript reader service; json_handler is for branch-managed JSON, not external platform files. Mirrors the cc_sessions.py ruling."
     },
     {
       "file": "apps/modules/bash_writes.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Pure string parser for edit_gate's scripted lane — reads a Bash command and returns resolved paths. Touches no JSON file at all, so there is nothing for json_handler to open and nothing to log_operation about. Same profile as grounding_content.py, which is bypassed here for the same reason."
     },
     {
       "file": "apps/modules/bash_writes.py",
       "standard": "modules",
+      "functions": ["<file>", "write_targets_by_segment"],
       "reason": "Not a drone command surface: it is the write-target reader consumed by handlers/security/edit_gate.py inside a PreToolUse hook, where there is no CLI caller to route. Same pattern as grounding_content.py (consumed by 5 handlers) and cadence.py. print_introspection() IS provided, so the module still answers for itself."
     },
     {
       "file": "apps/handlers/security/testwrite_gate.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler. Identical to the edit_gate/rm_gate/registry_gate bypasses above."
     },
     {
       "file": "apps/modules/testwrite_targets.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Pure path classifier for testwrite_gate — answers 'is this a new test file' from a Path's shape and one exists() call. Touches no JSON at all. Same profile as bash_writes.py."
     },
     {
       "file": "apps/modules/testwrite_targets.py",
       "standard": "modules",
+      "functions": ["<file>"],
       "reason": "Not a drone command surface: it is the test-file classifier consumed by handlers/security/testwrite_gate.py inside a PreToolUse hook, where there is no CLI caller to route. Its residual IS reachable from the terminal — print_introspection() is surfaced through 'drone @hooks testwrite'. Same profile as bash_writes.py."
     },
     {
       "file": "apps/modules/admin_seat.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Asks @ai_mail's verified-caller rail one boolean question and stamps/unstamps one env var. Touches no JSON at all, so there is nothing for json_handler to log."
     },
     {
       "file": "apps/modules/admin_seat.py",
       "standard": "modules",
+      "functions": ["<file>", "caller_name"],
       "reason": "Not a drone command surface: a CLI that answered 'are you the admin seat' would stamp a caller cwd from whatever directory the operator stood in, which is exactly the name-check this module exists to refuse. Consumed by edit_gate and testwrite_gate inside PreToolUse hooks. print_introspection() reports the contract. Same profile as bash_writes.py."
     },
     {
       "file": "apps/modules/testgate_policy.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Reads the operator-owned .aipass/test_write_policy.json through handlers/json/files, stdlib json naming the decode error — same profile as handlers/config/loader.py reading .aipass/hooks.json. This is a project config file outside hooks_json/, not branch operational state, and it is read-only here: the flip is deliberately a human edit."
     },
     {
       "file": "apps/modules/release_notice.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Reads .trinity/passport.json and .aipass/scaffold_manifest.json with stdlib json.loads and writes nothing (DPLAN-0335 leg 2) — no JSON file ops needing json_handler, identical profile to grounding_content.py and identity.py, which read the same passport the same way."
     },
     {
       "file": "apps/modules/release_notice.py",
       "standard": "modules",
+      "functions": ["<file>", "_is_manager", "_read_manifest"],
       "reason": "Shared notice-loading service consumed by two handlers — lifecycle/release_notice.py (SessionStart) and lifecycle/post_compact_regrounding.py (the post-compact regroup). The module IS the loader, same pattern as grounding_content.py and cadence.py, so it carries no drone subcommand and needs no handle_command; build_notice is orchestration over the private helpers beside it, and reads long only because the silence rules are documented in its docstring."
     },
     {
       "file": "apps/handlers/lifecycle/release_notice.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Thin SessionStart wiring — imports the module at call time and returns its string. No JSON operations at all, same profile as prompt/identity.py."
     },
     {
       "file": "apps/handlers/config/output_merge.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Parses each handler's stdout and serialises the ONE hook-protocol document Claude Code reads, in memory, with stdlib json (FPLAN-0535). Opens no file and stores nothing, so json_handler has nothing to open and log_operation nothing to log. Same profile as post_compact_regrounding.py and the security gates' hook protocol responses."
     },
     {
       "file": "apps/modules/shell_programs.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "The default-deny program tables (DPLAN-0356 phase 4) and two pure functions over shell_reader's invocations. Reads and writes no JSON, logs no operation; same profile as shell_reader.py."
     },
     {
       "file": "apps/modules/shell_programs.py",
       "standard": "modules",
+      "functions": ["<file>"],
       "reason": "Not a drone command surface: tables consumed by shell_reader, git_gate and edit_gate inside PreToolUse hooks. print_introspection() IS provided. Same profile as shell_reader.py."
     },
     {
       "file": "apps/modules/shell_reader.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Pure shell-word reader (DPLAN-0356 phase 3): reads a Bash command, and the script files it names, as text and returns the programs it runs. Reads and writes no JSON, logs no operation; same profile as bash_writes.py."
     },
     {
       "file": "apps/modules/shell_reader.py",
       "standard": "modules",
+      "functions": ["<file>"],
       "reason": "Not a drone command surface: the one shell-word reader consumed by handlers/security/rm_gate.py and git_gate.py inside a PreToolUse hook, where there is no CLI caller to route. print_introspection() IS provided."
     },
     {
       "file": "apps/modules/comment_scan.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "The comment budget's pure counter (devpulse 1858ba47): reads a file or text and returns line counts. Reads and writes no JSON, logs no operation; same profile as shell_reader.py."
     },
     {
       "file": "apps/modules/comment_scan.py",
       "standard": "modules",
+      "functions": ["<file>", "scan"],
       "reason": "Not a drone command surface: the counter consumed by handlers/lifecycle/comment_budget.py and modules/comments.py, kept free of CLI and hook types so @sentry can import it. The verb is comments.py. print_introspection() IS provided."
     },
     {
       "file": "apps/handlers/lifecycle/comment_budget.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "PostToolUse handler: stdlib json for the hook protocol response and to read its own JSONL ledger, written through prax append_jsonl as handlers/config/diagnostics.py does. Same profile as auto_fix.py."
     },
     {
       "file": "apps/modules/protected_paths.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Answers whether one path is a gate-switching file (DPLAN-0356 item 1) by pattern and path arithmetic. Reads and writes no JSON, logs no operation; same profile as admin_seat.py."
     },
     {
       "file": "apps/handlers/config/gates.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Constants and pure dict functions: which handlers are gates and how each fails (DPLAN-0356 item 2). Opens no file and stores nothing, so json_handler has nothing to open and log_operation nothing to log. Same profile as output_merge.py."
     },
     {
       "file": "apps/handlers/config/ledger_store.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "The injection ledger IS an operations record: one JSONL line per engine dispatch, in the temp dir beside cadence's per-session state (DPLAN-0347 hooks row 3). It runs inside every dispatch, tool events included, so a log_operation per call would write a second ledger into hooks_json on every tool call. The read verb logs through json_handler in apps/modules/injection_ledger.py."
     },
     {
       "file": "apps/modules/write_ownership.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Reads project registries (*_REGISTRY.json, any project's) read-only with stdlib json to learn branch rows and the owner flag for edit_gate. Writes nothing, logs no operation; same profile as admin_seat/bash_writes (devpulse 1d041cfc)."
     },
     {
       "file": "apps/modules/write_ownership.py",
       "standard": "modules",
+      "functions": ["<file>", "_read"],
       "reason": "Not a drone command surface: the who-may-write-whose-files reader consumed by handlers/security/edit_gate.py inside a PreToolUse hook. print_introspection states the rule; a CLI verdict would read the operator's cwd as a seat."
     },
     {
       "file": "apps/modules/write_grant.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Asks @ai_mail's dispatch-grant door one question per crossing write and stamps/unstamps one env var. Opens no JSON itself (the door reads the register and logs its own grant_decision); same profile as admin_seat.py."
     },
     {
       "file": "apps/modules/write_grant.py",
       "standard": "modules",
+      "functions": ["<file>"],
       "reason": "Not a drone command surface: consumed by handlers/security/edit_gate.py inside a PreToolUse hook. A CLI verdict would stamp the operator's cwd and env as a dispatched seat. print_introspection() reports the contract. Same profile as admin_seat.py."
     },
     {
@@ -647,31 +728,37 @@
     {
       "file": "apps/modules/protected_paths.py",
       "standard": "modules",
+      "functions": ["<file>"],
       "reason": "Fleet green leg 5: a module, not a handler. It is the business rule (which files switch the gates) and handlers/security/git_gate.py reaches it at call time; it is no drone verb because its answer depends on the asking seat's cwd and admin grant, which a CLI run would read as the operator's. Same profile and reason as write_ownership.py's modules row."
     },
     {
       "file": "apps/modules/promote.py",
       "standard": "introspection",
+      "functions": ["<file>"],
       "reason": "Fleet green leg 5: the bare verb IS the action. `drone @hooks promote` with no arguments promotes, as @devpulse runs it; a no-args introspection gate would turn every promotion into a help screen. Introspection is on --help, and `promote status` reads the live name."
     },
     {
       "file": "apps/modules/promote.py",
       "standard": "modules",
+      "functions": ["live_name", "point_at"],
       "reason": "Fleet green leg 5: promote.py:188 writes the one-line pointer's scratch file (a name, not JSON) and os.replace makes it the pointer in one rename, so a hook process reads the old name or the new, never half. json_handler serves JSON documents; a pointer is not one."
     },
     {
       "file": "apps/modules/engine_closure.py",
       "standard": "modules",
+      "functions": ["_imports", "_wired_handlers", "crash_refusal"],
       "reason": "Fleet green leg 5: the 'direct file operation' is read_text of a Python source file for ast.parse (the closure is computed by reading, never importing). Source code is not a JSON document json_handler could serve. handle_command and print_introspection are present."
     },
     {
       "file": "apps/modules/diagnostics_state.py",
       "standard": "modules",
+      "functions": ["_locked", "of_the_tree", "save_seat"],
       "reason": "Fleet green leg 5: of_the_tree reads the errored Python source to see whether an error's line holds a {{ placeholder. Source code is not JSON; the seat state itself is written atomically by save_seat (temp + os.replace). handle_command and print_introspection are present."
     },
     {
       "file": "apps/modules/engine_closure.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Reads the root .aipass/hooks.json read-only with stdlib json to learn which handlers are wired, and ruff's JSON report. Writes nothing, logs no operation; same profile as write_ownership/admin_seat."
     },
     {
@@ -832,31 +919,37 @@
     {
       "file": "apps/handlers/bridges/opencode.py",
       "standard": "handlers",
+      "functions": ["run"],
       "reason": "Bridges import engine module by design — that is their entire purpose."
     },
     {
       "file": "apps/handlers/bridges/opencode.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Thin entry point using stdlib json for the plugin answer — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/bridges/opencode.py",
       "standard": "architecture",
+      "functions": ["run"],
       "reason": "Bridge importing engine module is its architectural purpose."
     },
     {
       "file": "apps/handlers/bridges/seed.py",
       "standard": "handlers",
+      "functions": ["main"],
       "reason": "Bridges import engine module by design — that is their entire purpose."
     },
     {
       "file": "apps/handlers/bridges/seed.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Thin entry point using stdlib json for Seed's answer document — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/bridges/seed.py",
       "standard": "architecture",
+      "functions": ["main"],
       "reason": "Bridge importing engine module is its architectural purpose."
     },
     {
@@ -1625,16 +1718,19 @@
     {
       "file": "apps/handlers/config/codex_trust.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "json.dumps builds the exact bytes Codex hashes (sorted, compact), the input to sha256; no JSON file is read or written, and json_handler would change the bytes."
     },
     {
       "file": "apps/modules/provider_launch.py",
       "standard": "json_structure",
+      "functions": ["<file>"],
       "reason": "Path arithmetic over the shell reader's invocations: where a provider CLI would run. Opens and writes no JSON, so json_handler has nothing to log; same profile as admin_seat.py."
     },
     {
       "file": "apps/modules/provider_launch.py",
       "standard": "modules",
+      "functions": ["<file>"],
       "reason": "Not a drone command surface: consumed by handlers/security/edit_gate.py inside a PreToolUse hook. A CLI verdict would judge the operator's cwd as a seat. print_introspection() states the rule. Same profile as admin_seat.py."
     },
     {
