@@ -6,36 +6,6 @@
   },
   "bypass": [
     {
-      "file": "apps/handlers/aipass_standards/cli_content.py",
-      "standard": "cli",
-      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example ('from aipass.cli... import console' as the import to use). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: cli's 'handler imports CLI services' check honours no line-level rule (measured 2026-09-25)."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/encapsulation_content.py",
-      "standard": "cli",
-      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (the cli import a module should use). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: cli's 'handler imports CLI services' check honours no line-level rule (measured 2026-09-25)."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/imports_content.py",
-      "standard": "cli",
-      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (cli imports in the import-order example). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: cli's 'handler imports CLI services' check honours no line-level rule (measured 2026-09-25)."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/modules_content.py",
-      "standard": "cli",
-      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (the cli import a module should use). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: cli's 'handler imports CLI services' check honours no line-level rule (measured 2026-09-25)."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/output_routing_content.py",
-      "standard": "cli",
-      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (the cli helpers output should route through). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: cli's 'handler imports CLI services' check honours no line-level rule (measured 2026-09-25)."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/stderr_routing_content.py",
-      "standard": "cli",
-      "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (the err_console import to use). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard). File-wide: cli's 'handler imports CLI services' check honours no line-level rule (measured 2026-09-25)."
-    },
-    {
       "file": "apps/handlers/aipass_standards/architecture_content.py",
       "standard": "help_text",
       "lines": [
@@ -214,12 +184,6 @@
       "reason": "The standard's own inputs, not anybody's home: the developer_home classes (L1601 on) write each home spelling with an invented login into tmp_path files for the checker, the tree runner, the checklist and the verb to convict. The list is developer_home's own scan_text answer for the file, computed by calling it (2026-10-04, dispatch 79b012ed item 4)."
     },
     {
-      "file": "tests/test_checkers_batch8.py",
-      "standard": "permission_flags",
-      "lines": [1043, 1056, 1070, 1082, 1095, 1101, 1107],
-      "reason": "Test input (fleet green leg 15; re-pinned 10-08 from 1182/1209/1221, the file grew above them): 'cmd = \"--dangerously-skip-permissions\"' and its sibling are strings written into tmp files as the permission_flags checker's own input; no command is ever built from them. Extended 2026-10-18: 1052 and the prose-lines pins' inputs (1091, 1097, 1103) are line-list fixtures, code once a docstring toggle stopped hiding them."
-    },
-    {
       "file": "tests/test_audit_tests_lane_gate.py",
       "standard": "literal_path",
       "lines": [117],
@@ -257,12 +221,6 @@
       "standard": "through_the_command",
       "lines": [426],
       "reason": "No public route (fleet green leg 15; moved with its test by the 10-08 split): statement_deletion._mutant_text, the unparseable-mutant answer, is reached only inside a gated run. Named in the leg 15 reply to @devpulse as the checker asks."
-    },
-    {
-      "file": "tests/test_checkers_batch8.py",
-      "standard": "through_the_command",
-      "lines": [20],
-      "reason": "No public route (fleet green leg 15): handlers_check._branch_before is the path splitter check_module uses; its cases (dotted module names, nested apps) need no tree. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
       "file": "tests/test_coverage_audit.py",
@@ -429,12 +387,6 @@
       "reason": "The checker is wrong on these lines (fleet green leg 14): each failure answer is the STRICT answer. An unparseable file gets no console-import window (86) and no stderr-directed print lines (317), so it keeps every finding; ignorance never buys an exemption, as the comment at 86 says."
     },
     {
-      "file": "apps/handlers/aipass_standards/json_structure_check.py",
-      "standard": "logged_fallback",
-      "lines": [324, 342],
-      "reason": "The checker is wrong on these lines (fleet green leg 14; re-pinned -4 11-15, three docstrings trimmed): each failure answer is the STRICT answer. An unparseable file is not eligible for the bootstrap exemption (441, logged). A path outside the source root has no branch root (459): that is the true answer, and its one caller, _seam_logging, then finds no seam and grants nothing."
-    },
-    {
       "file": "apps/handlers/aipass_standards/ruff_check.py",
       "standard": "logged_fallback",
       "lines": [61, 113],
@@ -505,12 +457,6 @@
       "standard": "logged_fallback",
       "lines": [992],
       "reason": "The checker is wrong on this line (fleet green leg 14): an impossible date is no date, and both callers make None a violation. _newest_entry_date lists the entry as bad, and the last_updated check fails by name with the value found. The value is logged as a warning."
-    },
-    {
-      "file": "tests/test_checkers_batch3.py",
-      "standard": "permission_flags",
-      "lines": [369, 385],
-      "reason": "Test input (2026-10-18): 'CMD = \"--dangerously-skip-permissions\"' sits in textwrap.dedent fixture strings written to tmp files as the permission_flags checker's own input; a triple-quoted literal is code since the prose-lines helper, so the old toggle no longer hides them. No command is built from them."
     },
     {
       "file": "tests/test_checkers_batch3.py",

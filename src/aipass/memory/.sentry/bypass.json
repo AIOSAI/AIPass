@@ -112,12 +112,6 @@
       "reason": "File-wide because the checker names no line. Not a test file: the shared definition of the dead-cwd world that the subprocess pins import (it collects no tests). Its long docstring is why the world exists, and items 6 and 7 of the test template describe a file that tests a module. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
-      "file": "tests/test_auto_process_background.py",
-      "standard": "import_site",
-      "lines": [202],
-      "reason": "The import route is the subject: the helper returns the trigger object through the same import the product makes, because on 3.10 a split worker held two objects and a patch on the other one let a real completion fire (CI run 34088947108). A top-of-file binding is the route that failed. Leg 8 of DPLAN-0354, @memory's decision."
-    },
-    {
       "file": "tests/test_repo_root.py",
       "standard": "stdlib_patch",
       "reason": "File-wide because stdlib_patch passes no line (the checklist calls a lines rule inert); it covers one patch, rr.os.scandir at 450. The only way to make a real directory unlistable for one call without root or platform ACLs. A scandir parameter on exists_exactly would be a door for the test alone (no caller passes it), so the patch stays: monkeypatch scopes it to this test and restores it, and the test asserts the denied listing was the parent. Leg 8 of DPLAN-0354, @devpulse's landing ruling; made file-wide in leg 10."
@@ -138,12 +132,6 @@
       "standard": "import_site",
       "lines": [92],
       "reason": "The test is about the import itself: it proves conftest's mock still shadows json_handler through `from X import y` at call time. A top-of-file import would bind before the autouse fixture runs and test nothing. Leg 8 of DPLAN-0354, @memory's decision."
-    },
-    {
-      "file": "tests/test_marker7_memory_lane.py",
-      "standard": "import_site",
-      "lines": [728],
-      "reason": "The trigger bus package is stood in through sys.modules because the test pins the event _announce_bump fires through its own `from aipass.trigger.apps.modules.core import trigger`; the next line asserts that import reaches the stand-in. It is the only edge between @memory and @trigger's bus that keeps a real event from firing. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "tests/test_trinity_standard.py",
@@ -222,12 +210,6 @@
       "standard": "import_site",
       "lines": [64, 65, 66, 67, 76, 77, 83, 84, 85, 86],
       "reason": "The stub is the cure (compass 493; @devpulse's leg 11 ruling (a)). Each keeps a far side off the disk or the bus. 88-91 aipass.prax: the real logger writes every module's log file under logs/, and its json service writes operation logs. 115-116 handlers.json.json_handler: log_operation writes memory_json operation logs. 123-126 aipass.trigger: Trigger.fire posts real events to the bus. Leg 11 of DPLAN-0354; lines moved +1 by the four-rows split (2026-10-08), which added the support_config_verbs import; moved -6 when the three unrequested fixtures and their imports were cut (2026-10-10)."
-    },
-    {
-      "file": "tests/conftest.py",
-      "standard": "through_the_command",
-      "lines": [95],
-      "reason": "Ruling (b): a read, not a patch. The live-state guard reads trinity_push._REPO_ROOT to check that the push lane's own root holds a core registry with rows before a live-fleet test runs. No public name carries that root (registry_scope.REPO_ROOT is the other lane, read beside it), and no door is added for the guard. Leg 11 of DPLAN-0354; line moved +1 by the four-rows split (2026-10-08), -58 by the fixture cut (2026-10-10)."
     },
     {
       "file": "tests/test_config_loader.py",
@@ -317,12 +299,6 @@
       "standard": "import_site",
       "lines": [81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 104, 105, 127, 134],
       "reason": "The stub is the cure (ruling (a)). rollover.py imports these at import time, and each far side writes. orchestrator.execute_rollover writes .trinity, the backups and the vector stores. memory_watcher.check_and_rollover runs that same rollover. detector's walk recreates a missing .trinity file. todo_report.roll_pad writes the .backup todo backlogs. plans_processor.process_plans embeds and writes the flow_plans store. 134-137 register the REAL cli flag helpers under the stand-in package, which has no __path__. 139/140 are the parent packages. 199 is the eviction of the cached rollover (del under the module constant _ROLLOVER_MODULE, after setitem so teardown restores it) that the re-import at 207 needs; the checker read the constant key from sentry leg 17 on, and devpulse added the line on 2026-10-05 as part of this same ruling. 207 is the deliberate re-import of rollover against them. Leg 11 of DPLAN-0354."
-    },
-    {
-      "file": "tests/test_marker7_memory_lane.py",
-      "standard": "through_the_command",
-      "lines": [94, 135, 156, 167, 271, 734],
-      "reason": "Contracts pinned, each with no public caller that leaves the disk alone. 149/284: detector._read_registry is the rollover WRITE scope (it stops at the repo edge); its public readers walk files and return counts, never rows, and read_scope adds the externals. 228/262: rollover._normalize_rolled never reaches another repository and names a branch whose frame could not be written; its public caller runs a real rollover first. 409: spawn_pusher._write_json refuses a path outside the root; its public caller pushes the spawn templates. 1015: templates._announce_bump fires on the bus; its public caller stamps the receipts. Leg 11 of DPLAN-0354."
     },
     {
       "file": "tests/test_residency_scope.py",

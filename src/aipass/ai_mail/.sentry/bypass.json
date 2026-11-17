@@ -65,13 +65,6 @@
       "measured": "2026-11-08, grep across src/aipass"
     },
     {
-      "file": "__init__.py",
-      "standard": "unused_function",
-      "pattern": "register_path, outstanding_dispatches",
-      "reason": "HALF OF THIS ENTRY HAS NOW EXPIRED, and it is recorded rather than quietly kept. Both doors were requested in writing by @devpulse (FPLAN-0452 P0 addendum, mail 8c9c65cb) for a watchdog wire that was unbuilt at the time. It is built now: outstanding_dispatches() is called in production by devpulse/apps/handlers/watchdog/dispatches.py:143, so sentry would no longer flag it and it needs no cover. register_path() is the half that still does — its only caller in the repo is devpulse's tests/conftest.py:75, which patches it; a door reached only by a test patch is a door with no production reader. It stays exported because @devpulse asked for it in writing and removing another branch's requested door on my own initiative is not mine to do, but the honest state is 'unused, kept on request', not 'unused, pending'. REMOVE THIS ENTRY the day register_path() gets a production caller — an unused_function bypass that outlives its cause is how a dead export becomes permanent.",
-      "measured": "2026-08-23 (S154) — re-checked against the built wire, not assumed. One of the two doors named here is now live; the entry survives only for register_path()."
-    },
-    {
       "file": "tests/test_wake.py",
       "standard": "stdlib_patch",
       "reason": "Platform and pid simulation (ai_mail, fleet green leg 10, under @devpulse's leg 10 ruling a). stdlib_patch passes no line, so the rule is file-wide; the cost, a future patch in this file hidden, is accepted and this rule is re-read each leg. Lines covered as of the 2026-10-08 split, measured by the checker (the platform, pid and lock lines moved to tests/test_wake_helpers.py, the manager lanes to tests/test_wake_managers.py, the shared helpers to tests/support_wake.py; each carries its own row): time.sleep 95 (the wait on a pid, no real waiting); shutil.which 260 288 (which tools the host has); Path.home 684 (the host home sent to tmp). A seam for any of these would exist for the test alone."

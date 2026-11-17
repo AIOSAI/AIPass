@@ -6,12 +6,6 @@
   },
   "bypass": [
     {
-      "standard": "through_the_command",
-      "file": "tests/test_watchdog_dispatches.py",
-      "lines": [91],
-      "reason": "An identity pin, not a reach: seat_email's owner lookup must BE guard.owner_address, one implementation of 'who owns this project' (the 2026-08-21 two-answers bug). No behaviour shows the difference until a second copy drifts."
-    },
-    {
       "standard": "logged_fallback",
       "file": "apps/devpulse.py",
       "lines": [107],

@@ -141,46 +141,6 @@
       "reason": "handle_command() depth 5 — multi-subcommand routing (gift/trade/drop/find/mint). Inherent complexity from varied trade operations."
     },
     {
-      "file": "apps/handlers/rooms/explore_ops.py",
-      "standard": "handlers",
-      "reason": "Commons shared database architecture — cross-handler db import + commons_identity for caller detection"
-    },
-    {
-      "file": "apps/handlers/rooms/room_ops.py",
-      "standard": "handlers",
-      "reason": "Commons shared database architecture — cross-handler db import + commons_identity for caller detection"
-    },
-    {
-      "file": "apps/handlers/notifications/notification_ops.py",
-      "standard": "handlers",
-      "reason": "Commons shared database architecture — cross-handler db import + commons_identity for caller detection"
-    },
-    {
-      "file": "apps/handlers/posts/post_ops.py",
-      "standard": "handlers",
-      "reason": "Commons shared database architecture — cross-handler db import + commons_identity for mentions/caller detection"
-    },
-    {
-      "file": "apps/handlers/curation/curation_ops.py",
-      "standard": "handlers",
-      "reason": "Commons shared database architecture — cross-handler db import + commons_identity for caller detection"
-    },
-    {
-      "file": "apps/handlers/comments/comment_ops.py",
-      "standard": "handlers",
-      "reason": "Commons shared database architecture — cross-handler db import + commons_identity for mentions/caller detection"
-    },
-    {
-      "file": "apps/handlers/catchup/catchup_ops.py",
-      "standard": "handlers",
-      "reason": "Commons shared database architecture — cross-handler db import + commons_identity for caller detection"
-    },
-    {
-      "file": "apps/handlers/profiles/profile_ops.py",
-      "standard": "handlers",
-      "reason": "Commons shared database architecture — cross-handler db import + commons_identity for caller detection"
-    },
-    {
       "file": "apps/handlers/feed/feed_ops.py",
       "standard": "naming",
       "reason": "Redundant prefix — file naming convention inherited from port, all handlers follow {domain}_ops.py pattern for consistency"
@@ -224,81 +184,6 @@
       "file": "apps/handlers/identity/identity_ops.py",
       "standard": "naming",
       "reason": "Redundant prefix — all handlers follow {domain}_ops.py pattern for consistency across 19 handler domains"
-    },
-    {
-      "file": "apps/handlers/rooms/explore_ops.py",
-      "standard": "architecture",
-      "reason": "Commons shared database architecture — handler imports commons_identity for caller detection (architectural)"
-    },
-    {
-      "file": "apps/handlers/rooms/room_ops.py",
-      "standard": "architecture",
-      "reason": "Commons shared database architecture — handler imports commons_identity for caller detection (architectural)"
-    },
-    {
-      "file": "apps/handlers/notifications/notification_ops.py",
-      "standard": "architecture",
-      "reason": "Commons shared database architecture — handler imports commons_identity for caller detection (architectural)"
-    },
-    {
-      "file": "apps/handlers/posts/post_ops.py",
-      "standard": "architecture",
-      "reason": "Commons shared database architecture — handler imports commons_identity for mentions/caller detection (architectural)"
-    },
-    {
-      "file": "apps/handlers/comments/comment_ops.py",
-      "standard": "architecture",
-      "reason": "Commons shared database architecture — handler imports commons_identity for mentions/caller detection (architectural)"
-    },
-    {
-      "file": "apps/handlers/curation/curation_ops.py",
-      "standard": "architecture",
-      "reason": "Commons shared database architecture — handler imports commons_identity for caller detection (architectural)"
-    },
-    {
-      "file": "apps/handlers/catchup/catchup_ops.py",
-      "standard": "architecture",
-      "reason": "Commons shared database architecture — handler imports commons_identity for caller detection (architectural)"
-    },
-    {
-      "file": "apps/handlers/profiles/profile_ops.py",
-      "standard": "architecture",
-      "reason": "Commons shared database architecture — handler imports commons_identity for caller detection (architectural)"
-    },
-    {
-      "file": "apps/handlers/rooms/room_ops.py",
-      "standard": "imports",
-      "reason": "Commons shared database architecture — handler imports commons_identity module for caller detection"
-    },
-    {
-      "file": "apps/handlers/notifications/notification_ops.py",
-      "standard": "imports",
-      "reason": "Commons shared database architecture — handler imports commons_identity module for caller detection"
-    },
-    {
-      "file": "apps/handlers/posts/post_ops.py",
-      "standard": "imports",
-      "reason": "Commons shared database architecture — handler imports commons_identity module for mentions/caller detection"
-    },
-    {
-      "file": "apps/handlers/comments/comment_ops.py",
-      "standard": "imports",
-      "reason": "Commons shared database architecture — handler imports commons_identity module for mentions/caller detection"
-    },
-    {
-      "file": "apps/handlers/curation/curation_ops.py",
-      "standard": "imports",
-      "reason": "Commons shared database architecture — handler imports commons_identity module for caller detection"
-    },
-    {
-      "file": "apps/handlers/catchup/catchup_ops.py",
-      "standard": "imports",
-      "reason": "Commons shared database architecture — handler imports commons_identity module for caller detection"
-    },
-    {
-      "file": "apps/handlers/profiles/profile_ops.py",
-      "standard": "imports",
-      "reason": "Commons shared database architecture — handler imports commons_identity module for caller detection"
     },
     {
       "file": "apps/handlers/welcome/welcome_handler.py",
