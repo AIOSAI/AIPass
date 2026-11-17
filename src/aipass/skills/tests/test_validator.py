@@ -3,7 +3,7 @@
 # Description: Unit tests for skills validator
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # Category: skills/tests
 # =============================================
 
@@ -49,6 +49,15 @@ class TestValidateSkill:
         result = validate_skill({"requires": {"pip": ["nonexistent_pkg_xyz_123"]}})
         assert result["valid"] is False
         assert "nonexistent_pkg_xyz_123" in result["missing_pip"]
+
+    def test_a_package_whose_parent_is_missing_is_reported_missing(self):
+        # Mutant killed 2026-11-17: asking find_spec for the dotted name raises ModuleNotFoundError.
+        result = validate_skill({"requires": {"pip": ["nonexistent_pkg_xyz_123.sub"]}})
+        assert (result["valid"], result["missing_pip"]) == (False, ["nonexistent_pkg_xyz_123.sub"])
+
+    def test_an_installed_dotted_package_is_not_missing(self):
+        result = validate_skill({"requires": {"pip": ["xml.etree"]}})
+        assert (result["valid"], result["missing_pip"]) == (True, [])
 
     def test_available_binary(self):
         # python3 should be on PATH

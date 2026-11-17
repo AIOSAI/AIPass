@@ -3,7 +3,7 @@
 # Description: Skill off-switch tests
 # Version: 1.4.0
 # Created: 2026-08-18
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -225,6 +225,22 @@ class TestUnreadableStateFailsClosed:
         # Missing means nobody has toggled anything: every skill is on.
         assert not (state_dir / "switch_state.json").exists()
         assert sh.read_state() == {}
+
+
+class TestRewritingOverAnUnreadableDocument:
+    """A write over an unreadable document is the operator's recovery: allowed, and logged as an error for medic."""
+
+    def test_the_unreadable_document_is_logged_as_an_error_and_replaced(self, state_dir, monkeypatch):
+        (state_dir / "switch_state.json").write_text("{not json at all", encoding="utf-8")
+        errors = []
+        monkeypatch.setattr(sh.logger, "error", lambda msg, *a, **k: errors.append(msg % a))
+
+        assert sh.write_state({"sample": {"enabled": False}}) is True
+
+        assert len(errors) == 1 and "unreadable switch state" in errors[0]
+        document = json.loads((state_dir / "switch_state.json").read_text(encoding="utf-8"))
+        assert document["skills"] == {"sample": {"enabled": False}}
+        assert document["created"] == document["last_updated"]
 
 
 class TestTurnOff:

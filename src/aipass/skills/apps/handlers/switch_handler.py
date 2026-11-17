@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: switch_handler.py
 # Description: Per-skill off-switch — state, declaration, systemd actuation
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-18
-# Modified: 2026-10-24
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -92,7 +92,7 @@ def write_state(skills: Dict[str, Any]) -> bool:
                 created = existing.get("created", today)
         except (OSError, ValueError) as exc:
             # A rewrite over an unreadable document is always allowed: it is how an operator recovers.
-            logger.warning("Rewriting an unreadable switch state document: %s", exc)
+            logger.error("Rewriting an unreadable switch state document: %s", exc)
 
     document = {
         "module_name": "switch",
