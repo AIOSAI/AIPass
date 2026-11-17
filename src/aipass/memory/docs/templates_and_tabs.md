@@ -16,8 +16,8 @@ instruction the editing agent reads. Everything below is the machinery behind
 `push-templates` and `diff-templates` still **route and refuse**, naming the live lane
 (`modules/templates.RETIRED_VERBS`); a removed verb tells a caller nothing about its replacement.
 They scanned the branch root for a naming convention that predates `.trinity/` and could match no
-real memory file. `pusher.py`, `differ.py` and the tests that pinned them are parked in
-`tests/parked/dead_template_lane_20260827/`, with the measurement written down there.
+real memory file: measured live, `diff-templates` reported 16 branches with differences and not
+one was a `.trinity/` file. `pusher.py`, `differ.py` and their tests have left the tree.
 
 - `push-templates` → `drone @memory push` (branch memory files, gated) and
   `drone @memory templates spawn-templates` (@spawn's scaffold sets)

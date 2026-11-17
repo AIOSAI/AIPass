@@ -3,15 +3,15 @@
 # Description: Symbolic Memory Module — PARKED 2026-08-14
 # Version: 1.0.0
 # Created: 2026-03-17
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """
 Symbolic Memory Module — PARKED 2026-08-14 (the owner's ruling).
 
-Its AUDN deduplicator deleted on an LLM verdict with no record. The code and the
-revival steps are in tests/parked/symbolic_20260814/; this stub makes every parked
-surface say so. governance.py is not part of this tier and is live.
+Its AUDN deduplicator deleted on an LLM verdict with no record. The code is out of the
+tree and lives in git history; this stub makes every parked surface say so.
+governance.py is not part of this tier and is live.
 """
 
 import sys
@@ -37,12 +37,12 @@ _PARKED_SUBCOMMANDS = {
 _PARKED_REASON = (
     f"PARKED {PARKED_DATE} by the owner's ruling — unused tier, and the Agent Memory Atlas "
     "review flagged its AUDN deduplicator for acting on an LLM Delete verdict with no "
-    "record of what was removed. Parked, not removed."
+    "record of what was removed."
 )
 
 _ACTIVE_PIECE = "Compass — @devpulse's curated-truth store (SQLite/FTS5): drone @devpulse compass"
 
-_ARCHIVE_HINT = "Code + revival steps: memory/tests/parked/symbolic_20260814/README.md"
+_ARCHIVE_HINT = "Code: out of the tree, in git history (memory's symbolic tier, parked 2026-08-14)"
 
 
 class SymbolicTierParked(RuntimeError):

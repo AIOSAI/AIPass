@@ -772,26 +772,6 @@ class TestTheDeadTemplateLaneIsRetired:
 
         assert offenders == []
 
-    def test_the_park_keeps_them_with_the_measurement(self):
-        """Never a casual delete — the record of WHY outlives the code.
-
-        A TRACKED park, not `.archive/`: `.archive/` is gitignored and present in no clone.
-        """
-        parked = _MEMORY_ROOT / "tests" / "parked" / "dead_template_lane_20260827"
-
-        assert (parked / "pusher(disabled).py").is_file()
-        assert (parked / "differ(disabled).py").is_file()
-        assert not (_MEMORY_ROOT / ".archive" / "dead_template_lane_20260827").exists()
-        assert "zero real matches" in (parked / "README.md").read_text(encoding="utf-8").lower()
-
-    def test_the_parked_lane_is_never_collected_as_tests(self):
-        """Two of the parked files are named `test_*` — the barrier must hold."""
-        parked = _MEMORY_ROOT / "tests" / "parked" / "dead_template_lane_20260827"
-
-        assert (parked / "test_templates(disabled).py").is_file()
-        assert (parked / "test_templates_display(disabled).py").is_file()
-        assert (_MEMORY_ROOT / "tests" / "parked" / "conftest.py").is_file()
-
     def test_the_retired_verbs_refuse_and_name_the_live_lane(self, capsys):
         """A refusal that exits 0 is half a refusal: claimed, exit 2, and the live lane named."""
         for verb in ("push-templates", "diff-templates"):

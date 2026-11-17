@@ -29,7 +29,7 @@ memory/
 │   │   ├── rollover.py          # Rollover orchestration, status, config verbs
 │   │   ├── roots.py             # Declared repository roots — list/init/add/remove/heal
 │   │   ├── search.py            # Semantic query routing
-│   │   ├── symbolic.py          # PARKED — refusal stub, impl in tests/parked/
+│   │   ├── symbolic.py          # PARKED — refusal stub only, the code is out of the tree
 │   │   ├── templates.py         # Gold templates — spawn scaffolds, receipt status, bump
 │   │   ├── todo.py              # The pad and its backlog — count, list, restore
 │   │   ├── verify.py            # Plan vectorization check
@@ -56,7 +56,7 @@ memory/
 ├── docs/                        # Tracked depth, one file per handler group, indexed from README
 ├── docs.local/                  # Untracked scratch and research
 ├── templates/                   # LOCAL.template.json, OBSERVATIONS.template.json — gold source
-├── tests/  └── parked/          # parked/conftest.py is the collection barrier
+├── tests/                       # one file per subject, conftest.py holds the shared stand-ins
 ├── .chroma/                     # ChromaDB vector store
 └── memory_json/                 # Operation logs + custom_config/memory.config.json
 ```

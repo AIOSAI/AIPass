@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_symbolic_parked.py
-# Description: Pins the park of the symbolic fragments tier (the owner's ruling, 2026-08-14)
-# Version: 1.0.2
+# Description: Pins the refusal surfaces of the parked symbolic fragments tier (the owner's ruling, 2026-08-14)
+# Version: 1.1.0
 # Created: 2026-08-14
 # Modified: 2026-11-17
 # =============================================
@@ -11,17 +11,12 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 
 import importlib
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
 from aipass.memory.apps.modules import symbolic
 from aipass.memory import new_state, should_surface
-
-# The park's TRACKED home: .archive/ is never shipped, so a park there is invisible to CI.
-_PARK = Path(__file__).resolve().parent / "parked" / "symbolic_20260814"
 
 _SUBCOMMANDS = ["demo", "analyze", "extract", "bootstrap", "fragments", "hook-test"]
 
@@ -122,75 +117,8 @@ class TestLiveLaneUntouched:
         surfaced, reason, state = should_surface("item-1", 0.9, new_state())
         assert surfaced is True, reason
 
-
-class TestRevivable:
-    """The owner may want this back. Everything must still be here."""
-
-    @pytest.mark.parametrize(
-        "relative",
-        [
-            "handlers/__init__(disabled).py",
-            "handlers/chroma_client(disabled).py",
-            "handlers/deduplicator(disabled).py",
-            "handlers/extractor(disabled).py",
-            "handlers/hook(disabled).py",
-            "handlers/retriever(disabled).py",
-            "handlers/storage(disabled).py",
-            "modules/symbolic(disabled).py",
-            "handlers_vector/embedder(disabled).py",
-        ],
-    )
-    def test_implementation_is_preserved(self, relative):
-        assert (_PARK / relative).is_file(), f"missing from the park: {relative}"
-
-    def test_the_park_is_not_in_the_disposal_zone(self):
-        """No path component may be `.archive`: existence alone cannot tell a tracked home from a local one."""
-        assert ".archive" not in _PARK.parts, f"the park is back in the disposal zone: {_PARK}"
-
-    @pytest.mark.parametrize(
-        "relative",
-        [
-            "handlers/extractor(disabled).py",
-            "modules/symbolic(disabled).py",
-        ],
-    )
-    def test_parked_code_is_not_importable_by_dotted_path(self, relative):
-        """The `(disabled)` suffix is the disabling: an invalid identifier can be neither imported nor collected."""
-        stem = (_PARK / relative).stem
-        assert not stem.isidentifier(), f"{stem} is still a valid module name"
-
     def test_the_orphaned_embedder_left_the_live_tree(self):
         """Parked with the tier (devpulse's ruling) — its only importers were symbolic's."""
         vector_dir = Path(__file__).resolve().parent.parent / "apps" / "handlers" / "vector"
         assert not (vector_dir / "embedder.py").exists()
         assert (vector_dir / "embed_subprocess.py").is_file(), "the live lane's script must stay"
-
-    def test_the_park_documents_its_own_revival(self):
-        readme = _PARK / "README.md"
-        assert readme.is_file()
-        text = readme.read_text(encoding="utf-8")
-        assert _names_the_ruling(text)
-        assert "revive" in text.lower()
-
-
-class TestParkIsNeverCollected:
-    """Kept is not run: parked test files still match `test_*.py`, so pin a real subprocess collection."""
-
-    def test_collecting_the_park_finds_nothing(self):
-        result = subprocess.run(
-            [sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", str(_PARK.parent)],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=180,
-        )
-        combined = result.stdout + result.stderr
-        assert "error" not in combined.lower(), combined
-        collected = [ln for ln in result.stdout.splitlines() if "::" in ln]
-        assert collected == [], f"parked code was collected: {collected[:5]}"
-
-    def test_a_parked_test_file_would_otherwise_have_matched(self):
-        """Guard the guard: if no parked file looks like a test, the pin is vacuous."""
-        tempting = [p.name for p in _PARK.parent.rglob("test_*.py")]
-        assert len(tempting) >= 1, "no parked file matches test_*.py — this pin no longer pins anything"

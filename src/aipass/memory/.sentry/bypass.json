@@ -124,7 +124,7 @@
     {
       "file": "tests/test_symbolic_parked.py",
       "standard": "import_site",
-      "lines": [85, 93],
+      "lines": [80, 88],
       "reason": "The import is what is under test: the parked symbolic package (the owner's ruling of 2026-08-14) must refuse every import, the package and each submodule, naming the ruling. A top-of-file import would raise at collection and pin nothing. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
@@ -216,42 +216,6 @@
       "standard": "import_site",
       "lines": [48],
       "reason": "The stub is the cure (ruling (a)). _get_module re-imports config_loader after the fixture evicted the json package, so it binds conftest's json_handler stand-in; with the real one bound, load/save write memory_json operation logs. Leg 11 of DPLAN-0354."
-    },
-    {
-      "file": "tests/test_vector.py",
-      "standard": "import_site",
-      "lines": [42, 47],
-      "reason": "Parked tier: vector/embedder.py was parked with the symbolic fragments tier on 2026-08-14 (the owner's ruling) and this file skips; the lines stay as they were. The stub also keeps fastembed from loading a model. Leg 11 of DPLAN-0354."
-    },
-    {
-      "file": "tests/test_symbolic_extras.py",
-      "standard": "import_site",
-      "lines": [48, 49],
-      "reason": "Parked tier: the symbolic fragments tier was parked on 2026-08-14 (the owner's ruling) and this file skips; the lines stay as they were. Where the import is meant to raise (the parked package's __init__ raises), the raise is the test. Leg 11 of DPLAN-0354; lines moved by the four-rows split (2026-10-08), the rest went to test_symbolic_extras_storage.py and support_symbolic_extras.py."
-    },
-    {
-      "file": "tests/test_symbolic_extras.py",
-      "standard": "state_leak",
-      "lines": [48],
-      "reason": "Parked tier: the owner's ruling of 2026-08-14 keeps this file as it was, and it skips, so these pops never run. Leg 11 of DPLAN-0354; lines moved by the four-rows split (2026-10-08)."
-    },
-    {
-      "file": "tests/test_symbolic_extras_storage.py",
-      "standard": "import_site",
-      "lines": [49, 50, 70, 71, 77, 78, 84, 85, 432, 452, 864],
-      "reason": "Parked tier: the symbolic fragments tier was parked on 2026-08-14 (the owner's ruling) and this file skips, as test_symbolic_extras.py did; the lines stay as they were. Where the import is meant to raise (the parked package's __init__ raises), the raise is the test. Leg 11 of DPLAN-0354; moved here from test_symbolic_extras.py (184-220, 1209, 1229, 1676) by the four-rows split (2026-10-08)."
-    },
-    {
-      "file": "tests/test_symbolic_extras_storage.py",
-      "standard": "state_leak",
-      "lines": [49, 70, 77, 84],
-      "reason": "Parked tier: the owner's ruling of 2026-08-14 keeps this code as it was, and the file skips, so these pops never run. Leg 11 of DPLAN-0354; moved here from test_symbolic_extras.py (184, 205, 212, 219) by the four-rows split (2026-10-08)."
-    },
-    {
-      "file": "tests/support_symbolic_extras.py",
-      "standard": "import_site",
-      "lines": [31, 41, 42, 49, 50, 51, 52, 53],
-      "reason": "Parked tier: these are the autouse stand-ins the two symbolic-extras files share, moved verbatim from test_symbolic_extras.py (90, 101, 102, 111-115) by the four-rows split (2026-10-08). Both files skip at module level before importing them, so they never run while the tier is parked (the owner's ruling of 2026-08-14). Leg 11 of DPLAN-0354."
     },
     {
       "file": "tests/test_rollover_pipeline.py",
