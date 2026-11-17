@@ -464,13 +464,19 @@ class TestInfrastructureMocking:
 
     def test_reimport_after_mock(self):
         """Module remains functional after importlib.reload."""
-        importlib.reload(display)
+        # A reload mints new consoles; put the old ones back or a later importer holds a different console.
+        before = dict(display.__dict__)
+        try:
+            importlib.reload(display)
 
-        assert hasattr(display, "handle_command")
-        assert callable(display.handle_command)
+            assert hasattr(display, "handle_command")
+            assert callable(display.handle_command)
 
-        result = display.handle_command("nonexistent", [])
-        assert result is False
+            result = display.handle_command("nonexistent", [])
+            assert result is False
+        finally:
+            for name, value in before.items():
+                setattr(display, name, value)
 
     def test_sys_modules_contains_display(self):
         """Display module is properly registered in sys.modules."""

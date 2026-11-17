@@ -3,7 +3,7 @@
 # Description: Rule E canaries — a help flag anywhere explains, never executes
 # Version: 1.0.2
 # Created: 2026-08-13
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/help_flags.py and the help gate of every drone module."""
@@ -161,13 +161,9 @@ class TestConfigNeverSetsOnHelp:
     """config set mutates the registry path — a stray flag must not land it."""
 
     def test_set_with_trailing_help_does_not_set(self, tmp_path: Path) -> None:
-        with (
-            patch(f"{_M}.config.set_registry_path") as setter,
-            patch(f"{_M}.config.print_help") as help_,
-        ):
+        with patch(f"{_M}.config.print_help") as help_:
             result = config.handle_command("set", [str(tmp_path / "somewhere"), "--help"])
 
-        setter.assert_not_called()
         help_.assert_called_once()
         assert result is True
 

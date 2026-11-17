@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for devpulse tests
 # Version: 1.4.0
 # Created: 2025-11-08
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Shared pytest fixtures for devpulse tests."""
@@ -18,6 +18,7 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 import pytest
 from pathlib import Path
 from typing import Generator
+from unittest.mock import patch
 
 from aipass.cli import display
 from aipass.devpulse.apps.handlers.json import json_handler
@@ -80,7 +81,7 @@ def hermetic_mail_doors(tmp_path_factory, monkeypatch):
     aipass_dir.mkdir()
     feed = aipass_dir / "notifications.jsonl"
     register = aipass_dir / "dispatch_register.jsonl"
-    monkeypatch.setattr("aipass.ai_mail.feed_path", lambda: feed)
     # One variable moves @ai_mail's register and its register_path door; its fence refuses a private patch.
     monkeypatch.setenv("AIPASS_DISPATCH_REGISTER", str(register))
-    return live
+    with patch("aipass.ai_mail.feed_path", lambda: feed):
+        yield live

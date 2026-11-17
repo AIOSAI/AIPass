@@ -3,7 +3,7 @@
 # Description: Tests for the schedule verb and the @daemon job it writes, and for register --remove dropping it
 # Version: 1.0.0
 # Created: 2026-11-15
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/schedule.py and the handlers/schedule/jobs.py job it writes."""
@@ -19,6 +19,7 @@ import datetime
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Iterator
 from unittest.mock import patch
 
 import pytest
@@ -60,7 +61,7 @@ def project(tmp_path: Path, tmp_registry: Path) -> Path:
 
 
 @pytest.fixture
-def daemon(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+def daemon() -> Iterator[SimpleNamespace]:
     """@daemon's queue door: a test sets ``answer`` to what route_command returns, or raises."""
     door = SimpleNamespace(answer=SimpleNamespace(exit_code=0, stdout=json.dumps({"jobs": [DAEMON_ROW]})), calls=[])
 
@@ -70,8 +71,9 @@ def daemon(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
             raise door.answer
         return door.answer
 
-    monkeypatch.setattr(schedule.drone, "route_command", route)
-    return door
+    # patch, not monkeypatch.setattr: its undo would store the name on drone's package for the whole run.
+    with patch.object(schedule.drone, "route_command", route):
+        yield door
 
 
 class TestSetRefusesBadValues:

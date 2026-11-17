@@ -74,7 +74,7 @@ def _collect_python_files(branch_path: Path, ignore_entries: list) -> list[Path]
     if not branch_path.is_dir():
         return files
     for py_file in branch_path.rglob("*.py"):
-        if _should_skip(py_file, branch_path, ignore_entries):
+        if not py_file.is_file() or _should_skip(py_file, branch_path, ignore_entries):
             continue
         files.append(py_file)
     return sorted(files)

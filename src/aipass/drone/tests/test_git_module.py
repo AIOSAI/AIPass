@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_module.py
-# Description: Tests for the @git module — routing, help, auth, scope footer, merge gate, gh verbs, untrack, release, label, alerts
+# Description: Tests for the @git module — routing, help, auth, scope footer, merge gate, gh verbs, untrack, release
 # Version: 1.6.1
 # Created: 2026-04-21
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/git_module.py: command routing, help, the auth gate and the verbs it fronts."""
@@ -365,10 +365,10 @@ class TestTriggerFireIntegration:
         monkeypatch.chdir(tmp_path)
 
         mock_trigger = MagicMock()
-        monkeypatch.setattr("aipass.trigger.trigger", mock_trigger)
-
-        with patch(
-            "aipass.drone.apps.plugins.devpulse_ops.merge_plugin.subprocess.run", side_effect=_run_merge_success
+        # patch, not monkeypatch.setattr: its undo would store the name on trigger's package for the whole run.
+        with (
+            patch("aipass.trigger.trigger", mock_trigger),
+            patch("aipass.drone.apps.plugins.devpulse_ops.merge_plugin.subprocess.run", side_effect=_run_merge_success),
         ):
             result = merge_pr("42", "devpulse")
 

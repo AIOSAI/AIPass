@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for api tests
 # Version: 2.6.0
 # Created: 2026-03-05
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # Category: api/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -381,9 +381,10 @@ def engine_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture(autouse=True)
-def notice_feed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """The notification feed agent feeds take notices from, moved into tmp_path and empty: the live one is the fleet's."""
-    path = tmp_path / "agent_notifications.jsonl"
+def notice_feed(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The notification feed agent feeds take notices from, moved to a temp dir and empty: the live one is the fleet's."""
+    # Its own dir, not tmp_path: a test that counts the files it wrote there must not find this one.
+    path = tmp_path_factory.mktemp("notice_feed") / "agent_notifications.jsonl"
     path.write_text("", encoding="utf-8")
     monkeypatch.setattr(_agent_notices, "feed_path", lambda: path)
     monkeypatch.setattr(_agent_notices, "_cache", {"key": None, "events": []})
