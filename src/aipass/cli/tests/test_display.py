@@ -3,7 +3,7 @@
 # Description: The display module — messages, header, routing, demo, exit seam, escape, live colour
 # Version: 1.4.0
 # Created: 2026-03-24
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/display.py — the render surface every branch imports."""
@@ -27,7 +27,7 @@ from rich.markup import escape as rich_escape
 import aipass.cli
 from aipass.cli.apps import modules
 from aipass.cli.apps.modules import display, templates
-from aipass.trigger.apps.modules import core as trigger_core
+from aipass.trigger import Trigger
 
 from .conftest import make_capture_console
 
@@ -451,7 +451,7 @@ class TestHeaderStaysOffTheTriggerBus:
     def test_header_fires_nothing(self, monkeypatch):
         """Mutant: put the cli_header_displayed fire back in header() - killed."""
         fired = []
-        monkeypatch.setattr(trigger_core.Trigger, "fire", classmethod(lambda _cls, event, **kw: fired.append(event)))
+        monkeypatch.setattr(Trigger, "fire", classmethod(lambda _cls, event, **kw: fired.append(event)))
         cons, get_output = _make_capture_console()
         with patch.object(display, "CONSOLE", cons):
             display.header("Quiet Title")

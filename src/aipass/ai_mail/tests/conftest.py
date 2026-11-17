@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for ai_mail tests - sandbox redirects, console pin, state reset
 # Version: 1.9.1
 # Created: 2026-03-05
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # Category: ai_mail/tests
 # CHANGELOG (Max 5 entries):
 #   - v1.9.1 (2026-11-15): main_argv stderr is dispatch_stderr.out; monitor_wake_stubbed drops log_wake_result
@@ -40,11 +40,11 @@ import aipass.ai_mail.apps.handlers.email.contacts as contacts_mod
 import aipass.ai_mail.apps.handlers.notify as notify_mod
 import aipass.ai_mail.apps.handlers.registry.read as registry_read
 import aipass.ai_mail.apps.modules.email_send as email_send_mod
-import aipass.trigger.apps.modules.core as trigger_core
 from aipass.ai_mail.apps.handlers.dispatch import register, report
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.modules import email as email_mod
 from aipass.cli import display
+from aipass.trigger import Trigger
 
 # Archived tests import modules that no longer exist; state the skip rather than rely on norecursedirs.
 collect_ignore_glob = [".archive/*", "**/.archive/*"]
@@ -191,13 +191,10 @@ class _BusRecorder:
 @pytest.fixture(autouse=True)
 def recorded_bus(monkeypatch) -> _BusRecorder:
     """No test fires on the real trigger bus; a test asserts what fired here."""
-    # report/send/dispatch import trigger through trigger's door at call time, email_send binds it at
-    # import: the door's name, the core's, and email_send's are all replaced.
+    # Every caller, door-read at call time or bound at import (email_send), reaches fire through the
+    # class. recorder.fire is read per call so a test can swap it (test_dispatch_report raises there).
     recorder = _BusRecorder()
-    monkeypatch.setattr("aipass.trigger.trigger", recorder)
-    monkeypatch.setattr(trigger_core, "trigger", recorder)
-    monkeypatch.setattr(trigger_core.Trigger, "fire", staticmethod(recorder.fire))
-    monkeypatch.setattr(email_send_mod, "trigger", recorder)
+    monkeypatch.setattr(Trigger, "fire", staticmethod(lambda event, **data: recorder.fire(event, **data)))
     return recorder
 
 

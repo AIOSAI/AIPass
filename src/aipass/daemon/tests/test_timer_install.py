@@ -3,7 +3,7 @@
 # Description: Tests for the timer_install module (systemd user timer installer)
 # Version: 1.2.0
 # Created: 2026-06-25
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/timer_install.py — install-timer and uninstall-timer, the systemd user timer."""
@@ -179,7 +179,7 @@ class TestTheCommandsReadSystemctlsAnswers:
         unit_dir.mkdir()
         service, timer = _units(unit_dir)
         log = systemctl_on_path({"stop": [5, "Unit daemon-tick.timer not loaded."]})
-        with patch("aipass.trigger.apps.modules.core.trigger.fire"):
+        with patch("aipass.trigger.Trigger.fire"):
             assert _exit_of("uninstall-timer") == 0
         assert _argv(log) == [
             "--user stop daemon-tick.timer",
@@ -353,7 +353,7 @@ class TestUninstall:
 
         with (
             patch(f"{TI}._UNIT_DIR", unit_dir),
-            patch("aipass.trigger.apps.modules.core.trigger.fire") as fire,
+            patch("aipass.trigger.Trigger.fire") as fire,
         ):
             assert _exit_of("uninstall-timer") == 0
         assert not half.exists(), "the half install must be removed"
@@ -394,13 +394,13 @@ class TestUninstall:
     def test_uninstall_removes_files(self, mock_systemctl, tmp_path):
         """uninstall-timer stops, disables, removes both unit files, reloads, and fires file_deleted per file.
 
-        fire is patched on the core `trigger` object _uninstall imports at call time; unpatched it hits the real bus.
+        fire is patched on `Trigger` through trigger's door, where _uninstall's fire resolves; unpatched it hits a bus.
         """
         service, timer = _units(tmp_path)
 
         with (
             patch(f"{TI}._UNIT_DIR", tmp_path),
-            patch("aipass.trigger.apps.modules.core.trigger.fire") as fire,
+            patch("aipass.trigger.Trigger.fire") as fire,
         ):
             assert _exit_of("uninstall-timer") == 0
         assert not service.exists()
@@ -427,7 +427,7 @@ class TestUninstall:
         _seal_timer_host_state.side_effect = lambda *args, **kwargs: args[0] != failing
 
         with (
-            patch("aipass.trigger.apps.modules.core.trigger.fire") as fire,
+            patch("aipass.trigger.Trigger.fire") as fire,
             pytest.raises(SystemExit) as stopped,
         ):
             handle_command("uninstall-timer", [])

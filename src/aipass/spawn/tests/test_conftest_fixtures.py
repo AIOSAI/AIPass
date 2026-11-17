@@ -3,7 +3,7 @@
 # Description: Pins that spawn's own mocking fixtures reach the code they claim to mock
 # Version: 1.0.2
 # Created: 2026-08-30
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests that tests/conftest.py's mocking fixtures actually reach apps/handlers/file_ops.py."""
@@ -19,7 +19,7 @@ from unittest.mock import Mock, patch
 import aipass.spawn.apps.handlers.file_ops as file_ops
 from aipass.cli import display
 from aipass.spawn.apps.handlers.json import json_handler
-from aipass.trigger.apps.modules import core as trigger_core
+from aipass.trigger import Trigger
 from aipass.spawn.tests import conftest as spawn_conftest
 
 # file_ops binds the logger object at import, so a patch at or above aipass.prax never reaches it:
@@ -112,7 +112,7 @@ class TestTheHeaderNeverReachesTheRealBus:
     def test_the_real_header_fires_nothing_on_the_real_bus(self, monkeypatch):
         """Ran red with header() firing cli_header_displayed again (one call on the real bus)."""
         real_fire = Mock()
-        monkeypatch.setattr(trigger_core.Trigger, "fire", real_fire)
+        monkeypatch.setattr(Trigger, "fire", real_fire)
 
         display.header("Probe Title")
 
