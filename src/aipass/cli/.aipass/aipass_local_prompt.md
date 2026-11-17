@@ -18,10 +18,10 @@ The face is `README.md`, kept short for strangers. Depth lives in `docs/`, one p
 
 ```
 cli/
-├── __init__.py                     lazy top-level exports (PEP 562)
+├── __init__.py                     the import door: lazy names (PEP 562), pinned in tests/test_display.py
 ├── apps/
 │   ├── cli.py                      entry point: main, run_cli, discover_modules, route_command
-│   ├── modules/                    public — import from here
+│   ├── modules/                    where the door's names live
 │   │   ├── display.py              messages, fatal, section, exit-code seam
 │   │   └── templates.py            operation_start, operation_complete
 │   ├── handlers/                   private — the fence (v2.1) refuses a foreign importer
@@ -40,7 +40,7 @@ Re-derive this with `find` before trusting it. Scaffold and dot-directories are 
 
 # Public API
 
-Import from `aipass.cli` (short set) or `aipass.cli.apps.modules` (full set): `console`, `err_console`, `header`, `success`, `error`, `warning`, `fatal`, `section`, `escape`, `operation_start`, `operation_complete`, plus the exit seam — `mark_command_failed`, `command_failed`, `reset_command_state`, `resolve_exit`.
+Other branches import from `aipass.cli`, the one door: the `display` module and `console`, `err_console`, `header`, `success`, `error`, `warning`, `fatal`, `section`, `escape`, `operation_start`, `operation_complete`, plus the exit seam — `mark_command_failed`, `command_failed`, `reset_command_state`, `resolve_exit`.
 
 Signatures and examples are in `docs/display_api.md`. Do not restate them here.
 
@@ -56,7 +56,7 @@ Three lines in `main()`, in order: `reset_command_state()` on entry, route, then
 
 These are the things that have actually broken here.
 
- - The handlers fence is only as good as the packages above it. `apps/__init__.py` imports nothing and the package `__init__.py` loads display lazily; an eager import in either puts kin in every stack and opens the fence. `tests/test_handlers_fence.py` pins both.
+ - The handlers fence is only as good as the packages above it. `apps/__init__.py` imports nothing and the package `__init__.py` loads every door name lazily; an eager import in either puts kin in every stack and opens the fence. `tests/test_handlers_fence.py` pins the first, `tests/test_display.py` the second.
  - Colour is decided per print against the live stream (`_LiveConsole` in `display.py`). Never read `isatty()` at import or pass `force_terminal`: Rich fixes its colour system in `__init__`, so an import-time answer outlives the stream it was read from.
  - `apps/modules/` must not import `aipass.prax` — circular, prax depends on this branch. Bypassed in `.sentry/bypass.json`. The json shim is the one exception and is safe only because prax's `__init__` is lazy.
  - The json shim binds names (`log_operation = _h.log_operation`) and never wraps them. A `def` wrapper adds a frame and the service then logs to the wrong document.

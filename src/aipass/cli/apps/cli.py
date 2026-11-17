@@ -15,7 +15,7 @@ import importlib
 from pathlib import Path
 from typing import List, Any
 
-from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax import logger
 
 from rich.table import Table
 from rich.panel import Panel

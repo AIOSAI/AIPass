@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_display.py
 # Description: The display module — messages, header, routing, demo, exit seam, escape, live colour
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-24
-# Modified: 2026-11-14
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/display.py — the render surface every branch imports."""
@@ -12,10 +12,13 @@
 # sentry: no-test-needed(documentation) — that display.header and the other public functions carry docstrings
 # sentry: no-test-needed(rich_markup) — that display.print_help's own literals keep their brackets
 
+import ast
 import contextlib
 import importlib
 import io
+import subprocess
 import sys
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -634,3 +637,58 @@ class TestColourFollowsTheLiveStream:
         _out, err = capsys.readouterr()
         assert "\x1b[" in terminal.getvalue()
         assert err == "live\n"
+
+
+DOOR_NAMES = {
+    "console": display,
+    "err_console": display,
+    "header": display,
+    "success": display,
+    "error": display,
+    "warning": display,
+    "fatal": display,
+    "section": display,
+    "escape": display,
+    "mark_command_failed": display,
+    "command_failed": display,
+    "reset_command_state": display,
+    "resolve_exit": display,
+    "operation_start": templates,
+    "operation_complete": templates,
+}
+
+
+class TestTheFrontDoor:
+    """from aipass.cli import <name> is the one cross-branch import; it hands out the long path's own objects."""
+
+    @pytest.mark.parametrize("name", sorted(DOOR_NAMES))
+    def test_each_door_name_is_the_long_path_object(self, name):
+        assert getattr(aipass.cli, name) is getattr(DOOR_NAMES[name], name)
+
+    def test_the_door_hands_out_the_display_module_itself(self):
+        assert aipass.cli.display is display
+
+    def test_all_lists_exactly_the_door_names(self):
+        assert sorted(aipass.cli.__all__) == sorted([*DOOR_NAMES, "display"])
+
+    def test_the_type_checker_sees_every_door_name(self):
+        tree = ast.parse(Path(aipass.cli.__file__).read_text(encoding="utf-8"))
+        seen = {
+            alias.asname or alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("aipass.cli.apps")
+            for alias in node.names
+        }
+        assert seen == {*DOOR_NAMES, "display"}
+
+    def test_an_unknown_name_raises_attribute_error(self):
+        with pytest.raises(AttributeError, match="no_such_name"):
+            getattr(aipass.cli, "no_such_name")
+
+    def test_importing_the_package_loads_nothing_under_apps(self):
+        probe = "import sys, aipass.cli; print(sorted(m for m in sys.modules if m.startswith('aipass.cli.apps')))"
+        done = subprocess.run(
+            [sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8", timeout=60
+        )
+        assert done.returncode == 0, done.stderr[-600:]
+        assert done.stdout.strip() == "[]"
