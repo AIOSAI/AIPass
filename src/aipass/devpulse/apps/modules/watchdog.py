@@ -15,7 +15,7 @@ import importlib
 from typing import List
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, err_console, error
+from aipass.cli import console, err_console, error
 from aipass.devpulse.apps.handlers.json import json_handler
 from aipass.devpulse.apps.handlers.watchdog import dispatches as _dispatches
 from aipass.devpulse.apps.handlers.watchdog import presenter

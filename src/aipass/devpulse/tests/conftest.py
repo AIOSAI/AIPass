@@ -19,7 +19,7 @@ import pytest
 from pathlib import Path
 from typing import Generator
 
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 from aipass.devpulse.apps.handlers.json import json_handler
 from aipass.devpulse.apps.handlers.watchdog import registry as watch_registry
 from aipass.devpulse.apps.handlers.watchdog import timer as watch_timer

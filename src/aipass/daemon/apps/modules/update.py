@@ -15,7 +15,7 @@ from typing import Dict, Any, List
 
 from aipass.prax import logger
 
-from aipass.cli.apps.modules import console, error, warning
+from aipass.cli import console, error, warning
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.cli.arg_gate import gate
 from aipass.daemon.apps.handlers.update.data_loader import (

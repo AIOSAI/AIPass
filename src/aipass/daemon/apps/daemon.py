@@ -15,7 +15,7 @@ from typing import List, Any
 
 from aipass.prax import logger
 
-from aipass.cli.apps.modules import console, error, reset_command_state, resolve_exit
+from aipass.cli import console, error, reset_command_state, resolve_exit
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.modules import (
     UnknownArgument,

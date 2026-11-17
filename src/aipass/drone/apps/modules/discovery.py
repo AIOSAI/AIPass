@@ -15,7 +15,7 @@ Thin orchestrator that delegates all discovery logic to the handler layer.
 from typing import Dict, List, Optional
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console
+from aipass.cli import console
 from aipass.drone.apps.handlers.discovery_handler import HelpResult
 from aipass.drone.apps.handlers.json import json_handler
 from .resolver import list_branches, resolve_branch
@@ -61,7 +61,7 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
 
 def print_help() -> None:
     """Print help for the discovery module."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print("discovery — Module and command discovery")
     console.print()
@@ -77,7 +77,7 @@ def print_help() -> None:
 
 def print_introspection():
     """Display module introspection info."""
-    from aipass.cli.apps.modules.display import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]discovery Module[/bold cyan]")

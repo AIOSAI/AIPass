@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from aipass.cli.apps.modules import display as cli_display
+from aipass.cli import display as cli_display
 from aipass.devpulse.apps.modules import compass as compass_cmd
 
 

@@ -15,7 +15,7 @@
 import pytest
 from unittest.mock import patch
 
-from aipass.cli.apps.modules import resolve_exit
+from aipass.cli import resolve_exit
 from aipass.flow.apps.modules.template_manager import handle_command
 
 _MOD = "aipass.flow.apps.modules.template_manager"

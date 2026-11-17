@@ -16,7 +16,7 @@ import shlex
 from typing import List, Optional
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console
+from aipass.cli import console
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.registry_handler import (
     get_registry_path,
@@ -40,7 +40,7 @@ __all__ = [
 
 def print_introspection():
     """Display module introspection info."""
-    from aipass.cli.apps.modules.display import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]config Module[/bold cyan]")
@@ -92,7 +92,7 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
 
 def print_help() -> None:
     """Print help for the config module."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print("config — Registry configuration management")
     console.print()

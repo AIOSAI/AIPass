@@ -14,7 +14,7 @@ import sys
 from typing import Dict, List, Optional
 
 from aipass.prax.apps.modules.logger import system_logger
-from aipass.cli.apps.modules import console
+from aipass.cli import console
 from aipass.drone.apps.handlers.executor import CommandResult, resolve_timeout
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.router_handler import (
@@ -68,7 +68,7 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
 
 def print_help() -> None:
     """Print help for the router module."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print("router — Command routing logic")
     console.print()
@@ -120,7 +120,7 @@ def route_command(
 
 def print_introspection():
     """Display module introspection info."""
-    from aipass.cli.apps.modules.display import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]router Module[/bold cyan]")

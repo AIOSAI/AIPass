@@ -23,7 +23,7 @@ import aipass.devpulse.apps.handlers.owner.guard as owner_guard
 from aipass.spawn.apps.modules import door_owner as spawn_registry
 import pytest
 
-from aipass.cli.apps.modules import display as cli_display
+from aipass.cli import display as cli_display
 from aipass.devpulse.apps.handlers.watchdog import dispatches as wd_dispatches
 from aipass.devpulse.apps.handlers.watchdog import presenter as wd_presenter
 from aipass.devpulse.apps.handlers.watchdog import registry as wd_registry

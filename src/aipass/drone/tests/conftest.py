@@ -25,7 +25,7 @@ from typing import Any, Generator
 import pytest
 
 from aipass.ai_mail.apps.modules import door_verified_caller as rail
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 from aipass.drone.apps.handlers import registry_handler, router_handler
 from aipass.drone.apps.handlers.git import session_home
 from aipass.drone.apps.handlers.json import json_handler

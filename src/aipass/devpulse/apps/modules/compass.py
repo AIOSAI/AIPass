@@ -13,7 +13,7 @@ Compass Module — command routing for devpulse's rated decision store.
 from typing import List, Optional
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import err_console, error
+from aipass.cli import err_console, error
 from aipass.devpulse.apps.handlers import compass
 from aipass.devpulse.apps.handlers.compass import mark_surfaced, recall_decisions
 from aipass.devpulse.apps.handlers.json import json_handler

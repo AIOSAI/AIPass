@@ -34,7 +34,7 @@ from aipass.devpulse.apps.handlers.release_notify.deliver import (
 )
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console as stdout_console, err_console, error, warning
+from aipass.cli import console as stdout_console, err_console, error, warning
 from aipass.devpulse.apps.handlers.json import json_handler
 
 # Progress and refusals go to stderr; the preview, the summary and help are the product, on stdout for a redirect.

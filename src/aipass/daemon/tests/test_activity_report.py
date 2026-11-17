@@ -20,7 +20,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aipass.cli.apps.modules import console as cli_console
+from aipass.cli import console as cli_console
 from aipass.daemon.apps.handlers.cli.arg_gate import UnknownArgument
 from aipass.daemon.apps.handlers.monitoring.activity_collector import scan_branch_activity
 from aipass.daemon.apps.modules import activity_report

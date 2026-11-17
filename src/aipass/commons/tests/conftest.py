@@ -30,8 +30,8 @@ try:
 except ImportError:
     logger.warning("[conftest] prax logger unavailable — using stdlib logging")
 
-from aipass.cli.apps.modules import display
-from aipass.cli.apps.modules.display import reset_command_state
+from aipass.cli import display
+from aipass.cli import reset_command_state
 from aipass.commons.apps.handlers.json import json_handler
 from aipass.commons.apps.modules.database import close_db, init_db
 

@@ -16,7 +16,7 @@ to the handler layer.
 from __future__ import annotations
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console
+from aipass.cli import console
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.module_registry_handler import (
     ModuleInfo,
@@ -44,7 +44,7 @@ __all__ = [
 
 def print_introspection():
     """Display module introspection info."""
-    from aipass.cli.apps.modules.display import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]module_registry Module[/bold cyan]")
@@ -113,7 +113,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
         elif is_module(args[0]):
             # None for a REGISTERED name means its adapter could not import; an
             # unknown name is the other None. Only the second is "not found".
-            from aipass.cli.apps.modules import err_console
+            from aipass.cli import err_console
 
             err_console.print(
                 f"module_registry: @{args[0]} is registered but could not load (see drone log)", markup=False
@@ -135,7 +135,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
 
 def print_help() -> None:
     """Print help for the module_registry module."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print("module_registry — Internal module registry for drone")
     console.print()

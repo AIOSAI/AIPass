@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Optional
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console
+from aipass.cli import console
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.broker.daemon import BrokerDaemon
 
@@ -81,7 +81,7 @@ def _show_status() -> bool:
 
 def print_introspection() -> None:
     """Display module overview (no args)."""
-    from aipass.cli.apps.modules.display import console as c
+    from aipass.cli import console as c
 
     c.print()
     c.print("[bold cyan]broker Module[/bold cyan]")

@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 from aipass.flow.apps.handlers.cli.arg_gate import UnknownArgument, refuse_extra
 from aipass.flow.apps.handlers.cli.help_flags import wants_help
 from aipass.flow.apps.handlers.json import json_handler

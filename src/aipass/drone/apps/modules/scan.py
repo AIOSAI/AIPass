@@ -59,7 +59,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
 
 def print_introspection() -> None:
     """Display module introspection info."""
-    from aipass.cli.apps.modules.display import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]scan Module[/bold cyan]")
@@ -81,7 +81,7 @@ def print_introspection() -> None:
 
 def print_help() -> None:
     """Print help for the scan module."""
-    from aipass.cli.apps.modules.display import console
+    from aipass.cli import console
 
     console.print("scan -- Branch command scanning")
     console.print()
@@ -104,7 +104,7 @@ def scan(target: str) -> list[dict] | None:
         branch_path = resolve_branch(target)
     except Exception as exc:
         logger.warning("scan: could not resolve '%s': %s", target, exc)
-        from aipass.cli.apps.modules import err_console
+        from aipass.cli import err_console
 
         err_console.print(f"scan: could not resolve '{target}': {exc}")
         return None

@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console
+from aipass.cli import console
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.command_registry.ops import (
     add_command as _add_command,
@@ -129,7 +129,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
 
 def print_introspection() -> None:
     """Display module introspection info."""
-    from aipass.cli.apps.modules.display import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]commands Module[/bold cyan]")
@@ -147,7 +147,7 @@ def print_introspection() -> None:
 
 def print_help() -> None:
     """Print help for the commands module."""
-    from aipass.cli.apps.modules.display import console
+    from aipass.cli import console
 
     console.print("commands -- Custom command shortcuts")
     console.print()

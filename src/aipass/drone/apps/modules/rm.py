@@ -18,7 +18,7 @@ from __future__ import annotations
 import tempfile
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, err_console, error, mark_command_failed
+from aipass.cli import console, err_console, error, mark_command_failed
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.rm_handler import (
     format_age,

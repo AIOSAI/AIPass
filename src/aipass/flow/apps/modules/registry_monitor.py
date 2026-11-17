@@ -48,7 +48,7 @@ from aipass.flow.apps.handlers.cli.arg_gate import UnknownArgument, refuse_unkno
 from aipass.flow.apps.handlers.cli.help_flags import wants_help
 from aipass.flow.apps.handlers.json import json_handler
 
-from aipass.cli.apps.modules import console, error, success, warning
+from aipass.cli import console, error, success, warning
 
 from aipass.flow.apps.handlers.registry.load_registry import RegistryUnreadableError, load_registry
 from aipass.flow.apps.handlers.registry.save_registry import registry_lock

@@ -25,7 +25,7 @@ from typing import List, Any
 
 from aipass.prax import logger
 
-from aipass.cli.apps.modules import console, header, error, reset_command_state, resolve_exit
+from aipass.cli import console, header, error, reset_command_state, resolve_exit
 
 MODULES_DIR = Path(__file__).parent / "modules"
 

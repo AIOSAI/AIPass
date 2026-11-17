@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from rich.table import Table
 
-from aipass.cli.apps.modules import console
+from aipass.cli import console
 
 from aipass.drone.apps.handlers.json import json_handler
 
@@ -67,7 +67,7 @@ def format_help_scan_failure(branch_name: str, help_errors: list[str]) -> None:
     """
     if not help_errors:
         return
-    from aipass.cli.apps.modules import err_console
+    from aipass.cli import err_console
 
     err_console.print(
         f"scan: @{branch_name}: the --help scan failed ({help_errors[0]}); showing module files only",

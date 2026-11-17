@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from rich.table import Table
 
-from aipass.cli.apps.modules import console
+from aipass.cli import console
 
 from aipass.drone.apps.handlers.json import json_handler
 

@@ -24,7 +24,7 @@ from aipass.devpulse.apps.handlers.feedback.compose import (
 )
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console as stdout_console, err_console, error
+from aipass.cli import console as stdout_console, err_console, error
 from aipass.devpulse.apps.handlers.json import json_handler
 
 # Mailbox chatter goes to stderr so it never pollutes a pipeline; help is documentation and goes to stdout.

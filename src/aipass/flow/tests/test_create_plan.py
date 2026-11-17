@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 import pytest
 
-from aipass.cli.apps.modules import command_failed, reset_command_state
+from aipass.cli import command_failed, reset_command_state
 from aipass.flow.apps.modules.create_plan import handle_command
 
 _MOD = "aipass.flow.apps.modules.create_plan"

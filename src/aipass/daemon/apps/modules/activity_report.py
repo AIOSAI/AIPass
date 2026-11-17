@@ -16,7 +16,7 @@ from typing import List, NoReturn
 
 from aipass.prax import logger
 
-from aipass.cli.apps.modules import console
+from aipass.cli import console
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.cli.arg_gate import gate, refuse
 

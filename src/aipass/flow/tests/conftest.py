@@ -27,7 +27,7 @@ import aipass.prax.apps.modules.logger  # noqa: F401
 import aipass.flow.apps.handlers.json.json_handler  # noqa: F401
 from aipass.flow.apps.handlers.json import json_handler as json_handler_module
 import aipass.cli.apps.modules  # noqa: F401
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 
 # Import-time find_repo_root() fallback logs would leak into mock_json_handler counts; pinned complete.
 import aipass.flow.apps.handlers.dashboard.push_central  # noqa: F401

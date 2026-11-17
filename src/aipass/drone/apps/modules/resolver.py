@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 
 from aipass.prax import logger
 from aipass.prax.apps.modules.logger import system_logger
-from aipass.cli.apps.modules import console, err_console
+from aipass.cli import console, err_console
 from aipass.drone.apps.handlers.exceptions import BranchNotFoundError
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.registry_handler import (
@@ -84,7 +84,7 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
 
 def print_help() -> None:
     """Print help for the resolver module."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print("resolver — Branch resolution logic")
     console.print()
@@ -97,7 +97,7 @@ def print_help() -> None:
 
 def print_introspection():
     """Display module introspection info."""
-    from aipass.cli.apps.modules.display import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]resolver Module[/bold cyan]")

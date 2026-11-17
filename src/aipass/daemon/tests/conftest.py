@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Generator
 from unittest.mock import MagicMock, patch
 
-from aipass.cli.apps.modules import console, err_console, reset_command_state
+from aipass.cli import console, err_console, reset_command_state
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.modules import timer_install
 from aipass.daemon.apps.handlers.schedule import command_job as command_job_mod

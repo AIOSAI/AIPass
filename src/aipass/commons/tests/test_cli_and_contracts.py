@@ -42,7 +42,7 @@ from aipass.commons.apps.commons import (
     route_command,
     ensure_database,
 )
-from aipass.cli.apps.modules.display import error as cli_error, command_failed
+from aipass.cli import error as cli_error, command_failed
 import aipass.commons.apps.handlers.json.json_handler as jh
 from aipass.commons.apps.modules import catchup as catchup_module
 from aipass.commons.apps.modules import commons_identity as identity_module

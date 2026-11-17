@@ -14,7 +14,7 @@ Nothing here decides anything: the module routes, the handlers act, this only sa
 import importlib
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 from aipass.devpulse.apps.handlers.json import json_handler
 
 MODULE_NAME = "presenter"

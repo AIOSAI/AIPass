@@ -13,7 +13,7 @@ Spatial Navigation Module
 from typing import List
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, success
+from aipass.cli import console, error, success
 
 from rich.panel import Panel
 

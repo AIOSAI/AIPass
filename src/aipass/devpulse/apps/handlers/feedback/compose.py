@@ -22,7 +22,7 @@ from aipass.devpulse.apps.handlers.feedback.storage import (
     generate_id,
 )
 
-from aipass.cli.apps.modules import err_console, error, success, warning
+from aipass.cli import err_console, error, success, warning
 from aipass.devpulse.apps.handlers.json import json_handler
 from aipass import ai_mail as _ai_mail
 

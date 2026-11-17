@@ -43,7 +43,7 @@ from aipass.flow.apps.handlers.cli.arg_gate import UnknownArgument, refuse_extra
 from aipass.flow.apps.handlers.cli.help_flags import wants_help
 from aipass.flow.apps.handlers.json import json_handler
 
-from aipass.cli.apps.modules import console, error, warning
+from aipass.cli import console, error, warning
 
 from aipass.flow.apps.handlers.registry.load_registry import load_registry
 from aipass.flow.apps.handlers.registry.statistics import get_registry_statistics

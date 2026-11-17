@@ -13,7 +13,7 @@
 
 import pytest
 
-from aipass.cli.apps.modules import error, mark_command_failed, reset_command_state
+from aipass.cli import error, mark_command_failed, reset_command_state
 from aipass.flow.apps import flow as branch_entry
 
 

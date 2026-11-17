@@ -18,7 +18,7 @@ import json
 from typing import List, Optional
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, warning
+from aipass.cli import console, warning
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.cli.arg_gate import gate
 from aipass.daemon.apps.handlers.schedule.discovery import MANAGER_CLASS, discover_jobs

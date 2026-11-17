@@ -18,7 +18,7 @@ Handles: craft, artifacts, inspect, collab, sign commands.
 from typing import List
 
 from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: F401 - the imports standard requires the prax logger in every module
-from aipass.cli.apps.modules import console, error, success, warning
+from aipass.cli import console, error, success, warning
 
 from rich.panel import Panel
 from rich.table import Table

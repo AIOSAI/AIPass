@@ -1403,7 +1403,7 @@ def _tier_commands(tier: str) -> list[str]:
 
 
 def _get_console():
-    from aipass.cli.apps.modules.display import console
+    from aipass.cli import console
 
     return console
 

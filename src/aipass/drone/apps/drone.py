@@ -20,7 +20,7 @@ from rich.table import Table
 from rich.text import Text
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, err_console
+from aipass.cli import console, err_console
 from aipass.drone.apps.modules import BranchNotFoundError, CommandExecutionError, RegistryError, RepoRootError
 from aipass.drone.apps.modules.resolver import branch_exists, get_all_branches
 from aipass.drone.apps.modules.router import caller_cwd, registries_in, route_command

@@ -17,7 +17,7 @@ from unittest.mock import call, patch
 
 import pytest
 
-from aipass.cli.apps.modules import error, mark_command_failed
+from aipass.cli import error, mark_command_failed
 
 from aipass.daemon.apps import daemon as _daemon_mod
 

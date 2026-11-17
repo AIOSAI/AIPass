@@ -22,7 +22,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aipass.cli.apps.modules import reset_command_state
+from aipass.cli import reset_command_state
 from aipass.flow.apps import flow as flow_entry
 from aipass.flow.apps.flow import (
     discover_modules,

@@ -11,7 +11,7 @@
 from typing import List
 
 from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: F401 - the imports standard requires the prax logger in every module
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 
 from aipass.commons.apps.handlers.welcome.welcome_ops import run_welcome
 from aipass.commons.apps.handlers.json import json_handler

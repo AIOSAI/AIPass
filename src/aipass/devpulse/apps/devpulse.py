@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, err_console, error, resolve_exit, reset_command_state, warning
+from aipass.cli import console, err_console, error, resolve_exit, reset_command_state, warning
 
 # The self-map and --help go to stdout like every branch's; never alias console to err_console here.
 

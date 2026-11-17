@@ -37,7 +37,7 @@ __all__ = [
 
 def print_introspection():
     """Display module introspection info."""
-    from aipass.cli.apps.modules.display import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]registry Module[/bold cyan]")
@@ -96,7 +96,7 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
 
 def print_help() -> None:
     """Print help for the registry module."""
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print("registry — Registry operations for branch management")
     console.print()

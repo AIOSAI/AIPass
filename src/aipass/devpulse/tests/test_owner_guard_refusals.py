@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
-from aipass.cli.apps.modules import display as cli_display
+from aipass.cli import display as cli_display
 from aipass.devpulse.apps.handlers.owner import guard as owner_guard
 from aipass.devpulse.apps.modules import admin_grant as admin_grant_module
 from aipass.devpulse.apps.modules import feedback as feedback_module
