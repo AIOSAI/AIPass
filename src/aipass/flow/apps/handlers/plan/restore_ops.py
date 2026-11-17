@@ -379,7 +379,7 @@ def restore_plan_impl(
             {"type": "restore_success", "plan_key": plan_key, "location": restored_location, "prefix": plan_prefix}
         )
 
-        from aipass.trigger.apps.modules.core import trigger
+        from aipass.trigger import trigger
 
         trigger.fire("plan_restored", plan_number=plan_key, location=restored_location)
 

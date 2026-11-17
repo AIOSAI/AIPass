@@ -3,7 +3,7 @@
 # Description: Tests for monitor_ops handler and registry_monitor module
 # Version: 2.3.0
 # Created: 2026-03-08
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/registry/monitor_ops.py and apps/modules/registry_monitor.py."""
@@ -493,12 +493,9 @@ class TestFireEvent:
         """Successful event fire should return True."""
         mod = monitor_ops
         mock_trigger = MagicMock()
-        fake_core = MagicMock(trigger=mock_trigger)
         plan_path = str(tmp_path / "FPLAN-0001.md")
-        with patch.dict(
-            "sys.modules",
-            {"aipass.trigger.apps.modules.core": fake_core},
-        ):
+        # Replaced at trigger's door, the name _fire_event imports; a fake core module would be cached by the door.
+        with patch("aipass.trigger.trigger", mock_trigger):
             result = mod._fire_event("plan_file_created", path=plan_path)
         assert result is True
         mock_trigger.fire.assert_called_once_with("plan_file_created", path=plan_path)
@@ -506,8 +503,8 @@ class TestFireEvent:
     def test_fire_event_import_error(self, mock_logger):
         """ImportError should return False and log warning."""
         mod = monitor_ops
-        # A None entry in sys.modules makes the import raise ImportError.
-        with patch.dict("sys.modules", {"aipass.trigger.apps.modules.core": None}):
+        # A None entry for the door's package makes the import raise ImportError; no cached name bypasses it.
+        with patch.dict("sys.modules", {"aipass.trigger": None}):
             result = mod._fire_event("test_event")
         assert result is False
 

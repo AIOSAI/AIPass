@@ -181,7 +181,7 @@ def _fire_completion(result: Dict[str, Any]) -> None:
     so the owner is woken. Never raises.
     """
     try:
-        from aipass.trigger.apps.modules.core import trigger
+        from aipass.trigger import trigger
 
         pool = result.get("pool") or {}
         rollover = result.get("rollover") or {}

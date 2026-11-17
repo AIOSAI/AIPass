@@ -84,7 +84,7 @@ def is_plan_file(path: Path) -> Optional[bool]:
 def _fire_event(event_name: str, **kwargs) -> bool:
     """Fire a trigger event (internal helper)"""
     try:
-        from aipass.trigger.apps.modules.core import trigger
+        from aipass.trigger import trigger
 
         trigger.fire(event_name, **kwargs)
         return True

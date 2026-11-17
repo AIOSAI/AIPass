@@ -3,7 +3,7 @@
 # Description: Tests for aggregate_ops -- registry, central file, and aggregation helpers
 # Version: 1.2.0
 # Created: 2026-03-29
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/plan/aggregate_ops.py."""
@@ -22,8 +22,8 @@ import aipass.flow.apps.handlers.plan.aggregate_ops as mod
 
 
 _MOD = "aipass.flow.apps.handlers.plan.aggregate_ops"
-# Patched where it lives: aggregate_central_impl imports it inside the function.
-_BUS = "aipass.trigger.apps.modules.core.trigger"
+# Patched at trigger's door: aggregate_central_impl runs `from aipass.trigger import trigger` inside the function.
+_BUS = "aipass.trigger.trigger"
 
 
 def _import(name: str):

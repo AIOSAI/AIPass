@@ -3,7 +3,7 @@
 # Description: Tests for apps/handlers/plan/create_ops.py and sibling plan handlers
 # Version: 1.5.0
 # Created: 2026-04-05
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/plan/create_ops.py and sibling plan handlers."""
@@ -387,8 +387,8 @@ class TestCreatePlanImpl:
 
     @pytest.fixture(autouse=True)
     def bus(self):
-        """Stand in for the trigger bus where it lives, so no real plan_created is fired."""
-        with patch("aipass.trigger.apps.modules.core.trigger") as fake:
+        """Stand in for the bus at trigger's door, where create_plan_impl imports it, so no real plan_created fires."""
+        with patch("aipass.trigger.trigger") as fake:
             yield fake
 
     def _make_deps(self, **overrides) -> dict:

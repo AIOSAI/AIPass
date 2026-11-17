@@ -3,7 +3,7 @@
 # Description: Tests for devpulse_ops plugins — merge, smart-sync, fix
 # Version: 1.0.4
 # Created: 2026-03-30
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/ merge, sync and fix, and their routing in apps/modules/git_module.py."""
@@ -122,7 +122,7 @@ class TestAuthDenialFix:
 class TestMergePrHappyPath:
     """merge_pr should merge, pull, and return commit + title."""
 
-    @patch("aipass.trigger.apps.modules.core.trigger")
+    @patch("aipass.trigger.trigger")
     @patch("aipass.drone.apps.plugins.devpulse_ops.merge_plugin.find_repo_root")
     @patch("aipass.drone.apps.plugins.devpulse_ops.merge_plugin.subprocess.run")
     def test_merge_pr_success(
@@ -638,7 +638,7 @@ class TestGitModuleRouting:
         "aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access",
         return_value="devpulse",
     )
-    @patch("aipass.trigger.apps.modules.core.trigger")
+    @patch("aipass.trigger.trigger")
     @patch("aipass.drone.apps.plugins.devpulse_ops.merge_plugin.find_repo_root")
     @patch("aipass.drone.apps.plugins.devpulse_ops.merge_plugin.subprocess.run")
     def test_handle_merge_routes_correctly(

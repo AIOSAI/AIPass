@@ -220,7 +220,7 @@ def create_plan_impl(
         )
         messages.append({"type": "display", "text": display_msg})
 
-        from aipass.trigger.apps.modules.core import trigger
+        from aipass.trigger import trigger
 
         trigger.fire("plan_created", plan_number=NEXT_NUM, location=RELATIVE_LOCATION, subject=subject)
 

@@ -308,7 +308,7 @@ def execute_rollover() -> Dict[str, Any]:
     if success_count > 0:
         try:
             # The published door is the instance; aliased, `trigger` is this function's loop name.
-            from aipass.trigger.apps.modules.core import trigger as trigger_bus
+            from aipass.trigger import trigger as trigger_bus
 
             trigger_bus.fire(
                 "rollover_complete", triggers_count=len(triggers), success_count=success_count, failed_count=len(failed)

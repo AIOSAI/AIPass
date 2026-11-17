@@ -3,7 +3,7 @@
 # Description: Tests for auto_process background spawn, single-flight lock and run_once
 # Version: 1.2.0
 # Created: 2026-08-14
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # Category: memory/tests
 # =============================================
 
@@ -195,11 +195,12 @@ class TestCompletionIsAnnounced:
         """The exact bus object ``_fire_completion`` will reach, resolved NOW.
 
         A dotted patch() walks the package attributes on 3.10 and sys.modules on 3.11+; when the two
-        split, the patch misses. Patching through the import route pins the object the code reaches.
+        split, the patch misses. Patching through the import route pins the object the code reaches:
+        ``from aipass.trigger import trigger``, trigger's package door.
         """
         import importlib
 
-        return importlib.import_module("aipass.trigger.apps.modules.core").trigger
+        return importlib.import_module("aipass.trigger").trigger
 
     @staticmethod
     def _fired(mock_fire):

@@ -137,7 +137,7 @@ def send_to_broadcast(
 
     if success_count > 0:
         try:
-            from aipass.trigger.apps.modules.core import trigger
+            from aipass.trigger import trigger
 
             trigger.fire("email_broadcast_sent", recipients=len(branches), successful=success_count, subject=subject)
         except ImportError as e:
@@ -203,7 +203,7 @@ def send_to_single(
         log_operation_fn("email_sent", payload)
 
         try:
-            from aipass.trigger.apps.modules.core import trigger
+            from aipass.trigger import trigger
 
             trigger.fire("email_sent", to=to_branch, subject=subject, auto_execute=auto_execute)
         except ImportError as e:

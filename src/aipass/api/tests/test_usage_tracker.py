@@ -3,7 +3,7 @@
 # Description: Tests for usage tracker module
 # Version: 1.0.1
 # Created: 2026-03-24
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/usage_tracker.py, API usage monitoring orchestration."""
@@ -25,8 +25,8 @@ from aipass.api.apps.modules.usage_tracker import handle_command
 from aipass.api.apps.modules.usage_tracker import handle_command as _hc  # noqa: F401 — sentry test_coverage detection
 
 PATCH_ROOT = "aipass.api.apps.modules.usage_tracker"
-# cleanup_data imports the bus inside the function, so the name it reads is the bus's home.
-TRIGGER_HOME = "aipass.trigger.apps.modules.core.trigger"
+# cleanup_data imports the bus through trigger's door inside the function, so the door's name is what it reads.
+TRIGGER_HOME = "aipass.trigger.trigger"
 
 # Generation timestamps far on either side of any retention window.
 _LONG_AGO = "2000-01-01T00:00:00"

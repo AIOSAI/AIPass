@@ -3,7 +3,7 @@
 # Description: Tests for aipass install — one-command bootstrap (DPLAN-0233)
 # Version: 1.8.0
 # Created: 2026-07-05
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/install.py (DPLAN-0233) and the install command it drives."""
@@ -53,8 +53,8 @@ from aipass.aipass.apps.modules.install import (
 )
 
 _MOD = "aipass.aipass.apps.modules.install"
-# The trigger object install fires on: _fire_lock_removed imports it from here at call time.
-_BUS = "aipass.trigger.apps.modules.core.trigger"
+# The trigger object install fires on: _fire_lock_removed imports it through trigger's door at call time.
+_BUS = "aipass.trigger.trigger"
 
 
 @pytest.fixture(autouse=True)

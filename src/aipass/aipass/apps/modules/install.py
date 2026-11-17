@@ -126,7 +126,7 @@ def _fire_lock_removed(path: Path, reason: str) -> None:
     home = path.parent / path.name.removeprefix(".").removesuffix(".install.lock")
     if Path(__file__).resolve().is_relative_to(home.resolve()):
         try:
-            from aipass.trigger.apps.modules.core import trigger
+            from aipass.trigger import trigger
 
             trigger.fire("file_deleted", path=str(path), reason=reason)
         except ImportError as exc:

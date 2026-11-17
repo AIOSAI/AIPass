@@ -3,7 +3,7 @@
 # Description: Tests for the @git module — routing, help, auth, scope footer, merge gate, gh verbs, untrack, release, label, alerts
 # Version: 1.6.1
 # Created: 2026-04-21
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/git_module.py: command routing, help, the auth gate and the verbs it fronts."""
@@ -39,7 +39,6 @@ from aipass.drone.apps.modules.git_module import (
     handle_command,
 )
 from aipass.drone.tests.support_git_module import _done
-from aipass.trigger.apps.modules import core as trigger_core
 
 from .conftest import GITHUB_SLUG, chore_ledger, github_stand_in, make_owner_project
 
@@ -366,7 +365,7 @@ class TestTriggerFireIntegration:
         monkeypatch.chdir(tmp_path)
 
         mock_trigger = MagicMock()
-        monkeypatch.setattr(trigger_core, "trigger", mock_trigger)
+        monkeypatch.setattr("aipass.trigger.trigger", mock_trigger)
 
         with patch(
             "aipass.drone.apps.plugins.devpulse_ops.merge_plugin.subprocess.run", side_effect=_run_merge_success

@@ -233,7 +233,7 @@ def cleanup_data(args: List[str], data_path: Optional[Path] = None):
         success(f"Cleaned up {removed} entries older than {days} days")
 
         try:
-            from aipass.trigger.apps.modules.core import trigger
+            from aipass.trigger import trigger
 
             trigger.fire("usage_data_cleaned", days=days, data_path=str(data_path))
         except ImportError:

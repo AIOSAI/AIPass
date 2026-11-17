@@ -36,7 +36,7 @@ logger = PraxTrail("watcher")
 def _get_trigger() -> Any:
     """The trigger bus. Imported here, never at module level: trigger imports prax's logger, which imports
     this module mid-init. An import failure raises to the fire site, which logs it."""
-    from aipass.trigger.apps.modules.core import trigger
+    from aipass.trigger import trigger
 
     return trigger
 

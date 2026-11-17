@@ -349,7 +349,7 @@ def aggregate_central_impl(
             )
 
             try:
-                from aipass.trigger.apps.modules.core import trigger
+                from aipass.trigger import trigger
 
                 trigger.fire(
                     "central_aggregated",

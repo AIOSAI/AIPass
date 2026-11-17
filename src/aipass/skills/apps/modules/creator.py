@@ -12,7 +12,7 @@ from aipass.prax import logger
 from aipass.cli import console, error
 from aipass.skills.apps.handlers.creator_handler import create_skill as _handler_create_skill
 from aipass.skills.apps.handlers.json import json_handler
-from aipass.trigger.apps.modules.core import trigger
+from aipass.trigger import trigger
 
 
 def handle_command(command: str, args: list) -> bool:

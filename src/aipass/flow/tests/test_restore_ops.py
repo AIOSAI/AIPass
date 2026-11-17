@@ -3,7 +3,7 @@
 # Description: Tests for restore_ops handler -- plan restore business logic, and validator
 # Version: 1.3.0
 # Created: 2026-03-29
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/plan/restore_ops.py and apps/handlers/plan/validator.py."""
@@ -104,7 +104,7 @@ class TestRestoreSuccess:
         }
         deps = _make_deps(load_registry=MagicMock(return_value=registry))
 
-        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+        with patch("aipass.trigger.trigger") as mock_trigger:
             result = fn(plan_num="1", **deps)
 
         assert result["success"] is True
@@ -119,7 +119,7 @@ class TestRestoreSuccess:
         registry = {"plans": {"0001": {"status": "closed", "file_path": str(plan_file), "location": str(tmp_path)}}}
         deps = _make_deps(load_registry=MagicMock(return_value=registry), save_registry=MagicMock(return_value=False))
 
-        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+        with patch("aipass.trigger.trigger") as mock_trigger:
             result = restore_plan_impl(plan_num="1", **deps)
 
         assert result["success"] is False
@@ -154,7 +154,7 @@ class TestRestoreSuccess:
         save_mock = MagicMock()
         deps = _make_deps(load_registry=MagicMock(return_value=registry), save_registry=save_mock)
 
-        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+        with patch("aipass.trigger.trigger") as mock_trigger:
             fn(plan_num="1", **deps)
 
         save_mock.assert_called_once()
@@ -185,7 +185,7 @@ class TestRestoreSuccess:
         scan_mock = MagicMock()
         deps = _make_deps(load_registry=MagicMock(return_value=registry), scan_plan_files=scan_mock)
 
-        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+        with patch("aipass.trigger.trigger") as mock_trigger:
             fn(plan_num="1", **deps)
 
         scan_mock.assert_called_once_with()
@@ -209,7 +209,7 @@ class TestRestoreSuccess:
         }
         deps = _make_deps(load_registry=MagicMock(return_value=registry))
 
-        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+        with patch("aipass.trigger.trigger") as mock_trigger:
             result = fn(plan_num="1", **deps)
 
         types = [m["type"] for m in result["messages"]]
@@ -290,7 +290,7 @@ class TestRestoreNotFound:
                 "aipass.flow.apps.handlers.plan.registry_routing._load_template_registry",
                 return_value={"types": {"flow_plans": {"prefix": "FPLAN"}}},
             ),
-            patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger,
+            patch("aipass.trigger.trigger") as mock_trigger,
         ):
             result = fn(plan_num="9999", **deps)
 
@@ -378,7 +378,7 @@ class TestRestoreDashboardFailures:
             update_dashboard_local=MagicMock(return_value=answer),
         )
 
-        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+        with patch("aipass.trigger.trigger") as mock_trigger:
             result = restore_plan_impl(plan_num="1", **deps)
 
         assert result["success"] is True
@@ -409,7 +409,7 @@ class TestRestoreDashboardFailures:
             push_to_plans_central=MagicMock(return_value=False),
         )
 
-        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+        with patch("aipass.trigger.trigger") as mock_trigger:
             result = fn(plan_num="1", **deps)
 
         assert result["success"] is True
@@ -436,7 +436,7 @@ class TestRestoreDashboardFailures:
             push_to_plans_central=MagicMock(return_value=False),
         )
 
-        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+        with patch("aipass.trigger.trigger") as mock_trigger:
             result = fn(plan_num="1", **deps)
 
         assert result["success"] is True
@@ -493,7 +493,7 @@ class TestRestoreCrossTypeCollision:
             save_registry=save_mock,
         )
 
-        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+        with patch("aipass.trigger.trigger") as mock_trigger:
             result = fn(plan_num="PPLAN-0011", **deps)
 
         assert result["success"] is True
@@ -539,7 +539,7 @@ class TestRestoreCrossTypeCollision:
             save_registry=MagicMock(),
         )
 
-        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+        with patch("aipass.trigger.trigger") as mock_trigger:
             result = fn(plan_num="PPLAN-0011", **deps)
 
         header = next(m for m in result["messages"] if m["type"] == "restore_header")
@@ -869,7 +869,7 @@ class TestRestoreFileFromBackup:
 
         target, msg = restore_file_from_backup(row, "0042")
 
-        assert target == home / name, msg
+        assert target is not None and target == home / name, msg
         assert target.read_text(encoding="utf-8").startswith("# The plan")
 
     def test_refuses_when_the_original_location_is_gone(self, tmp_path):
@@ -909,7 +909,7 @@ class TestRestoreOfANormallyClosedPlan:
         )
         deps["restore_file_from_backup_fn"] = lambda info, key: restore_file_from_backup(info, key, backup_dir=archive)
 
-        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+        with patch("aipass.trigger.trigger") as mock_trigger:
             result = fn(plan_num="FPLAN-0042", **deps)
 
         mock_trigger.fire.assert_called_once_with("plan_restored", plan_number="0042", location=str(home))
@@ -935,7 +935,7 @@ class TestRestoreOfANormallyClosedPlan:
         )
         deps["restore_file_from_backup_fn"] = lambda info, key: restore_file_from_backup(info, key, backup_dir=archive)
 
-        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+        with patch("aipass.trigger.trigger") as mock_trigger:
             fn(plan_num="FPLAN-0042", **deps)
 
         mock_trigger.fire.assert_called_once_with("plan_restored", plan_number="0042", location=str(home))
@@ -992,7 +992,7 @@ class TestRestoreAnswersToThePlansOwners:
     def test_the_holder_restores_and_the_log_names_it(self, tmp_path, monkeypatch, mock_json_handler):
         _row, restore_file, deps = self._setup(tmp_path, monkeypatch, "@beta")
 
-        with patch("aipass.trigger.apps.modules.core.trigger"):
+        with patch("aipass.trigger.trigger"):
             result = restore_plan_impl(plan_num="1", restore_file_from_backup_fn=restore_file, **deps)
 
         assert result["success"] is True

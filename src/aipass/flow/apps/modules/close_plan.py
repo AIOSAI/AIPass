@@ -59,7 +59,7 @@ from aipass.flow.apps.handlers.mbank.process import is_template_content, archive
 
 from aipass.flow.apps.handlers.plan.close_ops import close_plan_impl, close_all_plans_impl
 
-from aipass.trigger.apps.modules.core import trigger as _trigger_module
+from aipass.trigger import trigger as _trigger_module
 
 _trigger_fire = _trigger_module.fire
 

@@ -218,7 +218,7 @@ def fire_completed(dispatch_id: Optional[str], sender: str, target: str, report_
     In-process only: the feed line is what carries the event to other processes.
     """
     try:
-        from aipass.trigger.apps.modules.core import trigger
+        from aipass.trigger import trigger
 
         trigger.fire(
             "dispatch_completed",

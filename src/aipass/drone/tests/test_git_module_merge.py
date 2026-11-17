@@ -3,7 +3,7 @@
 # Description: Tests for the merge, dev-pr and branches lanes — protected-branch merge, return to dev, external repos
 # Version: 1.3.0
 # Created: 2026-10-08
-# Modified: 2026-11-10
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/merge_plugin.py and the merge, dev-pr, pr and branches handlers it pairs with."""
@@ -28,7 +28,6 @@ from aipass.drone.apps.handlers.git.commit_handler import subject_refusal
 from aipass.drone.apps.handlers.git.dev_pr_handler import DEV_PR_OUTCOME
 from aipass.drone.apps.modules.git_module import handle_command
 from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import merge_pr
-from aipass.trigger.apps.modules import core as trigger_core
 
 from .conftest import make_owner_project
 
@@ -44,11 +43,11 @@ _MERGE_MOD = "aipass.drone.apps.plugins.devpulse_ops.merge_plugin"
 def merge_bus(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     """Stand a recorder where merge_pr binds the bus, so no merge test fires the live one.
 
-    merge_pr imports ``trigger`` from trigger's core at call time; replacing it at that
-    home is what the call reaches (the leg-3 bus probe counted these five on the bus).
+    merge_pr imports ``trigger`` through trigger's door at call time; replacing the door's
+    name is what the call reaches (the leg-3 bus probe counted these five on the bus).
     """
     bus = MagicMock()
-    monkeypatch.setattr(trigger_core, "trigger", bus)
+    monkeypatch.setattr("aipass.trigger.trigger", bus)
     return bus
 
 

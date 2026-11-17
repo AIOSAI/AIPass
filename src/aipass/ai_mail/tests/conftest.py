@@ -191,8 +191,10 @@ class _BusRecorder:
 @pytest.fixture(autouse=True)
 def recorded_bus(monkeypatch) -> _BusRecorder:
     """No test fires on the real trigger bus; a test asserts what fired here."""
-    # report/send/dispatch import trigger at call time, email_send binds it at import: both homes replaced.
+    # report/send/dispatch import trigger through trigger's door at call time, email_send binds it at
+    # import: the door's name, the core's, and email_send's are all replaced.
     recorder = _BusRecorder()
+    monkeypatch.setattr("aipass.trigger.trigger", recorder)
     monkeypatch.setattr(trigger_core, "trigger", recorder)
     monkeypatch.setattr(trigger_core.Trigger, "fire", staticmethod(recorder.fire))
     monkeypatch.setattr(email_send_mod, "trigger", recorder)

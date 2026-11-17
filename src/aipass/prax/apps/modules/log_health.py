@@ -127,7 +127,7 @@ def _display_rates(results: list, is_scan: bool) -> None:
 
 def _get_event_callback():
     """trigger.fire, imported at call time: trigger imports prax's logger."""
-    from aipass.trigger.apps.modules.core import trigger
+    from aipass.trigger import trigger
 
     return trigger.fire
 

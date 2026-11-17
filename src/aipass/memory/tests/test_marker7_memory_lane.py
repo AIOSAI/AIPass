@@ -723,12 +723,11 @@ class TestTemplateBumpFiresThePush:
             package = types.ModuleType(name)
             package.__path__ = []  # type: ignore[attr-defined]
             monkeypatch.setitem(sys.modules, name, package)
-        bus_module = types.ModuleType("aipass.trigger.apps.modules.core")
-        bus_module.trigger = _Bus  # type: ignore[attr-defined]
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", bus_module)
+        # _announce_bump imports the bus through trigger's package door: `from aipass.trigger import trigger`.
+        sys.modules["aipass.trigger"].trigger = _Bus  # type: ignore[attr-defined]
 
         # Exactly what `from X import trigger` compiles to: no route the code under test does not take.
-        reached = __import__("aipass.trigger.apps.modules.core", fromlist=["trigger"])
+        reached = __import__("aipass.trigger", fromlist=["trigger"])
         assert reached.trigger is _Bus, "the bus stand-in is not reachable by the import _announce_bump uses"
 
         templates._announce_bump({"pending": True, "dry_run": True, "stamped": False, "now": {"local": "3.0.0"}})

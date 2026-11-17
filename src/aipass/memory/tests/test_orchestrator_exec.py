@@ -3,7 +3,7 @@
 # Description: Tests for the orchestrator execute_rollover pipeline
 # Version: 1.1.0
 # Created: 2026-04-26
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # Category: memory/tests
 # =============================================
 
@@ -46,11 +46,15 @@ def _stub_the_bus(monkeypatch, recorder):
     conftest's autouse fixture stands a whole mock module (conftest line HELD
     with the large graphs). So the real core imported at the top is registered
     there for the test and its two doors are replaced: the published instance
-    and the class form, which reaches the same bus.
+    and the class form, which reaches the same bus. The fire reads ``trigger`` through
+    trigger's package door, so the recorder's instance also stands at the door's name
+    (on whatever sys.modules holds for ``aipass.trigger``, the conftest's stand-in here;
+    a dotted string would resolve the real package instead; monkeypatch undoes it).
     """
     monkeypatch.setitem(sys.modules, trigger_core.__name__, trigger_core)
     monkeypatch.setattr(trigger_core, "trigger", recorder.trigger)
     monkeypatch.setattr(trigger_core.Trigger, "fire", recorder.Trigger.fire)
+    monkeypatch.setattr(sys.modules["aipass.trigger"], "trigger", recorder.trigger, raising=False)
 
 
 # ---------------------------------------------------------------------------

@@ -190,7 +190,7 @@ def _uninstall() -> int:
         console.print(f"  [dim]Not installed:[/dim] no daemon-tick unit in {_UNIT_DIR}, nothing to remove")
         logger.info("[timer_install] uninstall: no daemon-tick unit file, nothing to remove")
 
-    from aipass.trigger.apps.modules.core import trigger
+    from aipass.trigger import trigger
 
     for dst in installed:
         dst.unlink()

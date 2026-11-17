@@ -207,7 +207,7 @@ def _announce_bump(outcome: dict) -> None:
     @trigger ships in the same package, so a failed import is a broken install: logged as the failure it is.
     """
     try:
-        from aipass.trigger.apps.modules.core import trigger
+        from aipass.trigger import trigger
 
         trigger.fire(
             template_bump.BUMP_EVENT,

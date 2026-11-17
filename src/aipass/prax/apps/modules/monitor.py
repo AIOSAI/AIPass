@@ -576,7 +576,7 @@ def _rate_tracker_worker():
     from aipass.prax.apps.handlers.monitoring.rate_tracker import scan_rates, configure, SCAN_INTERVAL
     from aipass.prax.apps.handlers.config.load import get_system_logs_dir
 
-    from aipass.trigger.apps.modules.core import trigger
+    from aipass.trigger import trigger
 
     configure(logs_dir=get_system_logs_dir(), event_callback=trigger.fire)
 
