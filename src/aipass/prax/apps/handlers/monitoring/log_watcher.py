@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List, Tuple
 import re
 
-from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.prax.apps.handlers.logging.direct import get_direct_logger
 from watchdog.observers import Observer as WatchdogObserver  # type: ignore
 from watchdog.events import FileSystemEventHandler  # type: ignore
 

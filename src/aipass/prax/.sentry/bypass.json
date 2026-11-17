@@ -193,17 +193,6 @@
       "reason": "Door two (FPLAN-0932): stdlib plus jsonl_writer only, for code on the watched event path that cannot import prax's logger or json service without re-entering it. A test pins its import set; json_handler would pull json_service and config onto that path."
     },
     {
-      "file": "prax/__init__.py",
-      "standard": "encapsulation",
-      "lines": [
-        10,
-        16,
-        21,
-        22
-      ],
-      "reason": "The TYPE_CHECKING view of the front door: each door name is typed from its real home, and the dashboard names, append_jsonl and trail live in handler modules (they resolve there on purpose, never through a module's re-export or the logger graph; tests pin that). Type-checker only: nothing is imported at runtime."
-    },
-    {
       "file": "apps/handlers/config/load.py",
       "standard": "json_structure",
       "reason": "Hot path: runs per log line, per file event or per discovered path. log_operation measured ~11 ms per call (about 9 reads and 2 fsynced writes) and loses entries under concurrent writers, so it was removed here; the operation log stays on the command doors."

@@ -42,7 +42,7 @@ prax/
 # Logging system
 
  - Canonical import: `from aipass.prax import logger`. Works from any branch, no setup call.
- - Direct logger: `from aipass.prax.apps.modules.logger import get_direct_logger` — for prax internals inside watchdog threads or the import chain, where the stack walk would recurse.
+ - Direct logger: `from aipass.prax.apps.handlers.logging.direct import get_direct_logger` — for prax internals inside watchdog threads or the import chain, where the stack walk would recurse.
  - Auto-routing by stack introspection: caller's module, branch and file path decide the destination.
  - Two-tier placement: `system_logs/<branch>_<module>.log` central, `<branch>/logs/<module>.log` local. Both rotate by size.
  - Env override before the stack walk: `AIPASS_LOG_NAME`, for shared base classes that would otherwise all log as one caller.

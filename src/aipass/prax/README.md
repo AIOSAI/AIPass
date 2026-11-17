@@ -69,7 +69,7 @@ Each module carries its own reference too, reached by adding `--help` to the ver
 - Logs are the first diagnostic in this ecosystem. If something misbehaved, say which branch
   and roughly when, and the line is usually already on disk.
 - Caps other branches read from prax are named as constants, never as numbers to copy:
-  `SUBJECT_CAP` and `DASHBOARD_CHAR_BUDGET` in `aipass.prax.apps.modules.dashboard`. The
+  `SUBJECT_CAP` and `DASHBOARD_CHAR_BUDGET`, `from aipass.prax import ...`. The
   contract for both is [docs/dashboard_caps.md](docs/dashboard_caps.md).
 
 ---

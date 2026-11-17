@@ -16,7 +16,7 @@ import json
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.prax.apps.handlers.logging.direct import get_direct_logger
 
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.repo_root import find_repo_root

@@ -15,7 +15,7 @@ from typing import Optional, Dict
 
 from watchdog.events import FileSystemEventHandler
 
-from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.prax.apps.handlers.logging.direct import get_direct_logger
 from aipass.prax.apps.handlers.monitoring.event_queue import MonitoringEvent, MonitoringQueue
 from aipass.prax.apps.handlers.monitoring.branch_detector import detect_branch_from_path
 from aipass.prax.apps.handlers.monitoring.monitoring_filters import should_monitor, get_priority

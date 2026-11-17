@@ -67,10 +67,8 @@ must never vanish from the board.
 
 ## Programmatic Dashboard API
 
-Inside prax. `write_section` is not on the package door: no other branch writes through it.
-
 ```python
-from aipass.prax.apps.modules.dashboard import write_section
+from aipass.prax import write_section
 
 write_section(branch_path, "ai_mail", {"new": 3, "total": 5})
 ```

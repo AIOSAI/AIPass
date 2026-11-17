@@ -4,8 +4,8 @@
 
 `DASHBOARD.local.json` is read by its branch on every greeting, so its size is a
 cost paid per session, per branch, forever. Two caps bound it. Both live once, in
-`prax/apps/handlers/dashboard/operations.py`, and are re-exported for everyone
-outside prax from `aipass.prax.apps.modules.dashboard` (handlers are internal).
+`prax/apps/handlers/dashboard/operations.py`, and everyone outside prax reads
+them through the package door, `aipass.prax` (handlers are internal).
 
 Units are **chars** — `len()` over the rendered text, the number `wc -m` reports.
 Never bytes, never tokens.

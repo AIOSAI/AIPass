@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: logger.py
 # Description: PRAX Public API
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2025-11-15
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -16,15 +16,11 @@ __all__ = [
     "system_logger",
     "get_system_logger",
     "SystemLogger",
-    "get_direct_logger",
-    "direct_log",
-    "DirectLogger",
     "get_system_status",
     "print_introspection",
     "handle_command",
     "MODULE_NAME",
     "DATA_FILE",
-    "append_jsonl",
     "log_backup_count",
     "LOGGING_ALLOWED",
     "LOGGER_DOORS",
@@ -45,8 +41,6 @@ from aipass.prax.apps.handlers.config.load import (
     load_log_config,
     PRAX_JSON_DIR,
 )
-from aipass.prax.apps.handlers.logging.direct import get_direct_logger, direct_log, DirectLogger
-from aipass.prax.apps.handlers.logging.jsonl_writer import append_jsonl
 from aipass.prax.apps.handlers.json import json_handler
 
 MODULE_NAME = "prax_logger"
@@ -153,7 +147,6 @@ def print_introspection():
     console.print("    [dim]→ setup.py (get_captured_loggers_count — returns active logger count)[/dim]")
     console.print("    [dim]→ introspection.py (get_caller_info — resolves caller module name)[/dim]")
     console.print("    [dim]→ direct.py (get_direct_logger — bypasses event pipeline for infrastructure logging)[/dim]")
-    console.print("    [dim]→ direct.py (direct_log — shorthand for direct logging calls)[/dim]")
     console.print("    [dim]→ direct.py (DirectLogger — direct logger class)[/dim]")
     console.print()
     console.print("  [cyan]handlers/discovery/[/cyan]")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch_section.py
 # Description: Dispatch status section builder for devpulse dashboard
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-05-16
-# Modified: 2026-10-24
+# Modified: 2026-11-17
 # =============================================
 
 """Dispatch section builder for devpulse dashboard plugin."""
@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 from typing import Dict, List
 
-from aipass.prax.apps.modules.dashboard import get_branch_paths, write_section
+from aipass.prax import get_branch_paths, write_section
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 

@@ -11,7 +11,7 @@
 import json
 from typing import Dict
 
-from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.prax.apps.handlers.logging.direct import get_direct_logger
 from aipass.prax.apps.handlers.config.load import _find_repo_root
 from aipass.prax.apps.handlers.json import json_handler
 

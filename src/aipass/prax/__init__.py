@@ -12,11 +12,13 @@ if TYPE_CHECKING:  # each name typed from its home
         SUBJECT_CAP as SUBJECT_CAP,
         cap_subject as cap_subject,
         dashboard_lock as dashboard_lock,
+        write_section as write_section,
     )
     from aipass.prax.apps.handlers.dashboard.refresh import (
         refresh_all_dashboards as refresh_all_dashboards,
         refresh_single_dashboard as refresh_single_dashboard,
     )
+    from aipass.prax.apps.handlers.dashboard.status import get_branch_paths as get_branch_paths
     from aipass.prax.apps.handlers.json import json_service as json_handler
     from aipass.prax.apps.handlers.logging.jsonl_writer import append_jsonl as append_jsonl
     from aipass.prax.apps.handlers.logging.trail import trail as trail
@@ -30,6 +32,7 @@ _WRITER_MODULE = "aipass.prax.apps.handlers.logging.jsonl_writer"
 _TRAIL_MODULE = "aipass.prax.apps.handlers.logging.trail"
 _OPS_MODULE = "aipass.prax.apps.handlers.dashboard.operations"
 _REFRESH_MODULE = "aipass.prax.apps.handlers.dashboard.refresh"
+_STATUS_MODULE = "aipass.prax.apps.handlers.dashboard.status"
 
 # Door name -> (home module, attribute there); None hands out the home module itself.
 _HOMES = {
@@ -43,6 +46,8 @@ _HOMES = {
     "DASHBOARD_CHAR_BUDGET": (_OPS_MODULE, "DASHBOARD_CHAR_BUDGET"),
     "cap_subject": (_OPS_MODULE, "cap_subject"),
     "dashboard_lock": (_OPS_MODULE, "dashboard_lock"),
+    "write_section": (_OPS_MODULE, "write_section"),
+    "get_branch_paths": (_STATUS_MODULE, "get_branch_paths"),
     "refresh_single_dashboard": (_REFRESH_MODULE, "refresh_single_dashboard"),
     "refresh_all_dashboards": (_REFRESH_MODULE, "refresh_all_dashboards"),
 }

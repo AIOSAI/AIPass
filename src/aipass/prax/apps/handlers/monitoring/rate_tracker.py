@@ -18,7 +18,7 @@ from datetime import date
 from pathlib import Path
 from typing import Dict, Optional
 
-from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.prax.apps.handlers.logging.direct import get_direct_logger
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.monitoring.branch_detector import detect_branch_from_log
 

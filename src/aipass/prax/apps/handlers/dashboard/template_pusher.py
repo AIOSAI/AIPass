@@ -18,7 +18,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List
 
-from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.prax.apps.handlers.logging.direct import get_direct_logger
 
 logger = get_direct_logger()
 

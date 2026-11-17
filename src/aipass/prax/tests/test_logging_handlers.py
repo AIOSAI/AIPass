@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_logging_handlers.py
 # Description: Tests for prax logging handler modules
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-04-25
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/logging/direct.py and its sibling modules under apps/handlers/logging/."""
@@ -27,15 +27,15 @@ from aipass.prax.apps.handlers.logging import setup as logging_setup
 
 
 class TestDirectLog:
-    """direct_log() on the real body, into a logger whose files live under tmp_path."""
+    """get_direct_logger() on the real body, into a logger whose files live under tmp_path."""
 
-    def test_direct_log_writes_the_line(self, monkeypatch, tmp_path):
-        """direct_log writes the message into the caller's system and local logs, both under tmp_path."""
-        logs, cache, message = tmp_path / "logs", {}, "direct_log reached its file"
+    def test_a_direct_logger_writes_the_line(self, monkeypatch, tmp_path):
+        """A direct logger writes the message into the caller's system and local logs, both under tmp_path."""
+        logs, cache, message = tmp_path / "logs", {}, "the direct logger reached its file"
         monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(logs))
         monkeypatch.setattr(direct, "_direct_loggers", cache)
         try:
-            direct.direct_log("warning", message)
+            direct.get_direct_logger().warning(message)
         finally:
             for built in cache.values():
                 for handler in list(built.handlers):
@@ -66,7 +66,7 @@ class TestDirectLog:
 
         def first_line():
             barrier.wait()
-            direct.direct_log("info", "first line")
+            direct.get_direct_logger().info("first line")
 
         threads = [threading.Thread(target=first_line) for _ in range(8)]
         for thread in threads:
@@ -100,7 +100,7 @@ class TestDirectLog:
         for d in locked:
             d.chmod(0o500)
         try:
-            direct.direct_log("info", "a line with nowhere to go")
+            direct.get_direct_logger().info("a line with nowhere to go")
         finally:
             for d in locked:
                 d.chmod(0o700)

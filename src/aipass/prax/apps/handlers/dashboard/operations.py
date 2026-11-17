@@ -18,7 +18,7 @@ from typing import Dict, Iterator
 
 import fcntl
 
-from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.prax.apps.handlers.logging.direct import get_direct_logger
 
 logger = get_direct_logger()
 
@@ -27,7 +27,7 @@ from aipass.prax.apps.handlers.json import json_handler
 _PRAX_ROOT = Path(__file__).resolve().parents[3]  # .../prax/
 
 # The one copy of the dashboard caps, in chars (len()); other branches import them
-# via aipass.prax.apps.modules.dashboard. Reference: docs/dashboard_caps.md
+# through the package door, aipass.prax. Reference: docs/dashboard_caps.md
 SUBJECT_CAP = 120
 
 DASHBOARD_CHAR_BUDGET = 6000

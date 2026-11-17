@@ -59,7 +59,7 @@ under any suite unless the test redirects that constant itself.
 ## Pattern B — Direct Logger (for prax internals)
 
 ```python
-from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.prax.apps.handlers.logging.direct import get_direct_logger
 
 logger = get_direct_logger()
 logger.info("Direct log entry")

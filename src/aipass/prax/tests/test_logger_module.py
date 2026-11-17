@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_logger_module.py
 # Description: Unit tests for PRAX logger module (public API)
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-04-03
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/logger.py."""
@@ -11,7 +11,7 @@
 # logger.py is bound once at the top; _inject_and_import doubles each handler name on it per test.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(ruff) — that each __all__ re-export, e.g. get_direct_logger(), names a real import (F822)
+# sentry: no-test-needed(ruff) — that each __all__ name, e.g. get_system_logger(), names a real definition (F822)
 # sentry: no-test-needed(through_the_command) — append_jsonl()'s writing, covered by tests/test_jsonl_writer.py
 
 import ast
@@ -39,7 +39,6 @@ WATCHER = "aipass.prax.apps.handlers.discovery.watcher"
 HANDLER_DEPS = [
     "aipass.prax.apps.handlers.logging.setup",
     "aipass.prax.apps.handlers.logging.introspection",
-    "aipass.prax.apps.handlers.logging.direct",
     "aipass.prax.apps.handlers.discovery.watcher",
     "aipass.prax.apps.handlers.registry.load",
     "aipass.prax.apps.handlers.config.load",
@@ -64,12 +63,6 @@ def _build_handler_mocks(tmp_path):
 
     intro = mocks["aipass.prax.apps.handlers.logging.introspection"]
     intro.get_caller_info = MagicMock(return_value=("test_module", "/fake/path.py", "prax"))
-
-    direct = mocks["aipass.prax.apps.handlers.logging.direct"]
-    mock_direct_logger = MagicMock()
-    direct.get_direct_logger = MagicMock(return_value=mock_direct_logger)
-    direct.direct_log = MagicMock()
-    direct.DirectLogger = MagicMock
 
     watcher = mocks["aipass.prax.apps.handlers.discovery.watcher"]
     watcher.start_file_watcher = MagicMock()
@@ -112,11 +105,6 @@ _IMPORTED_NAMES = {
     "aipass.prax.apps.handlers.config.load": [
         ("get_system_logs_dir", "get_system_logs_dir"),
         ("get_module_logs_dir", "get_module_logs_dir"),
-    ],
-    "aipass.prax.apps.handlers.logging.direct": [
-        ("get_direct_logger", "get_direct_logger"),
-        ("direct_log", "direct_log"),
-        ("DirectLogger", "DirectLogger"),
     ],
     "aipass.prax.apps.handlers.json": [("json_handler", "json_handler")],
 }
@@ -481,7 +469,7 @@ def _spellings_under_a_broken_chain() -> dict:
     spellings = [
         "from aipass.prax import logger",
         "from aipass.prax.apps.modules.logger import system_logger",
-        "from aipass.prax.apps.modules.logger import get_direct_logger",
+        "from aipass.prax.apps.handlers.logging.direct import get_direct_logger",
     ]
     result = subprocess.run(
         [sys.executable, "-c", _BROKEN_CHAIN_PROBE, *spellings],
@@ -524,7 +512,7 @@ class TestBrokenChainRaises:
         assert _spellings_under_a_broken_chain() == {
             "from aipass.prax import logger": "ImportError",
             "from aipass.prax.apps.modules.logger import system_logger": "ImportError",
-            "from aipass.prax.apps.modules.logger import get_direct_logger": "ImportError",
+            "from aipass.prax.apps.handlers.logging.direct import get_direct_logger": "ImportError",
         }
 
     def test_the_package_defines_no_fallback_logger(self):
@@ -696,6 +684,8 @@ _DOOR_HOMES = {
     "DASHBOARD_CHAR_BUDGET": (_OPS, "DASHBOARD_CHAR_BUDGET"),
     "cap_subject": (_OPS, "cap_subject"),
     "dashboard_lock": (_OPS, "dashboard_lock"),
+    "write_section": (_OPS, "write_section"),
+    "get_branch_paths": ("aipass.prax.apps.handlers.dashboard.status", "get_branch_paths"),
     "refresh_single_dashboard": (_REFRESH, "refresh_single_dashboard"),
     "refresh_all_dashboards": (_REFRESH, "refresh_all_dashboards"),
 }

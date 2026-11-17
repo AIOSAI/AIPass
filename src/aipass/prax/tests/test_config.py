@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_config.py
 # Description: Tests for prax config handlers (load + ignore_patterns)
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-03-29
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/config/load.py and apps/handlers/config/ignore_patterns.py."""
@@ -20,7 +20,7 @@ import pytest
 from aipass.prax.apps.handlers.config import ignore_patterns as ip_mod
 from aipass.prax.apps.handlers.config import load as load_mod
 from aipass.prax.apps.handlers.json import json_service
-from aipass.prax.apps.modules import logger as logger_module
+from aipass.prax.apps.handlers.logging import direct as direct_mod
 
 
 def _patch_load_world(monkeypatch, tmp_path):
@@ -205,7 +205,7 @@ class TestGetModuleLogsDir:
         monkeypatch.setattr(load_mod, "_find_repo_root", lambda: tmp_path)
         monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
         door_one = MagicMock()
-        monkeypatch.setattr(logger_module, "get_direct_logger", door_one)
+        monkeypatch.setattr(direct_mod, "get_direct_logger", door_one)
 
         load_mod.get_module_logs_dir("stranger")
 

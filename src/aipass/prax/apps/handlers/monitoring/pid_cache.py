@@ -17,7 +17,7 @@ import time as _time
 from pathlib import Path
 from typing import Optional
 
-from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.prax.apps.handlers.logging.direct import get_direct_logger
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.repo_root import find_repo_root
 from aipass.prax.apps.handlers.fleet import fleet_rows

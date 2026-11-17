@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: direct.py
 # Description: Direct Logger (Event Pipeline Bypass)
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-02-27
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """PRAX Direct Logger
@@ -163,11 +163,3 @@ def get_direct_logger() -> DirectLogger:
     Writes nothing: most callers run it at module level, at import."""
     module_name, branch_path = _get_direct_caller_info()
     return DirectLogger(module_name, branch_path)
-
-
-def direct_log(level: str, message: str) -> None:
-    """Log a single message directly without event pipeline; get_direct_logger() avoids repeated stack walks."""
-    module_name, branch_path = _get_direct_caller_info()
-    logger = _get_or_create_logger(module_name, branch_path)
-    log_fn = getattr(logger, level.lower(), logger.info)
-    log_fn(message)

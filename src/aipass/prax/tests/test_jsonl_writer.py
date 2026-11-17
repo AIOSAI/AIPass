@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_jsonl_writer.py
 # Description: Tests for PRAX JSONL writer with rotation, and the trail logger on it
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-07-10
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/logging/jsonl_writer.py and apps/handlers/logging/trail.py."""
@@ -27,7 +27,6 @@ from aipass.prax.apps.handlers.logging import jsonl_writer
 from aipass.prax.apps.handlers.logging import trail as trail_mod
 from aipass.prax.apps.handlers.logging.jsonl_writer import append_jsonl
 from aipass.prax import trail
-from aipass.prax.apps.modules import logger as logger_module
 
 SRC_DIR = Path(__file__).resolve().parents[3]
 
@@ -335,11 +334,3 @@ class TestDefaultRotation:
         append_jsonl(target, {"still": "ok"})
 
         assert not (tmp_path / "test.jsonl.1").exists()
-
-
-class TestTheExport:
-    """The logger module hands callers the writer itself, not a copy or a wrapper."""
-
-    def test_the_logger_module_exports_the_writer(self):
-        """Green from its first run, so its proof is its mutant (prax, leg 9)."""
-        assert logger_module.append_jsonl is jsonl_writer.append_jsonl

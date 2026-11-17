@@ -19,7 +19,7 @@ from typing import IO, Optional
 
 import fcntl
 
-from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.prax.apps.handlers.logging.direct import get_direct_logger
 from aipass.prax.apps.handlers.json import json_handler
 
 logger = get_direct_logger()
