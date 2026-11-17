@@ -100,7 +100,7 @@ aipass/
 # Integration
 
  - Depends on: @drone (routing), @spawn (agent creation, registry sync, identity repair), @hooks (trust registry, verify, smoke), @prax (logging), @trigger (soft, degrades), pytest, the CLI tools.
- - Serves humans. Fleet importers: @spawn, three `shared/` modules (no branch but prax at import, docs/shared_contract.md); @api, `apps/modules/new_project` (the phone's project door).
+ - Serves humans. Fleet importers: @spawn, three `shared/` modules (no branch but prax at import, docs/shared_contract.md); @api, `from aipass.aipass import create_project, TEMPLATES` (`__init__.py`, the one import door; the phone's project door).
  - Hands the install to devpulse through `devpulse/dropbox/install_report.json`; setup.sh's items arrive via `<home>/.aipass/setup_attention.txt`.
 
 # Working habits

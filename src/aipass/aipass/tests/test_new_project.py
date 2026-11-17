@@ -12,6 +12,7 @@
 # sentry: no-test-needed(covered_elsewhere) — spawn_agent's own behavior; @spawn's function, mocked here
 
 import hashlib
+import importlib
 import io
 import json
 import shutil
@@ -23,6 +24,7 @@ from unittest.mock import patch
 
 import pytest  # pyright: ignore[reportMissingImports]
 
+import aipass.aipass as door
 from aipass.aipass.apps import aipass as entry
 from aipass.aipass.apps.handlers.init.bootstrap import init_project, is_projects_child
 from aipass.aipass.apps.handlers.new_project import (
@@ -1179,3 +1181,55 @@ def test_create_project_writes_the_prep_skill_the_switch_pair_and_links_claude_s
     assert (target / ".codex" / "skills" / "claude" / "SKILL.md").read_text(encoding="utf-8") == sc.claude_skill_md()
     assert not (target / ".claude" / "commands" / "prep.md").exists()
     assert result["notes"] == []
+
+
+# Written out by hand, not read from the door: the door's own table must agree with an independent list.
+DOOR_HOME = "aipass.aipass.apps.handlers.new_project"
+DOOR_NAMES = ("create_project", "TEMPLATES")
+_LOADED_UNDER_APPS = "\nprint(json.dumps(sorted(m for m in sys.modules if m.startswith('aipass.aipass.apps'))))"
+
+
+def _fresh_loaded(body: str) -> list[str]:
+    """Run *body* in a clean interpreter; answer the aipass apps modules it left loaded."""
+    done = subprocess.run(
+        [sys.executable, "-c", "import importlib, json, sys\n" + body + _LOADED_UNDER_APPS],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+    )
+    assert done.returncode == 0, done.stderr[-800:]
+    return json.loads(done.stdout.strip().splitlines()[-1])
+
+
+class TestTheTopFileIsTheOneDoor:
+    """from aipass.aipass import <name>: each name from its real home, lazily, never cached."""
+
+    def test_the_public_list_is_exactly_the_hand_written_table(self):
+        assert sorted(door.__all__) == sorted(DOOR_NAMES)
+        assert set(door.__all__) <= set(dir(door))
+
+    @pytest.mark.parametrize("name", DOOR_NAMES)
+    def test_every_name_is_the_same_object_as_its_home_s(self, name):
+        assert getattr(door, name) is getattr(importlib.import_module(DOOR_HOME), name)
+
+    @pytest.mark.parametrize("name", ["new_project", "find_host_root", "adopt_project", "_HOMES_MISSING"])
+    def test_an_unknown_name_raises_attribute_error_with_no_fallback(self, name):
+        with pytest.raises(AttributeError, match=name):
+            getattr(door, name)
+
+    @pytest.mark.parametrize("name", DOOR_NAMES)
+    def test_a_patch_on_the_home_reaches_a_caller_that_read_the_door_before(self, monkeypatch, name):
+        """A door that caches the first answer hands later callers the unpatched name."""
+        getattr(door, name)
+        sentinel = object()
+        monkeypatch.setattr(importlib.import_module(DOOR_HOME), name, sentinel)
+        assert getattr(door, name) is sentinel
+
+    def test_a_bare_import_loads_nothing_under_apps(self):
+        assert _fresh_loaded("import aipass.aipass") == []
+
+    def test_each_name_loads_no_more_than_its_home_alone(self):
+        """No second door: the door's reach equals a direct import of the home."""
+        through_door = _fresh_loaded(f"import aipass.aipass as d\nfor n in {DOOR_NAMES!r}: getattr(d, n)")
+        assert through_door == _fresh_loaded(f"importlib.import_module({DOOR_HOME!r})")

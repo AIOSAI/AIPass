@@ -94,15 +94,15 @@ class UsageError(Exception):
 
 
 def _api_host_config() -> Any:
-    """@api's host-api module door (set_face_dir, face_dir, set_baud_bin, baud_bin, load_config), or None.
+    """@api's package door (set_face_dir, face_dir, set_baud_bin, baud_bin, load_config, ...), or None.
 
     The one cross-branch edge: @api validates each path at write time and aipass never
-    writes api's config. Import @api's module, never its handlers.
+    writes api's config. Read @api's names through its package top file, never under its apps.
     """
     try:
-        from aipass.api.apps.modules import host_api
+        import aipass.api as host_api
     except ImportError as exc:
-        logger.warning("[baud] @api host_api module not importable: %s", exc)
+        logger.warning("[baud] @api package not importable: %s", exc)
         return None
     return host_api
 

@@ -20,10 +20,13 @@ This branch's `.sentry/bypass.json` names the same dependency in its
 [`shared/scaffold_content.py`](../shared/scaffold_content.py), the template
 text `apps/handlers/init/` re-exports.
 
-One door into `apps/` exists as well, and it is not under this contract:
-@api's host verbs import [`apps/modules/new_project.py`](../apps/modules/new_project.py)
-for `create_project` and `TEMPLATES`, which the module resolves from its
-handler on first use. Nothing else in `apps/` is imported by another branch.
+The import door into `apps/` is not under this contract: the package top file,
+[`__init__.py`](../__init__.py), hands out `create_project` and `TEMPLATES`
+(`from aipass.aipass import create_project`), each read from
+`apps/handlers/new_project/` on every access, never cached, and a bare
+`import aipass.aipass` loads nothing under `apps/`. The two names are what
+@api's host verbs call. [`apps/modules/new_project.py`](../apps/modules/new_project.py)
+still resolves the same two names for a caller on the old module path.
 
 `shared/` imports no branch but prax, **by contract**. @spawn is downstream of
 it, so an import added here lands in someone else's process. Prax is the one
