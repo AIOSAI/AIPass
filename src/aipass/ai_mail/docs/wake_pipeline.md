@@ -24,7 +24,7 @@ The `dispatch` command sends an email and wakes the target branch in one step. D
    - **Transcripts** — `dispatch_stdout.out`, `dispatch_stderr.out` and
      `dispatch_stdout.attempt-N.out` (N 1-3) in the target's `logs/`, rotated
      to `.out.1`; never `.log`, which trigger's watcher reads.
-     Names: `door_wake.TRANSCRIPT_NAMES`
+     Names: `dispatch_monitor.TRANSCRIPT_NAMES`
    - **Wake-back** — on agent exit, the original sender is notified. A
      builder-class sender is **woken**; a **manager sender is MAILED, never
      woken** (`_mail_wake_back()`): the manager gate stays, and the mail is the

@@ -91,7 +91,7 @@ OPENCODE_STREAM_FAILED = -6
 STREAMING_PROVIDERS = (CODEX, OPENCODE)
 WAKE_RESULT_DECLINED = "declined"
 # Transcripts, not logs: never a .log name, or trigger's watcher reads agent text as prax lines.
-# Published through door_wake; readers outside ai_mail take the names from there.
+# Sentry's log_structure check and devpulse's usage tool spell these names out: rename all three together.
 TRANSCRIPT_NAMES = {
     "stdout": "dispatch_stdout.out",
     "stderr": "dispatch_stderr.out",

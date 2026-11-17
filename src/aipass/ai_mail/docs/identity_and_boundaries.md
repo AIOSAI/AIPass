@@ -169,7 +169,7 @@ A sender that cannot be placed in a project — no `AIPASS_CALLER_CWD` (drone om
 ## The Handlers Fence
 
 `apps/handlers/__init__.py` is an import-time fence: code outside this branch reaches
-the handlers through `apps/modules`, and a foreign importer gets an `ImportError` naming
+the handlers through the package door, `from aipass.ai_mail import <name>`, and a foreign importer gets an `ImportError` naming
 the caller, the file and the line. It reads the stack once, at the first import of the
 package, and sorts each frame into one of three kinds:
 

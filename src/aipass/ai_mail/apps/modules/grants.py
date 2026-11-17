@@ -10,7 +10,7 @@
 Grants Module
 
 Lists the scoped write grants open on the dispatch register. Granting happens on the
-dispatch verb (--grant-root, --grant); a gate decides a write through door_dispatch_grant.
+dispatch verb (--grant-root, --grant); a gate decides a write through aipass.ai_mail.granted.
 """
 
 from typing import List

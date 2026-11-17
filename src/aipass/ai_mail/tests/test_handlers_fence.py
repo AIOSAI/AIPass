@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_handlers_fence.py
-# Description: The handlers fence: a foreign importer is refused, kin and the modules door pass (DPLAN-0404)
+# Description: The handlers fence: a foreign importer is refused, kin and the package door pass (DPLAN-0404)
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/__init__.py, the fence, in a fresh interpreter per case."""
@@ -87,20 +87,16 @@ class TestAForeignImporterIsRefused:
 
 
 class TestKinAndTheDoorPass:
-    """Kin import freely, stdlib and pytest are transport to the fence, and the modules door is open to all."""
+    """Kin import freely, stdlib and pytest are transport to the fence, and the package door is open to all."""
 
     @pytest.mark.parametrize("shape", ["pkg", "deep", "dyn", "chain", "mock"])
     def test_the_branch_itself_is_allowed(self, tmp_path, shape):
         """The probe from its own seat; mock is the shape whose import starts in unittest/mock.py and pkgutil.py."""
         assert _probe(KIN_PROBE, shape, tmp_path) == "ALLOWED"
 
-    def test_the_modules_door_is_open_to_a_foreign_branch(self, foreign_seat, tmp_path):
-        """A foreign seat importing this branch's modules, which import the handlers on its behalf, passes."""
+    def test_the_package_door_is_open_to_a_foreign_branch(self, foreign_seat, tmp_path):
+        """A foreign seat reading a name through aipass.ai_mail, which loads its handler home on its behalf, passes."""
         assert _probe(foreign_seat, "door", tmp_path) == "ALLOWED"
-
-    def test_the_package_front_door_is_open_to_a_foreign_branch(self, foreign_seat, tmp_path):
-        """The top file loads each name's handler home on the foreign caller's behalf."""
-        assert _probe(foreign_seat, "front", tmp_path) == "ALLOWED"
 
     def test_the_apps_package_does_not_import_its_handlers(self):
         """An apps/__init__.py importing handlers becomes every foreign import's caller: the fence goes decorative."""

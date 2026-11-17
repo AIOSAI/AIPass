@@ -242,7 +242,7 @@ the read and the lock is refused, never reopened; a widen that adds nothing writ
 It sends no mail: the admin tells the target. There is no narrowing and no change of root.
 
 The grant needs no revoke: it is open exactly while its row is, so the monitor's exit, a
-reply, a stop and a close each end it. `door_dispatch_grant.granted(caller_branch,
+reply, a stop and a close each end it. `aipass.ai_mail.granted(caller_branch,
 dispatch_id, target_path)` answers `{allowed, dispatch_id, reason}` for one write, derived at
 that read: the row is outstanding, carries a grant, was sent to that caller, is before
 `expected_by`, and its `monitor_alive` is `True` (`None` refuses). `dispatch_id` is the

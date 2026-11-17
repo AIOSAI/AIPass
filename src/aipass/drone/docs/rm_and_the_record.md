@@ -143,7 +143,7 @@ apply, and the target moves into the `.archive` beside it, in that branch. The r
 `exemption: "admin"` beside the caller, and the result line says the fence was crossed.
 
 - **Verified on @ai_mail's rail**, the one the hooks gates use: `repo_door.admin_verdict()` stamps
-  the caller and asks `door_verified_caller.is_verified_admin_caller()`, the 5-leg grant. Never a
+  the caller and asks `aipass.ai_mail.is_verified_admin_caller()`, the 5-leg grant. Never a
   name, a cwd string or an env var the caller sets.
 - **Fails closed.** An unimportable rail or a raising verifier is a refusal, logged at WARNING; a
   plain no is logged at INFO. Either way the sibling refusal stands as it reads for everyone.

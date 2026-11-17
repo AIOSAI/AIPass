@@ -23,7 +23,7 @@ from unittest.mock import MagicMock
 import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
 import aipass.ai_mail.apps.handlers.dispatch.wake_dashboard as wake_dashboard_mod
 import aipass.prax
-from aipass.ai_mail.apps.modules.door_wake import TRANSCRIPT_NAMES
+from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import TRANSCRIPT_NAMES
 from aipass.ai_mail.apps.handlers.dispatch import register as register_mod
 from aipass.ai_mail.apps.handlers.dispatch.wake_dashboard import refresh_recipient_dashboard
 from aipass.ai_mail.apps.handlers.dispatch.wake import (
@@ -497,9 +497,9 @@ class TestTheGrantIsReadFromTheUntrackedConfig:
 
 
 class TestTranscriptNamesAreACrossBranchContract:
-    """Sentry's log_structure check and devpulse's usage tool read the names through door_wake."""
+    """Sentry's log_structure check and devpulse's usage tool spell these names out: a rename breaks them."""
 
-    def test_the_door_publishes_names_that_never_end_in_log(self):
+    def test_the_transcript_names_never_end_in_log(self):
         assert TRANSCRIPT_NAMES == {
             "stdout": "dispatch_stdout.out",
             "stderr": "dispatch_stderr.out",
