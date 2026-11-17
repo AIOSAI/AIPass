@@ -1,7 +1,7 @@
 """CLI - Display formatting for AIPass.
 
-The one import door: other branches write `from aipass.cli import <name>`. `display` is the module itself.
-Names load on first access (PEP 562): an eager import here puts kin in every stack and opens the handlers fence.
+The import door, `from aipass.cli import <name>`; `display` is the module. Read on access (PEP 562):
+an eager import puts kin in every stack and opens the handlers fence.
 """
 
 import importlib
@@ -42,12 +42,15 @@ __all__ = ["display", *_HOMES]
 
 
 def __getattr__(name: str):
-    """Load a door name on first access and cache it on the package."""
+    """Hand out a door name from its home on each access."""
+    # Never cached on the package: a patch on the home must reach every caller reading through here.
     if name == "display":
-        value = importlib.import_module(_DISPLAY)
-    elif name in _HOMES:
-        value = getattr(importlib.import_module(_HOMES[name]), name)
-    else:
+        return importlib.import_module(_DISPLAY)
+    if name not in _HOMES:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    globals()[name] = value
-    return value
+    return getattr(importlib.import_module(_HOMES[name]), name)
+
+
+def __dir__() -> list:
+    """Public names, whether or not they have been read yet."""
+    return sorted(set(globals()) | set(__all__))

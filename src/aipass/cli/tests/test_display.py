@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_display.py
 # Description: The display module — messages, header, routing, demo, exit seam, escape, live colour
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-24
 # Modified: 2026-11-17
 # =============================================
@@ -680,6 +680,23 @@ class TestTheFrontDoor:
             for alias in node.names
         }
         assert seen == {*DOOR_NAMES, "display"}
+
+    def test_a_patch_on_the_home_reaches_the_next_read_through_the_door(self, monkeypatch):
+        assert aipass.cli.console is display.console
+        stand_in = object()
+        monkeypatch.setattr(display, "console", stand_in)
+        assert aipass.cli.console is stand_in
+        assert "console" not in vars(aipass.cli)
+
+    def test_a_patch_on_the_door_name_reaches_a_call_time_reader_and_restores(self):
+        stand_in = object()
+        with patch("aipass.cli.console", stand_in):
+            assert aipass.cli.console is stand_in
+        assert "console" not in vars(aipass.cli)
+        assert aipass.cli.console is display.console
+
+    def test_dir_lists_every_door_name_before_any_is_read(self):
+        assert {*DOOR_NAMES, "display"} <= set(dir(aipass.cli))
 
     def test_an_unknown_name_raises_attribute_error(self):
         with pytest.raises(AttributeError, match="no_such_name"):
