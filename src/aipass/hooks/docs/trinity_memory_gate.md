@@ -47,6 +47,15 @@ nothing left to refuse: the seat is told `MEMORY CHECK DID NOT RUN for this Bash
 ERROR line, `[HOOKS] edit_gate tripwire: the memory check failed, a shell write to memory may be unreported`,
 reaches medic with the cause at INFO.
 
+**The snapshot store.** The pending snapshots live in one file per session in the temp directory,
+`aipass-trinity-tripwire-<session>.json`, a dict keyed by `tool_use_id`. After the call, a store that exists but
+is not such a dict (a directory, unreadable, not JSON, another type) is the comparison failing, as above; a
+store that does not exist, or holds no entry for this call, logs `no snapshot for <id>` at INFO and says
+nothing to the seat, since the snapshot side either refused that call or chose not to watch it. Before the
+call, a damaged store logs a WARNING and starts fresh, and the write replaces it. That drops the snapshots of
+calls still in flight, whose checks then read as no snapshot; refusing instead would refuse every Bash call
+for the rest of the session, because nothing else rewrites the store.
+
 It watches **every `.trinity` in the project**, not just the seat's, and
 `passport.json` with `local.json` and `observations.json`. A cross-branch shell write is exactly the shape the reader cannot always see. The wording follows
 ownership: the seat's own file is reported as this call's write, another branch's as

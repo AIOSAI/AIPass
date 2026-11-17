@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.25.0
+# Version: 1.26.0
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
@@ -912,16 +912,25 @@ def _tripwire_path(hook_data: dict) -> Path:
     return _TRIPWIRE_DIR / f"aipass-trinity-tripwire-{hook_data.get('session_id') or 'nosession'}.json"
 
 
-def _read_pending(path: Path) -> dict:
-    """The session's pending snapshots, keyed by tool_use_id. An unreadable file starts fresh and says so."""
-    if not path.is_file():
+def _load_pending(path: Path) -> dict:
+    """The session's pending snapshots, keyed by tool_use_id: {} when no store exists.
+
+    Raises when a store exists but is not a dict of snapshots (a directory, unreadable, not JSON, another type)."""
+    if not path.exists():
         return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"{path.name} holds a {type(data).__name__}, not a dict of snapshots")
+    return data
+
+
+def _read_pending(path: Path) -> dict:
+    """The snapshot side's read: a damaged store starts fresh and says so, as the new write replaces it."""
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        return _load_pending(path)
     except (OSError, ValueError) as exc:
         logger.warning("[HOOKS] edit_gate tripwire: unreadable snapshot file %s, starting fresh: %s", path, exc)
         return {}
-    return data if isinstance(data, dict) else {}
 
 
 def _runs_memory_verb(command: str, cwd: str) -> bool:
@@ -1190,7 +1199,8 @@ def tripwire(hook_data: dict) -> dict:
         if hook_data.get("tool_name") != "Bash":
             return {"stdout": "", "exit_code": 0}
         tool_use_id = hook_data.get("tool_use_id")
-        before = _read_pending(_tripwire_path(hook_data)).get(tool_use_id) if tool_use_id else None
+        # A damaged store raises into the catch below: it is the check failing, never "no snapshot".
+        before = _load_pending(_tripwire_path(hook_data)).get(tool_use_id) if tool_use_id else None
         if not isinstance(before, dict):
             if _seat_trinity(hook_data.get("cwd", "") or os.getcwd()) is not None:
                 logger.info(

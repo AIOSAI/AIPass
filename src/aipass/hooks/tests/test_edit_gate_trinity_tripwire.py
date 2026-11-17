@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_trinity_tripwire.py
 # Description: edit_gate's memory tripwire: a .trinity write a shell made is reported at PostToolUse, project-wide
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-10-08
 # Modified: 2026-11-16
 # =============================================
@@ -17,6 +17,8 @@
 import json
 import logging
 from unittest.mock import patch
+
+import pytest
 
 from aipass.hooks.apps.handlers.security import edit_gate
 from aipass.hooks.tests.support_edit_gate_trinity import (
@@ -176,6 +178,24 @@ class TestShellMemoryTripwire:
         assert context.startswith("MEMORY CHECK DID NOT RUN for this Bash call (KeyError")
         assert [c.args for c in log.error.call_args_list] == [(edit_gate.TRIPWIRE_FAILED_LOG,)]
 
+    @pytest.mark.parametrize(
+        ("damage", "cause"),
+        [("directory", "IsADirectoryError"), ("not json", "JSONDecodeError"), ("a list", "ValueError")],
+    )
+    def test_a_snapshot_store_that_exists_but_cannot_be_read_is_the_check_failing(
+        self, tmp_path, monkeypatch, damage, cause
+    ):
+        seat = self._seat(tmp_path, monkeypatch)
+        store = tmp_path / "aipass-trinity-tripwire-session-1.json"
+        if damage == "directory":
+            store.mkdir()
+        else:
+            store.write_text("{torn" if damage == "not json" else "[]", encoding="utf-8")
+        with patch.object(edit_gate, "logger") as log:
+            result = edit_gate.tripwire(self._data(seat, self.RESIDUAL))
+        assert self._context(result).startswith(f"MEMORY CHECK DID NOT RUN for this Bash call ({cause}")
+        assert [c.args for c in log.error.call_args_list] == [(edit_gate.TRIPWIRE_FAILED_LOG,)]
+
     def test_a_file_the_shell_left_unreadable_is_named(self, tmp_path, monkeypatch):
         seat = self._seat(tmp_path, monkeypatch)
         result = self._around(seat, self.RESIDUAL, during=lambda: self._write(seat, "local.json", "x\n"))
@@ -216,6 +236,7 @@ class TestShellMemoryTripwire:
         with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_ENFORCE)):
             assert edit_gate.tripwire(self._data(seat, self.RESIDUAL)) == self.SILENT
         assert "no snapshot for toolu_a" in caplog.text
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING], "no store at all is not damage"
 
     def test_the_pending_snapshots_stay_bounded(self, tmp_path, monkeypatch):
         """A call whose PostToolUse never fires (a later gate refused it) must not grow the file."""

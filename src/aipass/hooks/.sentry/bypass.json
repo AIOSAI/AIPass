@@ -491,9 +491,9 @@
       "lines": [
         630,
         867,
-        923
+        933
       ],
-      "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 613: the todos advisory text, never a verdict. 850 _seat_trinity and 906 _read_pending: the tripwire, which reports after the call and decides nothing."
+      "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 613: the todos advisory text, never a verdict. 867 _seat_trinity: the tripwire's seat lookup, which decides nothing. 933 _read_pending: the snapshot side's read; the fresh start is followed by the write that replaces the damaged store, and a write that fails refuses the call. The after-call side reads through _load_pending, which raises."
     },
     {
       "file": "apps/handlers/lifecycle/session_start.py",
@@ -913,9 +913,9 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "fallback",
       "lines": [
-        921
+        931
       ],
-      "reason": "The hook's own per-session /tmp snapshot of in-flight Bash calls; a corrupt copy holds only stale stats, and starting fresh costs at most one unwatched call. Raising would darken the tripwire for the whole session. Logged at WARNING, which @trigger escalates."
+      "reason": "The hook's own per-session /tmp snapshot of in-flight Bash calls; a corrupt copy holds only stale stats. On the snapshot side, starting fresh drops the snapshots of calls still in flight (their after-call checks log no snapshot at INFO); raising would refuse every Bash call for the rest of the session, as nothing else rewrites the store. Logged at WARNING, which @trigger escalates. The after-call side does not start fresh: a damaged store there is the check failing."
     },
     {
       "file": "apps/handlers/security/subagent_gate.py",
