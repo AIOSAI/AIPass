@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: backup.py
 # Description: BACKUP Branch — main orchestrator with auto-discovery
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-04-16
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """BACKUP Branch - Main Orchestrator"""
@@ -68,7 +68,7 @@ def print_help() -> None:
     console.print("  [green]prune[/green]        List stored copies the ignore spec now matches; --apply deletes them")
     console.print("  [green]settings[/green]     Turn a project's drive_sync on or off (the one live setting)")
     console.print(
-        "  [green]schedule[/green]     Read or set a registered project's scheduled backup (daily, weekly, monthly; on/off)"
+        "  [green]schedule[/green]     Read or set a project's scheduled backup (daily, weekly, monthly; on/off)"
     )
     console.print("  [green]drive_sync[/green]   Upload the snapshot store to the remote drive, whatever the setting")
     console.print("  [green]drive_check[/green]  Test the remote drive connection")
@@ -94,9 +94,7 @@ def print_help() -> None:
     console.print("  [green]--apply[/green]           prune: delete what the listing names (without it, nothing goes)")
     console.print()
     console.print("  [dim]settings takes one key: drive_sync on|off <project_path|@name>.[/dim]")
-    console.print(
-        "  [dim]schedule takes words: on, off, daily HH:MM, weekly WEEKDAY HH:MM, monthly DAY HH:MM; --json reads it.[/dim]"
-    )
+    console.print("  [dim]schedule takes words: on, off, daily HH:MM, weekly WEEKDAY HH:MM, monthly DAY HH:MM.[/dim]")
     console.print("  [dim]stop takes an optional lane word: snapshot, drive_sync or all.[/dim]")
     console.print()
     console.print("-" * 70)
@@ -174,13 +172,13 @@ def main():
     """Main entry point - routes commands or shows help.
 
     reset_command_state() clears a previous command's failure mark; a handled command returns
-    resolve_exit(True) (0 or 2), or STOPPED_EXIT (130) after a stop. A return, never SystemExit,
+    resolve_exit(True) (0 or 2), or stop's exit_code turns it to 130 after a stop. A return, never SystemExit,
     so drone gets the child's code as is and every finally runs.
     """
-    from aipass.backup.apps.modules.stop import STOPPED_EXIT, reset_stop_state, run_was_stopped
+    from aipass.backup.apps.modules.stop import begin_run, exit_code
 
     reset_command_state()
-    reset_stop_state()
+    begin_run()
     args = sys.argv[1:]
 
     if args and args[0] in ("--version", "-V"):
@@ -224,7 +222,7 @@ def main():
 
         handled, failure = route_command(mode, remaining, modules)
         if handled:
-            return STOPPED_EXIT if run_was_stopped() else resolve_exit(True)
+            return exit_code(resolve_exit(True))
         if failure:
             error(f"{mode} failed -- {failure}")
             return 1
@@ -244,7 +242,7 @@ def main():
 
     handled, failure = route_command(command, remaining, modules)
     if handled:
-        return STOPPED_EXIT if run_was_stopped() else resolve_exit(True)
+        return exit_code(resolve_exit(True))
 
     if failure:
         error(f"{command} failed -- {failure}")

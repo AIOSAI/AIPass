@@ -3,7 +3,7 @@
 # Description: Tests for apps/backup.py's command routing and the help gate every apps/modules/ verb carries
 # Version: 2.1.0
 # Created: 2026-06-12
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/backup.py's command routing and the help gate every apps/modules/ verb carries."""
@@ -165,12 +165,8 @@ class TestModuleDiscovery:
         discovered = entry.discover_modules()
 
         found = sorted(module.__name__.split(".")[-1] for module in discovered)
-        # A door publishes names and carries no handle_command: not a command.
-        on_disk = sorted(
-            path.stem for path in entry.MODULES_DIR.glob("*.py") if not path.name.startswith(("_", "door_"))
-        )
+        on_disk = sorted(path.stem for path in entry.MODULES_DIR.glob("*.py") if not path.name.startswith("_"))
         assert found == on_disk, f"discovery and apps/modules/ disagree: {found!r} vs {on_disk!r}"
-        assert "door_trail" not in found, "a door reached the router as a command module"
         # An empty MODULES_DIR would pass the equality on []; identity rules out a re-imported twin.
         assert {"drive_sync", "register", "share"} <= set(found)
         assert drive_sync in discovered and register in discovered

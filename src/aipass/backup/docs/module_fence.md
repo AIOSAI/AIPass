@@ -28,9 +28,11 @@ served from `sys.modules`. The write-time wall is sentry's `encapsulation` row.
 
 ### The door
 
-Other branches reach backup through `apps/modules/door_trail.py`, which publishes
-`log_operation` from `apps/handlers/audit/trail.py` and nothing else. A door is
-not a command: it has no `handle_command`, so the router never offers it.
+Other branches reach backup through the package door, `aipass.backup`
+(`__init__.py`). Its `_HOMES` table maps each public name to its home module;
+today that is `log_operation` from `apps/handlers/audit/trail.py` and nothing
+else. A name is loaded from its home on each read and never cached, and a name
+not in the table is an `AttributeError`.
 
 ### The tests
 

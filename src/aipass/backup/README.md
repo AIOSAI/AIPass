@@ -86,8 +86,8 @@ exits 130), `prune` lists (and with `--apply`
 deletes) stored copies the ignore rules now match, and `display` renders the panels the
 other lanes print. The Drive lane is `drive_sync`, `drive_check`, `drive_stats`,
 `drive_clear` and `share`. `settings` sets one key, a project's `drive_sync` on
-or off, and fails honestly for anything else. `door_trail` is not a verb: it is
-the door other branches import, publishing this branch's operation trail.
+or off, and fails honestly for anything else. Other branches import from the
+package door, `from aipass.backup import log_operation`, never from `apps/`.
 
 Underneath, the handlers do the work: walking and filtering a tree, applying
 ignore rules, copying, building store paths, reading and writing the
