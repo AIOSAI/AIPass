@@ -12,11 +12,16 @@
 # sentry: no-test-needed(behaviour) — handlers wired by registry.setup_handlers; each has its own test file
 
 import json
+import os
+import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from unittest.mock import MagicMock, call
 
+import aipass.trigger as trigger_door
+from aipass.trigger import Trigger as DoorTrigger, trigger as door_bus
 from aipass.trigger.apps.handlers import failure_report, medic_state
 from aipass.trigger.apps.handlers.events import error_detected, registry, runaway_handler
 from aipass.trigger.apps.modules import core
@@ -899,3 +904,42 @@ def test_a_handler_registered_here_is_visible_through_a_fresh_import(trigger_cls
     reimported.fire("identity_probe")
 
     assert handler.call_args_list == [call(fire_event=reimported.fire)]
+
+
+_DOOR_PROBE = """
+import json, sys
+import aipass.trigger
+cold = sorted(n for n in sys.modules if n.startswith("aipass."))
+from aipass.trigger import trigger
+print(json.dumps([cold, type(trigger).__name__]))
+"""
+
+
+class TestFrontDoor:
+    """aipass/trigger/__init__.py hands out the bus and its class, lazily, as the very objects core holds."""
+
+    def test_the_door_hands_out_the_core_bus_and_class_themselves_never_copies(self):
+        assert door_bus is core.trigger
+        assert DoorTrigger is core.Trigger
+        assert {"trigger", "Trigger"} <= set(vars(trigger_door)), "a handed-out name is not cached on the package"
+
+    def test_a_name_off_the_public_list_raises_attribute_error_never_a_stand_in(self):
+        for name in ("core", "report_error", "handle_command"):
+            with pytest.raises(AttributeError, match=name):
+                getattr(trigger_door, name)
+
+    def test_a_bare_import_loads_nothing_under_apps_and_the_name_trigger_is_the_bus(self):
+        result = subprocess.run(
+            [sys.executable, "-c", _DOOR_PROBE],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            cwd=str(Path(__file__).resolve().parents[3]),
+            env={**os.environ},
+            timeout=120,
+        )
+        assert result.returncode == 0, f"probe failed: {result.stderr}"
+        cold, bus_type = json.loads(result.stdout.strip().splitlines()[-1])
+
+        assert cold == ["aipass.trigger"]
+        assert bus_type == "Trigger"
