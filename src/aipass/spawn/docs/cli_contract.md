@@ -91,10 +91,14 @@ case. Every newborn is born with the same fence: `templates/citizen/apps/handler
 is devpulse's fence template verbatim, placeholders intact, and the template ships the pair
 `tests/test_handlers_fence.py` and `tests/support_fence.py` so a newborn pins its own fence
 from its first run. The fence's refusal names the package door, `from aipass.<branch> import
-<name>`. `tests/test_template_import_guard.py` pins the template's fence before
-any mint: a foreign seat refused by name, an outside seat refused as unknown, kin and the
-modules door allowed, a dead cwd survived, and a cwd inside the newborn buying a foreign seat
-nothing.
+<name>`. A newborn is also born with that door: `templates/citizen/__init__.py` is the
+same PEP 562 door with an empty name table, so a bare import loads nothing under `apps/` and
+every name raises `AttributeError` until one is added. `spawn update` never overwrites an
+existing `.py`, so a branch's real door is reported for review, never replaced.
+`tests/test_template_import_guard.py` pins the template's fence before any mint: a foreign
+seat refused by name, an outside seat refused as unknown, kin allowed, the empty door passing
+the template's own `door` probe from a foreign seat, a dead cwd survived, and a cwd inside the
+newborn buying a foreign seat nothing.
 
 ---
 

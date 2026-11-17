@@ -273,7 +273,7 @@
       "path": "apps/plugins/README.md"
     },
     "f026": {
-      "content_hash": "cb42dcf8f733",
+      "content_hash": "10a431cbfff5",
       "has_branch_placeholder": false,
       "name": "__init__.py",
       "path": "__init__.py"
@@ -417,13 +417,13 @@
       "path": "tests/test_scaffold.py"
     },
     "f050": {
-      "content_hash": "d3df3c22c520",
+      "content_hash": "ee50f54b3da5",
       "has_branch_placeholder": false,
       "name": "support_fence.py",
       "path": "tests/support_fence.py"
     },
     "f051": {
-      "content_hash": "3fe422edcbc3",
+      "content_hash": "7ede9272d093",
       "has_branch_placeholder": false,
       "name": "test_handlers_fence.py",
       "path": "tests/test_handlers_fence.py"

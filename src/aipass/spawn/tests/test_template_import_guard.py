@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_template_import_guard.py
 # Description: What the newborn's handler guard must survive on its very first import
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-30
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
-"""Tests for templates/citizen/apps/handlers/__init__.py, the newborn's import-time access guard."""
+"""Tests for templates/citizen/apps/handlers/__init__.py (the newborn's guard) and templates/citizen/__init__.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that apps/modules/core.py parses and imports
@@ -344,32 +344,48 @@ def test_newborn_refuses_a_foreign_branch_and_names_it(class_name, tmp_path):
 
 
 @pytest.mark.parametrize("class_name", TEMPLATE_CLASSES)
-def test_the_newborns_modules_door_is_open_to_a_foreign_branch(class_name, tmp_path):
-    """A foreign seat imports a newborn module that imports the handlers on its behalf.
+def test_the_newborns_package_door_passes_its_own_door_probe_from_a_foreign_seat(class_name, tmp_path):
+    """The template's top file and the template's support_fence 'door' shape, both rendered, from a foreign seat.
 
-    Kin asked, so the fence lets it through. The scaffold ships no door file, so one is planted."""
+    The probe answers ALLOWED only for a lazy door: nothing under apps loaded, an unknown name refused."""
     root = _plant_newborn(tmp_path / "tree", class_name)
-    modules = root / "aipass" / "newborn" / "apps" / "modules"
-    modules.mkdir()
-    (modules / "__init__.py").write_text("", encoding="utf-8")
-    (modules / "door_probe.py").write_text(
-        "from aipass.newborn.apps.handlers import MY_BRANCH\n\n__all__ = ['MY_BRANCH']\n", encoding="utf-8"
+    template = get_template_dir(class_name)
+    (root / "aipass" / "newborn" / "__init__.py").write_text(
+        _render((template / "__init__.py").read_text(encoding="utf-8")), encoding="utf-8"
+    )
+    probe = _render((template / "tests" / "support_fence.py").read_text(encoding="utf-8"))
+
+    result = _run_seat(
+        tmp_path / "aipass" / "foreign" / "probe.py",
+        root,
+        probe.replace("print(_run(sys.argv[1]))", 'print(_run("door"))'),
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ALLOWED"
+
+
+@pytest.mark.parametrize("class_name", TEMPLATE_CLASSES)
+def test_the_newborns_package_door_is_born_empty(class_name, tmp_path):
+    root = _plant_newborn(tmp_path / "tree", class_name)
+    (root / "aipass" / "newborn" / "__init__.py").write_text(
+        _render((get_template_dir(class_name) / "__init__.py").read_text(encoding="utf-8")), encoding="utf-8"
     )
 
     result = _run_seat(
         tmp_path / "aipass" / "foreign" / "probe.py",
         root,
         """
-        import importlib
+        import aipass.newborn as door
 
-        door = importlib.import_module("aipass.newborn.apps.modules.door_probe")
-        print("ALLOWED " + door.MY_BRANCH)
+        print(door.__all__)
         """,
         cwd=tmp_path,
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "ALLOWED newborn"
+    assert result.stdout.strip() == "[]"
 
 
 @pytest.mark.parametrize("class_name", TEMPLATE_CLASSES)
