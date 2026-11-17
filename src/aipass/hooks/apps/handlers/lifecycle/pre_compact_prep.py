@@ -71,7 +71,7 @@ def _count_active_dispatch_locks(repo_root: Path | None) -> int | None:
 
 def _count_open_plans(branch_dir: Path) -> int | None:
     try:
-        from aipass.flow.apps.modules.door_open_plans import get_open_plans
+        from aipass.flow import get_open_plans
 
         target = str(branch_dir.resolve())
         return sum(1 for _num, info in get_open_plans() if info.get("location") == target)

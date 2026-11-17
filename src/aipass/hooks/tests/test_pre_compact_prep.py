@@ -4,7 +4,7 @@
 # Description: Tests for pre_compact_prep lifecycle handler
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/lifecycle/pre_compact_prep.py."""
@@ -245,7 +245,7 @@ class TestCountOpenPlans:
             ("0003", {"location": str(branch_dir.resolve())}),
         ]
 
-        with patch("aipass.flow.apps.modules.door_open_plans.get_open_plans", return_value=fake_plans):
+        with patch("aipass.flow.get_open_plans", return_value=fake_plans):
             snapshot = _snapshot(branch_dir)
 
         assert "2 open plan(s)" in snapshot
@@ -254,7 +254,7 @@ class TestCountOpenPlans:
 
         branch_dir = _make_branch(tmp_path)
 
-        with patch("aipass.flow.apps.modules.door_open_plans.get_open_plans", side_effect=RuntimeError("no")):
+        with patch("aipass.flow.get_open_plans", side_effect=RuntimeError("no")):
             snapshot = _snapshot(branch_dir)
 
         assert "open plan" not in snapshot

@@ -4,7 +4,7 @@
 # Description: Tests for compass recall prompt handler
 # Branch: hooks
 # Created: 2026-07-16
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/prompt/compass_recall.py."""
@@ -137,8 +137,8 @@ def _recall(tmp_path, session_id, candidates, hooks_block):
     with (
         patch("aipass.hooks.apps.handlers.prompt.compass_recall._STATE_DIR", tmp_path),
         patch("aipass.hooks.apps.handlers.prompt.compass_recall.find_project_config", return_value=project),
-        patch("aipass.devpulse.apps.modules.compass.recall_decisions", return_value=candidates),
-        patch("aipass.devpulse.apps.modules.compass.mark_surfaced", return_value=1),
+        patch("aipass.devpulse.recall_decisions", return_value=candidates),
+        patch("aipass.devpulse.mark_surfaced", return_value=1),
     ):
         return handle(_payload("How should we handle prompt config?", session_id=session_id))
 
@@ -151,11 +151,11 @@ class TestCompassRecallHandler:
                 tmp_path,
             ),
             patch(
-                "aipass.devpulse.apps.modules.compass.recall_decisions",
+                "aipass.devpulse.recall_decisions",
                 return_value=[CANDIDATE_GOOD],
             ),
             patch(
-                "aipass.devpulse.apps.modules.compass.mark_surfaced",
+                "aipass.devpulse.mark_surfaced",
                 return_value=1,
             ) as mock_mark,
             patch(
@@ -191,11 +191,11 @@ class TestCompassRecallHandler:
                 tmp_path,
             ),
             patch(
-                "aipass.devpulse.apps.modules.compass.recall_decisions",
+                "aipass.devpulse.recall_decisions",
                 return_value=[CANDIDATE_BAD],
             ),
             patch(
-                "aipass.devpulse.apps.modules.compass.mark_surfaced",
+                "aipass.devpulse.mark_surfaced",
                 return_value=1,
             ),
             patch(
@@ -227,7 +227,7 @@ class TestCompassRecallHandler:
                 tmp_path,
             ),
             patch(
-                "aipass.devpulse.apps.modules.compass.recall_decisions",
+                "aipass.devpulse.recall_decisions",
                 return_value=[],
             ),
             patch(
@@ -247,7 +247,7 @@ class TestCompassRecallHandler:
                 tmp_path,
             ),
             patch(
-                "aipass.devpulse.apps.modules.compass.recall_decisions",
+                "aipass.devpulse.recall_decisions",
                 return_value=[CANDIDATE_GOOD],
             ),
             patch(
@@ -330,11 +330,11 @@ class TestCompassRecallHandler:
                 tmp_path,
             ),
             patch(
-                "aipass.devpulse.apps.modules.compass.recall_decisions",
+                "aipass.devpulse.recall_decisions",
                 return_value=[CANDIDATE_GOOD],
             ),
             patch(
-                "aipass.devpulse.apps.modules.compass.mark_surfaced",
+                "aipass.devpulse.mark_surfaced",
                 return_value=1,
             ),
             patch(
@@ -367,11 +367,11 @@ class TestCompassRecallHandler:
                 tmp_path,
             ),
             patch(
-                "aipass.devpulse.apps.modules.compass.recall_decisions",
+                "aipass.devpulse.recall_decisions",
                 return_value=[CANDIDATE_GOOD, CANDIDATE_LOW_RELEVANCE],
             ),
             patch(
-                "aipass.devpulse.apps.modules.compass.mark_surfaced",
+                "aipass.devpulse.mark_surfaced",
                 return_value=1,
             ) as mock_mark,
             patch(
@@ -421,11 +421,11 @@ class TestCompassRecallHandler:
                 tmp_path,
             ),
             patch(
-                "aipass.devpulse.apps.modules.compass.recall_decisions",
+                "aipass.devpulse.recall_decisions",
                 return_value=[CANDIDATE_GOOD],
             ),
             patch(
-                "aipass.devpulse.apps.modules.compass.mark_surfaced",
+                "aipass.devpulse.mark_surfaced",
                 return_value=1,
             ),
             patch(
@@ -460,11 +460,11 @@ class TestCompassRecallHandler:
                 tmp_path,
             ),
             patch(
-                "aipass.devpulse.apps.modules.compass.recall_decisions",
+                "aipass.devpulse.recall_decisions",
                 return_value=[CANDIDATE_GOOD],
             ),
             patch(
-                "aipass.devpulse.apps.modules.compass.mark_surfaced",
+                "aipass.devpulse.mark_surfaced",
                 return_value=1,
             ),
             patch(
@@ -508,8 +508,8 @@ class TestSeatGate:
         payload = {**_payload("How should we handle prompt config?"), "cwd": str(seat)}
         with (
             patch("aipass.hooks.apps.handlers.prompt.compass_recall._STATE_DIR", tmp_path),
-            patch("aipass.devpulse.apps.modules.compass.recall_decisions", return_value=[CANDIDATE_GOOD]) as recall,
-            patch("aipass.devpulse.apps.modules.compass.mark_surfaced", return_value=1),
+            patch("aipass.devpulse.recall_decisions", return_value=[CANDIDATE_GOOD]) as recall,
+            patch("aipass.devpulse.mark_surfaced", return_value=1),
             patch("aipass.memory.should_surface", return_value=(True, "ok", {})),
             patch("aipass.memory.record_message", side_effect=lambda s: s),
         ):

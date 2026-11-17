@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-15
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/config/trust_registry.py and apps/handlers/config/loader.py's trust integration."""
@@ -24,7 +24,8 @@ from unittest.mock import patch
 
 import pytest
 
-from aipass.hooks.apps.handlers.config import gates, loader
+import aipass.hooks as hooks_door
+from aipass.hooks.apps.handlers.config import gates, loader, trust_registry
 from aipass.hooks.apps.modules import engine
 from aipass.hooks.apps.handlers.config.trust_registry import (
     bootstrap,
@@ -151,6 +152,25 @@ class TestRegistryHelpers:
         with patch.dict("os.environ", {"AIPASS_TRUST_REGISTRY": str(reg_path)}):
             with pytest.raises(ValueError, match="trust registry"):
                 read_registry()
+
+
+class TestThePackageDoor:
+    def test_the_door_hands_out_the_six_registry_names_each_its_homes_own_object(self):
+        assert sorted(hooks_door.__all__) == sorted(
+            ["enroll", "is_trusted", "read_registry", "revoke", "registry_path", "REGISTRY_PATH"]
+        )
+        for name in hooks_door.__all__:
+            assert getattr(hooks_door, name) is getattr(trust_registry, name), name
+
+    def test_a_patch_on_the_home_reaches_a_door_reader_and_leaves_no_copy_on_the_package(self, tmp_path):
+        with patch.object(trust_registry, "is_trusted", return_value="patched"):
+            assert hooks_door.is_trusted(str(tmp_path)) == "patched"
+        assert "is_trusted" not in vars(hooks_door)
+        assert hooks_door.is_trusted is trust_registry.is_trusted
+
+    def test_a_home_name_the_door_does_not_list_is_not_handed_out(self):
+        with pytest.raises(AttributeError, match="bootstrap"):
+            getattr(hooks_door, "bootstrap")
 
 
 class TestEnrollRevoke:

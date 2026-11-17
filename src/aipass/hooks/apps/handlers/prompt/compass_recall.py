@@ -126,7 +126,7 @@ def handle(hook_data: dict) -> dict:
             _save_state(state, hook_data)
             return {"stdout": "", "exit_code": 0}
 
-        from aipass.devpulse.apps.modules.compass import recall_decisions, mark_surfaced
+        from aipass.devpulse import recall_decisions, mark_surfaced
 
         candidates = recall_decisions(prompt_text, limit=3)
         if not candidates:
