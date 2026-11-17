@@ -3,7 +3,7 @@
 # Description: drone rm: containment, carve-outs, the sibling fence and the admin crossing
 # Version: 1.4.0
 # Created: 2026-06-02
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/rm.py and the rm_handler containment it drives."""
@@ -23,7 +23,6 @@ from unittest.mock import patch
 
 import pytest
 
-from aipass.ai_mail.apps.modules import door_verified_caller as rail
 from aipass.drone.apps.handlers import rm_handler
 from aipass.drone.apps.handlers.rm_handler import (
     check_carveouts,
@@ -32,7 +31,7 @@ from aipass.drone.apps.handlers.rm_handler import (
     safe_delete,
 )
 
-from .conftest import rail_answers, rm_ledger
+from .conftest import RAIL, rail_answers, rm_ledger
 
 POSIX_TMP = Path(os.sep, "tmp")
 
@@ -832,9 +831,9 @@ class TestTheVerifiedAdminCrossesTheSiblingFence:
         assert target.exists()
 
     def test_an_unimportable_rail_fails_closed(self, at_drone_beside_api, monkeypatch):
-        # Both: `from package import name` reads the package attribute before sys.modules.
-        monkeypatch.setitem(sys.modules, rail.__name__, None)
-        monkeypatch.delattr(sys.modules[rail.__name__.rpartition(".")[0]], "door_verified_caller")
+        # Both: the door's import_module reads sys.modules; `from package import name` reads the package attribute.
+        monkeypatch.setitem(sys.modules, RAIL.__name__, None)
+        monkeypatch.delattr(sys.modules[RAIL.__name__.rpartition(".")[0]], RAIL.__name__.rpartition(".")[2])
         target = at_drone_beside_api / "README.md"
 
         ((_, ok, _),) = safe_delete([str(target)])

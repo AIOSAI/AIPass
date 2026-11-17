@@ -21,7 +21,7 @@ def setup_handlers():
     from aipass.trigger.apps.handlers.ci.outbound import set_send_email_callback as set_ci_email_callback
     from .ci_red import handle_ci_red
 
-    from aipass.ai_mail.apps.modules.email_send import deliver_email_to_branch
+    from aipass.ai_mail import deliver_email_to_branch
     from datetime import datetime
 
     def _send_email_adapter(

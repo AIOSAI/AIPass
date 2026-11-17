@@ -51,9 +51,9 @@ def verified_caller() -> tuple[str, bool]:
 
     Imported per call, so a dark rail fails only the gated verbs, and fails them closed: it raises.
     """
-    from aipass.ai_mail.apps.modules import door_verified_caller as rail
+    from aipass.ai_mail import is_verified_admin_caller, resolve_verified_caller
 
-    return rail.resolve_verified_caller(), bool(rail.is_verified_admin_caller())
+    return resolve_verified_caller(), bool(is_verified_admin_caller())
 
 
 def _record(operation: str, caller: str, target: Path, reason: str | None) -> None:

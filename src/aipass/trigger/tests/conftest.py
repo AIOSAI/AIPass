@@ -49,13 +49,16 @@ import aipass.trigger.apps.handlers.json.config_loader as config_loader
 import aipass.trigger.apps.handlers.log_watcher as lw
 from aipass.cli import display
 import aipass.ai_mail as ai_mail_pkg
-from aipass.ai_mail.apps.modules import door_wake
 from aipass.trigger.apps.handlers.ci import git_door, ledger as ci_ledger, outbound
 from aipass.trigger.apps.handlers.events import ci_red
 from aipass.trigger.apps.modules import ci as ci_module, core
 
 # .archive/ holds verbatim disposal copies that must never be collected.
 collect_ignore_glob = [".archive/*", "**/.archive/*"]
+
+# wake_branch's home module, reached through the door (the handlers fence refuses a direct import).
+# The door reads it there on every access, so a patch on it reaches every lazy caller.
+WAKE_HOME = sys.modules[ai_mail_pkg.wake_branch.__module__]
 
 
 @pytest.fixture(scope="session")
@@ -406,7 +409,7 @@ def ci_lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
     monkeypatch.setattr(ci_ledger, "logger", lane.log)
     monkeypatch.setattr(outbound, "_send_email", fake_mail)
     monkeypatch.setattr(git_door, "run_drone", fake_drone)
-    monkeypatch.setattr(door_wake, "wake_branch", fake_wake)
+    monkeypatch.setattr(WAKE_HOME, "wake_branch", fake_wake)
     monkeypatch.setattr(ai_mail_pkg, "send_notification", fake_feed, raising=False)
     monkeypatch.setattr(ai_mail_pkg, "outstanding_dispatches", lambda: lane.awake)
     monkeypatch.setattr(ci_module, "find_repo_root", lambda **kwargs: tmp_path)

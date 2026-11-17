@@ -181,7 +181,8 @@ class TestGhPassthroughHelp:
 # External-repo door — --repo <path>, admin seat only (DPLAN-0344)
 # ===========================================================================
 
-_RAIL = "aipass.ai_mail.apps.modules.door_verified_caller"
+# The door: repo_door imports the rail through it at call time, so a patch on the package reaches it.
+_RAIL = "aipass.ai_mail"
 
 
 def _git(cwd: Path, *argv: str) -> str:

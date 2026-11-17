@@ -168,7 +168,7 @@ def _fire_job(job: dict, runstate: dict, header: str = "") -> tuple:
             logger.warning("[run] Failed to fire %s/%s: %s", job["owner"], job["id"], detail)
         return (OUTCOME_FIRED if ok else OUTCOME_FAILED), detail
 
-    from aipass.ai_mail.apps.modules.door_wake import wake_branch
+    from aipass.ai_mail import wake_branch
 
     owner = job["owner"]
     job_id = job["id"]

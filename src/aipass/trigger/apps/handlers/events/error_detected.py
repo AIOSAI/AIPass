@@ -128,7 +128,7 @@ def _tell_registry_owner(reason: str, send: Callable[..., bool]) -> None:
 def _wake(recipient: str, about: str) -> None:
     """Wake the branch a delivered mail is for; a failure raises, since the mail then sits unread."""
     # Through ai_mail's published door, never its handlers.
-    from aipass.ai_mail.apps.modules.door_wake import wake_branch
+    from aipass.ai_mail import wake_branch
 
     try:
         wake_branch(recipient, fresh=False, sender="@trigger")

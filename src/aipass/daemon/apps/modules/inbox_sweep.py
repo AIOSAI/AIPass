@@ -97,7 +97,7 @@ def _apply_wake_policy(entries: List[dict]) -> None:
     The scanner reports mailbox state; eligibility to be woken is decided here,
     against the same blocklist wake_branch itself enforces.
     """
-    from aipass.ai_mail.apps.modules.door_wake import is_wake_blocked
+    from aipass.ai_mail import is_wake_blocked
 
     for entry in entries:
         if entry["skip_reason"] is None and is_wake_blocked(entry["owner"]):
@@ -118,7 +118,7 @@ def _wake_message(entry: dict) -> str:
 
 def _wake_owner(entry: dict) -> tuple:
     """Wake one branch owner. Returns (ok: bool, detail: str)."""
-    from aipass.ai_mail.apps.modules.door_wake import wake_branch
+    from aipass.ai_mail import wake_branch
 
     owner = entry["owner"]
     _event(f"WAKE: {owner} — {entry['stale_count']} unread, oldest {entry['oldest_age_hours']:.0f}h")

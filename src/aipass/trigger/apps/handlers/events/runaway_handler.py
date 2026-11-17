@@ -187,7 +187,7 @@ def handle_runaway_log_detected(
 
         try:
             # Through ai_mail's published door, never its handlers.
-            from aipass.ai_mail.apps.modules.door_wake import wake_branch
+            from aipass.ai_mail import wake_branch
 
             wake_branch(recipient, fresh=False, sender="@trigger")
         except Exception as exc:

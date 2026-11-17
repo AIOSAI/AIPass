@@ -17,17 +17,22 @@
 # sentry: no-test-needed(external) — ai_mail storing and upserting the message; AIPass tests only its own files
 
 import json
+import sys
 from pathlib import Path
 from typing import Any, Dict, List
 from unittest.mock import MagicMock
 
 import pytest
-from aipass.ai_mail.apps.modules import email_send
+import aipass.ai_mail as ai_mail
 from aipass.prax import trail
 from aipass.trigger.apps.handlers import escalation
 from aipass.trigger.apps.handlers.events import error_detected, runaway_handler
 from aipass.trigger.apps.handlers.events.registry import setup_handlers
 from aipass.trigger.apps.modules import core
+
+# deliver_email_to_branch's home module, reached through the door (the handlers fence refuses a direct import).
+# The door reads it there on every access, so a patch on it reaches setup_handlers' lazy import.
+DELIVER_HOME = sys.modules[ai_mail.deliver_email_to_branch.__module__]
 
 
 @pytest.fixture
@@ -70,7 +75,7 @@ def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cfg: Dict[str, Any]):
 def mailbox(monkeypatch: pytest.MonkeyPatch) -> List[Dict[str, Any]]:
     """A fake ai_mail that records every (to_branch, email_data, upsert_key) call.
 
-    Patched on email_send, where setup_handlers resolves it, so the adapter under test is the real closure.
+    Patched at its home, which the door setup_handlers imports through reads, so the adapter is the real closure.
     """
     calls: List[Dict[str, Any]] = []
 
@@ -79,7 +84,7 @@ def mailbox(monkeypatch: pytest.MonkeyPatch) -> List[Dict[str, Any]]:
         email_data["upsert_action"] = "updated" if upsert_key else "created"
         return True, "delivered"
 
-    monkeypatch.setattr(email_send, "deliver_email_to_branch", _deliver)
+    monkeypatch.setattr(DELIVER_HOME, "deliver_email_to_branch", _deliver)
     return calls
 
 
@@ -406,7 +411,7 @@ def test_setup_handlers_without_ai_mail_raises(monkeypatch: pytest.MonkeyPatch) 
     """Pins the default: with ai_mail unimportable the bus was wired with no mailer and only a warning said so."""
     trigger = MagicMock()
     monkeypatch.setattr(core, "trigger", trigger)
-    monkeypatch.delattr(email_send, "deliver_email_to_branch")
+    monkeypatch.delattr(DELIVER_HOME, "deliver_email_to_branch")
 
     with pytest.raises(ImportError):
         setup_handlers()

@@ -16,6 +16,7 @@
 # sentry: no-test-needed(constant) — the fixed investigation-step prose _build_notification_message() wraps
 
 import json
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,12 +24,16 @@ from typing import Any, Dict, List
 from unittest.mock import MagicMock
 
 import pytest
+import aipass.ai_mail as ai_mail
 import aipass.trigger.apps.handlers as handlers_pkg
 import aipass.trigger.apps.handlers.error_registry as error_registry
 import aipass.trigger.apps.handlers.events.error_detected as error_detected
-from aipass.ai_mail.apps.modules import door_wake as wake
 from aipass.prax import trail
 from aipass.trigger.apps.handlers import escalation, medic_state
+
+# wake_branch's home module, reached through the door (the handlers fence refuses a direct import).
+# The door reads it there on every access, so a patch on it reaches error_detected's lazy import.
+WAKE_HOME = sys.modules[ai_mail.wake_branch.__module__]
 
 
 @pytest.fixture(autouse=True)
@@ -44,7 +49,7 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     monkeypatch.setattr(error_registry, "report", MagicMock(return_value={"is_new": False}))
     monkeypatch.setattr(error_registry, "is_suppressed", MagicMock(return_value=False))
     monkeypatch.setattr(error_registry, "get_dispatch_count", MagicMock(return_value=0))
-    monkeypatch.setattr(wake, "wake_branch", MagicMock())
+    monkeypatch.setattr(WAKE_HOME, "wake_branch", MagicMock())
 
     monkeypatch.setattr(error_detected, "_send_email", None)
     monkeypatch.setattr(error_detected, "breaker_gate", MagicMock(return_value=""))
@@ -283,7 +288,7 @@ class TestHandleErrorDetectedGates:
         """Pins the warning-only wake: a delivered mail that never woke its branch reached only a log line."""
         mod = _import_module()
         send = _setup_happy_path(mod)
-        monkeypatch.setattr(wake, "wake_branch", MagicMock(side_effect=RuntimeError("no session")))
+        monkeypatch.setattr(WAKE_HOME, "wake_branch", MagicMock(side_effect=RuntimeError("no session")))
         record = MagicMock()
         monkeypatch.setattr(mod, "registry_record_dispatch", record)
 
@@ -302,7 +307,7 @@ class TestHandleErrorDetectedGates:
         send = MagicMock(return_value=True)
         error_detected.set_send_email_callback(send)
         wake_mock = MagicMock(side_effect=RuntimeError("no session"))
-        monkeypatch.setattr(wake, "wake_branch", wake_mock)
+        monkeypatch.setattr(WAKE_HOME, "wake_branch", wake_mock)
 
         with pytest.raises(RuntimeError, match="mail delivered to @spawn but wake failed.*no session"):
             error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)

@@ -96,7 +96,7 @@ def _apply_wake_blocklist(roster: List[dict]) -> List[dict]:
 
     The handler excludes @devpulse structurally; this re-checks the live blocklist.
     """
-    from aipass.ai_mail.apps.modules.door_wake import is_wake_blocked
+    from aipass.ai_mail import is_wake_blocked
 
     kept = []
     for entry in roster:
@@ -113,7 +113,7 @@ def _scheduled_lane_available() -> bool:
     Without the `scheduled` parameter, manager targets are skipped by name rather than dropped into an
     interactive tmux session. A wake that cannot import raises: no lane is ever guessed.
     """
-    from aipass.ai_mail.apps.modules.door_wake import wake_branch
+    from aipass.ai_mail import wake_branch
 
     return "scheduled" in inspect.signature(wake_branch).parameters
 
@@ -123,7 +123,7 @@ def _wake_steward(target: dict, prompt: str, model: str, fresh: bool, provider: 
 
     `errored` separates a crash in the wake path from an ordinary busy target (just a miss).
     """
-    from aipass.ai_mail.apps.modules.door_wake import wake_branch
+    from aipass.ai_mail import wake_branch
 
     email = target["email"]
     kwargs = {

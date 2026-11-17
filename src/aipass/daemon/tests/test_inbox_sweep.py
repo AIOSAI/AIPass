@@ -37,7 +37,7 @@ NOW = datetime(2026, 8, 11, 12, 0, 0)
 
 SCANNER = "aipass.daemon.apps.handlers.monitoring.inbox_scanner"
 DISCOVERY = "aipass.daemon.apps.handlers.schedule.discovery"
-WAKE = "aipass.ai_mail.apps.modules.door_wake"
+WAKE = "aipass.ai_mail"
 
 
 # ── Fixtures ──────────────────────────────────────────

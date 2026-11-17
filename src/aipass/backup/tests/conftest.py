@@ -30,8 +30,12 @@ from aipass.backup.apps.handlers.json import json_handler
 from aipass.backup.apps.handlers.project import registry
 from aipass.backup.apps.handlers.schedule import jobs
 from aipass.backup.apps.handlers.state import stop_flag
-from aipass.ai_mail.apps.modules import door_verified_caller
+import aipass.ai_mail as ai_mail
 from aipass.cli import display
+
+# The verified-caller names' home module, reached through the door (its handlers fence a direct import).
+# The door reads the names there on every access, so a patch on it reaches caller.py's lazy import.
+VERIFIED_CALLER_HOME = sys.modules[ai_mail.is_verified_admin_caller.__module__]
 
 BRANCH_MODULE = "aipass.backup"
 
@@ -126,8 +130,8 @@ def tmp_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def verified_seat(monkeypatch: pytest.MonkeyPatch) -> types.SimpleNamespace:
     """Every test runs as the verified admin seat; a fence test sets ``caller`` and ``admin`` itself."""
     seat = types.SimpleNamespace(caller="@devpulse", admin=True)
-    monkeypatch.setattr(door_verified_caller, "resolve_verified_caller", lambda: seat.caller)
-    monkeypatch.setattr(door_verified_caller, "is_verified_admin_caller", lambda: seat.admin)
+    monkeypatch.setattr(VERIFIED_CALLER_HOME, "resolve_verified_caller", lambda: seat.caller)
+    monkeypatch.setattr(VERIFIED_CALLER_HOME, "is_verified_admin_caller", lambda: seat.admin)
     return seat
 
 

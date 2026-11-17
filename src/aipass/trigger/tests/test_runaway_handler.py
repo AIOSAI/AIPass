@@ -11,6 +11,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(behaviour) — the detection in apps/handlers/log_watcher.py; the log watcher tests cover it
 import json
+import sys
 import tempfile
 import time
 from datetime import datetime, timedelta
@@ -20,9 +21,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aipass.ai_mail.apps.modules import door_wake as ai_mail_wake
+import aipass.ai_mail as ai_mail
 from aipass.trigger.apps.handlers import medic_state
 from aipass.trigger.apps.handlers.events import runaway_handler as mod
+
+# wake_branch's home module, reached through the door (the handlers fence refuses a direct import).
+# The door reads it there on every access, so a patch on it reaches the handler's lazy import.
+WAKE_HOME = sys.modules[ai_mail.wake_branch.__module__]
 
 # The handler only keys cooldowns and names alerts by this path; it never opens it.
 RUNAWAY_LOG = str(Path(tempfile.gettempdir()) / "test.log")
@@ -48,7 +53,7 @@ def _reset_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # type: igno
     _log.reset_mock()
     monkeypatch.setattr(mod, "logger", _log)
 
-    monkeypatch.setattr(ai_mail_wake, "wake_branch", MagicMock())
+    monkeypatch.setattr(WAKE_HOME, "wake_branch", MagicMock())
 
     yield
 
@@ -723,7 +728,7 @@ class TestSetSendEmailCallback:
 
 def _wake_mock() -> MagicMock:
     """Return the mocked wake_branch installed by the autouse fixture."""
-    return cast(MagicMock, ai_mail_wake.wake_branch)
+    return cast(MagicMock, WAKE_HOME.wake_branch)
 
 
 def _read_alerts(tmp_path: Path) -> list:

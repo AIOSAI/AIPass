@@ -39,8 +39,7 @@ from aipass.daemon.apps.handlers.schedule.rotation import (
     render_prompt,
 )
 from aipass.daemon.apps.handlers.schedule import runstate as runstate_mod
-from aipass.ai_mail.apps.modules import door_wake
-from aipass.ai_mail.apps.modules.door_wake import wake_branch
+from aipass.ai_mail import wake_branch
 from aipass.daemon.apps.handlers.schedule.discovery import (
     PassportUnreadable,
     active_citizens,
@@ -53,7 +52,7 @@ from aipass.daemon.apps.modules import run as run_module
 HANDLER = "aipass.daemon.apps.handlers.schedule.rotation"
 MODULE = "aipass.daemon.apps.modules.rotation"
 RUN = "aipass.daemon.apps.modules.run"
-WAKE_SEAM = "aipass.ai_mail.apps.modules.door_wake.wake_branch"
+WAKE_SEAM = "aipass.ai_mail.wake_branch"
 SCHEDULE_FILE = Path(__file__).resolve().parents[1] / ".daemon" / "schedule.json"
 
 
@@ -491,7 +490,8 @@ class TestManagerLane:
     def test_an_unimportable_wake_raises_never_reads_as_no_lane(self, capsys, monkeypatch):
         """No fallback: a broken ai_mail import was answered False, so every manager was skipped as if by choice."""
         # Deleting the name makes the from-import raise ImportError, as a broken ai_mail would.
-        monkeypatch.delattr(door_wake, "wake_branch")
+        # From its home module, reached through the door: the door then has nothing to hand out.
+        monkeypatch.delattr(inspect.getmodule(wake_branch), "wake_branch")
         with pytest.raises(ImportError):
             rotation_json(capsys, [], lane=None)
 
@@ -566,7 +566,7 @@ class TestRotationCommand:
 
     def test_blocklist_filter_drops_blocked_branches(self, roster, capsys):
         """Mutant killed: _apply_wake_blocklist keeps a blocked entry."""
-        with patch("aipass.ai_mail.apps.modules.door_wake.is_wake_blocked", side_effect=lambda e: e == "@backup"):
+        with patch("aipass.ai_mail.is_wake_blocked", side_effect=lambda e: e == "@backup"):
             status = rotation_json(capsys, roster, jobs=[rotation_job()], real_blocklist=True)
         assert [c["email"] for c in status["roster"]] == ["@commons"]
 

@@ -274,7 +274,7 @@ def admin_verdict() -> AdminVerdict:
     """
     try:
         # Lazy, so a dark lane refuses instead of breaking @git.
-        from aipass.ai_mail.apps.modules import door_verified_caller as rail
+        from aipass.ai_mail import is_verified_admin_caller, resolve_verified_caller
     except Exception as exc:
         logger.warning("git repo door: admin lane dark — verified-caller rail unavailable: %s", exc)
         return AdminVerdict(
@@ -284,8 +284,8 @@ def admin_verdict() -> AdminVerdict:
     # Stamped again here: the module route stamps, and a direct caller of the door gets the same rail.
     with caller_stamp():
         try:
-            caller = rail.resolve_verified_caller()
-            granted = bool(rail.is_verified_admin_caller())
+            caller = resolve_verified_caller()
+            granted = bool(is_verified_admin_caller())
         except Exception as exc:
             logger.warning("git repo door: admin verification raised, refusing: %s", exc)
             return AdminVerdict(

@@ -12,13 +12,19 @@
 # sentry: no-test-needed(covered_elsewhere) — how report() fingerprints and stores a row: tests/test_error_registry.py
 # sentry: no-test-needed(covered_elsewhere) — what error_detected does once fired: tests/test_error_detected.py
 
+import sys
+
 import pytest
 from unittest.mock import MagicMock
 
-from aipass.ai_mail.apps.modules import email_send
+import aipass.ai_mail as ai_mail
 from aipass.trigger.apps.handlers import error_reporter
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.modules import core
+
+# deliver_email_to_branch's home module, reached through the door (the handlers fence refuses a direct import).
+# The door reads it there on every access, so a patch on it reaches the handler's lazy import.
+DELIVER_HOME = sys.modules[ai_mail.deliver_email_to_branch.__module__]
 
 
 # ---------------------------------------------------------------------------
@@ -38,7 +44,7 @@ def _mock_infrastructure(monkeypatch):
     error_detected handler dispatches, and deliver_email_to_branch sends real
     mail. Each is a recorder here for every test, not only the ones that set
     their own. The two lazy imports inside the handler read core.trigger and
-    email_send.deliver_email_to_branch at call time, so those homes are patched.
+    the door's deliver_email_to_branch at call time, so those homes are patched.
     """
     monkeypatch.setattr(error_reporter, "logger", MagicMock())
 
@@ -67,7 +73,7 @@ def _mock_infrastructure(monkeypatch):
 
     # -- the event bus and real mail: recorders unless a test sets its own ---
     monkeypatch.setattr(core, "trigger", MagicMock())
-    monkeypatch.setattr(email_send, "deliver_email_to_branch", MagicMock(return_value=(True, "recorded")))
+    monkeypatch.setattr(DELIVER_HOME, "deliver_email_to_branch", MagicMock(return_value=(True, "recorded")))
 
 
 def _import_reporter():
@@ -98,7 +104,7 @@ class TestSendSourceFixEmail:
         reporter = _import_reporter()
 
         mock_deliver = MagicMock(return_value=(True, "delivered"))
-        monkeypatch.setattr(email_send, "deliver_email_to_branch", mock_deliver)
+        monkeypatch.setattr(DELIVER_HOME, "deliver_email_to_branch", mock_deliver)
 
         entry = {
             "component": "flow",
@@ -149,8 +155,8 @@ class TestSendSourceFixEmail:
         reporter = _import_reporter()
 
         # The name gone from its home makes the handler's lazy
-        # 'from aipass.ai_mail.apps.modules.email_send import ...' raise ImportError.
-        monkeypatch.delattr(email_send, "deliver_email_to_branch")
+        # 'from aipass.ai_mail import deliver_email_to_branch' raise ImportError.
+        monkeypatch.delattr(DELIVER_HOME, "deliver_email_to_branch")
 
         entry = {
             "component": "flow",
@@ -169,7 +175,7 @@ class TestSendSourceFixEmail:
         reporter = _import_reporter()
 
         mock_deliver = MagicMock(return_value=(False, "delivery failed"))
-        monkeypatch.setattr(email_send, "deliver_email_to_branch", mock_deliver)
+        monkeypatch.setattr(DELIVER_HOME, "deliver_email_to_branch", mock_deliver)
 
         entry = {
             "component": "flow",
@@ -189,7 +195,7 @@ class TestSendSourceFixEmail:
         reporter = _import_reporter()
 
         mock_deliver = MagicMock(side_effect=RuntimeError("connection refused"))
-        monkeypatch.setattr(email_send, "deliver_email_to_branch", mock_deliver)
+        monkeypatch.setattr(DELIVER_HOME, "deliver_email_to_branch", mock_deliver)
 
         entry = {
             "component": "flow",
@@ -215,7 +221,7 @@ class TestSendSourceFixEmail:
         reporter = _import_reporter()
 
         mock_deliver = MagicMock(return_value=(True, "ok"))
-        monkeypatch.setattr(email_send, "deliver_email_to_branch", mock_deliver)
+        monkeypatch.setattr(DELIVER_HOME, "deliver_email_to_branch", mock_deliver)
 
         entry = {
             "component": "api",

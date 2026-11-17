@@ -16,7 +16,7 @@ from pathlib import Path
 from aipass.prax import logger
 
 from aipass.aipass.shared.registry_discovery import registries_in
-from aipass.ai_mail.apps.modules.door_verified_caller import is_verified_admin_caller, resolve_verified_caller
+from aipass.ai_mail import is_verified_admin_caller, resolve_verified_caller
 from aipass.hooks.apps.modules.door_trust_registry import read_registry as read_trust, registry_path as trust_path
 from aipass.hooks.apps.modules.door_trust_registry import revoke as revoke_trust
 from aipass.spawn.apps.handlers.deletion_receipts import build_receipt, measure, receipt_problem, write_receipts

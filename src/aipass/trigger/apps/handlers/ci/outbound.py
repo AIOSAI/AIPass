@@ -50,7 +50,7 @@ def wake(to_branch: str, subject: str) -> bool:
     """Wake *to_branch* with @trigger as sender, so its exit wakes @trigger back to read the reply."""
     try:
         # ai_mail's published door, never its handlers.
-        from aipass.ai_mail.apps.modules.door_wake import wake_branch
+        from aipass.ai_mail import wake_branch
 
         _status, woke = wake_branch(to_branch, fresh=False, sender="@trigger", subject=subject)
         return bool(woke)

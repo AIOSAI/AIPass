@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from aipass.prax import logger
-from aipass.ai_mail.apps.modules.door_verified_caller import is_verified_admin_caller, resolve_verified_caller
+from aipass.ai_mail import is_verified_admin_caller, resolve_verified_caller
 
 from aipass.flow.apps.handlers.json import json_handler
 

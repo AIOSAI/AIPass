@@ -3,7 +3,7 @@
 # Description: Blocked is not ran — a wake that never started must not consume the period
 # Version: 1.2.0
 # Created:2026-08-30
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/run.py — blocked is not ran: a wake that never started must not consume the period."""
@@ -108,7 +108,7 @@ def _fire_due(job, *seams):
 def _fire_with(status, ok, job=None):
     """Fire one due job through the tick against a stubbed wake_branch. Returns ((outcome, detail), wake)."""
     fake_wake = MagicMock(return_value=(status, ok))
-    outcome, detail, _ = _fire_due(job or _job(), patch("aipass.ai_mail.apps.modules.door_wake.wake_branch", fake_wake))
+    outcome, detail, _ = _fire_due(job or _job(), patch("aipass.ai_mail.wake_branch", fake_wake))
     return (outcome, detail), fake_wake
 
 
@@ -169,9 +169,7 @@ class TestBlockedClassification:
         assert outcome == OUTCOME_FIRED
 
     def test_an_exception_is_a_failure_not_a_block(self):
-        outcome, detail, _ = _fire_due(
-            _job(), patch("aipass.ai_mail.apps.modules.door_wake.wake_branch", side_effect=RuntimeError("boom"))
-        )
+        outcome, detail, _ = _fire_due(_job(), patch("aipass.ai_mail.wake_branch", side_effect=RuntimeError("boom")))
         assert outcome == OUTCOME_FAILED
         assert "boom" in detail
 

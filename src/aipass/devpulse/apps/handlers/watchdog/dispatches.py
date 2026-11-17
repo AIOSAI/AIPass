@@ -19,7 +19,7 @@ from aipass.prax import logger
 from aipass.devpulse.apps.handlers.json import json_handler
 from aipass.devpulse.apps.handlers.owner.guard import owner_address as _owner_address
 from aipass import ai_mail as _ai_mail
-from aipass.ai_mail.apps.modules.door_session_pointer import CODEX, read_pointer
+from aipass.ai_mail import CODEX, read_pointer
 
 
 class RegisterUnavailable(RuntimeError):

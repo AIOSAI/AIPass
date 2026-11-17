@@ -3,7 +3,7 @@
 # Description: Tests for the drone @daemon run module
 # Version: 1.4.0
 # Created:2026-06-15
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/modules/run.py — the decentralized scheduler tick behind drone @daemon run."""
@@ -291,7 +291,7 @@ class TestRotationDelegation:
             results = self._tick(
                 live_job(),
                 runstate,
-                patch("aipass.ai_mail.apps.modules.door_wake.wake_branch", side_effect=RuntimeError("no wake")),
+                patch("aipass.ai_mail.wake_branch", side_effect=RuntimeError("no wake")),
             )
         assert (results["fired"], results["failed"]) == (0, 1)
         assert runstate["jobs"]["@commons/live"]["last_error"] == "no wake"
@@ -667,7 +667,7 @@ class TestTickLinesThroughPrax:
             patch(f"{RUN}.is_job_due", return_value=True),
             patch(f"{RUN}.missed_window", return_value=False),
             patch(f"{RUN}.save_runstate", return_value=True),
-            patch("aipass.ai_mail.apps.modules.door_wake.wake_branch", side_effect=RuntimeError("boom")),
+            patch("aipass.ai_mail.wake_branch", side_effect=RuntimeError("boom")),
         ):
             assert run_tick()["failed"] == 1
         errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
@@ -769,7 +769,7 @@ def kill_quietly(pid: int) -> None:
 @pytest.fixture
 def no_wake():
     """wake_branch, wired to fail loudly if a command job ever reaches it."""
-    wake = "aipass.ai_mail.apps.modules.door_wake.wake_branch"
+    wake = "aipass.ai_mail.wake_branch"
     with patch(wake, side_effect=AssertionError("a command job woke someone")) as mock_wake:
         yield mock_wake
 

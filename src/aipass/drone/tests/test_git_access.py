@@ -3,7 +3,7 @@
 # Description: Tests for tier-based git access — the tiers, the owner gate and its log severity
 # Version: 1.6.0
 # Created: 2026-05-12
-# Modified: 2026-11-14
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/auth.py: the git tiers and how owner tier is earned per repo."""
@@ -25,7 +25,7 @@ from aipass.drone.apps.plugins.devpulse_ops.auth import (
     external_owner_verbs,
     verify_git_access,
 )
-from aipass.ai_mail.apps.modules.door_session_pointer import transcript_dir
+from aipass.ai_mail import transcript_dir
 from aipass.drone.apps.handlers.git import help_pages, repo_door, session_home
 from aipass.drone.apps.modules.git_module import handle_command
 

@@ -24,7 +24,7 @@ def send_source_fix_email(entry: dict) -> Optional[bool]:
     """Send recommendation email to source branch about fixing log level.
     True sent; False nothing to send (no branch); None the send failed, so the mail is lost, not skipped.
     """
-    from aipass.ai_mail.apps.modules.email_send import deliver_email_to_branch
+    from aipass.ai_mail import deliver_email_to_branch
 
     try:
         component = entry.get("component", "").lower()

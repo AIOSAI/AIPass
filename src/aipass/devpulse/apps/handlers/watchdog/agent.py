@@ -25,7 +25,7 @@ from aipass.prax import logger
 from aipass.memory.apps.modules import fleet
 from aipass.devpulse.apps.handlers.watchdog import registry as _registry
 from aipass.devpulse.apps.handlers.json import json_handler
-from aipass.ai_mail.apps.modules.door_session_pointer import (
+from aipass.ai_mail import (
     CLAUDE,
     CODEX,
     OPENCODE,
@@ -314,7 +314,7 @@ class TranscriptScanner:
 
     def _note_watched(self, path: str) -> None:
         if self._watched != (self.provider, path):
-            self._watched = (self.provider, path)
+            self._watched = (self.provider, path)  # type: ignore[assignment]  # door names type as Any
             logger.debug("[watchdog.agent] scanner watching provider=%s path=%s", self.provider, path)
 
     def _claude_paths(self) -> tuple[list[str], dict[str, str]]:

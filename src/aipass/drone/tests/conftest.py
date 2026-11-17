@@ -19,16 +19,21 @@ import json
 import logging
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Generator
 
 import pytest
 
-from aipass.ai_mail.apps.modules import door_verified_caller as rail
+import aipass.ai_mail as ai_mail
 from aipass.cli import display
 from aipass.drone.apps.handlers import registry_handler, router_handler
 from aipass.drone.apps.handlers.git import session_home
 from aipass.drone.apps.handlers.json import json_handler
+
+# @ai_mail's verified-caller rail: the names' home module, reached through the door (its handlers fence a direct
+# import). The door reads the names there on every access, so a patch on it reaches repo_door's lazy import.
+RAIL = sys.modules[ai_mail.is_verified_admin_caller.__module__]
 
 # Not imported from sentry: its guard refuses another branch's caller.
 SANDBOX_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
@@ -338,8 +343,8 @@ def rail_answers(monkeypatch, verdict):
             raise verdict
         return verdict
 
-    monkeypatch.setattr(rail, "is_verified_admin_caller", answer)
-    monkeypatch.setattr(rail, "resolve_verified_caller", lambda: "@devpulse" if verdict is True else "@drone")
+    monkeypatch.setattr(RAIL, "is_verified_admin_caller", answer)
+    monkeypatch.setattr(RAIL, "resolve_verified_caller", lambda: "@devpulse" if verdict is True else "@drone")
 
 
 def logged_lines(method) -> list[str]:

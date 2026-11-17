@@ -3,7 +3,7 @@
 # Description: Tests for memory_pool_auto_processed event handler
 # Version: 1.1.0
 # Created: 2026-06-06
-# Modified: 2026-11-15
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/events/memory_pool.py."""
@@ -11,17 +11,22 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(behaviour) — the event wiring in apps/handlers/events/registry.py; the bus tests cover delivery
 
+import sys
+
 import pytest
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 from pathlib import Path
 
-from aipass.ai_mail.apps.modules import email_send
+import aipass.ai_mail as ai_mail
 from aipass.trigger.apps.handlers import error_registry, error_reporter
 from aipass.trigger.apps.handlers.events import error_detected, memory_pool, registry
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.modules import core
+
+# deliver_email_to_branch's home module, reached through the door (the handlers fence refuses a direct import).
+DELIVER_HOME = sys.modules[ai_mail.deliver_email_to_branch.__module__]
 
 
 @pytest.fixture(autouse=True)
@@ -237,7 +242,7 @@ class TestHandleMemoryPoolAutoProcessedFailure:
             error="pool write failed",
         )
 
-        assert any("pool write failed" in call.args[0] for call in mod.logger.warning.call_args_list)
+        assert any("pool write failed" in call.args[0] for call in mod.logger.warning.call_args_list)  # type: ignore[attr-defined]
 
 
 class TestEventRegistration:
@@ -254,7 +259,7 @@ class TestEventRegistration:
         monkeypatch.setattr(core, "trigger", mock_trigger)
 
         # Keeps the adapter setup_handlers builds off ai_mail's real delivery.
-        monkeypatch.setattr(email_send, "deliver_email_to_branch", MagicMock(return_value=(True, None)))
+        monkeypatch.setattr(DELIVER_HOME, "deliver_email_to_branch", MagicMock(return_value=(True, None)))
 
         registry.setup_handlers()
 
