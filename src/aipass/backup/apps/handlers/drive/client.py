@@ -3,7 +3,7 @@
 # Description: Google Drive client — auth, folders, file lookup via @api gateway
 # Version: 2.2.0
 # Created: 2026-04-16
-# Modified: 2026-10-31
+# Modified: 2026-11-17
 # =============================================
 
 """Google Drive client.
@@ -23,10 +23,7 @@ from aipass.prax import logger
 from ..audit import trail
 
 try:
-    from aipass.api.apps.modules.google_client import (
-        api_call_with_retry,
-        get_drive_service,
-    )
+    from aipass.api import api_call_with_retry, get_drive_service
 
     GOOGLE_API_AVAILABLE = True
 except ImportError:
