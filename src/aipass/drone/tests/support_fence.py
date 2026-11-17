@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: support_fence.py
 # Description: Fence probe for test_handlers_fence.py, run from a kin seat and from foreign copies
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Probe for the handlers fence of apps/handlers/__init__.py (no test_ prefix: never collected).
@@ -25,6 +25,7 @@ BRANCH = "drone"
 HANDLERS = f"aipass.{BRANCH}.apps.handlers"
 A_HANDLER = f"{HANDLERS}.json.json_handler"
 A_DOOR = "aipass.drone.apps.modules.door_broker"
+PACKAGE = f"aipass.{BRANCH}"
 KIN_PROBE = f"aipass.{BRANCH}.tests.support_fence"
 
 
@@ -66,6 +67,11 @@ def _door() -> None:
     importlib.import_module(A_DOOR)
 
 
+def _package() -> None:
+    """The package door handing out a name whose home is a handler."""
+    getattr(importlib.import_module(PACKAGE), "create_identified_connection")
+
+
 def _mock() -> None:
     """mock.patch on a handler path: the import starts in unittest/mock.py and pkgutil."""
     with patch(f"{A_HANDLER}.log_operation"):
@@ -79,6 +85,7 @@ SHAPES = {
     "chain": _chain,
     "sibling": _sibling,
     "door": _door,
+    "package": _package,
     "mock": _mock,
 }
 

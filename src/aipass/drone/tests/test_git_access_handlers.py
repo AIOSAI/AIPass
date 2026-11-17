@@ -3,7 +3,7 @@
 # Description: Tests for the git door handlers — diff, log, show, commit, checkout, PR routing and help
 # Version: 1.0.4
 # Created: 2026-10-08
-# Modified: 2026-11-03
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/git/commit_handler.py and the diff, log, show and checkout handlers beside it."""
@@ -28,7 +28,7 @@ from aipass.drone.apps.plugins.devpulse_ops.auth import (
 from aipass.drone.apps.handlers.git.diff_handler import get_branch_diff
 from aipass.drone.apps.handlers.git.log_handler import get_git_log
 from aipass.drone.apps.handlers.git.show_handler import show_object
-from aipass.prax.apps.modules import dashboard as prax_dashboard
+import aipass.prax
 from aipass.drone.apps.handlers.git import commit_handler
 from aipass.drone.apps.handlers.git.commit_handler import commit_changes
 from aipass.drone.apps.handlers.git.checkout_handler import checkout_branch
@@ -533,10 +533,10 @@ class TestCommitSubjectCap:
         survived). Where the number comes FROM is a property of the source.
         """
         source = inspect.getsource(commit_handler)
-        assert "from aipass.prax.apps.modules.dashboard import SUBJECT_CAP" in source, (
+        assert "from aipass.prax import SUBJECT_CAP" in source, (
             "the cap must be read from prax, never copied into drone"
         )
-        assert commit_handler.SUBJECT_CAP == prax_dashboard.SUBJECT_CAP
+        assert commit_handler.SUBJECT_CAP == aipass.prax.SUBJECT_CAP
 
     def test_over_cap_subject_refused(self, repo_dir: Path) -> None:
         essay = "feat(drone): " + "x" * commit_handler.SUBJECT_CAP

@@ -102,6 +102,27 @@ live verb is fired to prove the trap.
 
 ## The Python API
 
+`aipass.drone` is drone's one import door. Another branch takes every name from it, never from a
+path under `apps/`. The door is lazy and uncached: a bare `import aipass.drone` loads nothing under
+`apps/`, and each read loads only that name's home, the module that defines it. Its `__all__` is
+the public list:
+
+| Names | Home |
+|-------|------|
+| `resolve_branch`, `list_branches`, `branch_exists`, `get_branch_info`, `normalize_branch_arg` | `apps/modules/resolver.py` |
+| `route_command`, `route_all` | `apps/modules/router.py` |
+| `discover_modules`, `get_help`, `get_system_help` | `apps/modules/discovery.py` |
+| `HelpResult` | `apps/handlers/discovery_handler.py` |
+| `CommandResult` | `apps/handlers/executor.py` |
+| `get_registry_path`, `set_registry_path`, `reset_registry_path`, `resolve_aipass_home` | `apps/handlers/registry_handler.py` |
+| `create_identified_connection` | `apps/handlers/broker/client.py` |
+| `BrokerDaemon` | `apps/handlers/broker/daemon.py` |
+| `record_foreign_deletion`, `record_gate_refusal` | `apps/handlers/deletion_log.py` |
+| `RoutingError` and the other exceptions | `apps/handlers/exceptions.py` |
+
+A test patches a name at its home. Nothing is cached on the package, so the next read through the
+door returns the patch. An unknown name raises `AttributeError`.
+
 ```python
 from aipass.drone import resolve_branch, list_branches, route_command
 

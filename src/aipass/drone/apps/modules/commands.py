@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commands.py
 # Description: Module orchestrator for custom command shortcuts
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-03-17
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Module orchestrator for custom command shortcuts."""
@@ -26,9 +26,9 @@ from aipass.drone.apps.handlers.command_registry.lookup import (
     match_command as _match_command,
 )
 from aipass.drone.apps.handlers.command_registry.formatters import (
-    format_activation_results,
-    format_command_list,
-    format_removal,
+    format_activation_results as _format_activation_results,
+    format_command_list as _format_command_list,
+    format_removal as _format_removal,
 )
 from aipass.drone.apps.handlers.help_flags import wants_help
 
@@ -178,6 +178,21 @@ def remove(name: str) -> bool:
 def list_all() -> list[dict[str, Any]]:
     """List all registered custom commands sorted by name."""
     return _list_commands()
+
+
+def format_command_list(commands: list[dict]) -> None:
+    """Display registered custom commands as a table."""
+    _format_command_list(commands)
+
+
+def format_activation_results(branch: str, added: list[str], skipped: list[str]) -> None:
+    """Display what activation registered and what it skipped."""
+    _format_activation_results(branch, added, skipped)
+
+
+def format_removal(name: str, success: bool) -> None:
+    """Display the result of removing a custom command."""
+    _format_removal(name, success)
 
 
 def lookup(name: str) -> dict[str, Any] | None:

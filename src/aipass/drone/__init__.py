@@ -1,89 +1,62 @@
-"""
-AIPass Drone — Command routing & discovery module.
-
-Reference: docs/routing_and_resolution.md
-"""
+"""AIPass Drone's package door: every name another branch takes from drone (docs/routing_and_resolution.md)."""
 
 import importlib
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:  # Import-free type visibility; never executed at runtime.
-    from aipass.drone.apps.modules.config import get_registry_path, reset_registry_path, set_registry_path
-    from aipass.drone.apps.modules.discovery import HelpResult, discover_modules, get_help, get_system_help
-    from aipass.drone.apps.modules import (
-        BranchAlreadyExistsError,
-        BranchNotFoundError,
-        CommandExecutionError,
-        CommandResult,
-        InvalidPathError,
-        RegistryCorruptError,
-        RegistryError,
-        RegistryNotFoundError,
-        RegistryPermissionError,
-        RoutingError,
-    )
-    from aipass.drone.apps.modules.resolver import branch_exists, get_branch_info, list_branches, resolve_branch
-    from aipass.drone.apps.modules.router import route_all, route_command
+__version__ = "1.3.0"
 
-__version__ = "1.2.0"
+_APPS = "aipass.drone.apps"
+_REGISTRY = f"{_APPS}.handlers.registry_handler"
+_EXCEPTIONS = f"{_APPS}.handlers.exceptions"
+_DISCOVERY = f"{_APPS}.modules.discovery"
+_RESOLVER = f"{_APPS}.modules.resolver"
+_ROUTER = f"{_APPS}.modules.router"
+_DELETION_LOG = f"{_APPS}.handlers.deletion_log"
 
-# Lazy (PEP 562): importing this package imports no module, so a foreign `import aipass.drone`
-# is not a kin frame standing between a caller and the handlers fence.
-_LAZY = {
-    **dict.fromkeys(("get_registry_path", "reset_registry_path", "set_registry_path"), "config"),
-    **dict.fromkeys(("HelpResult", "discover_modules", "get_help", "get_system_help"), "discovery"),
-    **dict.fromkeys(("branch_exists", "get_branch_info", "list_branches", "resolve_branch"), "resolver"),
-    **dict.fromkeys(("route_all", "route_command"), "router"),
-    **dict.fromkeys(
-        (
-            "BranchAlreadyExistsError",
-            "BranchNotFoundError",
-            "CommandExecutionError",
-            "CommandResult",
-            "InvalidPathError",
-            "RegistryCorruptError",
-            "RegistryError",
-            "RegistryNotFoundError",
-            "RegistryPermissionError",
-            "RoutingError",
-        ),
-        "",
-    ),
+# Each name's real home: the door loads that one module on access, nothing more.
+_HOMES = {
+    "resolve_branch": _RESOLVER,
+    "list_branches": _RESOLVER,
+    "branch_exists": _RESOLVER,
+    "get_branch_info": _RESOLVER,
+    "normalize_branch_arg": _RESOLVER,
+    "route_command": _ROUTER,
+    "route_all": _ROUTER,
+    "discover_modules": _DISCOVERY,
+    "get_help": _DISCOVERY,
+    "get_system_help": _DISCOVERY,
+    "HelpResult": f"{_APPS}.handlers.discovery_handler",
+    "CommandResult": f"{_APPS}.handlers.executor",
+    "get_registry_path": _REGISTRY,
+    "set_registry_path": _REGISTRY,
+    "reset_registry_path": _REGISTRY,
+    "resolve_aipass_home": _REGISTRY,
+    "create_identified_connection": f"{_APPS}.handlers.broker.client",
+    "BrokerDaemon": f"{_APPS}.handlers.broker.daemon",
+    "record_foreign_deletion": _DELETION_LOG,
+    "record_gate_refusal": _DELETION_LOG,
+    "RoutingError": _EXCEPTIONS,
+    "BranchNotFoundError": _EXCEPTIONS,
+    "BranchAlreadyExistsError": _EXCEPTIONS,
+    "InvalidPathError": _EXCEPTIONS,
+    "RegistryError": _EXCEPTIONS,
+    "RegistryNotFoundError": _EXCEPTIONS,
+    "RegistryCorruptError": _EXCEPTIONS,
+    "RegistryPermissionError": _EXCEPTIONS,
+    "CommandExecutionError": _EXCEPTIONS,
 }
+
+__all__ = list(_HOMES)
 
 
 def __getattr__(name: str) -> Any:
-    """Load a public name from its apps.modules home on first access, then keep it."""
-    if name not in _LAZY:
+    """Hand out a door name from its home on each access; nothing under apps loads at package import."""
+    if name not in _HOMES:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    home = "aipass.drone.apps.modules" + (f".{_LAZY[name]}" if _LAZY[name] else "")
-    value = getattr(importlib.import_module(home), name)
-    globals()[name] = value
-    return value
+    # Never cached on the package: a patch on the home attribute must reach every caller reading through here.
+    return getattr(importlib.import_module(_HOMES[name]), name)
 
 
-__all__ = [
-    "resolve_branch",
-    "list_branches",
-    "branch_exists",
-    "get_branch_info",
-    "route_command",
-    "discover_modules",
-    "get_help",
-    "CommandResult",
-    "HelpResult",
-    "get_system_help",
-    "route_all",
-    "set_registry_path",
-    "get_registry_path",
-    "reset_registry_path",
-    "RoutingError",
-    "BranchNotFoundError",
-    "BranchAlreadyExistsError",
-    "InvalidPathError",
-    "RegistryError",
-    "RegistryNotFoundError",
-    "RegistryCorruptError",
-    "RegistryPermissionError",
-    "CommandExecutionError",
-]
+def __dir__() -> list:
+    """Public names, whether or not they have been resolved yet."""
+    return sorted(set(globals()) | set(__all__))

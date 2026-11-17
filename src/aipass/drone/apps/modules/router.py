@@ -13,7 +13,7 @@ Command routing logic for the AIPass drone module.
 import sys
 from typing import Dict, List, Optional
 
-from aipass.prax.apps.modules.logger import system_logger
+from aipass.prax import logger as system_logger
 from aipass.cli import console
 from aipass.drone.apps.handlers.executor import CommandResult, resolve_timeout
 from aipass.drone.apps.handlers.json import json_handler

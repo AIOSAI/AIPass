@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, List, NamedTuple, Optional
 
-from aipass.prax.apps.modules.logger import system_logger
+from aipass.prax import logger as system_logger
 from .exceptions import CommandExecutionError
 from .executor import DEFAULT_TIMEOUT, CommandResult, execute_command
 from aipass.drone.apps.handlers.json import json_handler

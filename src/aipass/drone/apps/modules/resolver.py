@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from aipass.prax import logger
-from aipass.prax.apps.modules.logger import system_logger
+from aipass.prax import logger as system_logger
 from aipass.cli import console, err_console
 from aipass.drone.apps.handlers.exceptions import BranchNotFoundError
 from aipass.drone.apps.handlers.json import json_handler

@@ -19,7 +19,7 @@ from pathlib import Path
 from aipass.prax import logger
 
 # Commit and plan subjects are the same glance, so one number: read prax's, never copy it.
-from aipass.prax.apps.modules.dashboard import SUBJECT_CAP
+from aipass.prax import SUBJECT_CAP
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.git.lock_handler import find_repo_root
 
