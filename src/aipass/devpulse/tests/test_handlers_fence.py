@@ -3,7 +3,7 @@
 # Description: The handlers fence: a foreign importer is refused, kin and the modules door pass (DPLAN-0404)
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-16
 # =============================================
 
 """Tests for apps/handlers/__init__.py, the fence, in a fresh interpreter per case."""
@@ -18,6 +18,9 @@ from pathlib import Path
 
 import pytest
 
+import aipass.devpulse as front_door
+from aipass.devpulse.apps.handlers import compass
+from aipass.devpulse.apps.handlers.owner import admin_grant
 from aipass.devpulse.tests import support_fence
 
 KIN_PROBE = Path(support_fence.__file__)
@@ -97,6 +100,41 @@ class TestKinAndTheDoorPass:
     def test_the_modules_door_is_open_to_a_foreign_branch(self, foreign_seat, tmp_path):
         """Modules import the handlers on a foreign seat's behalf: kin asked, so the fence lets it through."""
         assert _probe(foreign_seat, "door", tmp_path) == "ALLOWED"
+
+    def test_the_package_front_door_is_open_to_a_foreign_branch(self, foreign_seat, tmp_path):
+        """The one import door: every name it lists reaches a foreign seat through the fence."""
+        assert _probe(foreign_seat, "front", tmp_path) == "ALLOWED"
+
+    def test_the_front_door_hands_out_the_home_objects_and_keeps_no_copy(self, monkeypatch):
+        """Identity with the home, a patch on the home reaches the next read, an unknown name is an error."""
+        assert front_door.recall_decisions is compass.recall_decisions
+        assert front_door.mark_surfaced is compass.mark_surfaced
+        assert front_door.verify_admin_grant is admin_grant.verify_admin_grant
+        assert front_door.compute_signature is admin_grant.compute_signature
+        assert sorted(front_door.__all__) == [
+            "compute_signature",
+            "mark_surfaced",
+            "recall_decisions",
+            "verify_admin_grant",
+        ]
+        swapped = object()
+        monkeypatch.setattr(compass, "recall_decisions", swapped)
+        assert front_door.recall_decisions is swapped
+        with pytest.raises(AttributeError):
+            front_door.door_admin_grant
+
+    def test_a_bare_import_of_the_package_loads_nothing_under_apps(self):
+        """The door is lazy: importing it must not pay for compass or the grant."""
+        code = "import sys, aipass.devpulse; print(sorted(m for m in sys.modules if m.startswith('aipass.devpulse.')))"
+        done = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=120,
+        )
+        assert done.returncode == 0, done.stderr[-600:]
+        assert done.stdout.strip() == "[]", done.stdout
 
     def test_the_apps_package_does_not_import_its_handlers(self):
         """With that import, every foreign import sees apps/__init__.py as the caller and the fence is decorative."""
