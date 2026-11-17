@@ -14,7 +14,7 @@ The logging and monitoring backbone. Every branch logs through prax — `from ai
 
 ```
 prax/
-├── __init__.py                 # Public API, lazy (PEP 562): logger, append_jsonl, json_handler
+├── __init__.py                 # The one import door, lazy (PEP 562), no cache: __all__ is the list
 ├── apps/
 │   ├── prax.py                 # Entry point — discovers modules, routes commands, zero logic
 │   ├── modules/                # One orchestrator per verb: logger, monitor, dashboard,
@@ -54,9 +54,9 @@ prax/
  - Prax is the only logging system. No branch runs its own setup.
  - Infrastructure only — no application logic, no alerting on log content beyond growth rate.
  - No cross-branch file edits. Issue in another branch's code? Mail the owner.
- - Handlers are internal. Other branches import `aipass.prax` or `aipass.prax.apps.modules.*` and nothing deeper.
+ - Handlers are internal. Other branches import from the package door only: `from aipass.prax import <name>`, never a path under `apps/`.
  - Dashboards are generated. Services update their own section through `write_section()`, never by editing the file.
- - Caps other branches read are constants, not numbers to copy: `SUBJECT_CAP`, `DASHBOARD_CHAR_BUDGET` in `apps.modules.dashboard`, contract in `docs/dashboard_caps.md`.
+ - Caps other branches read are constants, not numbers to copy: `SUBJECT_CAP`, `DASHBOARD_CHAR_BUDGET` on the package door, contract in `docs/dashboard_caps.md`.
 
 # Gotchas
 

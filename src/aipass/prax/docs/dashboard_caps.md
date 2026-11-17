@@ -15,7 +15,7 @@ Owner: @prax.
 ## The import
 
 ```python
-from aipass.prax.apps.modules.dashboard import SUBJECT_CAP, DASHBOARD_CHAR_BUDGET, cap_subject
+from aipass.prax import SUBJECT_CAP, DASHBOARD_CHAR_BUDGET, cap_subject
 ```
 
 | Name | Value | Meaning |

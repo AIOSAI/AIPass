@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_logger_module.py
 # Description: Unit tests for PRAX logger module (public API)
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-04-03
 # Modified: 2026-11-16
 # =============================================
@@ -15,6 +15,7 @@
 # sentry: no-test-needed(through_the_command) — append_jsonl()'s writing, covered by tests/test_jsonl_writer.py
 
 import ast
+import importlib
 import json
 import os
 import subprocess
@@ -25,6 +26,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import aipass.prax as door
 from aipass.cli import display
 from aipass.prax.apps.handlers.config import load as config_load
 from aipass.prax.apps.handlers.logging import jsonl_writer
@@ -540,13 +542,13 @@ class TestBrokenChainRaises:
 
         assert namespace["__getattr__"]("logger") is sys.modules[MODULE_NAME].system_logger
 
-    def test_resolved_name_is_cached_in_globals(self):
-        """PEP 562 __getattr__ fires once per name: the second access comes from the module dict."""
+    def test_a_resolved_name_is_not_cached_in_globals(self):
+        """No cache: a name in the module dict would shadow __getattr__ and hide a later patch on its home."""
         namespace = _exec_prax_init()
 
-        first = namespace["__getattr__"]("logger")
+        namespace["__getattr__"]("logger")
 
-        assert namespace["logger"] is first
+        assert "logger" not in namespace
 
     def test_unknown_name_raises_attribute_error(self):
         """__getattr__ must not answer for names the package does not export."""
@@ -677,6 +679,55 @@ class TestStandaloneDoors:
 
         assert cold == {"aipass", "aipass.prax"}
         assert warm == _WRITER_DOOR | {"aipass.prax.apps.handlers.logging.trail"}
+
+
+_OPS = "aipass.prax.apps.handlers.dashboard.operations"
+_REFRESH = "aipass.prax.apps.handlers.dashboard.refresh"
+
+# The public list: each door name and the (home module, attribute) it is the same object as.
+_DOOR_HOMES = {
+    "logger": (MODULE_NAME, "system_logger"),
+    "get_system_logger": (MODULE_NAME, "get_system_logger"),
+    "log_backup_count": (MODULE_NAME, "log_backup_count"),
+    "append_jsonl": ("aipass.prax.apps.handlers.logging.jsonl_writer", "append_jsonl"),
+    "trail": ("aipass.prax.apps.handlers.logging.trail", "trail"),
+    "json_handler": ("aipass.prax.apps.handlers.json.json_service", None),
+    "SUBJECT_CAP": (_OPS, "SUBJECT_CAP"),
+    "DASHBOARD_CHAR_BUDGET": (_OPS, "DASHBOARD_CHAR_BUDGET"),
+    "cap_subject": (_OPS, "cap_subject"),
+    "dashboard_lock": (_OPS, "dashboard_lock"),
+    "refresh_single_dashboard": (_REFRESH, "refresh_single_dashboard"),
+    "refresh_all_dashboards": (_REFRESH, "refresh_all_dashboards"),
+}
+
+
+class TestFrontDoor:
+    """The one import door: every name other branches take, the home's own object, read fresh on each access."""
+
+    def test_the_door_publishes_exactly_the_public_list(self):
+        assert sorted(door.__all__) == sorted(_DOOR_HOMES)
+
+    @pytest.mark.parametrize("name", sorted(_DOOR_HOMES))
+    def test_each_door_name_is_the_object_its_home_gives(self, name):
+        module_name, attribute = _DOOR_HOMES[name]
+        home = importlib.import_module(module_name)
+
+        assert getattr(door, name) is (home if attribute is None else getattr(home, attribute))
+
+    @pytest.mark.parametrize("name", ["logger", "SUBJECT_CAP", "refresh_single_dashboard", "log_backup_count"])
+    def test_a_patch_on_the_home_reaches_a_later_read_through_the_door(self, name, monkeypatch):
+        """Read first, then patch: a cached door would keep handing out the first object."""
+        module_name, attribute = _DOOR_HOMES[name]
+        getattr(door, name)
+        sentinel = object()
+        monkeypatch.setattr(importlib.import_module(module_name), attribute, sentinel)
+
+        assert getattr(door, name) is sentinel
+
+    def test_a_bare_import_loads_nothing_under_apps(self):
+        cold, _ = _aipass_modules_through_the_door()
+
+        assert cold == {"aipass", "aipass.prax"}
 
 
 _TRIGGER_PROBE = """

@@ -196,10 +196,12 @@
       "file": "prax/__init__.py",
       "standard": "encapsulation",
       "lines": [
-        12,
-        13
+        10,
+        16,
+        21,
+        22
       ],
-      "reason": "FPLAN-0932: the TYPE_CHECKING view of the two standalone doors. append_jsonl and trail resolve straight to their handler modules on purpose, never through modules.logger and its graph; a test pins that. Type-checker only: nothing is imported at runtime."
+      "reason": "The TYPE_CHECKING view of the front door: each door name is typed from its real home, and the dashboard names, append_jsonl and trail live in handler modules (they resolve there on purpose, never through a module's re-export or the logger graph; tests pin that). Type-checker only: nothing is imported at runtime."
     },
     {
       "file": "apps/handlers/config/load.py",

@@ -107,10 +107,11 @@ Measured by object identity against a real consumer:
 | `setitem(sys.modules, "aipass.prax")` | REAL |
 | `patch("<the consuming module>.logger")` | **MOCK** |
 
-The cause is in this package's own `__init__.py`: `__getattr__` resolves
-`logger` once and caches the object in `globals()`, so the object is copied at
-the package boundary and copied again into each consumer's globals. Anything
-patched at or above `aipass.prax` is upstream of a copy already taken. **The last
+The cause is the consumer's own from-import: `from aipass.prax import logger`
+copies the object into the consumer's globals at import time. The package door
+caches nothing (`__getattr__` reads the home on every access), but anything
+patched at or above `aipass.prax` is still upstream of the copy the consumer
+already took. **The last
 dot must be resolved at call time**, which only the consumer-module patch does.
 
 **The technique, one line per consuming module:**

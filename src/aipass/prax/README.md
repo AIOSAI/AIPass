@@ -93,9 +93,10 @@ concern: logging setup and rotation, monitoring threads, dashboard refresh and t
 discovery and the registry, the central-file reader, the CLI predicates, the
 config resolution, the background watchers, and the json service every branch shares.
 
-External branches import `aipass.prax` or `aipass.prax.apps.modules.*` only; handlers are
-internal by contract. The public surface is lazy (PEP 562) — `logger`, `append_jsonl` and
-`json_handler` resolve on first access, so importing prax costs nothing until it is used.
+External branches import from one door, the package top file: `from aipass.prax import <name>`,
+never a path under `apps/`. The door is lazy (PEP 562) and caches nothing: each name
+(`__all__` in `__init__.py` is the list) is read from its home on every access, so importing
+prax costs nothing until a name is used, and a patch on the home reaches every later read.
 
 The directory tree lives in this branch's own prompt (`.aipass/aipass_local_prompt.md`) —
 one place, so it cannot disagree with itself.
