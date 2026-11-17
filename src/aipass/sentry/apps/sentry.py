@@ -277,7 +277,7 @@ def print_help() -> None:
     )
     console.print(
         "  [green]drone @sentry front-door scan[/green]                "
-        "[dim]# Count cross-branch imports reaching under apps/ (counting mode)[/dim]"
+        "[dim]# Fleet counts for the front_door standard, per branch and target[/dim]"
     )
     console.print(
         "  [green]drone @sentry bypass prune @flow[/green]             "

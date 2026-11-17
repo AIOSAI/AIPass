@@ -15,7 +15,7 @@ NAME_RATCHET_GATES = False
 
 # Standards consulted (scored + not_applicable): 83 aipass checkers + diagnostics. Moves by hand only, so a
 # checker that vanishes (retired, or its import broken) turns this job red instead of averaging one fewer.
-EXPECTED_STANDARDS = 85
+EXPECTED_STANDARDS = 86
 
 src = Path("src/aipass")
 pack = src / "sentry/apps/handlers/aipass_standards"

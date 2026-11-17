@@ -6,8 +6,8 @@
 # Modified: 2026-11-16
 # =============================================
 
-"""The `front-door` verb, counting mode. A measurement, not yet a rule: no finding fails
-anything, nothing scores, no bypass row is read.
+"""The `front-door` verb: fleet counts for the `front_door` standard, read the same way the
+row reads a file. The verb judges nothing; the audit row scores and waives.
 
 A bare call describes the verb; `scan` runs it over the tracked tree. `--sites` also prints
 every cross-branch import site with its call. A tree git cannot list or an unreadable file
@@ -18,8 +18,7 @@ counted; an unknown argument exits 7.
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from aipass.cli import console
-from aipass.cli.apps.modules import error
+from aipass.cli import console, error
 from aipass.sentry.apps.handlers.aipass_standards import front_door_count
 from aipass.sentry.apps.handlers.audit_tests import refusal
 from aipass.sentry.apps.handlers.bypass.ignore_handler import find_repo_root
@@ -110,7 +109,7 @@ def _print_sites(found: List[front_door_count.Site]) -> None:
 
 def _print_table(rows: Dict) -> None:
     """Per branch: findings as importer (out) and as target (in), then the clean cross-branch counts."""
-    console.print("[bold cyan]Front door, counting mode[/bold cyan] - findings reach under another branch's apps/")
+    console.print("[bold cyan]Front door, fleet counts[/bold cyan] - findings reach under another branch's apps/")
     header = f"{'branch':16}" + "".join(f"{label:>11}" for label, _ in _COLUMNS)
     _plain(header)
     for branch in sorted(rows):
@@ -177,7 +176,7 @@ def print_help() -> None:
 def print_introspection() -> None:
     """What this verb is, shown when it is called with no arguments."""
     console.print()
-    console.print("[bold cyan]front-door[/bold cyan] - counting mode for the front-door import rule")
+    console.print("[bold cyan]front-door[/bold cyan] - fleet counts for the front_door standard")
     console.print()
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print("  [dim]- aipass_standards/front_door_count.py (scan_tracked, tally)[/dim]")

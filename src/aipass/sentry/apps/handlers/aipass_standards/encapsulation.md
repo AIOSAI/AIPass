@@ -6,9 +6,10 @@
 
 ## Core Principle
 
-Handlers are implementation details. Modules are the public API.
+Handlers are implementation details. Across branches, the public API is the branch's front
+door, `from aipass.<branch> import <name>` (the `front_door` standard).
 
-**WHY:** When Branch A imports Branch B's handlers directly, it creates tight coupling that breaks when handlers change. Modules provide stable entry points that can evolve internally without breaking callers.
+**WHY:** When Branch A imports Branch B's handlers directly, it creates tight coupling that breaks when handlers change. The front door is the stable entry point: everything under `apps/` can move without breaking a caller.
 
 ---
 
@@ -24,18 +25,19 @@ from aipass.flow.apps.handlers.plan.validator import validate_plan
 
 **GOOD:**
 ```python
-# Use module entry point
-from aipass.flow.apps.modules.plan_validator import validate_plan
+# The front door
+from aipass.flow import validate_plan
 ```
 
-**WHY:** Handlers are internal to their branch. If Flow restructures its handlers, API breaks. Modules provide stable interfaces.
+**WHY:** Handlers are internal to their branch. If Flow restructures its handlers, API breaks. The front door provides the stable interface.
 
 ---
 
 ### 2. Inside a Branch, Any Handler May Import Any Handler
 
 Inside a branch, any handler may import any handler, in any package, absolute or relative.
-Across branches, only the entry point: another branch's handlers are never imported (rule 1).
+Across branches, only the front door: another branch's handlers are never imported (rule 1),
+and nothing under its `apps/` is (the `front_door` standard).
 
 **GOOD:**
 ```python
@@ -82,19 +84,16 @@ from aipass.api.apps.modules.openrouter_client import get_response
 
 ---
 
-## Exception: Service Branches
+## Service Branches Use Their Doors Too
 
-These service imports ARE allowed everywhere because they provide system-wide utilities:
+prax and cli serve every branch, and every branch reaches them through their front doors:
 
 ```python
-# Prax logger - allowed anywhere
-from aipass.prax.apps.modules.logger import system_logger as logger
-
-# CLI services - allowed anywhere
-from aipass.cli.apps.modules import console, header, success, error
+from aipass.prax import logger
+from aipass.cli import console, header, success, error
 ```
 
-**Note:** These are MODULE imports, not handler imports. Service branches expose functionality through modules, demonstrating the pattern.
+The long paths under their `apps/` are `front_door` findings like any other.
 
 ---
 

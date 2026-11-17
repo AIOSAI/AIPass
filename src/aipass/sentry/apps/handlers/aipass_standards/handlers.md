@@ -141,7 +141,7 @@ json_handler.log_operation("validation_run", {"files": 42})
 
 **Core principle:** Handlers cannot import MODULES from their own branch (prevents circular dependencies).
 
-**Strings are imports (2026-10-07, DPLAN-0404).** The cross-branch rule also reads a handlers target named as a call's string: `importlib.import_module("aipass.<other>.apps.handlers...")` (any alias, or a seam whose name ends in `import_module`), `pkgutil.resolve_name(...)`, `patch(...)` (first positional), `<x>.setattr("...", ...)`, and a bare name bound once at module level to such a string. The conviction quotes the line with `(string import)`. Prose (docstrings, comments, assignments, log messages) is not read; same-branch targets stay allowed. Reach another branch through its door, `aipass.<owner>.apps.modules.door_<subject>`.
+**Strings are imports (2026-10-07, DPLAN-0404).** The cross-branch rule also reads a handlers target named as a call's string: `importlib.import_module("aipass.<other>.apps.handlers...")` (any alias, or a seam whose name ends in `import_module`), `pkgutil.resolve_name(...)`, `patch(...)` (first positional), `<x>.setattr("...", ...)`, and a bare name bound once at module level to such a string. The conviction quotes the line with `(string import)`. Prose (docstrings, comments, assignments, log messages) is not read; same-branch targets stay allowed. Reach another branch through its front door, `from aipass.<owner> import <name>`.
 
 ### Why This Matters
 
@@ -193,11 +193,11 @@ from aipass.sentry.apps.modules.create_thing import something  # ❌ NO - circul
 # flow/apps/modules/list_plans.py
 from aipass.prax.apps.handlers.logging.setup import get_logger  # ❌ BLOCKED
 
-# ✅ CORRECT - use the module (public API)
-from aipass.prax.apps.modules.logger import system_logger as logger
+# ✅ CORRECT - use the front door
+from aipass.prax import logger
 ```
 
-**Why forbidden:** Handlers are internal implementation. External branches use MODULES.
+**Why forbidden:** Handlers are internal implementation. External branches use the front door.
 
 ### Real Example - Error Package
 
@@ -264,7 +264,7 @@ def create_branch(name):
 
 **Status:** ✅ Standard (2025-11-29)
 
-**Core principle:** Handlers are INTERNAL to their branch. External consumers use MODULES as the public API.
+**Core principle:** Handlers are INTERNAL to their branch. External consumers use the branch's front door, `from aipass.<branch> import <name>`.
 
 ### The Import Hierarchy
 
@@ -312,24 +312,24 @@ from aipass.flow.apps.handlers.json.json_handler import log_operation  # ✅ OK 
 # ❌ WRONG - reaching into Prax handlers from Flow
 from aipass.prax.apps.handlers.logging.setup import get_logger
 
-# ✅ RIGHT - import Prax module (public API)
-from aipass.prax.apps.modules.logger import system_logger as logger
+# ✅ RIGHT - import from Prax's front door
+from aipass.prax import logger
 ```
 
 ```python
 # ❌ WRONG - reaching into CLI handlers from Spawn
 from aipass.cli.apps.handlers.error_handler import track_operation
 
-# ✅ RIGHT - import CLI module (public API)
-from aipass.cli.apps.modules.error_tracking import track_operation
+# ✅ RIGHT - import what CLI's front door hands out
+from aipass.cli import error
 ```
 
 ### Handlers and modules/ - own branch BLOCKED, other branches ALLOWED
 
 A handler importing its **own** branch's `modules/` inverts the layering (orchestration lives in
-modules/) and is the shape that can close a cycle. Another branch's `modules/` is that branch's
-public gateway, the door the independence rule sends cross-branch callers to, so a handler may
-import it. Prax's logger and cli's modules are allowed everywhere. When the file's branch cannot be
+modules/) and is the shape that can close a cycle. Another branch is reached through its front
+door, `from aipass.<branch> import <name>`; this rule does not convict another branch's
+`modules/`, the `front_door` standard does. When the file's branch cannot be
 told from its path, the independence rule is not evaluable and says so, while the orchestration
 rule stays strict.
 

@@ -1,17 +1,16 @@
 # =================== AIPass ====================
 # Name: front_door_count.py
-# Description: Front-door counting mode: every cross-branch import that reaches under another branch's apps/
-# Version: 1.0.0
+# Description: Front-door detection: every cross-branch import that reaches under another branch's apps/
+# Version: 1.1.0
 # Created: 2026-11-16
 # Modified: 2026-11-16
 # =============================================
 
-"""Front-door counting mode: a measurement, not yet a rule.
+"""Front-door detection, shared by the ``front_door`` standard and the ``front-door`` verb.
 
-The rule measured: an import crossing into another branch goes through its front door,
+The rule: an import crossing into another branch goes through its front door,
 ``from aipass.<branch> import <name>``. One whose path reaches under ``apps`` is a finding.
-Nothing here scores, fails a file or reads a bypass row. The file is not a ``*_check.py``, so
-``discover_checkers`` never loads it and no audit number moves.
+This file only reads; ``front_door_check.py`` scores and waives, the verb counts the fleet.
 """
 
 import ast
@@ -128,6 +127,15 @@ def owner_of(rel: str) -> str:
     """The branch a repo-relative path sits in: the directory after ``src/aipass/``, else empty."""
     parts = rel.split("/")
     return parts[2] if parts[:2] == ["src", "aipass"] and len(parts) > 3 else ""
+
+
+def owner_of_path(file_path: str) -> str:
+    """The branch an absolute path sits in, read from its last ``src/aipass/`` pair, else empty."""
+    parts = Path(file_path).resolve().parts
+    for index in range(len(parts) - 1, 0, -1):
+        if parts[index - 1] == "src" and parts[index] == "aipass":
+            return owner_of("/".join(parts[index - 1 :]))
+    return ""
 
 
 def _literal_names(value: ast.expr, lists: Dict[str, List[str]]) -> Optional[List[str]]:
