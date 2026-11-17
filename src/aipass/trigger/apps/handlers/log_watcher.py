@@ -24,7 +24,7 @@ from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers.error_registry import report as registry_report
 
 from aipass.prax import logger
-from aipass.prax.apps.modules.logger import log_backup_count
+from aipass.prax import log_backup_count
 from aipass.trigger.apps.handlers import failure_report
 
 

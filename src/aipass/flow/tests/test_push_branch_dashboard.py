@@ -3,7 +3,7 @@
 # Description: Tests for push_branch_dashboard handler — branch dashboard push
 # Version: 1.4.0
 # Created: 2026-04-26
-# Modified: 2026-11-14
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/dashboard/push_branch_dashboard.py and aipass.prax's dashboard module."""
@@ -18,7 +18,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from aipass.flow.apps.handlers.dashboard import push_branch_dashboard
-from aipass.prax.apps.modules.dashboard import DASHBOARD_CHAR_BUDGET, SUBJECT_CAP, dashboard_lock
+from aipass.prax import DASHBOARD_CHAR_BUDGET, SUBJECT_CAP, dashboard_lock
 
 _MOD = "aipass.flow.apps.handlers.dashboard.push_branch_dashboard"
 

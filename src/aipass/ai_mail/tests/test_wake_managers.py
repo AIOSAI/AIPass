@@ -3,7 +3,7 @@
 # Description: Tests for the wake's manager lanes, the wake-back opt-out, the Fable grant read and the dashboard refresh
 # Version: 1.0.2
 # Created: 2026-10-08
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's manager lanes, wake-back and wake_dashboard.py's refresh."""
@@ -22,7 +22,7 @@ from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
 import aipass.ai_mail.apps.handlers.dispatch.wake_dashboard as wake_dashboard_mod
-import aipass.prax.apps.modules.dashboard as prax_dashboard_mod
+import aipass.prax
 from aipass.ai_mail.apps.modules.door_wake import TRANSCRIPT_NAMES
 from aipass.ai_mail.apps.handlers.dispatch import register as register_mod
 from aipass.ai_mail.apps.handlers.dispatch.wake_dashboard import refresh_recipient_dashboard
@@ -594,9 +594,8 @@ class TestRecipientDashboardRefresh:
 
     @staticmethod
     def _prax(monkeypatch, fake=None, fleet_guard=True):
-        """Patch the prax entry point where the wake imports it from — the
-        MODULE door (apps/modules/dashboard.py), prax's published surface."""
-        prax_refresh = prax_dashboard_mod
+        """Patch the refresh at its home: the wake takes it from the uncached prax door at call time."""
+        prax_refresh = sys.modules[aipass.prax.refresh_single_dashboard.__module__]
 
         if fake is not None:
             monkeypatch.setattr(prax_refresh, "refresh_single_dashboard", fake)

@@ -33,7 +33,7 @@ def refresh_recipient_dashboard(branch_path: Path, email: str, status: "Dispatch
     def _run() -> None:
         try:
             # Local import: a broken prax dashboard must not be an ImportError that kills every wake.
-            from aipass.prax.apps.modules.dashboard import refresh_single_dashboard
+            from aipass.prax import refresh_single_dashboard
 
             outcome["result"] = refresh_single_dashboard(branch_path)
         except Exception as exc:  # every failure is the same fail-open

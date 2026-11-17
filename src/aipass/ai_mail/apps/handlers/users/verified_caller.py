@@ -92,7 +92,7 @@ def verify_admin_caller(
 ) -> Tuple[bool, str]:
     """Run the full 5-leg admin-grant check."""
     try:
-        from aipass.devpulse.apps.modules.door_admin_grant import verify_admin_grant
+        from aipass.devpulse import verify_admin_grant
     except ImportError as exc:
         logger.warning("[identity] admin lane dark — reference implementation unavailable: %s", exc)
         return False, f"admin lane dark: devpulse admin_grant reference unavailable ({exc})"

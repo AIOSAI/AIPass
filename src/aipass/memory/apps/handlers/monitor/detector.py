@@ -18,7 +18,7 @@ from typing import List, Dict, Any
 from dataclasses import dataclass
 
 from aipass.memory.apps.handlers import repo_root, write_fence
-from aipass.prax.apps.modules.logger import get_system_logger
+from aipass.prax import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
 

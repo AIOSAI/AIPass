@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import Dict, Any
 
 from aipass.memory.apps.handlers import repo_root
-from aipass.prax.apps.modules.logger import get_system_logger
+from aipass.prax import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 
 logger = get_system_logger()

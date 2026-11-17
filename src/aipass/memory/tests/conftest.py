@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for memory tests — write fence, infrastructure stand-ins, live-fleet guards
 # Version: 1.4.0
 # Created: 2026-03-07
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # Category: memory/tests
 # =============================================
 
@@ -58,6 +58,7 @@ def _mock_infrastructure(monkeypatch):
     prax_mod.__path__ = [str(Path(__file__).resolve().parents[2] / "prax")]
     prax_mod.logger = mock_logger  # type: ignore[attr-defined]
     prax_mod.json_handler = _prax_json_service  # type: ignore[attr-defined]
+    setattr(prax_mod, "get_system_logger", MagicMock(return_value=mock_logger))
     prax_modules_mod = MagicMock()
     prax_modules_mod.logger = MagicMock()
     prax_modules_mod.logger.get_system_logger = MagicMock(return_value=mock_logger)

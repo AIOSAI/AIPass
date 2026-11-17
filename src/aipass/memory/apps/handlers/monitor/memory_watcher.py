@@ -25,7 +25,7 @@ from watchdog.events import FileSystemEventHandler
 from aipass.memory.apps.handlers.monitor.detector import RegistryUnreadable, check_single_file
 from aipass.memory.apps.handlers import repo_root
 from aipass.memory.apps.handlers.repo_root import exists_exactly
-from aipass.prax.apps.modules.logger import get_system_logger
+from aipass.prax import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.storage.lane import memory_python

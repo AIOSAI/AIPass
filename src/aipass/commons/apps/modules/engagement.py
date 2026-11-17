@@ -10,7 +10,7 @@
 
 from typing import List
 
-from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: F401 - the imports standard requires the prax logger in every module
+from aipass.prax import logger  # noqa: F401 - the imports standard requires the prax logger in every module
 from aipass.cli import console, error, success
 
 from aipass.commons.apps.handlers.engagement.engagement_ops import generate_prompt, create_event

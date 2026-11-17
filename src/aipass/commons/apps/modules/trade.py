@@ -17,7 +17,7 @@ Handles: gift, trade, drop, find, mint commands.
 
 from typing import List
 
-from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: F401 - the imports standard requires the prax logger in every module
+from aipass.prax import logger  # noqa: F401 - the imports standard requires the prax logger in every module
 from aipass.cli import console, error, warning
 
 from rich.panel import Panel

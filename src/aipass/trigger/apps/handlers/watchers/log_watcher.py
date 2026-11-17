@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from aipass.prax import logger
-from aipass.prax.apps.modules.logger import log_backup_count
+from aipass.prax import log_backup_count
 from aipass.trigger.apps.config import TRIGGER_ROOT
 from aipass.trigger.apps.handlers.json import json_handler
 

@@ -16,7 +16,7 @@ import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from aipass.prax.apps.modules.logger import get_system_logger
+from aipass.prax import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.json.entry_limits import load_entry_limits, classify_entries

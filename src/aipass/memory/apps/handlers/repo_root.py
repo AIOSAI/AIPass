@@ -14,7 +14,7 @@ Never cwd (callers walk at import time; a gone cwd raises), names in exact case,
 import os
 from pathlib import Path
 
-from aipass.prax.apps.modules.logger import get_system_logger
+from aipass.prax import get_system_logger
 
 logger = get_system_logger()
 

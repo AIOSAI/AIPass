@@ -23,7 +23,7 @@ from aipass.flow.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 # Import the caps, never retype them: `sections.flow` has two writers (prax's refresh and this push).
-from aipass.prax.apps.modules.dashboard import DASHBOARD_CHAR_BUDGET, cap_subject, dashboard_lock
+from aipass.prax import DASHBOARD_CHAR_BUDGET, cap_subject, dashboard_lock
 
 _PKG_ROOT = Path(__file__).resolve().parents[4]
 FLOW_ROOT = _PKG_ROOT / "flow"

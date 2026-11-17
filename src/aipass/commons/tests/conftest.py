@@ -3,7 +3,7 @@
 # Description: The Commons test configuration
 # Version: 1.2.1
 # Created: 2026-03-07
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """The Commons - Test Configuration"""
@@ -26,7 +26,7 @@ import pytest
 logger = logging.getLogger(__name__)
 
 try:
-    from aipass.prax.apps.modules.logger import system_logger as logger
+    from aipass.prax import logger
 except ImportError:
     logger.warning("[conftest] prax logger unavailable — using stdlib logging")
 

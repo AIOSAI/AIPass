@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict
 
-from aipass.prax.apps.modules.logger import get_system_logger
+from aipass.prax import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.json import entry_limits

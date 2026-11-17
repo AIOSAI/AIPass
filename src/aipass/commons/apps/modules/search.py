@@ -14,7 +14,7 @@ Handles: search, log commands.
 
 from typing import List
 
-from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: F401 - the imports standard requires the prax logger in every module
+from aipass.prax import logger  # noqa: F401 - the imports standard requires the prax logger in every module
 from aipass.cli import console, error
 
 from aipass.commons.apps.handlers.search.search_ops import run_search, run_log_export

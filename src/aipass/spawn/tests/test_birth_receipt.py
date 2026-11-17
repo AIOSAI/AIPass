@@ -3,7 +3,7 @@
 # Description: Birth receipt lane — a newborn arrives carrying .trinity/.template_version.json
 # Version: 1.2.2
 # Created: 2026-08-27
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/receipt_ops.py and the birth-receipt lane it drives through apps/modules/core.py."""
@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from aipass.hooks.apps.modules import grounding_content
-from aipass.prax.apps.modules import dashboard
+import aipass.prax
 from aipass.spawn.apps.handlers import delete_ops, mint_ops, receipt_ops, update_ops
 from aipass.spawn.apps.handlers.class_registry import get_available_classes, get_template_dir
 from aipass.spawn.apps.modules import core
@@ -349,7 +349,7 @@ def _prompt_cap() -> int:
 def _dashboard_cap() -> int:
     """@prax's cap, read off its exported name."""
 
-    return int(getattr(dashboard, "DASHBOARD_CHAR_BUDGET"))
+    return int(getattr(aipass.prax, "DASHBOARD_CHAR_BUDGET"))
 
 
 def _memory_file_budgets() -> dict:
