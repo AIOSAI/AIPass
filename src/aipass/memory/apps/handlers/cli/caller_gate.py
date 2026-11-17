@@ -3,7 +3,7 @@
 # Description: Caller Gate Handler: who may name another branch on a verb that writes for it
 # Version: 1.1.0
 # Created: 2026-11-15
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """A seat writes its own branch; @memory's seat and the verified admin (ai_mail's rail) may name another."""
@@ -17,9 +17,9 @@ MEMORY_SEAT = "@memory"
 
 def verified_caller() -> tuple[str, bool]:
     """``(caller, is_admin)`` from the rail; "" when unprovable. Imported per call: a dark rail fails only here."""
-    from aipass.ai_mail.apps.modules import door_verified_caller as rail
+    from aipass.ai_mail import is_verified_admin_caller, resolve_verified_caller
 
-    return rail.resolve_verified_caller(), bool(rail.is_verified_admin_caller())
+    return resolve_verified_caller(), bool(is_verified_admin_caller())
 
 
 def _address(name: str) -> str:

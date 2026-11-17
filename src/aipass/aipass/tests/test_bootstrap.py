@@ -3,7 +3,7 @@
 # Description: Tests for init bootstrap handler (DPLAN-0164)
 # Version: 1.6.0
 # Created: 2026-05-04
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py and the init/update flows it drives."""
@@ -14,6 +14,7 @@
 # sentry: no-test-needed(ruff) — that every module this file imports parses and imports
 
 import json
+import sys
 import uuid
 from datetime import date
 from pathlib import Path
@@ -28,7 +29,7 @@ from aipass.aipass.apps.handlers.init.bootstrap import (
 from aipass.aipass.apps.handlers.init import bootstrap
 from aipass.aipass.apps.handlers.init.scaffold_manifest import read_ignore
 from aipass.aipass.shared import project_home
-from aipass.hooks.apps.modules import door_trust_registry
+from aipass.hooks import enroll
 from aipass.aipass.shared import scaffold_content as sc
 from aipass.aipass.shared.registry_discovery import registries_in
 from aipass.aipass.tests.support_bootstrap import _expected_aipass_home
@@ -698,7 +699,8 @@ def test_init_raises_when_the_trust_registry_cannot_be_imported(tmp_path, monkey
     target = tmp_path / "proj"
     target.mkdir()
     monkeypatch.setattr(project_home, "is_throwaway_path", lambda path: str(path) != str(target.resolve()))
-    monkeypatch.delattr(door_trust_registry, "enroll")  # the import inside _enroll_project now raises ImportError
+    # gone at its home, so the door's import inside _enroll_project raises ImportError
+    monkeypatch.delattr(sys.modules[enroll.__module__], "enroll")
 
     with pytest.raises(ImportError, match="enroll"):
         init_project(target, project_name="untrusted")

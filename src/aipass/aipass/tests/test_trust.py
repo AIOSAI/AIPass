@@ -3,7 +3,7 @@
 # Description: Tests for trust CLI commands, init enrollment, setup.sh enrollment
 # Version: 1.2.6
 # Created: 2026-07-15
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/trust.py and the handlers it drives."""
@@ -21,8 +21,7 @@ import pytest  # pyright: ignore[reportMissingImports]
 
 from aipass.aipass.apps.handlers.init.bootstrap import init_project, update_project
 from aipass.aipass.apps.modules.trust import handle_command
-from aipass.hooks.apps.modules import door_trust_registry
-from aipass.hooks.apps.modules.door_trust_registry import (
+from aipass.hooks import (
     enroll,
     is_trusted,
     read_registry,
@@ -38,7 +37,7 @@ def _isolate_registry(tmp_path, monkeypatch):
     """Redirect the trust registry to a tmp file so tests never touch ~/.aipass.
 
     One setting through hooks' public seam: every verb and trust.py's prune
-    resolve door_trust_registry.registry_path() per call, which reads
+    resolve hooks' registry_path() per call, which reads
     AIPASS_TRUST_REGISTRY.
     """
     fake_registry = tmp_path / "trusted_projects.json"
@@ -343,7 +342,7 @@ def test_update_project_raises_when_the_trust_registry_cannot_be_imported(tmp_pa
         '{"new_hook": {"handler": "aipass.hooks.apps.handlers.test.handle", "enabled": true}}}',
         encoding="utf-8",
     )
-    monkeypatch.delattr(door_trust_registry, "enroll")
+    monkeypatch.delattr(sys.modules[enroll.__module__], "enroll")  # gone at its home: the door's import raises
 
     with pytest.raises(ImportError, match="enroll"):
         update_project(target)
@@ -458,7 +457,7 @@ def test_setup_sh_has_enroll_block():
     body = SETUP_SH.read_text(encoding="utf-8")
     assert _ENROLL_ANCHOR in body
     block = _extract_enroll_block()
-    assert "from aipass.hooks.apps.modules.door_trust_registry import enroll" in block
+    assert "from aipass.hooks import enroll" in block
     assert "enroll(sys.argv[1])" in block
     # Only ever the repo being installed — never a blanket trust.
     assert '"$SCRIPT_DIR"' in block
