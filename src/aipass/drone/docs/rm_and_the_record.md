@@ -104,15 +104,15 @@ behalf of an HMAC-authenticated requester and therefore passes that identity in 
 its own cwd. The broker's protocol audit log is unchanged — that records requests and error codes;
 this records deletions.
 
-Another branch's removals reach the same store through `apps/modules/door_deletion_log.py`, whose
-one export `record_deletion()` takes `lane`, `outcome`, `caller`, `requested`, `resolved`, `target`
+Another branch's removals reach the same store through the package door:
+`from aipass.drone import record_foreign_deletion`, which takes `lane`, `outcome`, `caller`, `requested`, `resolved`, `target`
 and `reason`, plus an optional `measurement` keyed like `measure()`'s and an optional
 `project_root`. Its row reads back beside `rm`'s, with `target` added. It raises `ValueError` on an
 empty `lane`, `outcome`, `caller`, `resolved` or `target`, or on a measurement with other keys, and
 writes nothing: a half row is refused. @spawn's branch and project retirements write through it
 under the `spawn_delete` and `spawn_retire` lanes.
 
-The door's second export, `record_gate_refusal()`, records a `drone rm` the hooks rm gate refused
+The door's `record_gate_refusal()` records a `drone rm` the hooks rm gate refused
 before drone ran. It writes lane `rm_gate`, outcome `refused`, and takes `caller`, `cwd`,
 `requested` (the text as typed), `resolved` (a path, or `None` when the gate could not resolve it;
 `path` is then null), `reason` and an optional `project_root`. An empty `caller`, `cwd`,

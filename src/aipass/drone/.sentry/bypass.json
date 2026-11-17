@@ -116,14 +116,6 @@
       "reason": "Threaded broker entrypoint, exercised by tests/test_broker.py; production uses blocking start(); intentionally not called in shipped non-test code."
     },
     {
-      "file": "apps/handlers/registry_handler.py",
-      "standard": "unused_function",
-      "functions": [
-        "reset_registry_path"
-      ],
-      "reason": "Public API: the package door (__init__.py) hands it out by name through importlib, which this check does not read. It undoes set_registry_path, which api's host config calls; tests/test_resolver.py and test_registry_case_sweep.py call it."
-    },
-    {
       "file": "apps/plugins/devpulse_ops/auth.py",
       "standard": "encapsulation",
       "lines": [

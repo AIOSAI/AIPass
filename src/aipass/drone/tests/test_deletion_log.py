@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_deletion_log.py
 # Description: Every drone delete, and every refused one, leaves a deletion record
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-08-14
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
-"""Tests for apps/handlers/deletion_log.py, the safe_delete path writing it and apps/modules/door_deletion_log.py."""
+"""Tests for apps/handlers/deletion_log.py, the safe_delete path writing it and the package door handing it out."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(stdlib) — json's line encoding of a record; the tests read records back through json
@@ -24,8 +24,7 @@ import pytest
 from aipass.drone.apps.handlers import deletion_log
 from aipass.drone.apps.handlers.router_handler import CallerIdentity
 from aipass.drone.apps.handlers.rm_handler import safe_delete
-from aipass.drone.apps.modules.door_deletion_log import record_deletion as door_record_deletion
-from aipass.drone.apps.modules.door_deletion_log import record_gate_refusal as door_record_gate_refusal
+import aipass.drone as door
 
 # ``drone rm`` is the only sanctioned delete; refusals are records too (a blocked attempt leaves no other trace).
 
@@ -383,7 +382,7 @@ class TestTheGateRecordsItsRefusalThroughTheDoor:
     def test_a_gate_refusal_lands_with_its_lane_cwd_and_no_resolved_path(self, project):
         standing = project / "src" / "aipass" / "canary"
 
-        door_record_gate_refusal(
+        door.record_gate_refusal(
             caller="canary",
             cwd=standing,
             requested="../api/notes.md",
@@ -392,7 +391,7 @@ class TestTheGateRecordsItsRefusalThroughTheDoor:
         )
 
         (record,) = read_records(project)
-        assert door_record_gate_refusal is deletion_log.record_gate_refusal
+        assert door.record_gate_refusal is deletion_log.record_gate_refusal
         assert (record["lane"], record["outcome"], record["caller"]) == ("rm_gate", "refused", "canary")
         assert (record["cwd"], record["requested"], record["path"]) == (str(standing), "../api/notes.md", None)
         assert record["reason"] == "drone rm is the admin seat's alone"
@@ -411,7 +410,7 @@ class TestTheGateRecordsItsRefusalThroughTheDoor:
         monkeypatch.setenv("AIPASS_DELETION_LOG", str(blocked / "d.jsonl"))
 
         with pytest.raises(OSError):
-            door_record_gate_refusal(caller="canary", cwd=project, requested="x", resolved=None, reason="refused")
+            door.record_gate_refusal(caller="canary", cwd=project, requested="x", resolved=None, reason="refused")
 
 
 class TestBounded:
@@ -556,10 +555,10 @@ class TestAnotherBranchRecordsThroughTheDoor:
         gone.write_text("x", encoding="utf-8")
         safe_delete([str(gone)])
 
-        door_record_deletion(**self.ROW, measurement=self.MEASURED)
+        door.record_foreign_deletion(**self.ROW, measurement=self.MEASURED)
 
         rm_row, door_row = read_records(project)
-        assert door_record_deletion is deletion_log.record_foreign_deletion
+        assert door.record_foreign_deletion is deletion_log.record_foreign_deletion
         assert set(TestRecordContents.REQUIRED) <= set(rm_row) & set(door_row)
         assert {k: door_row[k] for k in ("lane", "outcome", "caller", "target", "path", "reason")} == {
             "lane": "spawn_retire",
@@ -575,7 +574,7 @@ class TestAnotherBranchRecordsThroughTheDoor:
     @pytest.mark.parametrize("empty", ["", "  ", None])
     def test_an_empty_required_field_is_refused_and_writes_no_half_row(self, project, field, empty):
         with pytest.raises(ValueError, match=field):
-            door_record_deletion(**{**self.ROW, field: empty})
+            door.record_foreign_deletion(**{**self.ROW, field: empty})
 
         assert read_records(project) == []
 

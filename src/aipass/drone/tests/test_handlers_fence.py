@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_handlers_fence.py
-# Description: The handlers fence: a foreign importer is refused, kin and the modules door pass (DPLAN-0404)
+# Description: The handlers fence: a foreign importer is refused, kin and the package door pass
 # Version: 1.1.0
 # Created: 2026-10-08
 # Modified: 2026-11-17
@@ -126,21 +126,16 @@ class TestAForeignImporterIsRefused:
 
 class TestKinAndTheDoorPass:
     """This branch's own files import freely, the standard library and pytest are
-    transport between them and the fence, and the modules door is open to all."""
+    transport between them and the fence, and the package door is open to all."""
 
     @pytest.mark.parametrize("shape", ["pkg", "deep", "dyn", "chain", "mock"])
     def test_the_branch_itself_is_allowed(self, tmp_path, shape):
         """The probe from its own seat; mock.patch imports from unittest/mock.py and pkgutil.py."""
         assert _probe(KIN_PROBE, shape, tmp_path) == "ALLOWED"
 
-    def test_the_modules_door_is_open_to_a_foreign_branch(self, foreign_seat, tmp_path):
-        """A foreign seat importing this branch's door_broker, which imports the
-        handlers on its behalf: kin asked, so the fence lets it through."""
-        assert _probe(foreign_seat, "door", tmp_path) == "ALLOWED"
-
     def test_the_package_door_is_open_to_a_foreign_branch(self, foreign_seat, tmp_path):
         """A foreign seat reading a handler-homed name through aipass.drone: the door is kin, so it passes."""
-        assert _probe(foreign_seat, "package", tmp_path) == "ALLOWED"
+        assert _probe(foreign_seat, "door", tmp_path) == "ALLOWED"
 
     def test_the_apps_package_does_not_import_its_handlers(self):
         """With that import, every foreign import sees apps/__init__.py as the caller and passes."""

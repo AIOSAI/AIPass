@@ -24,8 +24,7 @@ import aipass
 BRANCH = "drone"
 HANDLERS = f"aipass.{BRANCH}.apps.handlers"
 A_HANDLER = f"{HANDLERS}.json.json_handler"
-A_DOOR = "aipass.drone.apps.modules.door_broker"
-PACKAGE = f"aipass.{BRANCH}"
+A_DOOR = f"aipass.{BRANCH}"
 KIN_PROBE = f"aipass.{BRANCH}.tests.support_fence"
 
 
@@ -63,13 +62,8 @@ def _sibling() -> None:
 
 
 def _door() -> None:
-    """This branch's modules door, which imports the handlers on the caller's behalf."""
-    importlib.import_module(A_DOOR)
-
-
-def _package() -> None:
-    """The package door handing out a name whose home is a handler."""
-    getattr(importlib.import_module(PACKAGE), "create_identified_connection")
+    """The package door reading a handler-homed name, importing the handler on the caller's behalf."""
+    getattr(importlib.import_module(A_DOOR), "create_identified_connection")
 
 
 def _mock() -> None:
@@ -85,7 +79,6 @@ SHAPES = {
     "chain": _chain,
     "sibling": _sibling,
     "door": _door,
-    "package": _package,
     "mock": _mock,
 }
 

@@ -79,10 +79,9 @@ then `@target` resolution, then the module lane. `apps/modules/` holds one orche
 concern — `resolver` and `config` for addressing, `router` for dispatch, `registry` and
 `module_registry` for what exists, `discovery` and `scan` for what a branch can do, `commands` for
 shortcuts, `git_module` for the whole git surface, `rm` for contained deletes and `broker` for the
-daemon that performs them on request. Beside them, the doors are the modules files a foreign
-branch may import: `door_broker` re-exports the broker client's identified connection and the
-daemon, which ai_mail's dispatch monitor reaches the broker through, and `door_deletion_log`
-exports `record_deletion`, through which @spawn writes its removals into the deletion record. `apps/handlers/` holds the implementation, grouped one
+daemon that performs them on request. Another branch imports none of them: it takes every name
+from the package door, `aipass.drone` (`__init__.py`), which hands each one out from its home.
+`apps/handlers/` holds the implementation, grouped one
 directory per concern: `git/` (a handler per verb), `broker/` (socket daemon, client, protocol and
 the server-side path resolver), `scanning/`, `command_registry/` and the json shim every branch
 shares. `apps/plugins/devpulse_ops/` sits outside the three layers on purpose: auth-gated
