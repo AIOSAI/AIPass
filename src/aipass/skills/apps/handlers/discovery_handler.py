@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discovery_handler.py
 # Description: Skill discovery handler
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-03-08
-# Modified: 2026-11-14
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -87,12 +87,11 @@ def discover_skills_in_path(search_path, source_label):
 
 
 def read_skill_md(skill_md_path):
-    """Read a SKILL.md once: (frontmatter metadata, body), or (None, None) without a readable --- block."""
+    """Read a SKILL.md once: (frontmatter metadata, body), or (None, None) without a --- block; unreadable or malformed raises ValueError."""
     try:
         content = Path(skill_md_path).read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        logger.warning(f"Failed to read SKILL.md: {skill_md_path}")
-        return None, None
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError(f"Unreadable SKILL.md at {skill_md_path}: {type(exc).__name__}") from exc
 
     lines = content.strip().splitlines()
     if not lines or lines[0].strip() != "---":

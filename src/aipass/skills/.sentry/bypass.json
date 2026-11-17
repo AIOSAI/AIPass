@@ -9,6 +9,30 @@
       "file": "apps/modules/discovery.py",
       "standard": "introspection",
       "reason": "list is the one verb that takes no arguments: a no-args gate would print introspection in place of `drone @skills list`, the branch's main verb. The module's introspection is reached by `list --help` (pinned in tests/test_discovery.py). Remove if the entry point ever passes list a filter argument."
+    },
+    {
+      "file": "apps/handlers/template.py",
+      "standard": "fallback",
+      "functions": [
+        "_replace_placeholder_in_file"
+      ],
+      "reason": "copytree has already copied the file; a binary file has no {{SKILL_NAME}} to replace, so skipping it is the right answer, not a stand-in."
+    },
+    {
+      "file": "apps/handlers/switch_handler.py",
+      "standard": "fallback",
+      "functions": [
+        "write_state"
+      ],
+      "reason": "Only the 'created' date is defaulted: rewriting over an unreadable state document is the operator's recovery path. read_state still fails closed."
+    },
+    {
+      "file": "apps/handlers/validator.py",
+      "standard": "fallback",
+      "functions": [
+        "_check_pip"
+      ],
+      "reason": "find_spec raising ModuleNotFoundError means a parent package is absent, so the package is missing; reporting it missing is the answer, not a stand-in."
     }
   ],
   "notes": {

@@ -3,7 +3,7 @@
 # Description: Unit tests for skills discovery
 # Version: 1.1.1
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # Category: skills/tests
 # =============================================
 
@@ -116,6 +116,13 @@ class TestMalformedFrontmatterIsRefused:
         with pytest.raises(ValueError, match=f"Frontmatter in {skill_md} is a list"):
             parse_frontmatter(skill_md)
 
+    def test_an_undecodable_file_names_the_file(self, tmp_path):
+        """An unreadable SKILL.md refuses like a malformed one, so it never drops out of discovery unseen."""
+        skill_md = tmp_path / "SKILL.md"
+        skill_md.write_bytes(b"---\nname: \xff\xfe\n---\n")
+        with pytest.raises(ValueError, match=f"Unreadable SKILL.md at {skill_md}"):
+            parse_frontmatter(skill_md)
+
 
 class TestDiscoverSkillsInPath:
     def test_finds_catalog_skills(self):
@@ -180,6 +187,6 @@ class TestParseFrontmatter:
             assert result["name"] == "test"
         Path(f.name).unlink()
 
-    def test_invalid_file(self, tmp_path):
-        result = parse_frontmatter(str(tmp_path / "nonexistent" / "file.md"))
-        assert result is None
+    def test_a_missing_file_refuses(self, tmp_path):
+        with pytest.raises(ValueError, match="Unreadable SKILL.md at"):
+            parse_frontmatter(str(tmp_path / "nonexistent" / "file.md"))
