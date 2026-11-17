@@ -3,7 +3,7 @@
 # Description: front_door_check — the gating row: per-site findings, scoped and whole-file waivers
 # Version: 1.2.0
 # Created: 2026-11-16
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/front_door_check.py."""
