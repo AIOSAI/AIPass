@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: email.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Description: Checks inbox for unread emails on UserPromptSubmit
 # Branch: hooks
 # Layer: apps/handlers/notification
 # Created: 2026-05-21
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Checks branch inbox for unread emails and returns notification text."""
@@ -15,6 +15,7 @@ from collections import Counter
 from pathlib import Path
 
 from aipass.ai_mail import mail_kind
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 
@@ -94,6 +95,14 @@ def _cadence_allows(new_count: int, hook_data: dict) -> bool:
 
 
 def handle(hook_data: dict) -> dict:
+    """Notify of unread mail; each call leaves one json trail entry."""
+    result = _handle(hook_data)
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle", {"exit_code": result.get("exit_code"), "seat": seat})
+    return result
+
+
+def _handle(hook_data: dict) -> dict:
     """Check inbox and return email notification if unread messages exist."""
     branch_root = _find_branch_root()
     if not branch_root:

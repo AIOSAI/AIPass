@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: opencode.py
-# Version: 1.4.0
+# Version: 1.5.0
 # Description: OpenCode bridge — the aipass.ts plugin's calls, mapped to Claude's protocol, answered in one JSON line
 # Branch: hooks
 # Layer: apps/handlers/bridges
 # Created: 2026-10-28
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """OpenCode bridge.
@@ -195,12 +195,14 @@ def run(arg: str, stdin_data: str) -> dict:
         # Cadence and the ledgers key a seat on this variable; the OpenCode server inherits none, or a stale one.
         os.environ[SESSION_ENV] = str(payload["session_id"])
     _mount()
+    from aipass.hooks.apps.handlers.json import json_handler
     from aipass.hooks.apps.modules.engine import run_event
 
     if payload.get("tool") == PATCH_TOOL:
         output, exit_code = _run_patch(arg, payload)
     else:
         output, exit_code = run_event(arg, json.dumps(claude_payload(payload)))
+    json_handler.log_operation("bridge", {"event": arg, "exit_code": exit_code})
     result = answer(output, exit_code)
     key = GROUNDING.get(arg)
     # Only a plugin that says it keeps entries gets one; an older installed copy would drop the text.

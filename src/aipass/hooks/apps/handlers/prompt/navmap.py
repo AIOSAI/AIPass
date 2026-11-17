@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: navmap.py
-# Version: 1.4.3
+# Version: 1.5.0
 # Description: Tier 1 navigation map — periodic prompt injection (UserPromptSubmit); edit-time cap warning (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-06-18
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Loads .aipass/tier1_navmap.md, injected periodically, and warns when an edit leaves it over its cap."""
@@ -14,6 +14,7 @@ import importlib
 import json
 from pathlib import Path
 
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 #: The per-fire budget the file's own header states; injection cuts near 10,000, with no warning at edit time.
@@ -30,6 +31,14 @@ def load_content(hook_data: dict) -> str:
 
 
 def handle(hook_data: dict) -> dict:
+    """Load the tier1 navmap on its cadence; each call leaves one json trail entry."""
+    result = _handle(hook_data)
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle", {"exit_code": result.get("exit_code"), "seat": seat})
+    return result
+
+
+def _handle(hook_data: dict) -> dict:
     """Load tier1 navmap — periodic (cadence period 5) + turn 0 + post-compaction."""
     # A cadence that raises withholds this loader: the engine logs the ERROR, the kernel's banner names why.
     cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
@@ -58,6 +67,14 @@ def _edited_navmaps(hook_data: dict) -> list[Path]:
 
 
 def handle_edit(hook_data: dict) -> dict:
+    """Say when an edit leaves a navmap over its cap; each call leaves one json trail entry."""
+    result = _handle_edit(hook_data)
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle_edit", {"exit_code": result.get("exit_code"), "seat": seat})
+    return result
+
+
+def _handle_edit(hook_data: dict) -> dict:
     """PostToolUse: say, with the count, when an edit leaves a navmap over NAVMAP_CHAR_CAP; never blocks."""
     try:
         sizes = [(path, len(path.read_text(encoding="utf-8"))) for path in _edited_navmaps(hook_data)]

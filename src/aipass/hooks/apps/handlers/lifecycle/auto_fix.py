@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: auto_fix.py
-# Version: 1.8.3
+# Version: 1.9.0
 # Description: Post-edit diagnostics — syntax, lint, type, pattern, sentry checks (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Runs diagnostics on edited files and surfaces errors for the agent to fix."""
@@ -18,6 +18,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
@@ -522,6 +523,14 @@ def _to_model(context: str) -> str:
 
 
 def handle(hook_data: dict) -> dict:
+    """Run diagnostics on an edited file; each call leaves one json trail entry. A raise is the engine's to log."""
+    result = _handle(hook_data)
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle", {"exit_code": result.get("exit_code"), "seat": seat})
+    return result
+
+
+def _handle(hook_data: dict) -> dict:
     """Run diagnostics on edited files and surface errors. A raise is the engine's to log."""
     tool_name = hook_data.get("tool_name", "")
     if tool_name not in EDIT_TOOLS:

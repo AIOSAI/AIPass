@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: codex.py
-# Version: 2.7.0
+# Version: 2.8.0
 # Description: Codex bridge — mounts the promoted hook code, maps apply_patch, fails closed on PreToolUse
 # Branch: hooks
 # Layer: apps/handlers/bridges
 # Created: 2026-07-10
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Codex bridge.
@@ -283,7 +283,10 @@ def main() -> None:
             # Cadence and the ledgers key a seat on this variable; a Codex hook inherits none, or its launcher's.
             os.environ[SESSION_ENV] = str(payload["session_id"])
         _mount()
+        from aipass.hooks.apps.handlers.json import json_handler
+
         output, exit_code = _run_calls(arg, stdin_data)
+        json_handler.log_operation("bridge", {"event": arg, "exit_code": exit_code})
     except BaseException as exc:  # fail closed on the guarded event, however it broke: see _broken
         _broken(event_type, exc)
         return

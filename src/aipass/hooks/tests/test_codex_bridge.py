@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_codex_bridge.py
-# Version: 2.12.0
+# Version: 2.13.0
 # Description: Tests for Codex, OpenCode and Seed bridges: payload mapping, output envelope, apply_patch, fail closed
 # Branch: hooks
 # Layer: tests
@@ -29,6 +29,7 @@ from unittest.mock import patch
 import pytest
 
 from aipass.hooks.apps.handlers.bridges import codex, opencode, seed
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.modules import engine
 import aipass.prax as prax
 
@@ -191,6 +192,38 @@ class TestWrapOutput:
         block = {"decision": "block", "reason": "seat taken"}
         bridge.default = (json.dumps(block), 2)
         assert bridge.run("UserPromptSubmit", {"prompt": "hi"}) == block
+
+
+class TestEveryCallLeavesATrailEntry:
+    """Each codex bridge call appends one entry to its own json trail, an allow as well as a block."""
+
+    BLOCK: tuple[str, int] = (json.dumps({"decision": "block", "reason": "git write blocked"}), 2)
+
+    @pytest.fixture
+    def trail(self, tmp_path, monkeypatch) -> Path:
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+        return tmp_path / "hooks" / "hooks_json" / "codex_log.json"
+
+    def _allow_then_block(self, bridge) -> tuple[dict, dict]:
+        allowed = bridge.run("PreToolUse", {"tool_name": "Bash"})
+        bridge.default = self.BLOCK
+        return allowed, bridge.run("PreToolUse", {"tool_name": "Bash"})
+
+    def test_an_allow_and_a_block_each_write_their_exit_code(self, bridge, trail: Path):
+        self._allow_then_block(bridge)
+        entries = json.loads(trail.read_text(encoding="utf-8"))
+        assert [(entry["operation"], entry["data"]) for entry in entries] == [
+            ("bridge", {"event": "PreToolUse", "exit_code": 0}),
+            ("bridge", {"event": "PreToolUse", "exit_code": 2}),
+        ]
+
+    def test_a_trail_that_cannot_be_written_changes_no_answer(self, bridge, trail: Path):
+        with patch.object(json_handler, "log_operation", return_value=False) as logged:
+            allowed, blocked = self._allow_then_block(bridge)
+        assert allowed == {}
+        assert blocked["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert [call.args[0] for call in logged.call_args_list].count("bridge") == 2
+        assert not trail.exists()
 
 
 class TestApplyPatchMapping:

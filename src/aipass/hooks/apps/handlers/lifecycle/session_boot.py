@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: session_boot.py
-# Version: 4.6.4
+# Version: 4.7.0
 # Description: Boot wrapper — attach-first menu, resumes by pointer (0448), steps aside while dispatched (0449)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-06-30
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Boot wrapper for Claude Code sessions.
@@ -23,6 +23,7 @@ import sys
 import time
 from pathlib import Path
 
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 _DEFAULT_ARGS = ["--permission-mode", "bypassPermissions"]
@@ -368,8 +369,9 @@ def _warn_on_version_drift(claude_bin: str) -> str:
 
 
 def boot(cwd: str | None = None, extra_args: list[str] | None = None) -> dict:
-    """Boot Claude Code — present menu when sessions exist."""
+    """Boot Claude Code — present menu when sessions exist. The trail entry comes first: most paths exec away."""
     cwd = cwd or str(Path.cwd().resolve())
+    json_handler.log_operation("boot", {"seat": cwd, "headless": bool(extra_args and "-p" in extra_args)})
     branch = Path(cwd).name
     claude_bin = _resolve_claude_binary()
 

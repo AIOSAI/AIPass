@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: seed.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Seed bridge — a hooks.json command row of a Seed head, handed to the engine, answered in Claude's shape
 # Branch: hooks
 # Layer: apps/handlers/bridges
 # Created: 2026-11-04
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Seed bridge.
@@ -135,9 +135,11 @@ def main() -> None:
             if "provider" not in payload:
                 stdin_data = json.dumps({**payload, "provider": PROVIDER})
         _mount()
+        from aipass.hooks.apps.handlers.json import json_handler
         from aipass.hooks.apps.modules.engine import run_event
 
         output, exit_code = run_event(arg, stdin_data)
+        json_handler.log_operation("bridge", {"event": arg, "exit_code": exit_code})
     except BaseException as exc:  # fail closed on the guarded event, however it broke: see _broken
         _broken(event_type, exc)
         return

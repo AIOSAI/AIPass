@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: compact.py
-# Version: 1.1.3
+# Version: 1.2.0
 # Description: Injects live state for post-compact recovery (PreCompact)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Reads branch state and injects recovery context before compaction."""
@@ -16,6 +16,7 @@ import os
 import subprocess
 from pathlib import Path
 
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 
@@ -72,6 +73,14 @@ def _get_git_info() -> str | None:
 
 
 def handle(hook_data: dict) -> dict:
+    """Inject live branch state after a compact; each call leaves one json trail entry."""
+    result = _handle(hook_data)
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle", {"exit_code": result.get("exit_code"), "seat": seat})
+    return result
+
+
+def _handle(hook_data: dict) -> dict:
     """Inject live branch state for post-compact recovery."""
     try:
         cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")

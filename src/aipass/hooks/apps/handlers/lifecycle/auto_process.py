@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: auto_process.py
-# Version: 1.3.3
+# Version: 1.4.0
 # Description: Kicks @memory's auto-process once per session and on pre-compact (TDPLAN-0005)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-06-06
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Kicks @memory's auto_process in a detached child; the work leaves the prompt lane.
@@ -17,6 +17,7 @@ import os
 import tempfile
 from pathlib import Path
 
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 _GUARD_DIR = Path(tempfile.gettempdir())
@@ -44,9 +45,15 @@ def _mark_session_ran() -> None:
 
 
 def handle(hook_data: dict) -> dict:
-    """Kick @memory's detached auto-process, never inline. A refusal marks the guard; a failed kick or raise retries."""
-    _ = hook_data
+    """Kick @memory's detached auto-process; each call leaves one json trail entry."""
+    result = _handle()
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle", {"exit_code": result.get("exit_code"), "seat": seat})
+    return result
 
+
+def _handle() -> dict:
+    """Kick @memory's detached auto-process, never inline. A refusal marks the guard; a failed kick or raise retries."""
     if _already_ran_this_session():
         return {"stdout": "", "exit_code": 0}
 

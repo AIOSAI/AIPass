@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: post_compact_regrounding.py
-# Version: 2.2.3
+# Version: 2.3.0
 # Description: Mid-turn grounding backstop after compaction, budgeted per fire (PostToolUse, DPLAN-0276, #752)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-31
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Re-grounds the agent after compaction even when no UserPromptSubmit arrives.
@@ -21,6 +21,7 @@ left; the last part stamps completion so the next turn-0 fire-all stands down.
 import importlib
 import json
 
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 #: 10% under Claude Code's 10,000-unit limit; the hard ceiling for every fire, headers and markers included.
@@ -185,6 +186,14 @@ def _pack_once(sections: list[tuple[str, str]], instruction: str, budget: int, t
 
 
 def handle(hook_data: dict) -> dict:
+    """Inject the next due re-ground part; each call leaves one json trail entry."""
+    result = _handle(hook_data)
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle", {"exit_code": result.get("exit_code"), "seat": seat})
+    return result
+
+
+def _handle(hook_data: dict) -> dict:
     """Inject the next budgeted part of the post-compact re-ground, if one is due."""
     # Uncaught: a raise here is the engine's ERROR and engine.jsonl row, never a quiet skip.
     cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")

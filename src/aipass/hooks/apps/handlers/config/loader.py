@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: loader.py
-# Version: 2.3.1
+# Version: 2.4.0
 # Description: Hook config loader — the AIPass config from AIPASS_HOME, a project's own behind trust, gates always
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-05-19
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Which hook config a session runs. Security never depends on trust (DPLAN-0356 item 1).
@@ -20,6 +20,7 @@ import tempfile
 from pathlib import Path
 
 from aipass.hooks.apps.handlers.config import gates
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 _GUARD_DIR = Path(tempfile.gettempdir())
@@ -221,9 +222,9 @@ def find_project_config() -> dict | None:
 def resolve_config() -> dict:
     """The config a hook call runs: the site's own (find_project_config), else the gate set. Never empty of gates."""
     config = find_project_config()
-    if config is not None:
-        return config
-    return gate_set()
+    found = config is not None
+    json_handler.log_operation("resolve_config", {"source": "project" if found else "gate_set"})
+    return config if found else gate_set()
 
 
 def config_unavailable_reason() -> str:

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: temporal.py
-# Version: 1.1.1
+# Version: 1.2.0
 # Description: Every-turn local date/time/weekday/part-of-day injection (UserPromptSubmit)
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-21
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tiny always-on temporal grounding line — no cadence gating, fires every
@@ -17,6 +17,7 @@ provider's own record of the hook, a string the prompt itself does not contain."
 import re
 from datetime import datetime
 
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 SMOKE_NONCE = re.compile(r"aipass-smoke:([0-9a-f]{12,32})")
@@ -44,6 +45,14 @@ def _format_line(now: datetime) -> str:
 
 
 def handle(hook_data: dict) -> dict:
+    """Inject the local temporal line every turn; each call leaves one json trail entry."""
+    result = _handle(hook_data)
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle", {"exit_code": result.get("exit_code"), "seat": seat})
+    return result
+
+
+def _handle(hook_data: dict) -> dict:
     """Inject the current local temporal line — every turn, no cadence."""
     try:
         line = _format_line(datetime.now().astimezone())

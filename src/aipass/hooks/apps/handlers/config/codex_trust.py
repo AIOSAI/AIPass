@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: codex_trust.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Codex's hook approvals: the trusted_hash it records per hooks.json row, and the rows it holds
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-11-15
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Codex runs a hooks.json row only while its approval in config.toml matches (codex-rs `hook_hash`, 0.164)."""
@@ -16,6 +16,8 @@ import json
 import re
 import sys
 from pathlib import Path
+
+from aipass.hooks.apps.handlers.json import json_handler
 
 tomllib = importlib.import_module("tomllib" if sys.version_info >= (3, 11) else "tomli")
 
@@ -47,7 +49,11 @@ def hook_hash(event: str, group: dict, handler: dict) -> str:
 
 
 def hook_state(config: Path) -> dict:
-    """The [hooks.state] table of *config*; no file is {} (nothing approved), an unreadable one raises."""
-    if not config.is_file():
-        return {}
-    return tomllib.loads(config.read_text(encoding="utf-8")).get("hooks", {}).get("state", {})
+    """The [hooks.state] table of *config*; no file is {} (nothing approved), an unreadable one raises.
+
+    Each call that answers leaves one json trail entry."""
+    state = {}
+    if config.is_file():
+        state = tomllib.loads(config.read_text(encoding="utf-8")).get("hooks", {}).get("state", {})
+    json_handler.log_operation("hook_state", {"config": str(config), "rows": len(state)})
+    return state

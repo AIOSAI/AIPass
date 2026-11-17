@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: session_start.py
-# Version: 1.5.2
+# Version: 1.6.0
 # Description: Resets cadence counter on new chat / clear; injects the culture file; writes the session pointer
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-07
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """SessionStart: resets the cadence counter, injects the culture file, writes the session pointer.
@@ -18,12 +18,21 @@ import json
 import os
 from pathlib import Path
 
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 _SKIP_SOURCES = frozenset({"resume", "compact"})
 
 
 def handle(hook_data: dict) -> dict:
+    """Reset the cadence counter unless resumed; each call leaves one json trail entry."""
+    result = _handle(hook_data)
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle", {"exit_code": result.get("exit_code"), "seat": seat})
+    return result
+
+
+def _handle(hook_data: dict) -> dict:
     """Reset cadence counter unless this is a resume."""
     source = hook_data.get("source", "")
 
@@ -38,6 +47,14 @@ def handle(hook_data: dict) -> dict:
 
 
 def handle_culture(hook_data: dict) -> dict:
+    """Inject the host's culture file; each call leaves one json trail entry."""
+    result = _handle_culture(hook_data)
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle_culture", {"exit_code": result.get("exit_code"), "seat": seat})
+    return result
+
+
+def _handle_culture(hook_data: dict) -> dict:
     """Inject the host's $AIPASS_HOME/.claude/AGENTS.md on purpose, projects too: a project's voice is its AGENTS.md.
 
     Skipped for Claude inside AIPASS_HOME, which reads the file natively there; Codex never does."""
@@ -73,6 +90,14 @@ def _interactive(provider: str, hook_data: dict) -> bool:
 
 
 def handle_session_pointer(hook_data: dict) -> dict:
+    """Record this session as the resume target; each call leaves one json trail entry."""
+    result = _handle_session_pointer(hook_data)
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle_session_pointer", {"exit_code": result.get("exit_code"), "seat": seat})
+    return result
+
+
+def _handle_session_pointer(hook_data: dict) -> dict:
     """Record this session as the branch's resume target, with the CLI running it, so a resume reopens that CLI.
 
     A compact keeps the session, so its pointer is already right. A bridge that names no provider is Claude's.

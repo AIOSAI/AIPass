@@ -1,15 +1,16 @@
 # =================== AIPass ====================
 # Name: tier0_kernel.py
-# Version: 1.3.1
+# Version: 1.4.0
 # Description: Tier 0 kernel — always-on minimal prompt injection (UserPromptSubmit)
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-06-18
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Loads .aipass/tier0_kernel.md — tiny always-on identity + reflex block."""
 
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 
@@ -56,6 +57,14 @@ def _turn_or_none() -> int | None:
 
 
 def handle(hook_data: dict) -> dict:
+    """Load the tier0 kernel on its cadence; each call leaves one json trail entry."""
+    result = _handle(hook_data)
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle", {"exit_code": result.get("exit_code"), "seat": seat})
+    return result
+
+
+def _handle(hook_data: dict) -> dict:
     """Load tier0 kernel — cadence-gated (period from cadence_config.json, default 5)."""
     cadence_down = None
     try:

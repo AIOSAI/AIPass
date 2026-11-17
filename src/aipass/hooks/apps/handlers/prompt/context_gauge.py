@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: context_gauge.py
-# Version: 1.10.1
+# Version: 1.11.0
 # Description: Heads-up to run /prep ($prep on Codex) before auto-compact, and the grounding receipt (UserPromptSubmit)
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-20
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Heads-up so the model banks memories via /prep before the compact ceiling.
@@ -20,6 +20,7 @@ import os
 import tempfile
 from pathlib import Path
 
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 _GUARD_DIR = Path(tempfile.gettempdir())
@@ -94,11 +95,13 @@ def _receipt_line(hook_data: dict) -> str:
 
 
 def handle(hook_data: dict) -> dict:
-    """The context-fill nudge, then the grounding receipt's line when there is one."""
+    """The context-fill nudge, then the grounding receipt's line when there is one; one json trail entry per call."""
     result = _gauge(hook_data)
     line = _receipt_line(hook_data)
     if line:
         result = {**result, "stdout": "\n\n".join(part for part in (result["stdout"], line) if part)}
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle", {"exit_code": result.get("exit_code"), "seat": seat})
     return result
 
 
@@ -109,6 +112,8 @@ def handle_stop(hook_data: dict) -> dict:
     would end pending; at Stop they are stored. A compacted headless run returns from pending the same way.
     """
     _receipt_line(hook_data)
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle_stop", {"exit_code": 0, "seat": seat})
     return {"exit_code": 0, "stdout": ""}
 
 

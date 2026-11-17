@@ -1,14 +1,16 @@
 # =================== AIPass ====================
 # Name: identity.py
-# Version: 1.3.3
+# Version: 1.4.0
 # Description: Injects branch identity from passport.json (UserPromptSubmit), cadence-gated
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-05-22
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Reads .trinity/passport.json and outputs formatted identity for prompt injection."""
+
+from aipass.hooks.apps.handlers.json import json_handler
 
 
 def load_content(hook_data: dict) -> str:
@@ -20,6 +22,14 @@ def load_content(hook_data: dict) -> str:
 
 
 def handle(hook_data: dict) -> dict:
+    """Inject branch identity, cadence-gated; each call leaves one json trail entry."""
+    result = _handle(hook_data)
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle", {"exit_code": result.get("exit_code"), "seat": seat})
+    return result
+
+
+def _handle(hook_data: dict) -> dict:
     """Inject branch identity — cadence-gated (period from cadence_config.json, default 5)."""
     import importlib
 

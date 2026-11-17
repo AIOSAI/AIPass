@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: pre_compact_prep.py
-# Version: 1.6.3
+# Version: 1.7.0
 # Description: Stamps a mechanical AUTO-COMPACT SNAPSHOT into the compacting branch's memory (PreCompact)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-20
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Mechanical /prep AT compact time (DPLAN-0253).
@@ -29,6 +29,7 @@ from pathlib import Path
 
 from aipass.hooks.apps.handlers.config.loader import fleet_rows
 from aipass.hooks.apps.handlers.json import files as json_files
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 _DEFAULT_SUMMARY_CAP = 300
@@ -248,6 +249,14 @@ def _stamp_locked(local_path: Path, summary: str, cap: int) -> bool:
 
 
 def handle(hook_data: dict) -> dict:
+    """Stamp the AUTO-COMPACT SNAPSHOT; each call leaves one json trail entry. A raise is the engine's."""
+    result = _handle(hook_data)
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle", {"exit_code": result.get("exit_code"), "seat": seat})
+    return result
+
+
+def _handle(hook_data: dict) -> dict:
     """Stamp a mechanical AUTO-COMPACT SNAPSHOT into the compacting branch's memory. A raise is the engine's."""
     cwd = hook_data.get("cwd", "") or str(Path.cwd())
     context_window = importlib.import_module("aipass.hooks.apps.modules.context_window")

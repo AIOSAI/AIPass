@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: rollover.py
-# Version: 2.5.0
+# Version: 2.6.0
 # Description: Triggers memory rollover via @memory when files are overdue (PreCompact), naming the compacting branch
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Delegates rollover detection to @memory and triggers rollover if overdue.
@@ -22,6 +22,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 # Contract with @memory's todo_report.READY_PHRASE: the one phrase this handler greps.
@@ -140,6 +141,14 @@ def _run_rollover(branch: str | None, seat: Path) -> tuple[bool, str]:
 
 
 def handle(hook_data: dict) -> dict:
+    """Check memory files for overflow, roll over if due; each call leaves one json trail entry."""
+    result = _handle(hook_data)
+    seat = hook_data.get("cwd", "") if isinstance(hook_data, dict) else ""
+    json_handler.log_operation("handle", {"exit_code": result.get("exit_code"), "seat": seat})
+    return result
+
+
+def _handle(hook_data: dict) -> dict:
     """Check memory files for overflow and trigger rollover if needed."""
     repo_root = _find_repo_root()
     if not repo_root:

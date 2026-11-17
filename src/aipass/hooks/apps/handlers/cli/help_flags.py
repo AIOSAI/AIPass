@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: help_flags.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Help-Flag Detection Handler — did the caller ask, or instruct?
 # Branch: hooks
 # Layer: apps/handlers/cli
 # Created: 2026-08-13
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -13,6 +13,8 @@ Help-Flag Detection Handler
 """
 
 from typing import Sequence
+
+from aipass.hooks.apps.handlers.json import json_handler
 
 # Dashed forms count anywhere: a question must never be executed as an instruction.
 HELP_FLAGS_DASHED = ("--help", "-h")
@@ -27,12 +29,8 @@ def is_help_flag(token: str) -> bool:
 
 
 def wants_help(args: Sequence[str], allow_bare_word: bool = False) -> bool:
-    """Report whether help was requested in an argument list."""
-    if not args:
-        return False
-
-    if is_help_flag(args[0]):
-        return True
-
+    """Report whether help was requested in an argument list; each call leaves one json trail entry."""
     tail = HELP_FLAGS if allow_bare_word else HELP_FLAGS_DASHED
-    return any(token in tail for token in args[1:])
+    asked = bool(args) and (is_help_flag(args[0]) or any(token in tail for token in args[1:]))
+    json_handler.log_operation("wants_help", {"help": asked})
+    return asked

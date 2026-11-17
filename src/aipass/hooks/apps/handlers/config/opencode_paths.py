@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: opencode_paths.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Where OpenCode keeps its store and loads the AIPass plugin; the one place these paths are worked out
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-10-28
-# Modified: 2026-10-28
+# Modified: 2026-11-17
 # =============================================
 
 """OpenCode's file locations, read from the environment on every call (tests and seats set it)."""
@@ -13,6 +13,8 @@
 import os
 import sqlite3
 from pathlib import Path
+
+from aipass.hooks.apps.handlers.json import json_handler
 
 
 def opencode_db_path() -> Path:
@@ -24,8 +26,10 @@ def opencode_db_path() -> Path:
 
 
 def opencode_store() -> sqlite3.Connection:
-    """OpenCode's store, read-only, waiting at most 2 s on its writer."""
-    return sqlite3.connect(f"{opencode_db_path().resolve().as_uri()}?mode=ro", uri=True, timeout=2)
+    """OpenCode's store, read-only, waiting at most 2 s on its writer; each call leaves one json trail entry."""
+    db = opencode_db_path()
+    json_handler.log_operation("opencode_store", {"db": str(db)})
+    return sqlite3.connect(f"{db.resolve().as_uri()}?mode=ro", uri=True, timeout=2)
 
 
 def opencode_plugin_path() -> Path:
