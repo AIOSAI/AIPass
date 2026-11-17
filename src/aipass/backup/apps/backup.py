@@ -17,7 +17,7 @@ from typing import Any
 os.environ.setdefault("AIPASS_BRANCH_NAME", "backup")
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, header, reset_command_state, resolve_exit
+from aipass.cli import console, error, header, reset_command_state, resolve_exit
 
 VERSION = "1.3.0"
 MODULE_NAME = "backup"

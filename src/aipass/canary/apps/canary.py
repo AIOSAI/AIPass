@@ -21,7 +21,7 @@ from typing import Any, List
 # so a later setdefault would name the wrong branch in every log line.
 os.environ.setdefault("AIPASS_BRANCH_NAME", "canary")
 
-from aipass.cli.apps.modules import console, error, reset_command_state, resolve_exit
+from aipass.cli import console, error, reset_command_state, resolve_exit
 from aipass.prax import logger
 
 __version__ = "2.7.0"

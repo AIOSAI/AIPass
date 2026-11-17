@@ -76,7 +76,7 @@ def refresh_recipient_dashboard(branch_path: Path, email: str, status: "Dispatch
 
 
 if __name__ == "__main__":
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     json_handler.log_operation("wake_dashboard_introspection")
     console.print("\nWAKE DASHBOARD REFRESH")

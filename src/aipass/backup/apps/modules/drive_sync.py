@@ -19,7 +19,7 @@ from pathlib import Path
 from rich.progress import Progress
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, mark_command_failed
+from aipass.cli import console, error, mark_command_failed
 
 from aipass.backup.apps.handlers.ignore.patterns import load_spec
 from aipass.backup.apps.handlers.ignore.whitelist import load_whitelist

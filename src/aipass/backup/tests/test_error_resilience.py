@@ -28,7 +28,7 @@ from aipass.backup.apps.handlers.state import timestamps
 from aipass.backup.apps.handlers.state.timestamps import load_timestamps
 from aipass.backup.apps.modules import snapshot
 from aipass.backup.apps.modules.snapshot import run_snapshot
-from aipass.cli.apps.modules import command_failed
+from aipass.cli import command_failed
 
 
 # The live-tree race is reached through run_snapshot, at the two windows the

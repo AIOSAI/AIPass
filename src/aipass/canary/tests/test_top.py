@@ -19,7 +19,7 @@ import pytest
 
 from aipass.canary.apps import canary as canary_entry
 from aipass.canary.apps.handlers.leaderboard import reader
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 
 # Driven through main() with real discovery, so these exit codes are the ones drone returns.
 # A refusal exits 2 AND writes nothing to stdout, plain and --json: a caller reads stdout as the ranking.

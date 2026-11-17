@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 from aipass.api.apps.handlers.json import json_handler
-from aipass.cli.apps.modules import console, header
+from aipass.cli import console, header
 from aipass.prax import logger
 
 _INTEGRATIONS_DIR = Path(__file__).parent.parent / "integrations"

@@ -347,7 +347,7 @@ def get_caller_project_branches(caller_cwd: str) -> Dict[str, str]:
 
 
 if __name__ == "__main__":
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print("\n" + "=" * 70)
     console.print("AI_MAIL HANDLER: registry/read.py")

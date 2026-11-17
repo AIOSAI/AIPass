@@ -217,7 +217,7 @@ def run_purge(mailbox_path: Path) -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print("\n" + "=" * 70)
     console.print("SENT/DELETED AUTO-PURGE HANDLER")

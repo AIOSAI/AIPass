@@ -25,7 +25,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from aipass.ai_mail.apps.handlers.dispatch.wake import BUSY_STEP, DispatchStatus
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 from aipass.ai_mail.apps.modules.dispatch import (
     handle_command,
     print_help,

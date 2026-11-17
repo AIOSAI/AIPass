@@ -16,7 +16,7 @@ dispatch verb (--grant-root, --grant); a gate decides a write through door_dispa
 from typing import List
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 from aipass.ai_mail.apps.handlers.cli.help_flags import wants_help
 from aipass.ai_mail.apps.handlers.dispatch import register
 from aipass.ai_mail.apps.handlers.dispatch.grant import GrantRefused, open_grants

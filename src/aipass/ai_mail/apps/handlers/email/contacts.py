@@ -99,7 +99,7 @@ def all_contacts() -> Dict:
 
 
 if __name__ == "__main__":
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print("\n" + "=" * 70)
     console.print("CONTACTS ADDRESS BOOK HANDLER")

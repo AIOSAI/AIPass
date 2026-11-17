@@ -11,7 +11,7 @@
 from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, header, success, warning
+from aipass.cli import console, error, header, success, warning
 
 from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.report.formatter import _human_bytes, format_age

@@ -17,7 +17,7 @@ import sys
 from datetime import datetime
 from typing import List
 
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 from aipass.api.apps.handlers.json import json_handler
 from aipass.prax import logger
 from aipass.api.apps.handlers.host import pairings as host_pairings

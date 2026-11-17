@@ -31,7 +31,7 @@ from aipass.backup.apps.handlers.project import registry
 from aipass.backup.apps.handlers.schedule import jobs
 from aipass.backup.apps.handlers.state import stop_flag
 from aipass.ai_mail.apps.modules import door_verified_caller
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 
 BRANCH_MODULE = "aipass.backup"
 

@@ -29,7 +29,7 @@ from aipass.ai_mail.apps.ai_mail import (
     route_command,
     main,
 )
-from aipass.cli.apps.modules import error as cli_error
+from aipass.cli import error as cli_error
 
 
 @pytest.fixture(autouse=True)

@@ -16,7 +16,7 @@ import sys
 
 from typing import Callable, List, Optional
 
-from aipass.cli.apps.modules import console, header, success, error, warning
+from aipass.cli import console, header, success, error, warning
 from aipass.api.apps.handlers.json import json_handler
 from aipass.prax import logger  # noqa: F401
 import aipass.api.apps.handlers.google.auth as google_auth

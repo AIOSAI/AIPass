@@ -19,7 +19,7 @@ from pathlib import Path
 
 import aipass.drone as drone
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 
 from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.json.json_handler import InvalidDocument

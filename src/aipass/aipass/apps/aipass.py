@@ -16,7 +16,7 @@ import importlib.metadata
 from pathlib import Path
 from typing import List, Any
 
-from aipass.cli.apps.modules import console, error, resolve_exit, warning
+from aipass.cli import console, error, resolve_exit, warning
 from aipass.prax import logger
 
 try:

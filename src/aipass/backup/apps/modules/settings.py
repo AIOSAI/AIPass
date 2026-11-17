@@ -11,7 +11,7 @@
 import sys
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, warning
+from aipass.cli import console, error, warning
 from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.path.builder import backup_root
 from aipass.backup.apps.handlers.project.config import set_project_setting

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional
 
 from rich.text import Text
-from aipass.cli.apps.modules import console, error as cli_error
+from aipass.cli import console, error as cli_error
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 

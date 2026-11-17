@@ -124,7 +124,7 @@ def is_verified_admin_caller() -> bool:
 
 
 if __name__ == "__main__":
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print()
     console.print("[bold cyan]VERIFIED-CALLER RAIL[/bold cyan]")

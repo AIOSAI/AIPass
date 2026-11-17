@@ -44,7 +44,7 @@ import aipass.trigger.apps.modules.core as trigger_core
 from aipass.ai_mail.apps.handlers.dispatch import register, report
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.modules import email as email_mod
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 
 # Archived tests import modules that no longer exist; state the skip rather than rely on norecursedirs.
 collect_ignore_glob = [".archive/*", "**/.archive/*"]

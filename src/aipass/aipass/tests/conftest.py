@@ -27,7 +27,7 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 import pytest
 
 from aipass.aipass.apps.handlers.json import json_handler
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 
 
 @pytest.fixture(autouse=True)

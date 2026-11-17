@@ -26,7 +26,7 @@ from aipass.ai_mail.apps.handlers.dispatch import grant as grant_mod
 from aipass.ai_mail.apps.handlers.dispatch import register, report
 from aipass.ai_mail.apps.handlers.notify import jsonl_records
 from aipass.ai_mail.apps.modules import grants as grants_module
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 
 
 @pytest.fixture

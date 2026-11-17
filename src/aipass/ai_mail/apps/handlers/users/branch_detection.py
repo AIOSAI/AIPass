@@ -329,7 +329,7 @@ def get_branch_info_from_registry(branch_path: Path) -> Optional[Dict]:
 
 
 if __name__ == "__main__":
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print("\n" + "=" * 70)
     console.print("BRANCH AUTO-DETECTION HANDLER")

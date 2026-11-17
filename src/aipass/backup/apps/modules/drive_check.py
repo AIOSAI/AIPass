@@ -11,7 +11,7 @@
 import sys
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error as cli_error
+from aipass.cli import console, error as cli_error
 
 from aipass.backup.apps.handlers.audit import trail
 

@@ -51,7 +51,7 @@ from aipass.aipass.apps.handlers.baud.phone_setup import (
     ServerStart,
 )
 from aipass.aipass.apps.handlers.json import json_handler
-from aipass.cli.apps.modules import console, warning
+from aipass.cli import console, warning
 from aipass.prax import logger
 
 # aipass install's last print (FPLAN-0642 slice B). The pair command is @api's

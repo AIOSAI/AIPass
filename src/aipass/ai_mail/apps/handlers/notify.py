@@ -217,7 +217,7 @@ def _trim_jsonl(path: Path, max_lines: int, keep_lines: int) -> bool:
 
 
 if __name__ == "__main__":
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print("\n" + "=" * 70)
     console.print("NOTIFICATION FEED WRITER")

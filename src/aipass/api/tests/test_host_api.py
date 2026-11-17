@@ -43,7 +43,7 @@ from aipass.api.apps.modules import host_config_cli as host_config_cli_module
 from aipass.api.apps.modules import host_pair_cli as host_pair_cli_module
 from aipass.api.apps.modules import host_serve as host_serve_module
 from aipass.api.tests.support_host_api import TAILNET_SHAPED, UNHELD_ADDRESS, _baud_binary, _face_bundle
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 
 
 # Never opened; under the platform temp dir, not /tmp.

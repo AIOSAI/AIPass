@@ -42,7 +42,7 @@ import pytest
 from keyring.backend import KeyringBackend
 from keyring.errors import PasswordDeleteError
 
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 
 BRANCH_MODULE = "api"
 

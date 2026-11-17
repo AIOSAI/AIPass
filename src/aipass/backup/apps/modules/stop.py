@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, mark_command_failed
+from aipass.cli import console, error, mark_command_failed
 
 from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.json.json_handler import InvalidDocument

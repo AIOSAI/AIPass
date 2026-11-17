@@ -37,7 +37,7 @@ import pytest
 
 from aipass.canary.apps import canary as canary_entry
 from aipass.canary.apps.handlers.json import json_handler
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 
 # .archive/ holds disposal copies that must never be collected or rglob-walked into module names.
 collect_ignore_glob = [".archive/*", "**/.archive/*"]

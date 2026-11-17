@@ -25,7 +25,7 @@ import pytest
 
 import aipass.aipass.apps.aipass as aipass_mod
 import aipass.aipass.apps.modules as modules_pkg
-from aipass.cli.apps.modules import error as cli_error
+from aipass.cli import error as cli_error
 from aipass.aipass.apps.aipass import (
     _pyproject_version,
     discover_modules,

@@ -13,7 +13,7 @@ from pathlib import Path
 
 from typing import List, Optional
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, header, success, error, warning
+from aipass.cli import console, header, success, error, warning
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.usage import tracking, aggregation, cleanup
 

@@ -127,7 +127,7 @@ def format_email_list_item(index: int, email_data: Dict, show_unread: bool = Tru
 
 
 if __name__ == "__main__":
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     console.print("\n" + "=" * 70)
     console.print("EMAIL FORMATTING HANDLER")

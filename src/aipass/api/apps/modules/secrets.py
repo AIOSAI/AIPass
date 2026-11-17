@@ -17,7 +17,7 @@ import sys
 from typing import Any, List, Optional, Union
 
 from aipass.prax import logger  # noqa: F401 — sentry imports standard
-from aipass.cli.apps.modules import console, header, error, success, warning
+from aipass.cli import console, header, error, success, warning
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.auth import secrets as _handler
 

@@ -20,7 +20,7 @@ from typing import Any, List
 
 from aipass.prax import logger
 
-from aipass.cli.apps.modules import console, error, reset_command_state, resolve_exit
+from aipass.cli import console, error, reset_command_state, resolve_exit
 
 _UPDATE_SECTION = None  # type: ignore
 

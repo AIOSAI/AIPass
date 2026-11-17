@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from aipass.cli.apps.modules import console, error, success
+from aipass.cli import console, error, success
 from aipass.hooks.apps.modules import door_trust_registry
 from aipass.hooks.apps.modules.door_trust_registry import (
     enroll,

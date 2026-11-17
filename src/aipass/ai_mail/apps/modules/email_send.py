@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import List
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 from aipass.trigger.apps.modules.core import trigger
 
 from aipass.ai_mail.apps.handlers.cli.help_flags import wants_help

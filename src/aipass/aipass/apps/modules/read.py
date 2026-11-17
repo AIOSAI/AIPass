@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from aipass.aipass.apps.handlers.json import json_handler
 from aipass.aipass.apps.handlers.readme_map import get_readme_path, list_branches, read_readme_at
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 

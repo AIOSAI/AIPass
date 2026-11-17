@@ -16,7 +16,7 @@ from typing import List
 
 from aipass.canary.apps.handlers.json import json_handler
 from aipass.canary.apps.handlers.notes import store
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 from aipass.prax import logger
 
 REPAIR_HINT = "inspect or move the file by hand - canary never rewrites a store it cannot read"

@@ -188,7 +188,7 @@ if __name__ == "__main__":
         console.print()
 
     except Exception as e:
-        from aipass.cli.apps.modules import error as cli_error
+        from aipass.cli import error as cli_error
 
         cli_error(f"Error: {e}")
         raise

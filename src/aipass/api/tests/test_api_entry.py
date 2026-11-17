@@ -18,7 +18,7 @@ import pytest
 
 from aipass.api.apps.api import discover_modules, main, print_help, print_introspection, route_command
 from aipass.api.apps.handlers.auth.secrets import SecretsUnavailable
-from aipass.cli.apps.modules import display
+from aipass.cli import display
 
 PATCH_CONSOLE = "aipass.api.apps.api.console"
 PATCH_HEADER = "aipass.api.apps.api.header"

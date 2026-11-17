@@ -16,7 +16,7 @@ import json
 from pathlib import Path
 from typing import List, NamedTuple, Optional
 
-from aipass.cli.apps.modules import console
+from aipass.cli import console
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 

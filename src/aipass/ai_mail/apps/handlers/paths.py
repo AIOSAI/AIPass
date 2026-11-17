@@ -77,7 +77,7 @@ def find_project_root(start: Path) -> Optional[Path]:
 
 
 if __name__ == "__main__":
-    from aipass.cli.apps.modules import console
+    from aipass.cli import console
 
     json_handler.log_operation("paths_introspection")
     console.print("\n" + "=" * 70)

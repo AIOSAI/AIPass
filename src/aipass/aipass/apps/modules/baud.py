@@ -75,7 +75,7 @@ from aipass.aipass.apps.modules._phone_print import (
     print_phone_ready,
     print_phone_tail,
 )
-from aipass.cli.apps.modules import console, error, success, warning
+from aipass.cli import console, error, success, warning
 from aipass.prax import logger
 
 COMMAND = "baud"

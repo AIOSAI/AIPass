@@ -16,7 +16,7 @@ from typing import List
 
 from aipass.canary.apps.handlers.duration import parser
 from aipass.canary.apps.handlers.json import json_handler
-from aipass.cli.apps.modules import console, error
+from aipass.cli import console, error
 from aipass.prax import logger
 
 JSON_FLAG = "--json"

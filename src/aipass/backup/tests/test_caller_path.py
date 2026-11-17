@@ -29,7 +29,7 @@ from aipass.backup.apps.modules import register as register_mod
 from aipass.backup.apps.modules import share as share_mod
 from aipass.backup.apps.modules import status as status_mod
 from aipass.backup.apps.modules.register import resolve_project
-from aipass.cli.apps.modules import command_failed
+from aipass.cli import command_failed
 
 
 def _arguments(func, call) -> dict:
