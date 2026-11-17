@@ -3,12 +3,12 @@
 # Description: Pins the public cross-branch gateway for the fleet definition and the package top file
 # Version: 1.1.0
 # Created: 2026-08-30
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/fleet.py and __init__.py, memory's one import door."""
 
-# modules/ is the public gateway; handlers/ is private. The mechanics of finding residents are not re-exported.
+# The package top file is the public door; handlers/ is private. The mechanics of finding residents are not exported.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(covered_elsewhere) — declared_residency answers, in tests/test_residency_scope.py
@@ -95,21 +95,16 @@ def _fresh(body: str, cwd: Path | None = None) -> list[str]:
     return json.loads(done.stdout.strip().splitlines()[-1])
 
 
-class TestTheGatewayIsADoorNotACopy:
-    """Re-export, never reimplement. A gateway that computes anything is a second definition."""
+class TestTheModuleIsNotASecondDoor:
+    """The package top file is memory's one door; fleet.py hands out only what it defines."""
 
-    @pytest.mark.parametrize("name", CONTRACT)
-    def test_every_contract_name_is_the_same_object_as_the_handler_s(self, name):
-        """Identity, not equality. A wrapper that merely AGREES today is the defect this ends."""
-        assert getattr(fleet, name) is getattr(registry_scope, name)
+    def test_dunder_all_lists_only_what_fleet_defines(self):
+        assert fleet.__all__ == ["print_introspection", "handle_command"]
 
-    def test_dunder_all_is_exactly_the_contract(self):
-        assert tuple(fleet.__all__) == CONTRACT
-
-    @pytest.mark.parametrize("name", INTERNAL)
-    def test_the_internals_stay_behind_the_door(self, name):
-        """Named one by one: a later re-export would silently widen what I must not break."""
-        assert not hasattr(fleet, name), f"{name} is internal and must not be part of the public gateway"
+    @pytest.mark.parametrize("name", CONTRACT + INTERNAL)
+    def test_no_registry_scope_name_is_handed_out_here(self, name):
+        """Named one by one: a re-export here would reopen the second door sentry's front_door convicts."""
+        assert not hasattr(fleet, name), f"{name} is on fleet.py; it belongs to the package door or its handler"
 
 
 class TestTheCommandSurfaceIsIntrospectionOnly:
@@ -134,14 +129,10 @@ class TestTheCommandSurfaceIsIntrospectionOnly:
         assert "nonsense" in captured.out + captured.err
 
     def test_the_command_surface_executes_no_fleet_work(self, monkeypatch):
-        """The pin that keeps this a door: the CLI must never answer the question itself.
-
-        Both bindings are watched: ``fleet`` holds its own names for the handler's functions.
-        """
+        """The CLI describes the contract and never answers the question itself."""
         called = []
-        for owner in (registry_scope, fleet):
-            monkeypatch.setattr(owner, "fleet_branches", lambda *a, **k: called.append(a) or [])
-            monkeypatch.setattr(owner, "accepted_resident_paths", lambda *a, **k: called.append(a) or set())
+        monkeypatch.setattr(registry_scope, "fleet_branches", lambda *a, **k: called.append(a) or [])
+        monkeypatch.setattr(registry_scope, "accepted_resident_paths", lambda *a, **k: called.append(a) or set())
         assert fleet.handle_command("fleet", []) is True
         assert called == [], "the gateway's CLI computed fleet state instead of describing the contract"
 
@@ -162,9 +153,9 @@ class TestTheCommandSurfaceIsIntrospectionOnly:
 class TestTheDoorAnswersTheSameAsTheRoom:
     """One behavioural pass, so the re-export is proven to carry real answers."""
 
-    def test_fleet_branches_through_the_gateway_matches_the_handler(self):
+    def test_fleet_branches_through_the_door_matches_the_handler(self):
         repo_root = registry_scope.find_repo_root()
-        assert fleet.fleet_branches(repo_root) == registry_scope.fleet_branches(repo_root)
+        assert door.fleet_branches(repo_root) == registry_scope.fleet_branches(repo_root)
 
 
 class TestTheTopFileIsTheOneDoor:

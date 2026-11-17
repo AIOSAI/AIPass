@@ -84,7 +84,7 @@ branches are ours" once, for three tiers:
 | `resident` | `projects/*/*_REGISTRY.json` | its passport declares `citizenship.residency: "resident"` |
 | `external` | a registry at the top level of a **declared** root | a passport EXISTS — presence, not declaration |
 
-`modules/fleet.py` is the public door; cross-branch callers import from there, never from the handler.
+Cross-branch callers import through the package door, `from aipass.memory import fleet_branches`, never from the handler.
 `fleet_branches()` gives the live count; this document does not.
 
 There is no list of residents anywhere: a project joins by saying so in its own passport

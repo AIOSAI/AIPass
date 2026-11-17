@@ -3,7 +3,7 @@
 # Description: Tests for auto_process background spawn, single-flight lock and run_once
 # Version: 1.2.0
 # Created: 2026-08-14
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # Category: memory/tests
 # =============================================
 
@@ -13,7 +13,7 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(covered_elsewhere) — run_pool_processing and auto_process() work, in tests/test_auto_process.py
-# sentry: no-test-needed(external) — what the detached child's crash output holds in CHILD_OUT; that is the child's own run
+# sentry: no-test-needed(external) — what the detached child's crash output holds in CHILD_OUT; the child's own run
 
 import json
 import os
@@ -191,69 +191,54 @@ class TestCompletionIsAnnounced:
     """
 
     @staticmethod
-    def _bus():
-        """The exact bus object ``_fire_completion`` will reach, resolved NOW.
-
-        A dotted patch() walks the package attributes on 3.10 and sys.modules on 3.11+; when the two
-        split, the patch misses. Patching through the import route pins the object the code reaches:
-        ``from aipass.trigger import trigger``, trigger's package door.
-        """
-        import importlib
-
-        return importlib.import_module("aipass.trigger").trigger
-
-    @staticmethod
     def _fired(mock_fire):
         """The one memory_pool_auto_processed call, as (name, payload)."""
         calls = [c for c in mock_fire.call_args_list if c.args and c.args[0] == "memory_pool_auto_processed"]
         assert len(calls) == 1, f"expected exactly one completion fire, got {len(calls)}"
         return calls[0].kwargs
 
-    def test_a_finished_run_announces_success_in_the_published_shape(self, isolated_lock):
+    def test_a_finished_run_announces_success_in_the_published_shape(self, isolated_lock, bus):
         """@trigger's handler reads `status` on both sections — the internal dicts do not carry it."""
         done = {
             "success": True,
             "pool": {"success": True, "files_processed": 3, "total_chunks": 12},
             "rollover": {"success": True, "triggers": 1, "processed": 1},
         }
-        with patch.object(self._bus(), "fire") as fire:
-            with patch.object(ap, "auto_process", return_value=done):
-                ap.run_once()
+        with patch.object(ap, "auto_process", return_value=done):
+            ap.run_once()
 
-        payload = self._fired(fire)
+        payload = self._fired(bus)
         assert payload["success"] is True
         assert payload["error"] is None
         assert payload["pool"] == {"status": "ok", "files_processed": 3, "total_chunks": 12}
         assert payload["rollover"] == {"status": "ok", "triggers": 1, "processed": 1}
 
-    def test_a_crashed_run_announces_the_failure_that_reaches_medic(self, isolated_lock):
+    def test_a_crashed_run_announces_the_failure_that_reaches_medic(self, isolated_lock, bus):
         """The leg that was dead. `success: False` + `error` is what becomes error_detected."""
-        with patch.object(self._bus(), "fire") as fire:
-            with patch.object(ap, "auto_process", side_effect=RuntimeError("chroma exploded")):
-                ap.run_once()
+        with patch.object(ap, "auto_process", side_effect=RuntimeError("chroma exploded")):
+            ap.run_once()
 
-        payload = self._fired(fire)
+        payload = self._fired(bus)
         assert payload["success"] is False
         assert "chroma exploded" in payload["error"]
         assert payload["branch"] == "memory", "the citizen to wake for a fault here is this code's owner"
         assert payload["pool"]["status"] == "unknown", "a section that never reported is not a completion"
         assert payload["rollover"]["status"] == "unknown"
 
-    def test_a_declined_run_announces_nothing(self, isolated_lock):
+    def test_a_declined_run_announces_nothing(self, isolated_lock, bus):
         """A run that never held the lock did not complete anything; the holder announces its own."""
         isolated_lock.write_text(json.dumps({"pid": os.getpid(), "started": time.time()}), encoding="utf-8")
 
-        with patch.object(self._bus(), "fire") as fire:
-            result = ap.run_once()
+        result = ap.run_once()
 
         assert result["skipped"] is True
-        assert not [c for c in fire.call_args_list if c.args and c.args[0] == "memory_pool_auto_processed"]
+        assert not [c for c in bus.call_args_list if c.args and c.args[0] == "memory_pool_auto_processed"]
 
-    def test_a_broken_bus_does_not_break_the_run(self, isolated_lock):
+    def test_a_broken_bus_does_not_break_the_run(self, isolated_lock, bus):
         """Observability must not take down the work it observes."""
-        with patch.object(self._bus(), "fire", side_effect=RuntimeError("bus down")):
-            with patch.object(ap, "auto_process", return_value={"success": True}):
-                result = ap.run_once()
+        bus.side_effect = RuntimeError("bus down")
+        with patch.object(ap, "auto_process", return_value={"success": True}):
+            result = ap.run_once()
 
         assert result["success"] is True
         assert not isolated_lock.exists(), "a failed fire must still release the lock"

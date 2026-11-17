@@ -3,7 +3,7 @@
 # Description: Pins the declared-roots anchor and the external tier it opens
 # Version: 1.0.2
 # Created: 2026-08-30
-# Modified: 2026-11-14
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/monitor/registry_scope.py — the declared-roots anchor and the external tier."""
@@ -20,9 +20,9 @@ from pathlib import Path
 
 import pytest
 
+import aipass.memory as door
 from aipass.memory.apps.handlers import repo_root
 from aipass.memory.apps.handlers.monitor import registry_scope as rs
-from aipass.memory.apps.modules import fleet
 
 
 def _write(path: Path, document: dict) -> None:
@@ -315,11 +315,11 @@ class TestTheFleetGrowsWithoutMovingUnderneathAnyone:
 
 
 class TestTheGatewayCarriesTheNewSurface:
-    """@daemon consumes through modules/fleet.py and must not need a second import."""
+    """Other branches consume through the package door and must not need a second import."""
 
-    def test_the_new_names_are_on_the_public_gateway(self):
-        for name in ("declared_roots", "external_branches", "RESIDENCY_EXTERNAL", "DECLARED_ROOTS"):
-            assert getattr(fleet, name) is getattr(rs, name), f"{name} is not the handler's own object"
+    def test_the_new_names_are_on_the_package_door(self):
+        for name in ("declared_roots", "external_branches", "RESIDENCY_EXTERNAL"):
+            assert getattr(door, name) is getattr(rs, name), f"{name} is not the handler's own object"
 
 
 class TestTheLiveMachineIsReachable:

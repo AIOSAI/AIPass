@@ -3,7 +3,7 @@
 # Description: Red-first pins for marker 7 — self-healing triggers and the aftercare rulings
 # Version: 1.2.2
 # Created: 2026-08-27
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/rollover.py, apps/modules/templates.py and the handlers they drive."""
@@ -17,7 +17,6 @@
 import hashlib
 import json
 import sys
-import types
 from pathlib import Path
 
 import pytest
@@ -705,35 +704,15 @@ class TestTemplateBumpFiresThePush:
         assert template_bump.BUMP_EVENT == "trinity_template_bumped"
         assert "aipass.trigger" not in source
 
-    def test_the_bump_announces_itself_on_the_bus(self, monkeypatch):
+    def test_the_bump_announces_itself_on_the_bus(self, bus):
         """Trigger-driven, never a poller: the bump ANNOUNCES what it did.
 
         The real call path: the payload is built inside a best-effort try, so a broken one is swallowed.
-        Real packages with `__path__`, not MagicMocks: on 3.10 the lazy import traverses the parent.
-        The reachability check runs first, so "never reached" and "chose not to fire" stay apart.
         """
-        fired = []
-
-        class _Bus:
-            @staticmethod
-            def fire(event, **data):
-                fired.append((event, data))
-
-        for name in ("aipass.trigger", "aipass.trigger.apps", "aipass.trigger.apps.modules"):
-            package = types.ModuleType(name)
-            package.__path__ = []  # type: ignore[attr-defined]
-            monkeypatch.setitem(sys.modules, name, package)
-        # _announce_bump imports the bus through trigger's package door: `from aipass.trigger import trigger`.
-        sys.modules["aipass.trigger"].trigger = _Bus  # type: ignore[attr-defined]
-
-        # Exactly what `from X import trigger` compiles to: no route the code under test does not take.
-        reached = __import__("aipass.trigger", fromlist=["trigger"])
-        assert reached.trigger is _Bus, "the bus stand-in is not reachable by the import _announce_bump uses"
-
         templates._announce_bump({"pending": True, "dry_run": True, "stamped": False, "now": {"local": "3.0.0"}})
 
-        assert [event for event, _ in fired] == [template_bump.BUMP_EVENT]
-        payload = fired[0][1]
+        assert [c.args[0] for c in bus.call_args_list] == [template_bump.BUMP_EVENT]
+        payload = bus.call_args.kwargs
         assert payload["pending"] is True and payload["dry_run"] is True and payload["stamped"] is False
         assert json.loads(payload["versions"]) == {"local": "3.0.0"}
 

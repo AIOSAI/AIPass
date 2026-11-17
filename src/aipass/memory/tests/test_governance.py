@@ -3,10 +3,10 @@
 # Description: Surfacing governance module — state API, rejection paths, command exit seam
 # Version: 1.0.2
 # Created: 2026-07-16
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
-"""Tests for apps/modules/governance.py (pure state-in/state-out API)."""
+"""Tests for handlers/governance/engine.py (pure state-in/state-out API) and apps/modules/governance.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(shared) — handle_command's --help lane: the same print_introspection() the bare verb reads
@@ -16,13 +16,13 @@ import pytest
 
 from aipass.cli import reset_command_state, resolve_exit
 from aipass.memory.apps.handlers.governance import engine
-from aipass.memory.apps.modules import governance as governance_module
-from aipass.memory.apps.modules.governance import (
+from aipass.memory.apps.handlers.governance.engine import (
     DEFAULT_CONFIG,
     new_state,
     record_message,
     should_surface,
 )
+from aipass.memory.apps.modules import governance as governance_module
 
 
 class TestNewState:
@@ -274,3 +274,14 @@ class TestTheUnknownSubcommandRefusalReachesTheExitCode:
         captured = capsys.readouterr()
         assert "governance Module" in captured.out
         assert "should_surface" in captured.out
+
+
+class TestTheModuleIsNotASecondDoor:
+    """The package top file is memory's one door; governance.py hands out only what it defines."""
+
+    def test_dunder_all_lists_only_what_governance_defines(self):
+        assert governance_module.__all__ == ["print_introspection", "handle_command"]
+
+    @pytest.mark.parametrize("name", ["should_surface", "record_message", "new_state", "DEFAULT_CONFIG"])
+    def test_no_engine_name_is_handed_out_here(self, name):
+        assert not hasattr(governance_module, name), f"{name} is on governance.py; it belongs to the door"

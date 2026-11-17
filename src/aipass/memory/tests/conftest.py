@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for memory tests — write fence, infrastructure stand-ins, live-fleet guards
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-07
 # Modified: 2026-11-17
 # Category: memory/tests
@@ -33,6 +33,7 @@ from aipass.memory.apps.handlers.monitor import registry_scope
 from aipass.memory.apps.handlers.templates import trinity_push
 from aipass.cli import display
 from aipass.memory.tests.support_config_verbs import _real_verbs
+from aipass.trigger import Trigger as _Trigger
 
 # Nothing under .archive/ is a test.
 collect_ignore_glob = [".archive/*", "**/.archive/*"]
@@ -77,14 +78,15 @@ def _mock_infrastructure(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json", json_pkg)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.json_handler", mock_json_handler)
 
-    mock_trigger = MagicMock()
-    mock_trigger.fire = MagicMock()
-    trigger_mod = MagicMock()
-    trigger_mod.Trigger = mock_trigger
-    monkeypatch.setitem(sys.modules, "aipass.trigger", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", trigger_mod)
+
+@pytest.fixture(autouse=True)
+def bus(monkeypatch):
+    """@trigger's bus, fire patched on the class (trigger's one supported route): the instance reaches it too.
+
+    No memory test fires the real bus; a test asks for this fixture to read its calls or set side_effect."""
+    recorder = MagicMock(return_value={})
+    monkeypatch.setattr(_Trigger, "fire", recorder)
+    return recorder
 
 
 @pytest.fixture

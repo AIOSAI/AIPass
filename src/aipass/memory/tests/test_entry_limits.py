@@ -1,13 +1,13 @@
 # =================== AIPass ====================
 # Name: test_entry_limits.py
-# Description: entry_limits config reader and the apps/modules/limits.py gateway over it
+# Description: entry_limits config reader and the apps/modules/limits.py introspection module
 # Version: 1.2.0
 # Created: 2026-06-13
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # Category: memory/tests
 # =============================================
 
-"""Tests for apps/handlers/json/entry_limits.py and its gateway apps/modules/limits.py."""
+"""Tests for apps/handlers/json/entry_limits.py and the introspection module apps/modules/limits.py."""
 
 # entry_limits reads through config_loader, so tests patch config_loader._CONFIG_PATH.
 
@@ -23,6 +23,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import aipass.memory as door
 from aipass.cli import reset_command_state, resolve_exit
 from aipass.memory.apps.handlers.json import entry_limits as _entry_limits
 from aipass.memory.apps.modules import limits as _limits
@@ -382,9 +383,9 @@ class TestTheDraftPercentComesFromTheConfig:
 def _gate_hits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config: dict, session: dict) -> list:
     """Run one authored session through the gate's own route: the door's load_entry_limits + changed_entries."""
     monkeypatch.setattr(_entry_limits.config_loader, "_CONFIG_PATH", _write_config(tmp_path, config))
-    limits = _limits.load_entry_limits("any")
+    limits = door.load_entry_limits("any")
     entry = {"number": 1, "date": "2026-10-23", "summary": "ok", "status": "done", **session}
-    return _limits.changed_entries({}, {"sessions": [entry]}, limits)
+    return door.changed_entries({}, {"sessions": [entry]}, limits)
 
 
 def _banded_config(**overrides) -> dict:
@@ -473,27 +474,20 @@ def _get_gateway():
     return _limits, _entry_limits
 
 
-class TestTheLimitsGatewayIsADoorNotACopy:
-    """``apps/handlers/`` is private implementation; ``apps/modules/`` is the door other branches use."""
+class TestTheLimitsModuleIsNotASecondDoor:
+    """``apps/handlers/`` is private implementation; the package top file is the one door other branches use."""
 
-    @pytest.mark.parametrize("name", _GATEWAY_CONTRACT)
-    def test_every_contract_name_is_the_same_object_as_the_handler_s(self, name: str) -> None:
-        """Identity, not equality. A wrapper that merely AGREES today is the defect this ends."""
-        limits, entry_limits = _get_gateway()
-
-        assert getattr(limits, name) is getattr(entry_limits, name)
-
-    def test_dunder_all_is_exactly_the_contract(self) -> None:
+    def test_dunder_all_lists_only_what_limits_defines(self) -> None:
         limits, _ = _get_gateway()
 
-        assert tuple(limits.__all__) == _GATEWAY_CONTRACT
+        assert limits.__all__ == ["print_introspection", "handle_command"]
 
-    @pytest.mark.parametrize("name", _GATEWAY_INTERNAL)
-    def test_the_internals_stay_behind_the_door(self, name: str) -> None:
-        """Named one by one: a later re-export would silently widen what I must not break."""
+    @pytest.mark.parametrize("name", tuple(n for n in _GATEWAY_CONTRACT if n != "draft_percent") + _GATEWAY_INTERNAL)
+    def test_no_entry_limits_name_is_handed_out_here(self, name: str) -> None:
+        """Named one by one: a re-export here would reopen the second door sentry's front_door convicts."""
         limits, _ = _get_gateway()
 
-        assert not hasattr(limits, name), f"{name} is internal and must not be part of the public gateway"
+        assert not hasattr(limits, name), f"{name} is on limits.py; it belongs to the package door or its handler"
 
     def test_it_answers_only_its_own_command(self) -> None:
         """A module that claims a command it does not own swallows another module's work."""

@@ -3,7 +3,7 @@
 # Description: changed_entries diff helper and the write_memory_file entry-limits wiring (FPLAN-0270 phase 3)
 # Version: 1.0.1
 # Created: 2026-06-13
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/json/entry_limits.py changed_entries and its write_memory_file wiring in memory_files.py."""
@@ -19,6 +19,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import aipass.memory as door
 from aipass.memory.apps.handlers import repo_root
 from aipass.memory.apps.handlers.json import entry_limits, memory_files
 
@@ -628,9 +629,9 @@ class TestRenamedFieldEntryDoesNotBrickRollover:
 
 
 class TestTheBypassClaimIsMeasuredNotAsserted:
-    """`.sentry/bypass.json` claims @hooks calls `changed_entries` — this checks it.
+    """The door hands out `changed_entries` because @hooks calls it — this checks that claim.
 
-    Red the day @hooks stops calling it: the bypass is stale and the function can go.
+    Red the day @hooks stops calling it: the door entry is stale and the function can go.
     Skips where @hooks is not installed (a lone checkout is not a failure).
     """
 
@@ -640,7 +641,7 @@ class TestTheBypassClaimIsMeasuredNotAsserted:
         candidate = repo_root.SOURCE_ROOT / "src" / "aipass" / "hooks" / "apps"
         return candidate if candidate.is_dir() else None
 
-    def test_hooks_still_calls_the_function_the_bypass_exempts(self) -> None:
+    def test_hooks_still_calls_the_function_the_door_hands_out(self) -> None:
         root = self._hooks_root()
         if root is None:
             pytest.skip("@hooks is not installed in this checkout — nothing to measure")
@@ -648,19 +649,16 @@ class TestTheBypassClaimIsMeasuredNotAsserted:
         callers = [
             path.relative_to(root) for path in _walk(root) if "changed_entries(" in path.read_text(encoding="utf-8")
         ]
-        # The bypass reason names this file as the caller; the claim is that file.
         assert Path("handlers", "security", "edit_gate.py") in callers, (
-            f"edit_gate.py is not among @hooks' callers of changed_entries() ({callers}) — "
-            "no file in @hooks calls changed_entries() any more — the unused_function bypass in "
-            ".sentry/bypass.json is now a false claim. Either the caller moved (update the reason) "
-            "or the function is genuinely dead (delete it and drop the bypass)."
+            f"edit_gate.py is not among @hooks' callers of changed_entries() ({callers}). "
+            "Either the caller moved (update this pin) or the function is genuinely dead "
+            "(delete it and drop it from the package door)."
         )
 
-    def test_the_bypass_rule_is_narrowed_to_that_one_function(self) -> None:
-        """A file-wide exemption would hide the NEXT orphan in the same file."""
-        import json as _json
-
-        rules = _json.loads(
+    def test_the_door_table_not_a_bypass_row_keeps_it_alive(self) -> None:
+        """sentry's unused_function counts a name in the package door's table as used, so entry_limits.py
+        carries no unused_function row: one would be file-wide cover for the NEXT orphan in the same file."""
+        rules = json.loads(
             (repo_root.SOURCE_ROOT / "src" / "aipass" / "memory" / ".sentry" / "bypass.json").read_text(
                 encoding="utf-8"
             )
@@ -670,10 +668,8 @@ class TestTheBypassClaimIsMeasuredNotAsserted:
             for rule in rules
             if rule.get("standard") == "unused_function" and rule.get("file", "").endswith("entry_limits.py")
         ]
-        assert mine, "the unused_function bypass for entry_limits.py is gone"
-        assert mine[0].get("functions") == ["changed_entries"], (
-            f"the exemption is not narrowed to the one function it was argued for: {mine[0]}"
-        )
+        assert "changed_entries" in door.__all__, "changed_entries left the door; nothing now marks it as used"
+        assert mine == [], f"an unused_function row for entry_limits.py excuses nothing the door does not: {mine}"
 
 
 class TestTheNearCapLineArrivesWhileThereIsStillRoom:

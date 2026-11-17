@@ -1,46 +1,23 @@
 # =================== AIPass ====================
 # Name: fleet.py
-# Description: Fleet definition module — the public cross-branch gateway
-# Version: 2.0.0
+# Description: Fleet definition module — introspection of the fleet names the package door hands out
+# Version: 2.1.0
 # Created: 2026-08-30
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """
-Fleet Definition Module — Public API
+Fleet Definition Module
 
-Cross-branch door to ``apps/handlers/monitor/registry_scope.py``: names are re-exported
-by IDENTITY, never wrapped, so there is one definition. Import the MODULE, not the symbols.
+Describes the fleet contract of ``apps/handlers/monitor/registry_scope.py``. Other branches
+take those names from the package door, ``from aipass.memory import <name>``, never from here.
 """
 
 from aipass.prax import logger
 
 from aipass.memory.apps.handlers.json import json_handler
-from aipass.memory.apps.handlers.monitor.registry_scope import (
-    DECLARED_ROOTS,
-    RESIDENCY_CORE,
-    RESIDENCY_EXTERNAL,
-    RESIDENCY_RESIDENT,
-    accepted_resident_paths,
-    declared_residency,
-    declared_roots,
-    external_branches,
-    find_repo_root,
-    fleet_branches,
-)
 
-__all__ = [
-    "fleet_branches",
-    "find_repo_root",
-    "declared_residency",
-    "accepted_resident_paths",
-    "declared_roots",
-    "external_branches",
-    "RESIDENCY_CORE",
-    "RESIDENCY_RESIDENT",
-    "RESIDENCY_EXTERNAL",
-    "DECLARED_ROOTS",
-]
+__all__ = ["print_introspection", "handle_command"]
 
 
 def print_introspection() -> None:
@@ -55,13 +32,11 @@ def print_introspection() -> None:
     console.print("  fleet_branches(repo_root=None, name_from='path')  -> every citizen in scope")
     console.print("  find_repo_root(start=None)                        -> the repo anchor")
     console.print("  declared_residency(branch_path)                   -> what a passport declares")
-    console.print("  accepted_resident_paths(repo_root=None)           -> resolved resident paths")
     console.print("  declared_roots(repo_root=None)                    -> participating repo roots")
     console.print("  external_branches(repo_root=None)                 -> citizens outside this repo")
     console.print("  RESIDENCY_CORE / RESIDENT / EXTERNAL              -> the three tier labels")
-    console.print(f"  DECLARED_ROOTS                                    -> '{DECLARED_ROOTS}', the machine anchor")
     console.print()
-    console.print("[dim]Library module — import from: aipass.memory.apps.modules.fleet[/dim]")
+    console.print("[dim]Library names — import from: aipass.memory[/dim]")
 
 
 def handle_command(command: str, args: list) -> bool:

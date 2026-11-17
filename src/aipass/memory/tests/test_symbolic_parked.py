@@ -3,7 +3,7 @@
 # Description: Pins the park of the symbolic fragments tier (the owner's ruling, 2026-08-14)
 # Version: 1.0.2
 # Created: 2026-08-14
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/symbolic.py and the parked handlers/symbolic package."""
@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 from aipass.memory.apps.modules import symbolic
-from aipass.memory.apps.modules.governance import new_state, should_surface
+from aipass.memory import new_state, should_surface
 
 # The park's TRACKED home: .archive/ is never shipped, so a park there is invisible to CI.
 _PARK = Path(__file__).resolve().parent / "parked" / "symbolic_20260814"

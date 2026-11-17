@@ -1,27 +1,21 @@
 # =================== AIPass ====================
 # Name: governance.py
-# Description: Surfacing governance module — public API
-# Version: 1.1.0
+# Description: Surfacing governance module — introspection of the names the package door hands out
+# Version: 1.2.0
 # Created: 2026-07-16
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """
-Surfacing Governance Module — Public API
+Surfacing Governance Module
 
-Cross-branch consumers (@hooks' compass_recall, every prompt) import from here.
+Cross-branch consumers import from the package door: ``from aipass.memory import should_surface``.
 """
 
 from aipass.prax import logger  # noqa: F401
 from aipass.memory.apps.handlers.json import json_handler
-from aipass.memory.apps.handlers.governance.engine import (
-    DEFAULT_CONFIG,
-    new_state,
-    record_message,
-    should_surface,
-)
 
-__all__ = ["should_surface", "record_message", "new_state", "DEFAULT_CONFIG"]
+__all__ = ["print_introspection", "handle_command"]
 
 
 def print_introspection() -> None:
@@ -37,7 +31,7 @@ def print_introspection() -> None:
     console.print("  record_message(state)")
     console.print("  new_state()")
     console.print()
-    console.print("[dim]Library module — import from: aipass.memory.apps.modules.governance[/dim]")
+    console.print("[dim]Library names — import from: aipass.memory[/dim]")
 
 
 def handle_command(command: str, args: list) -> bool:
