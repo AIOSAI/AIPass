@@ -91,10 +91,13 @@ is always current; depth is in the docs below. A verb `--help` does not name is 
 
 ## Architecture
 
+Other branches import from the package top file, `from aipass.hooks import <name>`: the trust registry's
+verbs, the sandbox builders, the branch-prompt cap and the mute flag, each read from its home on access.
+
 Three layers. `apps/hooks.py` is a thin router: it discovers the modules beside it and dispatches each
 command to the one that claims it. `apps/modules/` holds one business-logic module per concern —
 `engine` (the dispatcher), `engine_closure` (the engine's imports, kept free of NameErrors),
-`door_trust_registry` (the trust registry aipass imports), `cadence` (which turn a loader fires on),
+`cadence` (which turn a loader fires on),
 `injection_ledger` (what a seat was told, per turn), `grounding_receipt` (whether the grounding
 reached the model), `grounding_content` (the injected blocks and their budgets), `write_ownership`
 (whose file a write lands in), `write_grant` (whether a dispatch's grant covers a crossing write),

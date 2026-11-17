@@ -26,7 +26,8 @@ import pytest
 
 import aipass.hooks as hooks_door
 from aipass.hooks.apps.handlers.config import gates, loader, trust_registry
-from aipass.hooks.apps.modules import engine
+from aipass.hooks.apps import sound
+from aipass.hooks.apps.modules import engine, grounding_content, sandbox
 from aipass.hooks.apps.handlers.config.trust_registry import (
     bootstrap,
     enroll,
@@ -155,12 +156,17 @@ class TestRegistryHelpers:
 
 
 class TestThePackageDoor:
-    def test_the_door_hands_out_the_six_registry_names_each_its_homes_own_object(self):
-        assert sorted(hooks_door.__all__) == sorted(
-            ["enroll", "is_trusted", "read_registry", "revoke", "registry_path", "REGISTRY_PATH"]
-        )
-        for name in hooks_door.__all__:
-            assert getattr(hooks_door, name) is getattr(trust_registry, name), name
+    def test_the_door_hands_out_exactly_its_listed_names_each_its_homes_own_object(self):
+        homes = {
+            trust_registry: ["enroll", "is_trusted", "read_registry", "revoke", "registry_path", "REGISTRY_PATH"],
+            sandbox: ["build_policy", "build_srt_config", "resolve_bwrap_command"],
+            grounding_content: ["BRANCH_CHAR_BUDGET"],
+            sound: ["is_muted", "SOUND_FLAG"],
+        }
+        assert sorted(hooks_door.__all__) == sorted(name for names in homes.values() for name in names)
+        for home, names in homes.items():
+            for name in names:
+                assert getattr(hooks_door, name) is getattr(home, name), name
 
     def test_a_patch_on_the_home_reaches_a_door_reader_and_leaves_no_copy_on_the_package(self, tmp_path):
         with patch.object(trust_registry, "is_trusted", return_value="patched"):

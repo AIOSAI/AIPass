@@ -7,8 +7,16 @@ import importlib
 from typing import Any
 
 _TRUST = "aipass.hooks.apps.handlers.config.trust_registry"
+_SANDBOX = "aipass.hooks.apps.modules.sandbox"
+_SOUND = "aipass.hooks.apps.sound"
 
 _HOMES = {
+    "build_policy": _SANDBOX,
+    "build_srt_config": _SANDBOX,
+    "resolve_bwrap_command": _SANDBOX,
+    "BRANCH_CHAR_BUDGET": "aipass.hooks.apps.modules.grounding_content",
+    "is_muted": _SOUND,
+    "SOUND_FLAG": _SOUND,
     "enroll": _TRUST,
     "is_trusted": _TRUST,
     "read_registry": _TRUST,

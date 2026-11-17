@@ -95,7 +95,7 @@ _DRONE = "drone"
 
 _ADMIN_SEAT = "aipass.hooks.apps.modules.admin_seat"
 _OWNERSHIP = "aipass.hooks.apps.modules.write_ownership"
-_LEDGER_DOOR = "aipass.drone.apps.modules.door_deletion_log"
+_LEDGER_DOOR = "aipass.drone"
 
 RECORDED = "This refused attempt is recorded in .ai_central/deletions.jsonl."
 NOT_RECORDED = "Recording this refused attempt in the ledger failed; the failure is logged."
