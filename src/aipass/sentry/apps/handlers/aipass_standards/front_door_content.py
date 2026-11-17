@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: front_door_content.py
 # Description: Front Door Standards Content Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-11-16
 # Modified: 2026-11-16
 # =============================================
@@ -28,6 +28,8 @@ def get_front_door_standards() -> str:
         "  on first access (PEP 562 __getattr__), never eagerly. prax's door is the model.",
         "  One door: a door_*.py, or a module that only re-exports its own handlers with __all__,",
         "  under apps/modules/ is a second door (retired pattern), convicted at line 1, never waived.",
+        "  So is a real module whose __all__ names its own handlers' names: convicted at that line,",
+        "  each name and its handler listed; the door hands them out, __all__ keeps only own defs.",
         "",
         "[bold cyan]WHAT COUNTS (parse tree):[/bold cyan]",
         "  statement   import / from-import anywhere, functions included",

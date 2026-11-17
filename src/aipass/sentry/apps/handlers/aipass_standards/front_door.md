@@ -48,6 +48,16 @@ A branch has one door. A module under `apps/modules/` that hands its branch's ha
 
 An `apps/modules/__init__.py` is not read by shape: its re-export is as often the branch's own plumbing, and each foreign import of it is already a finding. The cure: the package top file hands out the name, `from aipass.<branch> import <name>`, and the module is retired once no other branch imports it. No bypass row waives a second door, and the modules, imports, introspection and dead_code rows leave it to this one, so one defect is reported once.
 
+### The mixed kind: a real module handing out handler names
+
+A module's own API is what it defines. A module under `apps/modules/` with real logic whose `__all__` also names something it imported from its own branch's handlers is handing those names outward, and is the mixed kind of second door. It is one finding at the `__all__` line, never waived, naming each handed-out name and the handler it comes from. The cure: the package door hands those names out from their homes, and the module drops them from `__all__` once no other branch imports them from here; it keeps the names it defines. A `door_` or door-shaped file gets only the finding above, not this one too. The other rows still judge the module as the module it is.
+
+What this reading cannot tell, and what covers it:
+
+- `apps/modules/__init__.py` is not read, for the same reason as above; each foreign import of it is a front_door site.
+- A module with no `__all__` that other branches import handler names from is invisible here; each such foreign import is a front_door site, which is the cover for that case.
+- An `__all__` that lists a handler name only for the module's own branch would be convicted all the same: the file alone cannot tell an inside reader from an outside one. The cure is the same, list only what the module defines.
+
 ## How a branch decides its public list
 
 The list is what other branches already reach for. `drone @sentry front-door scan` prints, per branch, every module and name other branches import from under its `apps/`; that list is the door's first `__all__`. A name nobody outside uses stays off it. The command door, `apps/<branch>.py`, is a separate thing and is unchanged.

@@ -23,6 +23,8 @@ Standards specific to modules (orchestration layer). Modules coordinate workflow
 
 A module that exists to hand this branch's handler names to other branches is a second door: a `door_*.py`, or a module whose whole body re-exports its own handlers with `__all__`. A branch has one door, its package top file (`src/aipass/<branch>/__init__.py`), so the `front_door` row convicts a second door and this row does not judge it again. The cure: the package top file hands out the name, `from aipass.<branch> import <name>`, and the module is retired once no other branch imports it.
 
+A module's `__all__` lists what the module defines. A real module whose `__all__` also names something it imported from its own branch's handlers is the mixed kind of second door, and `front_door` convicts it at the `__all__` line, naming each handed-out name and its handler. The cure: the package door hands those names out from their homes, and the module drops them from `__all__` once no other branch imports them from here; it keeps the names it defines.
+
 ---
 
 ## Module Responsibilities

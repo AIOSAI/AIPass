@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_front_door_check.py
 # Description: front_door_check — the gating row: per-site findings, scoped and whole-file waivers
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-11-16
 # Modified: 2026-11-16
 # =============================================
@@ -138,7 +138,61 @@ class TestSecondDoor:
         path = _write(tmp_path, RE_EXPORT, "src/aipass/sentry/apps/handlers/door_audit.py")
         assert checker.check_module(path)["passed"] is True
 
+    def test_a_door_named_file_is_one_finding_not_two(self, tmp_path):
+        source = RE_EXPORT + "\n\ndef helper():\n    return json_handler\n"
+        checks = checker.check_module(_write(tmp_path, source, f"{MODULES}/door_audit.py"))["checks"]
+        assert [c["line"] for c in checks] == [1]
+
     def test_no_bypass_row_waives_a_second_door(self, tmp_path):
         rel = f"{MODULES}/door_audit.py"
         rules = [{"file": rel, "standard": "front_door", "reason": "pin"}]
         assert checker.check_module(_write(tmp_path, RE_EXPORT, rel), rules)["score"] == 0
+
+
+#: A real module: one handler import used by its own def, and an __all__ of what it defines.
+OWN_API = (
+    "from aipass.sentry.apps.handlers.json.json_handler import load_json as load\n\n\n"
+    "def read(p):\n    return load(p)\n\n\n"
+    '__all__ = ["read"]\n'
+)
+#: The same module handing the handler name outward too.
+HANDS_OUT = OWN_API.replace('["read"]', '["read", "load"]')
+
+
+class TestAModuleHandingOutHandlerNames:
+    """The mixed second door: real logic, plus own-handler names in __all__."""
+
+    @pytest.mark.parametrize(
+        "rel, source, lines",
+        [
+            (f"{MODULES}/reader.py", OWN_API, []),
+            (f"{MODULES}/reader.py", HANDS_OUT, [8]),
+            (f"{MODULES}/reader.py", HANDS_OUT.replace('["read", "load"]', '("read", "load")'), [8]),
+            (f"{MODULES}/__init__.py", HANDS_OUT, []),
+            ("src/aipass/sentry/apps/handlers/reader.py", HANDS_OUT, []),
+            (f"{MODULES}/reader.py", HANDS_OUT.replace('\n\n__all__ = ["read", "load"]\n', ""), []),
+            (f"{MODULES}/reader.py", "from aipass.prax import logger\n\n__all__ = ['logger']\n", []),
+        ],
+        ids=[
+            "own_api_only",
+            "hands_out_a_handler_name",
+            "tuple_all",
+            "package_marker",
+            "under_handlers",
+            "no_all",
+            "another_branchs_door_name",
+        ],
+    )
+    def test_handler_names_in_all_are_convicted_at_the_all_line(self, tmp_path, rel, source, lines):
+        assert _convicted(checker.check_module(_write(tmp_path, source, rel))) == lines
+
+    def test_the_finding_names_each_name_its_home_the_door_and_the_cure(self, tmp_path):
+        message = checker.check_module(_write(tmp_path, HANDS_OUT, f"{MODULES}/reader.py"))["checks"][0]["message"]
+        assert "load (aipass.sentry.apps.handlers.json.json_handler)" in message
+        assert "read" not in message.split("hands out")[1].split(";")[0]
+        assert "from aipass.sentry import <name>" in message and "drop" in message
+
+    def test_no_bypass_row_waives_handed_out_names(self, tmp_path):
+        rel = f"{MODULES}/reader.py"
+        rules = [{"file": rel, "standard": "front_door", "reason": "pin"}]
+        assert checker.check_module(_write(tmp_path, HANDS_OUT, rel), rules)["score"] == 0

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: front_door_check.py
 # Description: Front Door Standards Checker - a cross-branch import goes through the branch's package top file
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-11-16
 # Modified: 2026-11-16
 # =============================================
@@ -11,12 +11,13 @@
 Reference: front_door.md. One finding per site (line, enclosing function): an import of another
 branch that reaches under its ``apps/``. Detection is ``front_door_count.scan_source``, the same
 reading the ``front-door`` verb counts with. A lines, functions or whole-file bypass row waives.
-A second door (``modules_check.is_second_door``) is one more finding, line 1, that no row waives.
+A second door (``modules_check.is_second_door``) is one more finding, line 1, that no row waives; so is a
+module whose ``__all__`` hands out its own handlers' names (``handed_out_handler_names``), at the ``__all__`` line.
 """
 
 import ast
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.aipass_standards.check_support import read_text, result
@@ -26,7 +27,7 @@ from aipass.sentry.apps.handlers.aipass_standards.front_door_count import (
     owner_of_path,
     scan_source,
 )
-from aipass.sentry.apps.handlers.aipass_standards.modules_check import is_second_door
+from aipass.sentry.apps.handlers.aipass_standards.modules_check import handed_out_handler_names, is_second_door
 from aipass.sentry.apps.handlers.bypass.utils import is_bypassed
 from aipass.sentry.apps.handlers.json import json_handler
 
@@ -80,6 +81,25 @@ def _second_door(path: Path) -> Dict:
     }
 
 
+def _handed_out(path: Path, line: int, names: List[Tuple[str, str]]) -> Dict:
+    """The finding for a real module whose __all__ also hands its branch's handler names outward."""
+    branch = owner_of_path(str(path))
+    listed = ", ".join(f"{name} ({home})" for name, home in names)
+    return {
+        "name": "Front door",
+        "passed": False,
+        "line": line,
+        "function": MODULE_LEVEL,
+        "message": (
+            f"{path.name}:{line} __all__ hands out {len(names)} handler name(s) of {branch}: {listed}; "
+            f"that makes it a second door, and a branch has one, its package top file: "
+            f"from aipass.{branch} import <name>. Cure: the package door hands these names out from their "
+            f"homes, and this module drops them from __all__ once no other branch imports them from here; "
+            f"it keeps the names it defines"
+        ),
+    }
+
+
 def _one_check(passed: bool, message: str) -> List[Dict]:
     """A single-entry checks list."""
     return [{"name": "Front door", "passed": passed, "message": message}]
@@ -100,8 +120,12 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         logger.warning("[front_door] Unparseable %s: %s", module_path, exc)
         return result(False, _one_check(False, f"Cannot be read as Python, imports unjudged: {exc}"), 0, STANDARD)
 
-    # Never waived: the owner ruled a second door a retired pattern with no exception.
-    checks = [_second_door(path)] if is_second_door(module_path, source) else []
+    # Never waived: the owner ruled a second door, either kind, a retired pattern with no exception.
+    if is_second_door(module_path, source):
+        checks = [_second_door(path)]
+    else:
+        handed = handed_out_handler_names(module_path, source)
+        checks = [_handed_out(path, *handed)] if handed else []
     for reading in readings:
         if reading.kind not in APPS_KINDS:
             continue

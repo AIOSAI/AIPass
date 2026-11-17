@@ -17,7 +17,7 @@ import re
 import ast
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE, is_bypassed
@@ -231,6 +231,33 @@ def is_second_door(module_path: str, content: str) -> bool:
         return False
     verdict = check_door(content, module_path)
     return verdict["passed"] and verdict["names"] > 0
+
+
+def handed_out_handler_names(module_path: str, content: str) -> Optional[Tuple[int, List[Tuple[str, str]]]]:
+    """The ``__all__`` line and each (name, handler module) a module under ``apps/modules`` hands outward.
+
+    A module's own API is what it defines; a name it imported from its own branch's handlers and lists in
+    ``__all__`` is handed to other branches. None when the file is not such a module or hands nothing out.
+    A package marker is not read: its re-export is as often the branch's own plumbing.
+    """
+    path = Path(module_path)
+    if path.parent.name != "modules" or path.parent.parent.name != "apps" or path.name == "__init__.py":
+        return None
+    tree = ast.parse(content)  # unparseable raises: the caller has already judged such a file
+    own_handlers = re.compile(rf"aipass\.{re.escape(_own_branch(module_path))}\.(?:\w+\.)*?apps\.handlers(?:\.|$)")
+    homes = {
+        alias.asname or alias.name: node.module or ""
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and own_handlers.match(node.module or "")
+        for alias in node.names
+    }
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and [getattr(t, "id", "") for t in node.targets] == ["__all__"]:
+            if not isinstance(node.value, (ast.List, ast.Tuple)):
+                return None
+            names = [e.value for e in node.value.elts if isinstance(e, ast.Constant) and e.value in homes]
+            return (node.lineno, [(name, homes[name]) for name in names]) if names else None
+    return None
 
 
 def check_handle_command(content: str) -> Optional[Dict]:
