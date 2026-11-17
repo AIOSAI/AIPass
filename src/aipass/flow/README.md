@@ -82,9 +82,10 @@ routes by verb, so adding a module adds a command with no registration step.
 The modules are thin orchestrators that route and display, never decide:
 `create_plan`, `close_plan`, `list_plans`, `restore_plan`, `template_manager`,
 `registry_monitor`, `aggregate_central`, and `post_close_runner`, which is the
-detached worker that picks up where a close left off. One more file there is
-not a command but a door: `door_open_plans` publishes `get_open_plans` to
-other branches, because `apps/handlers/` refuses any importer from outside flow.
+detached worker that picks up where a close left off. Other branches import
+from the package top file, `from aipass.flow import get_open_plans`: it loads
+each name from its handler home on access, on the caller's behalf, because
+`apps/handlers/` refuses any importer from outside flow.
 
 Below them, `apps/handlers/` holds the implementation in groups by domain —
 plan lifecycle, registry load and repair, template and plan-type resolution,

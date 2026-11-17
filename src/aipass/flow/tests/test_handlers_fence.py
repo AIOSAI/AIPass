@@ -115,7 +115,7 @@ class TestAForeignImporterIsRefused:
 
 class TestKinAndTheDoorPass:
     """This branch's own files import freely, the standard library and pytest are
-    transport between them and the fence, and the modules door is open to all."""
+    transport between them and the fence, and the package door is open to all."""
 
     @pytest.mark.parametrize("shape", ["pkg", "deep", "dyn", "chain", "mock"])
     def test_the_branch_itself_is_allowed(self, tmp_path, shape):
@@ -123,8 +123,8 @@ class TestKinAndTheDoorPass:
         shape (mock.patch imports from unittest/mock.py and pkgutil.py)."""
         assert _probe(KIN_PROBE, shape, tmp_path) == "ALLOWED"
 
-    def test_the_modules_door_is_open_to_a_foreign_branch(self, foreign_seat, tmp_path):
-        """A foreign seat importing this branch's modules, which import the handlers
+    def test_the_package_door_is_open_to_a_foreign_branch(self, foreign_seat, tmp_path):
+        """A foreign seat reading a name through aipass.flow, which imports the handler
         on its behalf: kin asked, so the fence lets it through."""
         assert _probe(foreign_seat, "door", tmp_path) == "ALLOWED"
 

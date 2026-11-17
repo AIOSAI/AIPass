@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_conftest_fixtures.py
 # Description: The autouse fixtures must actually reach what they claim to mock
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for tests/conftest.py's mock_logger and pre-import fixtures."""
@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 import aipass.flow.apps as flow_apps
-import aipass.prax.apps.modules.logger as prax_logger
+import aipass.prax as prax
 
 import aipass.flow.apps.handlers.registry.save_registry as save_registry_module
 
@@ -58,9 +58,9 @@ class TestMockLoggerReachesTheConsumersBinding:
 
         assert missed == [], f"modules still holding a live logger: {missed}"
 
-    def test_the_source_attribute_is_patched_too(self, mock_logger):
-        """The source attribute is patched as well: code binding system_logger after the fixture ran gets the mock."""
-        assert prax_logger.system_logger is mock_logger
+    def test_a_read_through_the_prax_door_after_the_fixture_binds_the_mock(self, mock_logger):
+        """A module imported after the fixture ran takes its logger from the door and gets the mock."""
+        assert prax.logger is mock_logger
 
 
 class TestTheOptOutIsRealAndNarrow:

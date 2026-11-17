@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared fixtures for flow tests - log redirect, console pin, command-state reset, caller rail
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-03-05
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Shared pytest fixtures for flow tests"""
@@ -22,11 +22,11 @@ from typing import Generator
 import sys
 from unittest.mock import MagicMock, patch
 
+import aipass.prax as prax
+
 # patch() needs these sub-module attributes for dotted-path traversal.
-import aipass.prax.apps.modules.logger  # noqa: F401
 import aipass.flow.apps.handlers.json.json_handler  # noqa: F401
 from aipass.flow.apps.handlers.json import json_handler as json_handler_module
-import aipass.cli.apps.modules  # noqa: F401
 from aipass.cli import display
 
 # Import-time find_repo_root() fallback logs would leak into mock_json_handler counts; pinned complete.
@@ -37,6 +37,9 @@ import aipass.flow.apps.handlers.plan.restore_ops  # noqa: F401
 import aipass.flow.apps.modules.aggregate_central  # noqa: F401
 import aipass.flow.apps.modules.registry_monitor  # noqa: F401
 from aipass.flow.apps.handlers.plan import authority
+
+# The door's logger is an object with no __module__; its class lives in the door name's home.
+_PRAX_LOGGER_HOME = sys.modules[type(prax.logger).__module__]
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -77,8 +80,8 @@ def mock_logger(request, monkeypatch):
         for attribute in ("logger", "system_logger"):
             if getattr(module, attribute, None) is not None:
                 monkeypatch.setattr(module, attribute, mock, raising=False)
-    # The source too, so a module imported LATER in the test binds the mock.
-    monkeypatch.setattr("aipass.prax.apps.modules.logger.system_logger", mock)
+    # The home too: prax's door never caches, so a module imported LATER binds the mock through it.
+    monkeypatch.setattr(_PRAX_LOGGER_HOME, "system_logger", mock)
     yield mock
 
 
