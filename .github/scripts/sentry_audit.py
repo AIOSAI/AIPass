@@ -6,7 +6,7 @@ One branch list feeds all three, so no file is gated on a branch the audit does 
 import sys
 from pathlib import Path
 
-from aipass.sentry.apps.modules.door_audit import audit_branch, load_bypass_rules, name_ratchet, startup_ratchet
+from aipass.sentry import audit_branch, load_bypass_rules, name_ratchet, startup_ratchet
 
 THRESHOLD = 100
 
