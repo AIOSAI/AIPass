@@ -3,7 +3,7 @@
 # Description: Unit tests for trigger event bus core module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/core.py, the Trigger event bus."""
@@ -921,7 +921,26 @@ class TestFrontDoor:
     def test_the_door_hands_out_the_core_bus_and_class_themselves_never_copies(self):
         assert door_bus is core.trigger
         assert DoorTrigger is core.Trigger
-        assert {"trigger", "Trigger"} <= set(vars(trigger_door)), "a handed-out name is not cached on the package"
+        assert not {"trigger", "Trigger"} & set(vars(trigger_door)), "a handed-out name was stored on the package"
+
+    def test_a_patch_on_the_home_reaches_the_next_door_read(self, monkeypatch):
+        stand_in = object()
+        monkeypatch.setattr(core, "trigger", stand_in)
+        assert trigger_door.trigger is stand_in
+
+    def test_fire_patched_on_the_door_class_records_import_bound_and_call_time_callers(self, monkeypatch):
+        recorder = MagicMock()
+        monkeypatch.setattr(trigger_door.Trigger, "fire", recorder)
+
+        door_bus.fire("bound_at_import", n=1)
+        trigger_door.trigger.fire("read_at_call_time", n=2)
+        trigger_door.Trigger.fire("class_form", n=3)
+
+        assert recorder.call_args_list == [
+            call("bound_at_import", n=1),
+            call("read_at_call_time", n=2),
+            call("class_form", n=3),
+        ]
 
     def test_a_name_off_the_public_list_raises_attribute_error_never_a_stand_in(self):
         for name in ("core", "report_error", "handle_command"):

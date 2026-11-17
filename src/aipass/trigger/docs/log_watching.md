@@ -6,7 +6,7 @@
 
 The branch watcher reads `system_logs/*.log` and the `logs/*.log` of every declared citizen:
 core, resident and external, the rows of `fleet_branches()` from memory's door
-(`aipass.memory.apps.modules.door_registry_scope`). A project takes part by being declared in
+(`from aipass.memory import fleet_branches`). A project takes part by being declared in
 `AIPASS_ROOTS.json`; its registry makes its citizens real. A citizen with no `logs/` yet is
 skipped and named once at INFO. Each log dir's branch is its address (`@my_agent` is MY_AGENT,
 whatever the directory is called). The census is re-read at most every `FLEET_TTL_SECONDS`

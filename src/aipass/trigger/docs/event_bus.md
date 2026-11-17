@@ -11,8 +11,13 @@ event/handler table. This page is what the bus guarantees and what it deliberate
 
 ## Python API
 
+Another branch takes the bus through the package door, `aipass/trigger/__init__.py`:
+`trigger` (the bus instance) and `Trigger` (its class). Every other name raises
+`AttributeError`. The door reads each name from `apps/modules/core.py` on every access and
+stores nothing on the package, so a patch on core reaches the next read.
+
 ```python
-from aipass.trigger.apps.modules.core import Trigger
+from aipass.trigger import Trigger
 
 # Register a handler
 def on_report_ready(**data):
@@ -61,10 +66,29 @@ events do not share key names — `plan_file_created` and `plan_file_deleted` ta
 `path`, while `plan_file_moved` takes `src_path` and `dest_path`. Read the
 handler in `apps/handlers/events/` before firing one by hand.
 
+**A test silences or records the bus one way: patch `fire` on the class, through the door.**
+`fire` is a classmethod and `trigger` is one `Trigger()` instance, so the class attribute is
+the one place every caller passes: a module that bound `trigger` at import, one that imports
+it at call time, and one that calls `Trigger.fire`. A recorder sees `fire(event, **data)`.
+
+```python
+from aipass.trigger import Trigger
+
+def test_x(monkeypatch):
+    fired = MagicMock()
+    monkeypatch.setattr(Trigger, "fire", fired)   # or mock.patch("aipass.trigger.Trigger.fire")
+```
+
+A plain function standing in for `fire` needs `staticmethod(fn)`, or it binds the instance.
+Two other forms miss callers: patching the name `aipass.trigger.trigger` never reaches a
+module that bound `trigger` at import, and patching `fire` on the instance never reaches
+`Trigger.fire`. Pinned in `tests/test_core.py::TestFrontDoor`.
+
+`report_error` is not on the door; inside trigger:
+
 ```python
 from aipass.trigger.apps.modules.errors import report_error
 
-# Cross-branch error reporting
 result = report_error(
     branch="api",
     error_type="ConnectionError",
