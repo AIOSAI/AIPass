@@ -3,7 +3,7 @@
 # Description: Tests for the leaderboard reader - drone @canary top, its JSON form and its refusals
 # Version: 1.3.0
 # Created: 2026-09-19
-# Modified: 2026-11-16
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/top.py and the leaderboard reader it drives."""
@@ -130,7 +130,7 @@ def test_a_plain_integer_is_read_as_written(monkeypatch, capsys, tmp_path, row, 
 
 
 def test_a_file_with_no_final_newline_still_reads_its_last_row(monkeypatch, capsys, tmp_path):
-    """Unlike the note store, this file is somebody else's - a missing terminator is not a tear."""
+    """This file is somebody else's - a missing terminator is not a tear."""
     board = _board(tmp_path, "alice 12\nbob 30")
 
     assert _run(monkeypatch, ["top", "2", board]) == 0

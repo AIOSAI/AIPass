@@ -26,9 +26,9 @@ count.
   anything is ranked: the file is a tally, not a table of final scores.
 - **Leading zeros are accepted** (`007` is 7), and so is `-0`, which equals
   zero. A plain integer is what the contract asks for and both are one.
-- **A missing final newline is fine.** Unlike the note store, this file is
-  somebody else's: an unterminated last line is how half the world's text files
-  end, not the torn write the store has to refuse.
+- **A missing final newline is fine.** This file is somebody else's: an
+  unterminated last line is how half the world's text files end, not a torn
+  write.
 
 ## The order
 

@@ -27,11 +27,12 @@ document for a given name resolves under `canary_json/` as
 
 Test data, git-ignored, nothing depends on it. Each operation trail creates its
 own documents there on its first live run, config, data and log apiece. The
-documents are named for the FILE that logs, not for the command: `note_*` and
-`store_*` for the note store, `span_*` and `parser_*` for the duration parser,
-`top_*` and `reader_*` for the leaderboard reader. A module and the handler
-behind it therefore write separate trails — the successful runs land under the
-module's name and the refusals under the handler's.
+documents are named for the FILE that logs, not for the command: `span_*` and
+`parser_*` for the duration parser, `top_*` and `reader_*` for the leaderboard
+reader. A module and the handler behind it therefore write separate trails — the
+successful runs land under the module's name and the refusals under the
+handler's. `note_*`, and the part of `store_*` written before the note module
+was retired, are inert: no code here writes the `note_*` names any more.
 
 `canary_json/custom_config/` is a leftover directory holding only a placeholder
 README. Nothing routes there, because the json service accepts only the three
@@ -40,8 +41,7 @@ for its purpose.
 
 ## docs.local/
 
-Git-ignored working space. It holds the note store, `notes.jsonl`, the sample
-and deliberately-malformed tally files the `top` module was exercised against by
+Git-ignored working space. It holds the sample and deliberately-malformed tally files the `top` module was exercised against by
 hand, whatever a sub-agent drops during a test, and probe scratch kept under
 `docs.local/.archive/`.
 
@@ -51,7 +51,7 @@ Prax log output *and* dispatch transcripts, which is worth knowing before
 reading anything there. `dispatch_stdout.log`, `dispatch_stderr.log`,
 `dispatch_wake.log` and the `.dispatch_env` snapshot are written by the mail
 branch when work arrives here — they are not this branch's own output.
-`note.log`, `span.log`, `top.log`, `align.log` and `kv.log` are: each module
+`span.log`, `top.log`, `align.log` and `kv.log` are: each module
 logs its own refusals and I/O failures to a file named for it.
 
 The entry point's own logger call sites — an import fallback, a module that

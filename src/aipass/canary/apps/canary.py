@@ -3,7 +3,7 @@
 # Description: Entry point CLI for drone @canary — permanent test citizen
 # Version: 2.7.0
 # Created: 2026-08-20
-# Modified: 2026-10-17
+# Modified: 2026-11-18
 # =============================================
 
 """CANARY Branch - Main Orchestrator
@@ -100,8 +100,6 @@ def print_help() -> None:
     console.print()
 
     console.print("[yellow]Commands:[/yellow]")
-    console.print("  [cyan]note add TEXT[/cyan]      Append one note to the branch-local store")
-    console.print("  [cyan]note list[/cyan]          Print notes in order, with index and timestamp")
     console.print("  [cyan]span TEXT[/cyan]          Print a written duration as a total in seconds")
     console.print('  [cyan]span --json TEXT[/cyan]   The same total as {"seconds": N}, nothing on stdout')
     console.print("  [cyan]top N FILE[/cyan]         Print the N highest counts in a name/count file")
@@ -127,8 +125,6 @@ def print_help() -> None:
 
     console.print("[yellow]Examples:[/yellow]")
     console.print("  $ drone @canary")
-    console.print('  $ drone @canary note add "check the tick-5 interrupt"')
-    console.print("  $ drone @canary note list")
     console.print("  $ drone @canary span '2d 4h'")
     console.print("  $ drone @canary span --json 1h30m")
     console.print("  $ drone @canary top 3 scores.txt")

@@ -25,8 +25,8 @@ Plain UTF-8 text. Every non-blank line is two or more fields.
 - **The first non-blank line sets the column count.** Every later row must have
   the same number of fields; one that does not refuses the file.
 - **A missing final newline is fine.** This file is somebody else's: an
-  unterminated last line is how half the world's text files end, not the torn
-  write the note store has to refuse.
+  unterminated last line is how half the world's text files end, not a torn
+  write.
 
 ## The layout
 

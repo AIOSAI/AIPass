@@ -8,7 +8,6 @@ these pages are what it points at.
 | Page | What it covers |
 |------|----------------|
 | [command_surface.md](command_surface.md) | Every routed form, the exit-code contract, subcommand help, and the help forms every module accepts |
-| [note_module.md](note_module.md) | The append-only note store: format, refusal, why it avoids the fleet json service, what its tests measure |
 | [span_module.md](span_module.md) | The duration parser: the grammar, every refusal and why stdout stays empty, the JSON form, what its tests measure |
 | [top_module.md](top_module.md) | The leaderboard reader: the file shape, the tie-break and why it is not insertion order, every refusal, what its tests measure |
 | [align_module.md](align_module.md) | The column aligner: the layout, the four rulings the contract leaves open, every refusal, what its tests measure |

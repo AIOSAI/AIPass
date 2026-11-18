@@ -17,8 +17,6 @@ and saying so is part of every report it sends.
 ```bash
 drone @canary                                  # what is present right now
 drone @canary --help                           # the reference
-drone @canary note add "check the interrupt"   # append one note
-drone @canary note list                        # read them back
 drone @canary span "2d 4h"                     # a written duration in seconds
 drone @canary top 3 scores.txt                 # the three highest counts in a tally
 drone @canary align table.txt                  # a text table with its columns lined up
@@ -72,7 +70,7 @@ the thing landed — not a summary of it.
 
 ## Commands
 
-Five verbs are routed today — `note`, `span`, `top`, `align` and `kv` — and not
+Four verbs are routed today — `span`, `top`, `align` and `kv` — and not
 one of them is permanent. Modules are added here for a specific test and removed after it,
 so the forms above are the reference and this page names no more than the verbs.
 
@@ -85,11 +83,9 @@ reports — is in [docs/command_surface.md](docs/command_surface.md).
 `apps/canary.py` is the entry point and holds no business logic: it discovers
 modules, routes to them, and turns their answer into an exit code. Modules live
 in `apps/modules/`, which is empty by design between tests; today it holds
-`note`, an append-only note store, `span`, a duration parser, `top`, a
-leaderboard reader, `align`, a column aligner, and `kv`, a key/value store that
-survives between runs. Handlers sit under
-`apps/handlers/`: the `notes` handler does the store's reading and appending,
-the `duration` handler parses a written duration and owns every one of that
+`span`, a duration parser, `top`, a leaderboard reader, `align`, a column
+aligner, and `kv`, a key/value store that survives between runs. Handlers sit
+under `apps/handlers/`: the `duration` handler parses a written duration and owns every one of that
 command's refusals, the `leaderboard` handler reads a name/count tally and owns
 every one of `top`'s refusals, the `table` handler reads a whitespace-separated
 table and owns every one of `align`'s refusals, the `kv` handler reads and
@@ -112,7 +108,6 @@ Depth lives in [docs/](docs/), one page per subject:
 | Page | What it covers |
 |------|----------------|
 | [docs/command_surface.md](docs/command_surface.md) | Every routed form, the exit-code contract, subcommand help, and the help forms every module accepts |
-| [docs/note_module.md](docs/note_module.md) | The note store: format, the parse refusal, why it avoids the fleet json service, what its tests measure |
 | [docs/span_module.md](docs/span_module.md) | The duration parser: the grammar, every refusal and why stdout stays empty, the JSON form, what its tests measure |
 | [docs/top_module.md](docs/top_module.md) | The leaderboard reader: the file shape, the tie-break and why it is not insertion order, every refusal, what its tests measure |
 | [docs/align_module.md](docs/align_module.md) | The column aligner: the layout, the four rulings the contract leaves open, every refusal, what its tests measure |
@@ -139,7 +134,7 @@ Depth lives in [docs/](docs/), one page per subject:
 
 ---
 
-**Last Updated:** 2026-10-17
+**Last Updated:** 2026-11-18
 
 ---
 
