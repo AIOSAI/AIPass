@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: series.py
 # Description: the ratchet series - one append-only line per probe, and the archived artifact behind it
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-10-12
-# Modified: 2026-11-14
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -22,6 +22,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
+from aipass.drone import resolve_aipass_home
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.json import json_handler
 
@@ -29,9 +30,6 @@ MODULE_NAME = "ratchet.series"
 
 SENTRY_ROOT = Path(__file__).resolve().parents[3]
 ARTIFACT_DIR = SENTRY_ROOT / ".sentry"
-
-#: The AIPass root the probe runs in: `src/aipass/sentry` is three levels down.
-REPO_ROOT = SENTRY_ROOT.parents[2]
 
 HOME_DIR = Path.home()
 SERIES_NAME = "ratchet_series.jsonl"
@@ -109,13 +107,21 @@ def fragment_chain(branch: str, lines: Sequence[dict]) -> List[dict]:
     return chain
 
 
+def repo_root() -> Path:
+    """The AIPass home from drone's one resolver, never a depth counted from this file (wrong on a wheel)."""
+    home = resolve_aipass_home()
+    if home.path is None:
+        raise RuntimeError(f"ratchet: no AIPass home resolved; tried {', '.join(home.tried)}")
+    return home.path
+
+
 def unprobed(line: dict, root: Optional[Path] = None) -> List[str]:
     """`relpath::qualname` of every function a fragment's budget left unprobed, read from its archive.
 
     A fragment with no archive raises: continuing from nothing would re-probe the whole tree."""
     if not line.get("archive"):
         raise ValueError(f"the {line.get('branch')} fragment {line.get('run_id')} names no archive to continue from")
-    path = (Path(root) if root else REPO_ROOT) / str(line["archive"])
+    path = (Path(root) if root else repo_root()) / str(line["archive"])
     group = campaign_group(json.loads(path.read_text(encoding="utf-8"))) or {}
     return _keys(_unprobed_mutants(group))
 
@@ -136,7 +142,7 @@ def portable(value: Any, root: Optional[Path] = None, home: Optional[Path] = Non
     """`value` with every path under the AIPass root made repo-relative and any other home path `~`.
 
     Walks dicts (keys too), lists and strings; the root alone becomes `.`."""
-    rewrite = _rewriter(Path(root) if root else REPO_ROOT, Path(home) if home else HOME_DIR)
+    rewrite = _rewriter(Path(root) if root else repo_root(), Path(home) if home else HOME_DIR)
     return _walk(value, rewrite)
 
 
@@ -199,7 +205,9 @@ def build_line(
     now: Optional[float] = None,
     slice_number: int = 1,
 ) -> dict:
-    """One series line from one audit-tests artifact. `slice_number` counts this branch's fragments, this one included."""
+    """One series line from one audit-tests artifact.
+
+    `slice_number` counts this branch's fragments, this one included."""
     group = campaign_group(document) or {}
     provenance = document.get("provenance") or {}
     stamped = now if now is not None else time.time()
