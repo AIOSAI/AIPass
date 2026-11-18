@@ -291,8 +291,8 @@
         185,
         187,
         188,
-        397,
-        399
+        398,
+        400
       ],
       "reason": "_refusals._reset_refusals() empties the refusal memory around every test (373, 375), so a refusal recorded by one test never answers another. A reset between tests is not a route the product has, and a public reset would be a door for the test alone. devpulse's ruling a of 10-03 (leg 12 dispatch), which replaces the earlier HELD (api, fleet green leg 12). 143, 145: the git-changes ReadCache (host_git._changes) cleared around each case, the same ruling; moved with _clean_git_changes_cache from test_host_read_lane.py:153, 155 in the oversize split (api, 2026-10-08), named and requested per file since 2026-10-09. Lines moved 225/227/466/468 -> 143/145/327/329 in the comment sweep (2026-10-17); 143/145/327/329 -> 180/182/364/366 with the keyring test backend (2026-10-22); 364/366 -> 373/375 with the no_fsync fixture (2026-10-25); 180/182/373/375 -> 179/181/372/374 with the changelog trim (2026-11-01); 179/181/372/374 -> 180/182/381/383 with the 2026-11-05 edits above them, re-ruled bypass by devpulse the same day; 180/182/381/383 -> 183/185/384/386 with the SECRETS_BASE redirect (2026-11-06). 184/187: the git sweep cache (host_git._sweeps) cleared beside it, the same ruling; 384/386 -> 386/388 (2026-11-10). 183/184/186/187/386/388 -> 184/185/187/188/397/399 with the agent_notices import and notice_feed fixture (2026-11-16)."
     },
