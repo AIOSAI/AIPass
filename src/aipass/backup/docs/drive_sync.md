@@ -228,7 +228,14 @@ for a run that copied nothing. The `all` cycle's Drive step is the same
 function, so it writes the same entry.
 
 `share` is the single-file lane: it uploads one file and prints the shareable
-link as its final line, so the link can be captured from stdout.
+link as its final line, so the link can be captured from stdout. A file of the
+same name already in `Shared` is reused, not uploaded again; a search for it
+that gets no answer fails the share (`Upload failed: File search for '<name>'
+got no answer - not uploading a twin`), since no answer is not "not there".
+
+Every folder step (the root, the project folder, each nested segment) fails
+the same way: the client's `last_error` names that step or the cause Drive
+gave, never an earlier call's error, and the step logs it at warning.
 
 ---
 

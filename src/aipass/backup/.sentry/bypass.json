@@ -26,7 +26,7 @@
     {
       "file": "apps/handlers/drive/share.py",
       "standard": "logged_fallback",
-      "lines": [69],
+      "lines": [70],
       "reason": "_revoke_public_access returns True only on success; its two other False returns are the could-not-list and could-not-delete failures the docstring names. Checker reads failure guards as the success path. Decision of @backup, fleet green leg 5."
     },
     {

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: share.py
 # Description: Drive sharing — upload + permission + shareable link retrieval
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-07-01
-# Modified: 2026-10-17
+# Modified: 2026-11-18
 # =============================================
 
 """Drive file sharing."""
@@ -17,6 +17,7 @@ from aipass.prax import logger
 
 from ..audit import trail
 from . import upload as upload_mod
+from .client import DriveError
 
 if TYPE_CHECKING:
     from .client import DriveClient
@@ -74,29 +75,27 @@ def upload_for_share(
     local_file: Path,
     note: str = "",
 ) -> str | None:
-    """Upload a file for sharing, reusing one of the same name in ``Shared``; the Drive file ID or None."""
-    folder_id = client.get_or_create_project_folder(SHARE_PROJECT_NAME)
-    if not folder_id:
+    """The Drive file ID, reusing a file of the same name in ``Shared``; None only on a failure last_error names."""
+    try:
+        folder_id = client.get_or_create_project_folder(SHARE_PROJECT_NAME)
+        if not folder_id:
+            raise DriveError(client.last_error or f"No '{SHARE_PROJECT_NAME}' folder on Drive")
+        existing = client._find_existing_file(local_file.name, folder_id)
+        if existing:
+            logger.info(f"File already on Drive: {existing['id']}")
+            return existing["id"]
+
+        client.file_tracker = {}
+        if not upload_mod.upload_single_file(client, local_file, SHARE_PROJECT_NAME, local_file.parent, note=note):
+            raise DriveError(client.last_error or f"Upload of {local_file.name} failed")
+        drive_id = client.file_tracker.get(local_file.name, {}).get("drive_id")
+        if not drive_id:
+            raise DriveError(f"Upload of {local_file.name} recorded no Drive id")
+        return drive_id
+    except DriveError as exc:
+        client.last_error = str(exc)
+        logger.warning(f"[backup] Share upload failed: {exc}")
         return None
-
-    existing = client._find_existing_file(local_file.name, folder_id)
-    if existing:
-        logger.info(f"File already on Drive: {existing['id']}")
-        return existing["id"]
-
-    client.file_tracker = {}
-    success = upload_mod.upload_single_file(
-        client,
-        local_file,
-        SHARE_PROJECT_NAME,
-        local_file.parent,
-        note=note,
-    )
-    if not success:
-        return None
-
-    entry = client.file_tracker.get(local_file.name, {})
-    return entry.get("drive_id")
 
 
 def set_share_permission(

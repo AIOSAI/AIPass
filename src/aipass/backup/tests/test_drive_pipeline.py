@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_drive_pipeline.py
 # Description: Tests for the Drive sync pipeline -- every Google edge sealed, zero live calls
-# Version: 3.1.4
+# Version: 3.1.5
 # Created: 2026-06-12
-# Modified: 2026-11-15
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/drive_sync.py and the apps/handlers/drive/ pipeline it drives."""
@@ -267,7 +267,7 @@ class TestDriveClient:
         client = drive_client.DriveClient()
 
         assert client.get_or_create_backup_folder() is None
-        assert client.backup_folder_id is None
+        assert (client.backup_folder_id, client.last_error) == (None, "No Drive service - authenticate first")
         drive_api.assert_not_called()
 
     def test_an_outage_never_creates_a_second_root_or_resets_the_tracker(
@@ -323,6 +323,24 @@ class TestDriveClient:
         assert client.last_error == "Folder search for 'a' got no answer - not creating a duplicate"
         recorded_logger.warning.assert_called_once_with(client.last_error)
         assert drive_api.call_count == 1
+
+    @pytest.mark.parametrize(
+        ("method", "args", "gone", "named"),
+        [
+            ("get_or_create_backup_folder", (), (True,), "Backup folder create got no answer"),
+            ("get_or_create_project_folder", ("p",), (False,), "Project folder create for 'p' got no answer"),
+            ("get_or_create_nested_folder", ("root", "a"), (), "Folder create for 'a' got no answer"),
+        ],
+    )
+    def test_a_folder_failure_names_itself_in_last_error_never_a_stale_one(
+        self, drive_api: MagicMock, recorded_logger: MagicMock, method, args, gone, named
+    ) -> None:
+        client = drive_client.DriveClient()
+        client._drive_service, client.backup_folder_id, client.last_error = MagicMock(), "root", "stale"
+        drive_api.side_effect = [*({"trashed": t} for t in gone), {"files": []}, None]
+
+        assert (getattr(client, method)(*args), client.last_error, drive_api.call_count) == (None, named, len(gone) + 2)
+        recorded_logger.warning.assert_called_once_with(named)
 
     def test_project_folder_found_is_returned_and_cached_by_project_name(self, drive_api: MagicMock) -> None:
         """A found project folder is returned and cached under its project name."""
@@ -854,24 +872,24 @@ class TestDriveTest:
         assert result["error"] == "No credentials"
         assert result["folder_id"] is None
 
-    def test_connectivity_fails_with_the_fallback_reason_when_folder_access_fails(
+    def test_connectivity_fails_naming_the_folder_step_that_got_no_answer(
         self,
         monkeypatch: pytest.MonkeyPatch,
         drive_api: MagicMock,
     ) -> None:
-        """Auth can pass and folder access still fail -- that is a FAIL with the fallback reason."""
+        """Auth can pass and folder access still fail -- that is a FAIL naming the step."""
         monkeypatch.setattr(
             drive_client,
             "get_drive_service",
             MagicMock(return_value=MagicMock(name="drive_service")),
         )
-        # The search answers empty and the create gets no answer: nothing sets last_error, so the fallback speaks.
+        # The search answers empty and the create gets no answer, with no cause recorded.
         drive_api.side_effect = [{"files": []}, None]
 
         result = drive_test.test_connectivity(drive_client.DriveClient())
 
         assert result["success"] is False
-        assert result["error"] == "Failed to access backup folder"
+        assert result["error"] == "Backup folder create got no answer"
         assert drive_api.call_count == 2
         assert result["folder_id"] is None
 
