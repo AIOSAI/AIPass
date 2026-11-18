@@ -41,6 +41,7 @@ For each collected file, the checker builds a search corpus from ALL `.py` conte
 | Glob-based discovery | `glob("*_check.py")`, `glob("*.py")` |
 | Filename string literal | `"foo_handler.py"` in source |
 | Project config, dotted path only | `"aipass.branch.apps.handlers.foo.handle"` in the project's `.aipass/*.json`, the project root being the nearest directory at or above the branch holding a `*_REGISTRY.json` (since 2026-10-08: hooks names 28 handlers only there), or the AIPass install, known as hooks' loader knows it: `.aipass/hooks.json` beside `src/aipass/` (since 2026-10-10: `AIPASS_REGISTRY.json` is git-ignored, so a clean checkout read hooks 88 where the seat read 100). A stem or filename in a json acquits nothing |
+| The branch's own door table | a string value of a module-level dict in the branch's top `__init__.py`, literal or an f-string over that file's string constants, equal to the file's whole dotted path: `"render_bootstrap_trinity": f"{_HANDLERS}.bootstrap_render"`. Other branches and shell scripts reach such a handler through the door alone, so no import names it. An entry naming a module that does not exist serves nothing |
 
 ### Always Considered Used
 

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch4.py
 # Description: Unit tests for 5 sentry checker handlers (batch 4)
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-03-29
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for 5 checkers: aipass_standards/stderr_routing_check.py, todo, trigger, dead_code, unused_function."""
@@ -53,6 +53,16 @@ def _make_branch(tmp_path: Path) -> Path:
     handlers = apps / "handlers"
     handlers.mkdir(parents=True)
     return tmp_path
+
+
+def _door_branch(tmp_path: Path, entries: str) -> Path:
+    """A branch whose only handler, handlers/served.py, nothing imports; its top __init__.py holds a door table."""
+    branch = _make_branch(tmp_path)
+    _write_file(branch / "apps" / (branch.name + ".py"), "def main():\n    return 0\n")
+    _write_file(branch / "apps" / "handlers" / "served.py", "def render():\n    return 1\n")
+    door = f'_HANDLERS = "{branch.name}.apps.handlers"\n_HOMES = {{{entries}}}\n'
+    _write_file(branch / "__init__.py", door)
+    return branch
 
 
 @patch("aipass.sentry.apps.handlers.aipass_standards.stderr_routing_check.json_handler")
@@ -377,6 +387,26 @@ class TestDeadCodeCheck:
         failed = [c for c in result["checks"] if not c["passed"]]
         assert len(failed) > 0
         assert "unreferenced" in failed[0]["message"]
+
+    def test_a_module_served_by_its_own_door_table_is_referenced(self, mock_json, tmp_path: Path) -> None:
+        branch = _door_branch(tmp_path, '"render": f"{_HANDLERS}.served"')
+        result = dead_code_check_branch(str(branch))
+        assert (result["score"], result["checks"][0]["passed"]) == (100, True)
+
+    def test_a_plain_string_table_entry_also_serves(self, mock_json, tmp_path: Path) -> None:
+        branch = _door_branch(tmp_path, f'"render": "{tmp_path.name}.apps.handlers.served"')
+        assert dead_code_check_branch(str(branch))["score"] == 100
+
+    @pytest.mark.parametrize(
+        "table",
+        ['"render": f"{_HANDLERS}.other"', '"render": f"{_HANDLERS}.deeper.served"', ""],
+        ids=["served_by_nobody", "entry_names_a_missing_module", "no_table"],
+    )
+    def test_a_file_the_table_does_not_resolve_to_is_still_dead(self, mock_json, tmp_path: Path, table) -> None:
+        branch = _door_branch(tmp_path, table)
+        result = dead_code_check_branch(str(branch))
+        assert result["score"] < 100
+        assert "handlers/served.py" in result["checks"][0]["message"]
 
     def test_dead_code_bypass_respected(self, mock_json, tmp_path: Path) -> None:
         """Bypass rules produce score=100."""

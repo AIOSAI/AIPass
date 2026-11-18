@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dead_code_check.py
 # Description: Dead Code Standards Checker Handler
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-03-22
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """Dead Code Standards Checker Handler
@@ -11,10 +11,12 @@
 Reference: dead_code.md
 """
 
+import ast
 import re
 from pathlib import Path, PurePath
 
 from aipass.prax import logger
+from aipass.sentry.apps.handlers.aipass_standards.check_support import parse, read_text
 from aipass.sentry.apps.handlers.json import json_handler
 from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE, is_bypassed
 from aipass.sentry.apps.handlers.bypass.ignore_handler import is_sentry_ignored, load_ignore_entries
@@ -114,6 +116,48 @@ def _named_in_config(import_path: str, config_text: str) -> bool:
     return re.search(rf"(?<![\w.]){re.escape(import_path)}(?!\w)", config_text) is not None
 
 
+def _string_value(node: ast.AST, constants: dict[str, str]) -> str | None:
+    """A string literal or an f-string over the module's own string constants, else None."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if not isinstance(node, ast.JoinedStr):
+        return None
+    pieces = []
+    for part in node.values:
+        if isinstance(part, ast.FormattedValue) and isinstance(part.value, ast.Name) and part.format_spec is None:
+            pieces.append(constants.get(part.value.id))
+        else:
+            pieces.append(_string_value(part, constants))
+    return None if None in pieces else "".join(pieces)
+
+
+def door_served(branch_root: Path) -> frozenset[str]:
+    """Dotted module paths the branch's door table serves: string values of a dict in its top ``__init__.py``.
+
+    Other branches and shell scripts reach a handler through this table alone, so no import names it.
+    """
+    door = branch_root / "__init__.py"
+    source = read_text(door, tag="dead_code") if door.is_file() else None
+    tree = parse(source, tag="dead_code") if source is not None else None
+    constants: dict[str, str] = {}
+    served: set[str] = set()
+    for node in tree.body if tree is not None else []:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            target = node.target
+        else:
+            continue
+        if not isinstance(target, ast.Name):
+            continue
+        text = _string_value(node.value, constants)
+        if text is not None:
+            constants[target.id] = text
+        elif isinstance(node.value, ast.Dict):
+            served.update(v for v in (_string_value(value, constants) for value in node.value.values) if v)
+    return frozenset(served)
+
+
 def _build_import_path(py_file: Path, branch_path: Path, branch_name: str) -> str:
     """Build the dotted import path for a file."""
     try:
@@ -153,8 +197,9 @@ def _check_file_used(
     source_text: str,
     entry_point_name: str,
     config_text: str = "",
+    served: frozenset[str] = frozenset(),
 ) -> bool:
-    """Determine if a .py file is referenced anywhere in the branch source."""
+    """Determine if a .py file is referenced anywhere in the branch source, or served by the branch's door table."""
     stem = py_file.stem
 
     if py_file.name == "__init__.py":
@@ -173,7 +218,7 @@ def _check_file_used(
             return True
 
     import_path = _build_import_path(py_file, branch_path, branch_name)
-    if import_path in source_text:
+    if import_path in source_text or import_path in served:
         return True
 
     try:
@@ -309,12 +354,13 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
 
     source_text = _collect_source_text(apps_dir, bp, ignore_entries)
     config_text = _project_config_text(bp)
+    served = door_served(bp)
 
     total_files = len(targets)
     dead_files: list[str] = []
 
     for target in targets:
-        used = _check_file_used(target, bp, branch_name, source_text, entry_point_name, config_text)
+        used = _check_file_used(target, bp, branch_name, source_text, entry_point_name, config_text, served)
         if not used:
             try:
                 rel = reported_path(target, apps_dir)

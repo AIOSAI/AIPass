@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dead_code_content.py
 # Description: Dead Code Standards Content Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-22
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -46,6 +46,8 @@ def get_dead_code_standards() -> str:
         "     [green]g)[/green] Full dotted path in the project's [dim].aipass/*.json[/dim]; the project",
         "        root holds a [dim]*_REGISTRY.json[/dim], or is the AIPass install",
         "        [dim](.aipass/hooks.json beside src/aipass/ -- the registry is git-ignored)[/dim]",
+        "     [green]h)[/green] Full dotted path in the branch's door table: a dict value in its",
+        "        top [dim]__init__.py[/dim], literal or an f-string over that file's constants",
         "",
         "  [yellow]Always considered used:[/yellow] __init__.py, entry point files,",
         "  and glob-discovered patterns (*_check.py, *_content.py).",
