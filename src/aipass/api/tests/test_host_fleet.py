@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_host_fleet.py
 # Description: Tests for the host API fleet lane — baud --snapshot contract
-# Version: 1.1.7
+# Version: 1.2.0
 # Created: 2026-08-14
 # Modified: 2026-11-17
 # =============================================
@@ -36,8 +36,16 @@ from aipass.api.apps.handlers.host import machine as host_machine
 from aipass.api.apps.handlers.host import read_cache as host_read_cache
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
-from aipass.skills.lib.screen_lock import handler as screen_lock
-from aipass.skills.lib.system_status import handler as system_status
+from aipass.skills import (
+    SCREEN_LOCK_METHOD_DBUS,
+    SCREEN_LOCK_METHOD_LOGINCTL,
+    SCREEN_LOCK_REASON_NO_READER,
+    SCREEN_LOCK_REASON_NO_SESSION,
+    SCREEN_LOCK_REASON_READ_FAILED,
+    SYSTEM_STATUS_PSUTIL_RECIPE,
+    SYSTEM_STATUS_REASONS,
+    SYSTEM_STATUS_SECTIONS,
+)
 
 
 # A real card, trimmed from @baud's verified run.
@@ -1013,7 +1021,7 @@ def _present(**values: Any) -> dict:
 
 def _absent(reason: str, **values: Any) -> dict:
     """A section that did not, carrying the skill's OWN sentence for its code."""
-    return {"available": False, "reason": reason, "sentence": system_status.REASONS[reason], "detail": None, **values}
+    return {"available": False, "reason": reason, "sentence": SYSTEM_STATUS_REASONS[reason], "detail": None, **values}
 
 
 def _sensorless_vitals(sampled_at: str = "2026-09-13T07:20:00.000+00:00") -> dict:
@@ -1064,7 +1072,7 @@ class TestTheMachineRoute:
 
         Absence carries the skill's sentence and a None where a zero would lie."""
         machine_door.return_value = _sensorless_vitals()
-        assert all(name in machine_door.return_value for name in system_status.SECTIONS), "stand-in drifted"
+        assert all(name in machine_door.return_value for name in SYSTEM_STATUS_SECTIONS), "stand-in drifted"
 
         response = client.get("/v1/machine", headers=auth)
 
@@ -1073,7 +1081,7 @@ class TestTheMachineRoute:
         assert body == _sensorless_vitals()
         assert body["fan"]["available"] is False
         assert body["fan"]["reason"] == "platform"
-        assert body["fan"]["sentence"] == system_status.REASONS["platform"]
+        assert body["fan"]["sentence"] == SYSTEM_STATUS_REASONS["platform"]
         assert body["fan"]["current"] is None
         assert body["temp"]["celsius"] is None
         assert body["cpu"]["percent"] == 11.4
@@ -1081,7 +1089,7 @@ class TestTheMachineRoute:
     @pytest.mark.parametrize(
         ("reason", "detail"),
         [
-            ("psutil_missing", system_status.PSUTIL_RECIPE),
+            ("psutil_missing", SYSTEM_STATUS_PSUTIL_RECIPE),
             ("switched_off", "Skill 'system_status' is switched OFF and takes no readings."),
             ("a_code_from_the_future", "a refusal this server has never seen"),
         ],
@@ -1222,8 +1230,8 @@ class TestTheMachineCache:
         """
         The door is imported inside the call, so importing this lane loads no skill.
 
-        Asked of a fresh interpreter, because this one already imported the skill
-        at the top of this file.
+        Asked of a fresh interpreter: the constants this file takes from aipass.skills
+        at its top have already loaded the skill here.
         """
         probe = (
             "import sys\n"
@@ -1255,9 +1263,9 @@ PATCH_LOCK_JSON = "aipass.api.apps.handlers.host.lock.json_handler"
 PATCH_LOCK_DOOR = "aipass.skills.lock_state"
 
 
-def _lock_answer(locked: bool, method: str = screen_lock.METHOD_LOGINCTL, session: Any = "3") -> dict:
+def _lock_answer(locked: bool, method: str = SCREEN_LOCK_METHOD_LOGINCTL, session: Any = "3") -> dict:
     """An answer in the skill's published shape. The unlocked default is this laptop's, read live."""
-    source = f"logind session {session}" if method == screen_lock.METHOD_LOGINCTL else "GNOME ScreenSaver"
+    source = f"logind session {session}" if method == SCREEN_LOCK_METHOD_LOGINCTL else "GNOME ScreenSaver"
     return {
         "ok": True,
         "locked": locked,
@@ -1268,7 +1276,7 @@ def _lock_answer(locked: bool, method: str = screen_lock.METHOD_LOGINCTL, sessio
     }
 
 
-def _cannot_tell(reason: str = screen_lock.REASON_NO_SESSION) -> dict:
+def _cannot_tell(reason: str = SCREEN_LOCK_REASON_NO_SESSION) -> dict:
     """The skill could not tell: ok False, locked None, its code and a sentence standing in for its own."""
     return {
         "ok": False,
@@ -1278,6 +1286,12 @@ def _cannot_tell(reason: str = screen_lock.REASON_NO_SESSION) -> dict:
         "reason": reason,
         "detail": f"Cannot tell whether the screen is locked ({reason}).",
     }
+
+
+def _switched_off() -> dict:
+    """lock_state() while screen_lock is switched off, in @skills' stated shape."""
+    sentence = "Skill 'screen_lock' is switched OFF. Turn it back on with: drone @skills on screen_lock"
+    return {"ok": False, "locked": None, "method": None, "session": None, "reason": "switched_off", "detail": sentence}
 
 
 @pytest.fixture
@@ -1309,7 +1323,7 @@ class TestTheLockRoute:
 
     @pytest.mark.parametrize(
         "answer",
-        [_lock_answer(locked=False), _lock_answer(locked=True, method=screen_lock.METHOD_DBUS, session=None)],
+        [_lock_answer(locked=False), _lock_answer(locked=True, method=SCREEN_LOCK_METHOD_DBUS, session=None)],
         ids=["unlocked_per_logind", "locked_per_gnome_screensaver"],
     )
     def test_both_answers_arrive_verbatim(self, client, auth: dict, lock_door, answer: dict) -> None:
@@ -1324,7 +1338,7 @@ class TestTheLockRoute:
 
     @pytest.mark.parametrize(
         "reason",
-        [screen_lock.REASON_NO_SESSION, screen_lock.REASON_NO_READER, screen_lock.REASON_READ_FAILED],
+        [SCREEN_LOCK_REASON_NO_SESSION, SCREEN_LOCK_REASON_NO_READER, SCREEN_LOCK_REASON_READ_FAILED],
     )
     def test_cannot_tell_is_a_200_carrying_the_skills_answer(self, client, auth: dict, lock_door, reason: str) -> None:
         """
@@ -1339,6 +1353,15 @@ class TestTheLockRoute:
 
         assert response.status_code == 200
         assert response.json() == _cannot_tell(reason)
+
+    def test_a_switched_off_skill_is_a_200_carrying_its_off_answer_and_sentence(self, client, auth, lock_door) -> None:
+        lock_door.return_value = _switched_off()
+
+        response = client.get("/v1/lock", headers=auth)
+
+        assert response.status_code == 200
+        assert response.json() == _switched_off()
+        assert response.json()["detail"].startswith("Skill 'screen_lock' is switched OFF.")
 
     def test_a_door_that_raises_is_a_503_naming_it_not_a_500(self, client, auth: dict, lock_door) -> None:
         """
@@ -1447,6 +1470,21 @@ class TestTheLockCache:
         assert host_lock.read_lock()["locked"] is True
         assert lock_door.call_count == 2
 
+    def test_a_switch_off_reaches_the_reader_once_the_cached_second_ends(
+        self, lock_door, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The one lag off has here: a reading taken before the switch is served until its 1.0 s ends."""
+        clock = {"now": 100.0}
+        monkeypatch.setattr(host_read_cache, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
+        lock_door.side_effect = [_lock_answer(locked=False), _switched_off()]
+
+        assert host_lock.read_lock() == _lock_answer(locked=False)
+        clock["now"] = 101.0
+        assert host_lock.read_lock() == _lock_answer(locked=False)
+        clock["now"] = 101.01
+        assert host_lock.read_lock() == _switched_off()
+        assert lock_door.call_count == 2
+
     def test_cannot_tell_is_served_for_its_window_like_any_reading(self, lock_door) -> None:
         """ok False is an answer, not a refusal: stored for the window, not re-asked per request."""
         lock_door.return_value = _cannot_tell()
@@ -1515,8 +1553,8 @@ class TestTheLockCache:
         """
         The door is imported inside the call, so importing this lane loads no skill.
 
-        Asked of a fresh interpreter, because this one already imported the skill
-        at the top of this file.
+        Asked of a fresh interpreter: the constants this file takes from aipass.skills
+        at its top have already loaded the skill here.
         """
         probe = (
             "import sys\n"

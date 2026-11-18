@@ -88,7 +88,7 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `POST /v1/memory-config/push` | operate | Empty body. What actually delivers a default everywhere |
 | `POST /v1/verbs/wake` | operate | `{branch, project, message?, fresh?}` → `@ai_mail dispatch wake` |
 | `POST /v1/verbs/kill` | operate | `{branch, project}` → `baud --end-room`. Returns `room` and `ended` |
-| `POST /v1/verbs/lock` | operate | Empty body. Proxied to `@skills`' screen_lock. Never gated |
+| `POST /v1/verbs/lock` | operate | Empty body. Proxied to `@skills`' screen_lock; refused while it is off |
 | `POST /v1/verbs/new-project` | operate | `{name, template?}` → `aipass new` + its agent. 200 `{ok, name, project, target, template, agent, agent_home, detail}`; 400 `project_name_refused`/`template_refused`/`project_refused`, 409 `project_exists`, 503 `project_door_failed` |
 | `POST /v1/backup/run` | operate | `{project, lane}` → **202** the running job. Lanes `snapshot`, `all`, `drive_sync`. Same lane running: **400**. See [host_backup.md](host_backup.md) |
 | `POST /v1/backup/cancel` | operate | `{project, lane}` → **200** `{project, lane, stopped, message}`. Nothing running: **404** `not_running` |

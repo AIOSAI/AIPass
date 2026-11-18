@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_host_verbs.py
 # Description: Tests for the host API verb lane — wake, kill, lock (FPLAN-0411 Phase 3)
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-08-14
 # Modified: 2026-11-17
 # =============================================
@@ -49,6 +49,8 @@ PATCH_HOST_FLEET = "aipass.api.apps.handlers.host.fleet"
 
 # Mismatched case on purpose: @baud sends AIPASS, the directory says AIPass; a case-sensitive compare refuses all.
 PROJECT = "aipass"
+# @skills' published sentence for a switched-off skill, the detail both lock lanes must carry intact.
+SWITCHED_OFF = "Skill 'screen_lock' is switched OFF. Turn it back on with: drone @skills on screen_lock"
 PROJECT_AS_SENT = "AIPASS"
 
 fastapi_required = pytest.mark.skipif(
@@ -452,8 +454,8 @@ class TestKillCarriesTheRoomsOwnProject:
             assert not resolve.called
 
 
-class TestLockIsNeverGated:
-    """@skills' doctrine: lock must work from anywhere, so this verb asks no questions before firing."""
+class TestTheLockVerbChecksNothingFirst:
+    """The only gate is @skills' off switch, so this verb asks no questions before firing."""
 
     def test_lock_calls_the_skill(self, quiet: Any) -> None:
         """The mechanism is @skills'. This is a proxy and nothing else."""
@@ -500,6 +502,15 @@ class TestTheSkillOwnsTheFailureText:
             skill.lock_screen.return_value = {"locked": False, "method": None, "session": None, "error": sentence}
 
             assert host_verbs.lock_screen()["detail"] == sentence
+
+    def test_a_switched_off_skill_is_a_refusal_with_its_sentence_intact_and_an_error_logged(self) -> None:
+        with patch(PATCH_VERBS_JSON), patch(PATCH_VERBS_LOGGER) as log, patch.object(host_verbs, "skills") as skill:
+            skill.lock_screen.return_value = {"locked": False, "method": None, "session": None, "error": SWITCHED_OFF}
+
+            result = host_verbs.lock_screen()
+
+        assert result == {"ok": False, "detail": SWITCHED_OFF, "method": None, "session": None}
+        assert SWITCHED_OFF in log.error.call_args.args[-1]
 
     def test_a_lock_with_no_error_text_still_says_something(self, quiet: Any) -> None:
         """A falsy 'locked' with an empty error must not render as a blank chip."""

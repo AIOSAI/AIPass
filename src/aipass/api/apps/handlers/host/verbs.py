@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: verbs.py
 # Description: Host API Verb Handler — wake, kill, lock and new-project, each a proxy
-# Version: 1.1.3
+# Version: 1.1.4
 # Created: 2026-08-14
 # Modified: 2026-11-17
 # =============================================
@@ -140,8 +140,8 @@ def kill_room(branch: str, project: str) -> Dict[str, Any]:
 
 
 def lock_screen() -> Dict[str, Any]:
-    """Lock the machine's screen. Never gated."""
-    # @skills' doctrine: lock must work from anywhere, so nothing is checked first.
+    """Lock the machine's screen. The verb checks nothing; @skills refuses it while screen_lock is switched off."""
+    # The gate is @skills' off switch alone: a check here would be a second answer to whether lock may run.
     result = skills.lock_screen()
 
     locked = bool(result.get("locked"))
