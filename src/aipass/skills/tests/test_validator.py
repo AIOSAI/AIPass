@@ -7,12 +7,44 @@
 # Category: skills/tests
 # =============================================
 
-"""Tests for apps/handlers/validator.py, the requires-block check behind validate."""
+"""Tests for apps/handlers/validator.py, the requires-block check, and apps/modules/validator.py, the validate verb."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(stdlib) — how shutil.which() and importlib.util.find_spec() search
 
+from aipass.skills.apps.handlers import switch_handler
 from aipass.skills.apps.handlers.validator import validate_skill
+from aipass.skills.apps.modules import validator as validate_verb
+
+_OFF = "Skill 'marked_probe' is switched OFF. Turn it back on with: drone @skills on marked_probe"
+
+
+class TestValidateOnAnOffSkill:
+    def test_off_validate_imports_nothing_and_neither_passes_nor_fails_the_skill(self, marked_probe, capsys):
+        switch_handler.set_enabled("marked_probe", False)
+
+        assert validate_verb.handle_command("validate", ["marked_probe"]) is False
+
+        out, err = capsys.readouterr()
+        assert not (marked_probe / "IMPORTED").exists()
+        assert _OFF in err and "not validated" in err
+        assert "requirements met" not in out and "NOT met" not in out
+
+    def test_on_validate_imports_the_handler_and_validates_as_before(self, marked_probe, capsys):
+        assert validate_verb.handle_command("validate", ["marked_probe"]) is True
+
+        out, _ = capsys.readouterr()
+        assert (marked_probe / "IMPORTED").exists()
+        assert "Skill 'marked_probe' - all requirements met." in out
+
+    def test_an_unreadable_switch_state_refuses_validate(self, marked_probe, capsys):
+        switch_handler.get_state_path().write_text("{not json", encoding="utf-8")
+
+        assert validate_verb.handle_command("validate", ["marked_probe"]) is False
+
+        _, err = capsys.readouterr()
+        assert not (marked_probe / "IMPORTED").exists()
+        assert "switch_state.json" in err and "not validated" in err
 
 
 class TestValidateSkill:

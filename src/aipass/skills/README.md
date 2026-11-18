@@ -32,8 +32,10 @@ under `lib/` — and the first match for a name wins, so a project can shadow a
 built-in without editing it. Before running anything, a skill can be asked
 whether its requirements are actually met on this machine: Python packages,
 binaries on PATH, config keys. Each skill also has an off-switch that survives a
-reboot; switching one off stops the processes it declares, blocks their respawn,
-and makes the runner refuse to start it.
+reboot. Off means no code of the skill runs: its declared processes stop and
+cannot respawn, `run` refuses, `info` and `validate` import nothing, and every
+function served from the package refuses. Off cannot stop someone reading a
+SKILL.md off disk.
 
 The skills that ship with AIPass live in `lib/`: branch health, drone command
 reference, GitHub, inbox check, screen lock and system status.

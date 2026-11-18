@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: loader.py
 # Description: Load SKILL.md and handlers; the info command
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-03-07
-# Modified: 2026-11-14
+# Modified: 2026-11-17
 # =============================================
 
 """Skill loader module."""
@@ -12,6 +12,7 @@ from aipass.cli import console, error, escape, warning
 from aipass.prax import logger
 from aipass.skills.apps.modules.discovery import discover_all
 from aipass.skills.apps.handlers.loader_handler import load_skill as _handler_load_skill
+from aipass.skills.apps.handlers.switch_handler import SwitchStateUnreadable, is_enabled
 from aipass.skills.apps.handlers.json import json_handler
 
 
@@ -43,6 +44,9 @@ def print_skill_info(name):
     console.print(f"  Description: {escape(str(metadata.get('description', 'No description')))}")
     console.print(f"  Path: {escape(str(loaded['path']))}")
     console.print(f"  Has Handler: {metadata.get('has_handler', False)}")
+    off = loaded["off"]
+    if off is not None:
+        console.print("  Handler: not imported while the skill is OFF")
 
     tags = metadata.get("tags") or []
     if tags:
@@ -61,19 +65,29 @@ def print_skill_info(name):
         for line in loaded["body"].splitlines():
             console.print(f"  {line}", markup=False)
 
+    if off is not None:
+        # An unreadable switch is a fault to fix; a skill switched off on purpose is not.
+        (error if off["unreadable"] else warning)(off["notice"])
+        return not off["unreadable"]
+
     logger.info(f"info: loaded skill '{name}'")
     return True
 
 
 def load_skill(name):
-    """Load a skill by name: {success, metadata, body, handler, path, error}."""
+    """Load a skill by name: {success, metadata, body, handler, path, error, off}.
+
+    off is None for an ON skill. For an OFF skill, or an unreadable switch state, it is
+    {notice, unreadable} and handler.py is never imported: off means no skill code runs."""
+    off = _switch_notice(name)
     registry = discover_all()
-    result = _handler_load_skill(name, registry)
+    result = _handler_load_skill(name, registry, import_code=off is None)
+    result["off"] = off
 
     if not result["success"]:
         logger.warning(f"Failed to load skill: {result['error']}")
 
-    if result["success"] and result["handler"] is None and result["metadata"].get("has_handler", False):
+    if result["success"] and off is None and result["handler"] is None and result["metadata"].get("has_handler"):
         warning(f"Warning: has_handler is true but handler.py not found at {result['path']}")
 
     json_handler.log_operation(
@@ -84,6 +98,20 @@ def load_skill(name):
         },
     )
     return result
+
+
+def _switch_notice(name):
+    """None while the skill is on; else {notice, unreadable}. An unreadable state counts as off, as in the runner."""
+    try:
+        if is_enabled(name):
+            return None
+    except SwitchStateUnreadable as exc:
+        logger.error("Treating '%s' as OFF - switch state unreadable: %s", name, exc)
+        return {"notice": str(exc), "unreadable": True}
+    return {
+        "notice": f"Skill '{name}' is switched OFF. Turn it back on with: drone @skills on {name}",
+        "unreadable": False,
+    }
 
 
 def print_info_help():

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: validator.py
 # Description: Skill validation module
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-11-14
+# Modified: 2026-11-17
 # =============================================
 
 """Skill validator module."""
@@ -31,6 +31,11 @@ def handle_command(command: str, args: list) -> bool:
     loaded = load_skill(name)
     if not loaded["success"]:
         error(f"Error: {loaded['error']}")
+        return False
+
+    if loaded["off"] is not None:
+        # Neither valid nor invalid: exit 1 so `validate x && next` never reads an unchecked skill as checked.
+        error(f"Error: {loaded['off']['notice']} The skill was not validated.")
         return False
 
     result = validate_skill(loaded["metadata"])

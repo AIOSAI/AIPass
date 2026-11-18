@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runner.py
 # Description: Execute skills
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-03-07
-# Modified: 2026-11-14
+# Modified: 2026-11-17
 # =============================================
 
 """Skill runner module."""
@@ -92,6 +92,9 @@ def run_skill(name, action=None, args=None, config=None):
             "output": "",
             "error": loaded["error"],
         }
+    # load_skill reads the switch again; flipped off since the read above, it imported nothing.
+    if loaded["off"] is not None:
+        return {"success": False, "output": "", "error": loaded["off"]["notice"]}
 
     handler = loaded["handler"]
     metadata = loaded["metadata"]

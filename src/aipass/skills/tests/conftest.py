@@ -3,7 +3,7 @@
 # Description: Skills test configuration
 # Version: 3.3.0
 # Created: 2026-03-07
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -120,3 +120,26 @@ def audit_guard(audit_hook_installed: None) -> Generator[Callable, None, None]:
     yield arm
     for guard in armed:
         _AUDIT_GUARDS.remove(guard)
+
+
+@pytest.fixture
+def marked_probe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[Path, None, None]:
+    """A project skill whose handler.py leaves an IMPORTED file beside itself the moment it is imported."""
+    skill_dir = tmp_path / ".aipass" / "skills" / "marked_probe"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: marked_probe\ndescription: probe\nhas_handler: true\n---\n\n# Probe body\n",
+        encoding="utf-8",
+    )
+    (skill_dir / "handler.py").write_text(
+        "from pathlib import Path\n"
+        "Path(__file__).with_name('IMPORTED').write_text('x', encoding='utf-8')\n"
+        "def run(action, args=None, config=None):\n"
+        "    return {'success': True, 'output': 'ran', 'error': None}\n"
+        "def get_actions():\n"
+        "    return ['go']\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    yield skill_dir
+    sys.modules.pop("skills_handler_marked_probe", None)
