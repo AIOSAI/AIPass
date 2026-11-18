@@ -1,19 +1,21 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: Project registry handler — load/register/lookup backup projects
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-04-16
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Project registry handler."""
 
 from pathlib import Path
 
+from aipass.prax import branch_state_root
+
 from ..audit import trail
 from ..json import json_handler
 
-REGISTRY_PATH = Path(__file__).resolve().parents[3] / "backup_json" / "project_registry.json"
+REGISTRY_PATH = branch_state_root("backup") / "backup_json" / "project_registry.json"
 
 
 def _read_registry() -> dict:

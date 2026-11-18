@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_error_resilience.py
 # Description: Tests for error resilience in snapshot.py, the document handlers and audit trail
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-06-12
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for error resilience in apps/modules/snapshot.py, the document handlers and audit trail."""
@@ -14,11 +14,13 @@
 # sentry: no-test-needed(constant) — the message each InvalidDocument carries; the tests pin the type only
 # sentry: no-test-needed(stdlib) — json module parsing and dumps
 
+import importlib
 import json
 from pathlib import Path
 
 import pytest
 
+from aipass import prax
 from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.drive.tracker import load_tracker
 from aipass.backup.apps.handlers.json import json_handler
@@ -515,3 +517,24 @@ class TestAuditLog:
             "save_timestamps",
         ], "a refused append stopped the run's later audit calls"
         assert warned.count("Failed to write operation log: audit stream unwritable") == len(attempted)
+
+
+class TestStateLocation:
+    """backup's state (logs/, backup_json/) comes from the branch state root, never from counting folders up."""
+
+    def test_the_audit_stream_comes_from_the_state_root(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """Kills the folder-counting line: on a checkout that answers the package's own logs/ folder."""
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", "")
+        monkeypatch.setattr(trail, "branch_state_root", lambda branch: tmp_path / "state" / branch)
+
+        assert trail.log_path() == tmp_path / "state" / "backup" / "logs" / trail.LOG_FILENAME
+
+    def test_the_registry_comes_from_the_state_root(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """Kills the folder-counting line: REGISTRY_PATH is set at import, so the module is reloaded under the patch."""
+        monkeypatch.setattr(prax, "branch_state_root", lambda branch: tmp_path / "state" / branch)
+        expected = tmp_path / "state" / "backup" / "backup_json" / "project_registry.json"
+        try:
+            assert importlib.reload(registry).REGISTRY_PATH == expected
+        finally:
+            monkeypatch.undo()
+            importlib.reload(registry)
