@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_modules_gateway.py
 # Description: Tests for spawn's front door (__init__.py); the apps.modules package hands out nothing
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-08-28
 # Modified: 2026-11-18
 # =============================================
@@ -194,6 +194,7 @@ FRONT_DOOR_HOMES = {
     "is_owner": registry,
     "registry_is_writable_document": registry,
     "render_bootstrap_trinity": bootstrap_render,
+    "restore_citizen": bootstrap_render,
 }
 
 

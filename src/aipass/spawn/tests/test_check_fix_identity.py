@@ -1,21 +1,22 @@
 # =================== META ====================
 # Name: test_check_fix_identity.py
 # Description: Tests for owner/identity check and fix (DPLAN-0239 P4)
-# Version: 1.0.5
+# Version: 1.1.0
 # Created: 2026-07-11
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/sync_registry_ops.py and apps/modules/sync_registry.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(documentation) — docstrings on check_owner_identity, fix_owner_identity and pick_owner_branch
-# sentry: no-test-needed(constant) — the flag-name strings ("no_owner", "multi_owner", "multi_ci_cure", etc.) sync_registry_ops emits
+# sentry: no-test-needed(constant) — the flag-name strings ("no_owner", "multi_owner", etc.) sync_registry_ops emits
 
 import json
+from unittest.mock import patch
 
 from aipass.spawn.apps.handlers.registry import ensure_project_has_owner, pick_owner_branch
-from aipass.spawn.apps.handlers.sync_registry_ops import check_owner_identity, fix_owner_identity
+from aipass.spawn.apps.handlers.sync_registry_ops import check_owner_identity, fix_owner_identity, sync_registry
 from aipass.spawn.apps.handlers.adoption_ops import adopt_existing
 from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
 
@@ -50,7 +51,7 @@ def _make_branch(tmp_path, name, rel_path, citizen_class="specialist", passport_
 
 def _entry(name, path, created="2026-01-01", owner=None, registry_id=None):
     """Helper: build a branch entry dict."""
-    e = {
+    e: dict = {
         "name": name,
         "path": path,
         "email": f"@{name.lower()}",
@@ -837,3 +838,105 @@ class TestSyncRegistryCommand:
         assert not [i for i in checked["issues"] if i["flag"] == "passport_mismatch"]
         assert not [a for a in fixed["actions"] if "stray" in a]
         assert passport.read_bytes() == before
+
+
+def _lost_owner_project(tmp_path):
+    """The measured fault: devpulse seated owner, its folder on disk, its passport gone; ai_mail healthy."""
+    devpulse = _make_branch(tmp_path, "devpulse", "src/devpulse", citizen_class="manager", passport_rid="proj-id")
+    (devpulse / ".trinity" / "passport.json").unlink()
+    _make_branch(tmp_path, "ai_mail", "src/ai_mail", passport_rid="proj-id")
+    reg = _write_registry(
+        tmp_path,
+        metadata={"version": "1.0.0", "id": "proj-id"},
+        branches=[
+            _entry("DEVPULSE", "src/devpulse", owner=True, registry_id="uid-dp"),
+            _entry("AI_MAIL", "src/ai_mail", created="2026-02-01", registry_id="uid-am"),
+        ],
+    )
+    return reg, devpulse / ".trinity" / "passport.json"
+
+
+class TestLostOwnerPassport:
+    """A lost owner passport is reported and costs no registry row; the seat never moves."""
+
+    def test_check_flags_a_missing_owner_passport(self, tmp_path):
+        """Mutant: the owner_passport_missing issue is dropped -> check reads clean -> red."""
+        reg, passport = _lost_owner_project(tmp_path)
+
+        result = check_owner_identity(registry_path=reg)
+
+        assert result["clean"] is False
+        [issue] = [i for i in result["issues"] if i["flag"] == "owner_passport_missing"]
+        assert issue["branch"] == "DEVPULSE"
+        assert str(passport) in issue["detail"]
+
+    def test_check_flags_an_unreadable_owner_passport(self, tmp_path):
+        """Mutant: only a missing file is flagged, a corrupt one is not -> red."""
+        reg, passport = _lost_owner_project(tmp_path)
+        passport.write_text("{not json", encoding="utf-8")
+
+        flags = [i["flag"] for i in check_owner_identity(registry_path=reg)["issues"]]
+
+        assert flags == ["owner_passport_missing"]
+
+    def test_sync_fix_keeps_a_damaged_citizen_and_exits_non_zero(self, tmp_path, monkeypatch, capsys):
+        """Mutant: a folder-on-disk citizen without a passport is removed as stale -> red."""
+        reg, _ = _lost_owner_project(tmp_path)
+        rows = json.loads(reg.read_text(encoding="utf-8"))["branches"]
+        rows.append(_entry("GONE", "src/gone", created="2026-03-01", registry_id="uid-g"))
+        doc = json.loads(reg.read_text(encoding="utf-8"))
+        doc["branches"] = rows
+        reg.write_text(json.dumps(doc), encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        assert handle_sync_registry([str(tmp_path), "--fix"]) != 0
+
+        kept = {b["name"]: b for b in json.loads(reg.read_text(encoding="utf-8"))["branches"]}
+        assert sorted(kept) == ["AI_MAIL", "DEVPULSE"], "the damaged citizen stays, the folderless one goes"
+        assert kept["DEVPULSE"]["owner"] is True
+        assert not kept["AI_MAIL"].get("owner")
+        err = capsys.readouterr().err
+        assert "devpulse" in err.lower() and "aipass doctor --fix" in err
+
+    def test_a_damaged_citizen_who_is_not_the_owner_still_fails_the_exit(self, tmp_path, monkeypatch):
+        """Mutant: the command returns the owner fix's code and ignores damaged -> exits 0 -> red."""
+        _make_branch(tmp_path, "devpulse", "src/devpulse", citizen_class="manager", passport_rid="proj-id")
+        (tmp_path / "src" / "ai_mail").mkdir(parents=True)
+        reg = _write_registry(
+            tmp_path,
+            metadata={"version": "1.0.0", "id": "proj-id"},
+            branches=[
+                _entry("DEVPULSE", "src/devpulse", owner=True, registry_id="uid-dp"),
+                _entry("AI_MAIL", "src/ai_mail", created="2026-02-01", registry_id="uid-am"),
+            ],
+        )
+        monkeypatch.chdir(tmp_path)
+
+        assert handle_sync_registry([str(tmp_path), "--fix"]) == 1
+
+        assert [b["name"] for b in json.loads(reg.read_text(encoding="utf-8"))["branches"]] == ["DEVPULSE", "AI_MAIL"]
+
+    def test_sync_reports_a_damaged_citizen_apart_from_stale(self, tmp_path):
+        """Mutant: damaged is folded back into stale -> red."""
+        reg, _ = _lost_owner_project(tmp_path)
+
+        result = sync_registry(fix=False, registry_path=reg)
+
+        assert result["damaged"] == ["devpulse"]
+        assert result["stale"] == []
+
+    def test_fix_owner_identity_changes_nothing_and_names_the_cure(self, tmp_path):
+        """Mutant: the fix carries on past a lost owner passport -> no error -> red."""
+        reg, _ = _lost_owner_project(tmp_path)
+        doc = json.loads(reg.read_text(encoding="utf-8"))
+        del doc["metadata"]["id"]
+        reg.write_text(json.dumps(doc), encoding="utf-8")
+        before = reg.read_bytes()
+
+        with patch("aipass.spawn.apps.handlers.sync_registry_ops.logger") as log:
+            result = fix_owner_identity(registry_path=reg)
+
+        assert result["applied"] is False and result["actions"] == []
+        assert "aipass doctor --fix" in result["error"]
+        assert reg.read_bytes() == before
+        log.error.assert_called_once()

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: Spawn's front door: the names other branches take, each loaded from its home
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-03-05
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """Spawn - the agent factory: mint, update, retire and register citizens.
@@ -33,6 +33,7 @@ _HOMES = {
     "is_owner": _REGISTRY,
     "registry_is_writable_document": _REGISTRY,
     "render_bootstrap_trinity": f"{_HANDLERS}.bootstrap_render",
+    "restore_citizen": f"{_HANDLERS}.bootstrap_render",
 }
 
 __all__ = list(_HOMES)

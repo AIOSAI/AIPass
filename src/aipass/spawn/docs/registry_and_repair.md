@@ -15,8 +15,14 @@ is the behaviour behind them.
 
 ## What sync-registry does
 
-It compares `AIPASS_REGISTRY.json` against the filesystem and reports healthy, stale and
-unregistered branches. The scan is CWD-first, so it works inside an external project: it
+It compares `AIPASS_REGISTRY.json` against the filesystem and reports healthy, stale, damaged
+and unregistered branches. Stale means the folder is gone, and only a stale entry is ever removed.
+Damaged means the folder is on disk but its passport is missing: the entry stays, the report
+names it with the cure, `aipass doctor --fix`, and the command exits 1.
+
+A lost owner passport is never a vacancy. `--check` flags `owner_passport_missing`, naming the
+path, and the owner reconcile under `--fix` changes nothing, logs an error and names the same
+cure, so the seat never moves to another citizen. The scan is CWD-first, so it works inside an external project: it
 checks the project root, then `src/*`, then `src/*/*`, and a directory counts as a branch
 when it holds `.trinity/passport.json`. It is a stat-level walk — it never reads a README,
 a prompt or a dashboard.

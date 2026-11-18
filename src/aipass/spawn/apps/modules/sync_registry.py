@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sync_registry.py
 # Description: Registry repair — thin CLI layer for registry synchronization
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-18
 # =============================================
 
 """Registry synchronization for branch lifecycle management.
@@ -16,6 +16,7 @@ from aipass.prax import logger
 from aipass.cli import console, err_console, error, warning
 
 from aipass.spawn.apps.handlers.sync_registry_ops import (
+    RESTORE_CURE,
     sync_registry,
     check_owner_identity,
     fix_owner_identity,
@@ -120,10 +121,9 @@ def handle_sync_registry(args: list[str]) -> int:
     json_handler.log_operation("registry_synced")
     _print_summary(result)
 
-    if fix:
-        return _handle_fix(registry_path, dry_run=dry_run)
-
-    return 0
+    code = _handle_fix(registry_path, dry_run=dry_run) if fix else 0
+    # A damaged citizen is a fault the sync could not repair: never a clean exit.
+    return 1 if result.get("damaged") else code
 
 
 def _handle_check(registry_path, json_output=False) -> int:
@@ -219,6 +219,13 @@ def _print_summary(result: dict) -> None:
             err_console.print(f"    {name}")
     else:
         console.print("  [green]No stale entries[/green]")
+
+    damaged = result.get("damaged", [])
+    if damaged:
+        error(f"Damaged ({len(damaged)}): folder on disk, passport missing - kept registered")
+        for name in sorted(damaged):
+            err_console.print(f"    {name}")
+        err_console.print(f"    Restore with: {RESTORE_CURE}")
 
     if unregistered:
         warning(f"Unregistered ({len(unregistered)}): on disk but not in registry")

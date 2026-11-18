@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_passport_seeds.py
 # Description: TDPLAN-0017 — passport seeds: export, validation, mint-from-seed
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-08-28
 # Modified: 2026-11-18
 # =============================================
@@ -39,7 +39,7 @@ from aipass.spawn.apps.handlers.seed_ops import (
     validate_passport,
     validate_seed,
 )
-from aipass.spawn import render_bootstrap_trinity
+from aipass.spawn import render_bootstrap_trinity, restore_citizen
 from aipass.spawn.apps.modules.core import spawn_agent
 from aipass.spawn.tests.conftest import MACHINE_CITIZEN_ID, MACHINE_REGISTRY_ID, make_passport, write_registry
 
@@ -432,6 +432,46 @@ class TestBootstrapRender:
         with pytest.raises(json.JSONDecodeError):
             self._render(root, target)
         assert not (target / ".trinity").exists()
+
+
+class TestRestoreCitizen:
+    """Another branch's restore: one registered citizen, from its registry row and its seed, missing files only."""
+
+    def test_restores_only_the_missing_files_from_the_seed(self, tmp_path):
+        """Mutant: restore renders over files that exist -> the kept local.json changes -> red."""
+        root = write_repo(tmp_path)
+        target = branch_dir(root)
+        seed_file = seed_path_for(target)
+        seed_file.parent.mkdir(parents=True)
+        seed_file.write_text(canonical_text(build_seed(make_passport())), encoding="utf-8")
+        (target / ".trinity" / "passport.json").unlink()
+        kept = target / ".trinity" / "local.json"
+        kept.write_text('{"mine": true}', encoding="utf-8")
+        home = SimpleNamespace(path=root, source="test", tried=())
+
+        with patch("aipass.spawn.apps.handlers.registry.resolve_aipass_home", return_value=home):
+            written = restore_citizen("WANDERER", root / "AIPASS_REGISTRY.json")
+
+        assert written == ["passport.json(seed)", "observations.json"]
+        assert kept.read_text(encoding="utf-8") == '{"mine": true}'
+        passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+        assert passport["identity"]["citizen_class"] == "specialist"
+        assert passport["citizenship"]["registry_id"] == "pid-test"
+
+    def test_an_unregistered_name_is_refused_with_nothing_written(self, tmp_path):
+        root = write_repo(tmp_path)
+
+        with pytest.raises(LookupError, match="stranger"):
+            restore_citizen("stranger", root / "AIPASS_REGISTRY.json")
+
+    def test_a_citizen_without_a_seed_is_refused(self, tmp_path):
+        """No seed, no class and role: restore never guesses them. Mutant: a default class -> red."""
+        root = write_repo(tmp_path)
+        (branch_dir(root) / ".trinity" / "passport.json").unlink()
+
+        with pytest.raises(FileNotFoundError, match="seed"):
+            restore_citizen("wanderer", root / "AIPASS_REGISTRY.json")
+        assert not (branch_dir(root) / ".trinity" / "passport.json").exists()
 
 
 class TestExportSeeds:

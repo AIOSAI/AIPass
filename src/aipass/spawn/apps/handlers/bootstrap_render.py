@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: bootstrap_render.py
 # Description: The install script's .trinity render for a core branch: seed first, then the template
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-11-17
 # Modified: 2026-11-18
 # =============================================
@@ -19,8 +19,10 @@ from aipass.prax import logger
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.class_registry import get_template_dir, resolve_template_class
 from aipass.spawn.apps.handlers.json import json_handler
+from aipass.spawn.apps.handlers.metadata import normalize_branch_name
 from aipass.spawn.apps.handlers.placeholders import build_replacements_dict, replace_placeholders
-from aipass.spawn.apps.handlers.seed_ops import find_seed, mint_and_write
+from aipass.spawn.apps.handlers.registry import branches_as_list, entry_path
+from aipass.spawn.apps.handlers.seed_ops import find_seed, load_seed, mint_and_write, seed_path_for
 
 TRINITY_FILES = ("passport.json", "local.json", "observations.json")
 
@@ -75,3 +77,36 @@ def render_bootstrap_trinity(
 
     json_handler.log_operation("bootstrap_rendered", data={"branch": branch_name, "written": written})
     return written
+
+
+def restore_citizen(branch_name: str, registry_path: Path) -> list[str]:
+    """Restore one registered citizen's missing .trinity files: the installer's render, fed by its row and seed.
+
+    The folder comes from the registry row; class, role and name come from the citizen's own seed, so
+    no list of classes or roles lives here. Unregistered, folderless or seedless raises, nothing written.
+    """
+    registry_path = Path(registry_path)
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    wanted = normalize_branch_name(branch_name, "lower")
+    rows = [
+        row
+        for row in branches_as_list(registry.get("branches", []))
+        if normalize_branch_name(row.get("name", ""), "lower") == wanted
+    ]
+    if not rows:
+        logger.error("[spawn] restore: %s is not registered in %s", branch_name, registry_path)
+        raise LookupError(f"{branch_name} is not registered in {registry_path}")
+    target = registry_path.parent / entry_path(rows[0])
+    seed_file = find_seed(target)
+    if seed_file is None:
+        logger.error("[spawn] restore: %s carries no seed at %s", branch_name, seed_path_for(target))
+        raise FileNotFoundError(f"{branch_name} carries no seed at {seed_path_for(target)}")
+    seed = load_seed(seed_file)
+    identity = seed.get("identity", {})
+    return render_bootstrap_trinity(
+        seed["branch_info"]["branch_name"],
+        target,
+        identity.get("citizen_class", ""),
+        identity.get("role", ""),
+        registry_path,
+    )

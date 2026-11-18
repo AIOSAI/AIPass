@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sync_registry_ops.py
 # Description: Registry sync handler — implementation logic for registry repair
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-18
 # =============================================
 
 """Registry synchronization handler for branch lifecycle management.
@@ -125,11 +125,13 @@ def _scan_for_branches(project_root: Path) -> dict[str, Path]:
 def sync_registry(fix: bool = False, registry_path=None) -> dict:
     """Synchronize *_REGISTRY.json with filesystem; registry_path defaults to the one above the cwd.
 
-    Stale: registered but directory or passport missing. Unregistered: passport on disk, no entry.
+    Stale: registered but the directory is gone, the only entry --fix removes. Damaged: directory on disk,
+    passport missing; kept and reported. Unregistered: passport on disk, no entry.
     A stale entry whose branch is on disk elsewhere in the project keeps its entry under the new path.
     """
     empty = {
         "stale": [],
+        "damaged": [],
         "unregistered": [],
         "healthy": [],
         "fixed": [],
@@ -170,6 +172,7 @@ def sync_registry(fix: bool = False, registry_path=None) -> dict:
         filesystem_branches = _scan_for_branches(project_root)
 
         stale: list[str] = []
+        damaged: list[str] = []
         unregistered_list: list[str] = []
         healthy: list[str] = []
 
@@ -190,7 +193,14 @@ def sync_registry(fix: bool = False, registry_path=None) -> dict:
                 if passport.exists():
                     healthy.append(name)
                 else:
-                    stale.append(name)
+                    # The folder is the citizen; a lost passport is repaired, never a reason to deregister.
+                    damaged.append(name)
+                    logger.error(
+                        "[sync-registry] %s: folder on disk, %s missing - kept registered; restore with: %s",
+                        name,
+                        passport,
+                        RESTORE_CURE,
+                    )
             else:
                 stale.append(name)
 
@@ -348,6 +358,7 @@ def sync_registry(fix: bool = False, registry_path=None) -> dict:
 
     return {
         "stale": stale,
+        "damaged": damaged,
         "unregistered": unregistered_list,
         "healthy": healthy,
         "fixed": fixed,
@@ -356,6 +367,26 @@ def sync_registry(fix: bool = False, registry_path=None) -> dict:
         "ids_failed": ids_failed,
         "descriptions_backfilled": descriptions_backfilled,
     }
+
+
+RESTORE_CURE = "aipass doctor --fix"
+
+
+def _read_owner_passport(owner, project_root):
+    """(passport, problem): problem names the path when the owner's folder exists but its passport is unreadable.
+
+    A folder that is gone answers (None, None): owner_missing_branch reports that case."""
+    owner_dir = project_root / entry_path(owner)
+    passport_path = owner_dir / ".trinity" / "passport.json"
+    if not owner_dir.is_dir():
+        return None, None
+    try:
+        passport = json.loads(passport_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        return None, f"Owner {owner.get('name', '?')} passport missing or unreadable at {passport_path}: {exc}"
+    if not isinstance(passport, dict):
+        return None, f"Owner {owner.get('name', '?')} passport at {passport_path} is not a JSON object"
+    return passport, None
 
 
 def check_owner_identity(registry_path=None):
@@ -414,15 +445,14 @@ def check_owner_identity(registry_path=None):
             )
 
     for owner in owners:
-        owner_dir = project_root / entry_path(owner)
-        passport_path = owner_dir / ".trinity" / "passport.json"
         is_manager = False
-        if owner in inside and passport_path.exists():
-            try:
-                passport = json.loads(passport_path.read_text(encoding="utf-8"))
+        if owner in inside:
+            passport, problem = _read_owner_passport(owner, project_root)
+            if problem:
+                logger.error("[check-identity] %s", problem)
+                issues.append({"flag": "owner_passport_missing", "detail": problem, "branch": owner.get("name", "")})
+            elif passport:
                 is_manager = passport.get("identity", {}).get("citizen_class") == "manager"
-            except (json.JSONDecodeError, IOError) as e:
-                logger.warning("[check-identity] Cannot read passport for %s: %s", owner.get("name", "?"), e)
         if not is_manager and branches:
             first = min(branches, key=lambda b: b.get("created", "9999-99-99"))
             if owner.get("name") != first.get("name"):
@@ -529,6 +559,14 @@ def fix_owner_identity(registry_path=None, dry_run=False):
         metadata_id = reg_data.get("metadata", {}).get("id", "")
         # Passports are read and written only inside the project: an entry path may climb out of it.
         inside = [b for b in branches if _validate_path_containment(b.get("path", ""), registry_path)]
+
+        # A lost owner passport is damage, never a vacancy: any reconcile here could move the seat.
+        seated = [b for b in inside if b.get("owner") is True]
+        lost = [problem for problem in (_read_owner_passport(b, project_root)[1] for b in seated) if problem]
+        if lost:
+            reason = f"{'; '.join(lost)} - the seat stays; restore it with: {RESTORE_CURE}"
+            logger.error("[fix-identity] %s", reason)
+            return {"actions": [], "applied": False, "error": reason}
 
         actions: list[str] = []
         registry_changed = False
