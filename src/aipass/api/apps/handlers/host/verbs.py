@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: verbs.py
 # Description: Host API Verb Handler — wake, kill, lock and new-project, each a proxy
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-08-14
 # Modified: 2026-11-17
 # =============================================
@@ -24,10 +24,7 @@ from aipass.api.apps.handlers.host import reads as host_reads
 from aipass.api.apps.handlers.host import fleet as host_fleet
 
 import aipass.drone as drone
-
-# @skills' published in-process door; lib/ is their public shape, not internals.
-from aipass.skills.lib.screen_lock import handler as screen_lock
-
+import aipass.skills as skills
 import aipass.aipass as project_door
 
 WAKE_TIMEOUT_SECONDS = 120
@@ -145,7 +142,7 @@ def kill_room(branch: str, project: str) -> Dict[str, Any]:
 def lock_screen() -> Dict[str, Any]:
     """Lock the machine's screen. Never gated."""
     # @skills' doctrine: lock must work from anywhere, so nothing is checked first.
-    result = screen_lock.lock_screen()
+    result = skills.lock_screen()
 
     locked = bool(result.get("locked"))
     method = result.get("method")

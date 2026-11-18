@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lock.py
 # Description: Host API Lock Handler — the screen lock's position, proxied from @skills
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-09-13
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """Host API Lock Handler
@@ -42,10 +42,10 @@ def forget() -> None:
 def _ask_the_skill() -> Dict[str, Any]:
     """One read through @skills' published door."""
     # Imported here so a server that never serves this route imports nothing new.
-    from aipass.skills.lib.screen_lock import handler as screen_lock
+    from aipass.skills import lock_state
 
     try:
-        answer = screen_lock.lock_state()
+        answer = lock_state()
     except Exception as exc:
         logger.error("[host_api] @skills' lock_state() raised %s: %s", type(exc).__name__, exc, exc_info=True)
         json_handler.log_operation("host_api_lock_door_failed", {"error": type(exc).__name__})

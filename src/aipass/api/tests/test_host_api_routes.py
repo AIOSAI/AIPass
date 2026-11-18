@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_api_routes.py
 # Description: Tests for the host API's live app — the extra guard, ping, bearer auth, scopes, the declared routes
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-10-08
-# Modified: 2026-11-14
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for create_app(), its auth and the declared routes in apps/handlers/host/server.py."""
@@ -50,8 +50,8 @@ PATCH_DENIALS_LOGGER = "aipass.api.apps.handlers.host.denials.logger"
 PATCH_DENIALS_JSON = "aipass.api.apps.handlers.host.denials.json_handler"
 PATCH_MACHINE_LOGGER = "aipass.api.apps.handlers.host.machine.logger"
 PATCH_MACHINE_JSON = "aipass.api.apps.handlers.host.machine.json_handler"
-# @skills' process door, patched where it lives: machine.py imports it inside the call.
-PATCH_PROCESSES_DOOR = "aipass.skills.lib.system_status.handler.machine_processes"
+# @skills' process door, mock.patch on the package: machine.py imports it inside the call.
+PATCH_PROCESSES_DOOR = "aipass.skills.machine_processes"
 
 
 # =============================================

@@ -457,7 +457,7 @@ class TestLockIsNeverGated:
 
     def test_lock_calls_the_skill(self, quiet: Any) -> None:
         """The mechanism is @skills'. This is a proxy and nothing else."""
-        with patch.object(host_verbs, "screen_lock") as skill:
+        with patch.object(host_verbs, "skills") as skill:
             skill.lock_screen.return_value = {"locked": True, "method": "loginctl", "session": "3", "error": None}
 
             host_verbs.lock_screen()
@@ -466,7 +466,7 @@ class TestLockIsNeverGated:
 
     def test_lock_checks_no_precondition(self, quiet: Any) -> None:
         """Not screen state, not a desktop environment, not a session id."""
-        with patch.object(host_verbs, "screen_lock") as skill:
+        with patch.object(host_verbs, "skills") as skill:
             skill.lock_screen.return_value = {"locked": True, "method": "dbus", "session": None, "error": None}
 
             result = host_verbs.lock_screen()
@@ -483,7 +483,7 @@ class TestTheSkillOwnsTheFailureText:
 
         `ok: false` rather than a raise: the mechanism DID run and answered.
         """
-        with patch.object(host_verbs, "screen_lock") as skill:
+        with patch.object(host_verbs, "skills") as skill:
             skill.lock_screen.return_value = {
                 "locked": False,
                 "method": None,
@@ -496,14 +496,14 @@ class TestTheSkillOwnsTheFailureText:
     def test_the_skills_own_sentence_is_surfaced_verbatim(self, quiet: Any) -> None:
         """Rewriting another branch's error is how a diagnosis gets lost."""
         sentence = "the screen locker refused and no fallback is installed"
-        with patch.object(host_verbs, "screen_lock") as skill:
+        with patch.object(host_verbs, "skills") as skill:
             skill.lock_screen.return_value = {"locked": False, "method": None, "session": None, "error": sentence}
 
             assert host_verbs.lock_screen()["detail"] == sentence
 
     def test_a_lock_with_no_error_text_still_says_something(self, quiet: Any) -> None:
         """A falsy 'locked' with an empty error must not render as a blank chip."""
-        with patch.object(host_verbs, "screen_lock") as skill:
+        with patch.object(host_verbs, "skills") as skill:
             skill.lock_screen.return_value = {"locked": False, "method": None, "session": None, "error": None}
 
             result = host_verbs.lock_screen()
@@ -513,7 +513,7 @@ class TestTheSkillOwnsTheFailureText:
 
     def test_the_method_is_reported_so_the_fallback_is_visible(self, quiet: Any) -> None:
         """loginctl vs dbus tells an operator which path is carrying them."""
-        with patch.object(host_verbs, "screen_lock") as skill:
+        with patch.object(host_verbs, "skills") as skill:
             skill.lock_screen.return_value = {"locked": True, "method": "dbus", "session": None, "error": None}
 
             assert host_verbs.lock_screen()["method"] == "dbus"
@@ -554,7 +554,7 @@ class TestNoMechanismIsReimplementedHere:
             "import re",
             "from aipass.prax import logger",
             "import aipass.drone as drone",
-            "from aipass.skills.lib.screen_lock import handler as screen_lock",
+            "import aipass.skills as skills",
             "import aipass.aipass as project_door",
         ]
 
@@ -620,7 +620,7 @@ class TestTheScopeWallCarriesProductionWeight:
         """The wall stops the mechanism, not just the response."""
         _, raw = host_tokens.issue_token("pixel-8", scope="read")
 
-        with patch(PATCH_VERBS_DRONE) as door, patch.object(host_verbs, "screen_lock") as skill:
+        with patch(PATCH_VERBS_DRONE) as door, patch.object(host_verbs, "skills") as skill:
             client.post(f"/v1/verbs/{verb}", json=_body(), headers={"Authorization": f"Bearer {raw}"})
 
             assert not door.route_command.called
@@ -738,7 +738,7 @@ class TestTheVerbRoutesAnswer:
         """One proxy hop, no arguments, no preconditions."""
         _, raw = host_tokens.issue_token("operator", scope="operate")
 
-        with patch.object(host_verbs, "screen_lock") as skill:
+        with patch.object(host_verbs, "skills") as skill:
             skill.lock_screen.return_value = {"locked": True, "method": "loginctl", "session": "3", "error": None}
             response = client.post("/v1/verbs/lock", json={}, headers={"Authorization": f"Bearer {raw}"})
 
@@ -749,7 +749,7 @@ class TestTheVerbRoutesAnswer:
         """The mechanism ran and said no: an answer for @baud's chip, not a server fault."""
         _, raw = host_tokens.issue_token("operator", scope="operate")
 
-        with patch.object(host_verbs, "screen_lock") as skill:
+        with patch.object(host_verbs, "skills") as skill:
             skill.lock_screen.return_value = {"locked": False, "method": None, "session": None, "error": "no session"}
             response = client.post("/v1/verbs/lock", json={}, headers={"Authorization": f"Bearer {raw}"})
 

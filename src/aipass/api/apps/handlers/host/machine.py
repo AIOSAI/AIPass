@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: machine.py
 # Description: Host API Machine Handler — the phone's vitals and process list, proxied from @skills
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-13
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -53,10 +53,10 @@ def read_machine() -> Dict[str, Any]:
 
 def read_processes(limit: int) -> Dict[str, Any]:
     """The busiest processes, as @skills' system_status answers them."""
-    from aipass.skills.lib.system_status import handler as system_status
+    from aipass.skills import machine_processes
 
     try:
-        answer = system_status.machine_processes(limit)
+        answer = machine_processes(limit)
     except Exception as exc:
         logger.error("[host_api] @skills' machine_processes() raised %s: %s", type(exc).__name__, exc, exc_info=True)
         json_handler.log_operation("host_api_processes_door_failed", {"error": type(exc).__name__})
@@ -86,10 +86,10 @@ def forget() -> None:
 
 def _ask_the_skill() -> Dict[str, Any]:
     """One read through @skills' published door."""
-    from aipass.skills.lib.system_status import handler as system_status
+    from aipass.skills import machine_vitals
 
     try:
-        vitals = system_status.machine_vitals()
+        vitals = machine_vitals()
     except Exception as exc:
         logger.error("[host_api] @skills' machine_vitals() raised %s: %s", type(exc).__name__, exc, exc_info=True)
         json_handler.log_operation("host_api_machine_door_failed", {"error": type(exc).__name__})

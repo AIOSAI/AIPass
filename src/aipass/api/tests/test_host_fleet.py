@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_fleet.py
 # Description: Tests for the host API fleet lane — baud --snapshot contract
-# Version: 1.1.6
+# Version: 1.1.7
 # Created: 2026-08-14
-# Modified: 2026-11-14
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/host/fleet.py, the baud --snapshot contract, and the host lane that serves it."""
@@ -1001,9 +1001,9 @@ PATCH_MACHINE_LOGGER = "aipass.api.apps.handlers.host.machine.logger"
 PATCH_MACHINE_JSON = "aipass.api.apps.handlers.host.machine.json_handler"
 PATCH_CACHE_JSON = "aipass.api.apps.handlers.host.read_cache.json_handler"
 
-# The door itself, patched where it lives. machine.py imports it inside the
+# @skills' door name, mock.patch on the package: machine.py imports it inside the
 # call, so the stand-in is what every read in these cases reaches.
-PATCH_VITALS_DOOR = "aipass.skills.lib.system_status.handler.machine_vitals"
+PATCH_VITALS_DOOR = "aipass.skills.machine_vitals"
 
 
 def _present(**values: Any) -> dict:
@@ -1228,7 +1228,7 @@ class TestTheMachineCache:
         probe = (
             "import sys\n"
             "import aipass.api.apps.handlers.host.machine\n"
-            "print('aipass.skills.lib.system_status.handler' in sys.modules)\n"
+            "print(any(name.startswith('aipass.skills.') for name in sys.modules))\n"
         )
         result = subprocess.run(
             [sys.executable, "-c", probe],
@@ -1250,9 +1250,9 @@ class TestTheMachineCache:
 PATCH_LOCK_LOGGER = "aipass.api.apps.handlers.host.lock.logger"
 PATCH_LOCK_JSON = "aipass.api.apps.handlers.host.lock.json_handler"
 
-# The door itself, patched where it lives. lock.py imports it inside the call,
+# @skills' door name, mock.patch on the package: lock.py imports it inside the call,
 # so the stand-in is what every read in these cases reaches — never a loginctl.
-PATCH_LOCK_DOOR = "aipass.skills.lib.screen_lock.handler.lock_state"
+PATCH_LOCK_DOOR = "aipass.skills.lock_state"
 
 
 def _lock_answer(locked: bool, method: str = screen_lock.METHOD_LOGINCTL, session: Any = "3") -> dict:
@@ -1521,7 +1521,7 @@ class TestTheLockCache:
         probe = (
             "import sys\n"
             "import aipass.api.apps.handlers.host.lock\n"
-            "print('aipass.skills.lib.screen_lock.handler' in sys.modules)\n"
+            "print(any(name.startswith('aipass.skills.') for name in sys.modules))\n"
         )
         result = subprocess.run(
             [sys.executable, "-c", probe],
