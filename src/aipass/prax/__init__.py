@@ -18,6 +18,7 @@ if TYPE_CHECKING:  # each name typed from its home
         refresh_all_dashboards as refresh_all_dashboards,
         refresh_single_dashboard as refresh_single_dashboard,
     )
+    from aipass.prax.apps.handlers.config.load import get_system_logs_dir as get_system_logs_dir
     from aipass.prax.apps.handlers.dashboard.status import get_branch_paths as get_branch_paths
     from aipass.prax.apps.handlers.json import json_service as json_handler
     from aipass.prax.apps.handlers.logging.jsonl_writer import append_jsonl as append_jsonl
@@ -35,10 +36,12 @@ _OPS_MODULE = "aipass.prax.apps.handlers.dashboard.operations"
 _REFRESH_MODULE = "aipass.prax.apps.handlers.dashboard.refresh"
 _STATUS_MODULE = "aipass.prax.apps.handlers.dashboard.status"
 _STATE_MODULE = "aipass.prax.apps.handlers.state_root"
+_CONFIG_MODULE = "aipass.prax.apps.handlers.config.load"
 
 # Door name -> (home module, attribute there); None hands out the home module itself.
 _HOMES = {
     "branch_state_root": (_STATE_MODULE, "branch_state_root"),
+    "get_system_logs_dir": (_CONFIG_MODULE, "get_system_logs_dir"),
     "logger": (_LOGGER_MODULE, "system_logger"),
     "get_system_logger": (_LOGGER_MODULE, "get_system_logger"),
     "log_backup_count": (_LOGGER_MODULE, "log_backup_count"),

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: introspection.py
 # Description: Stack Introspection
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2025-11-10
-# Modified: 2026-11-15
+# Modified: 2026-11-18
 # =============================================
 
 """PRAX Logging Introspection"""
@@ -12,6 +12,7 @@ import functools
 from pathlib import Path
 from typing import Optional
 
+import aipass
 from aipass.prax.apps.handlers.logging.trail import PraxTrail
 
 logger = PraxTrail("introspection")
@@ -78,7 +79,7 @@ def get_caller_info() -> tuple:
     return (module_name, caller_path, branch)
 
 
-_AIPASS_PKG_ROOT = Path(__file__).resolve().parents[4]  # logging/ → handlers/ → apps/ → prax/ → aipass/
+_AIPASS_PKG_ROOT = Path(aipass.__file__).resolve().parent
 _SRC_ROOT = _AIPASS_PKG_ROOT.parent  # aipass/ → src/ (contains branches outside aipass namespace)
 _REPO_ROOT = _SRC_ROOT.parent  # src/ → AIPass repo root
 
@@ -86,8 +87,7 @@ _REPO_ROOT = _SRC_ROOT.parent  # src/ → AIPass repo root
 def _resolve_caller_path(module_path: str) -> Optional[Path]:
     """Resolve a caller's path without ever requiring a working directory.
 
-    ``<stdin>`` or a relative ``__file__`` would make resolve() read a possibly deleted cwd.
-    None is an answer: not knowing the caller must never take down the caller's import.
+    ``<stdin>`` or a relative ``__file__`` would make resolve() read a dead cwd; None is an answer, never a raise.
     """
     # is_absolute() alone also refuses a "<" pseudo-filename; a second guard would be dead.
     candidate = Path(module_path) if module_path else None

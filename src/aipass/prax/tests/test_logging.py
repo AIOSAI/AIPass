@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_logging.py
 # Description: Tests for prax logging subsystem
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-03-29
-# Modified: 2026-11-15
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/logging/introspection.py and setup.py."""
@@ -14,6 +14,7 @@
 # sentry: no-test-needed(stdlib) — get_captured_loggers_count, the size of _captured_loggers
 
 import copy
+import importlib.util
 import json
 import logging
 import os
@@ -25,6 +26,7 @@ from unittest.mock import patch
 
 import pytest
 
+import aipass
 from aipass.prax.apps.handlers.logging import introspection
 from aipass.prax.apps.handlers.logging import setup as setup_handler
 from aipass.prax.apps.handlers.logging.introspection import (
@@ -93,8 +95,8 @@ class TestIsPraxInternal:
 
 
 def _aipass_package_root() -> Path:
-    """src/aipass, found from introspection's own file with the resolver it uses."""
-    return Path(introspection.__file__).resolve().parents[4]
+    """src/aipass, found from the package itself, as introspection finds it."""
+    return Path(aipass.__file__).resolve().parent
 
 
 class TestDetectBranchFromPath:
@@ -189,6 +191,18 @@ class TestDetectExternalProject:
         repo_root = _aipass_package_root().parent.parent
         internal_path = str(repo_root / "src" / "aipass" / "flow" / "apps" / "handler.py")
         assert detect_external_project(internal_path) is None
+
+    def test_a_copy_run_from_elsewhere_still_knows_the_repo(self, mock_prax_infrastructure, tmp_path):
+        """A snapshot copy (the hook engine runs one) took its package folder from its own depth, and lost it."""
+        copy_file = tmp_path / "snap" / "handlers" / "logging" / "x" / "introspection.py"
+        copy_file.parent.mkdir(parents=True)
+        copy_file.write_text(Path(introspection.__file__).read_text(encoding="utf-8"), encoding="utf-8")
+        spec = importlib.util.spec_from_file_location("introspection_snapshot_copy", copy_file)
+        assert spec is not None and spec.loader is not None
+        snapshot = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(snapshot)
+
+        assert snapshot.detect_external_project(str(_aipass_package_root() / "flow" / "apps" / "flow.py")) is None
 
     def test_an_empty_git_dir_is_no_project_root(self, mock_prax_infrastructure, tmp_path):
         """Codex's sandbox plants an empty .git in every cwd it starts in."""

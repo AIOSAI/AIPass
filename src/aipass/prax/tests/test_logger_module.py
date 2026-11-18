@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_logger_module.py
 # Description: Unit tests for PRAX logger module (public API)
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-04-03
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/logger.py."""
@@ -693,6 +693,7 @@ _DOOR_HOMES = {
     "refresh_single_dashboard": (_REFRESH, "refresh_single_dashboard"),
     "refresh_all_dashboards": (_REFRESH, "refresh_all_dashboards"),
     "branch_state_root": ("aipass.prax.apps.handlers.state_root", "branch_state_root"),
+    "get_system_logs_dir": ("aipass.prax.apps.handlers.config.load", "get_system_logs_dir"),
 }
 
 
