@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: update_ops.py
 # Description: Update handler — path-based template sync engine (P1 rewrite, TDPLAN-0006)
-# Version: 2.7.0
+# Version: 2.7.1
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Update handler — path-based template sync engine.
@@ -19,7 +19,7 @@ from typing import Any
 from aipass.memory import find_repo_root
 from aipass.prax import logger
 
-from aipass.aipass.shared.json_ops import backup_json, deep_merge
+from aipass.spawn.apps.handlers.json_merge import backup_json, deep_merge
 from aipass.spawn.apps.handlers.class_registry import get_template_dir, resolve_template_class
 from aipass.spawn.apps.handlers.meta_ops import (
     generate_branch_meta,

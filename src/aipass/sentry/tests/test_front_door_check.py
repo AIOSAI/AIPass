@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_front_door_check.py
 # Description: front_door_check — the gating row: per-site findings, scoped and whole-file waivers
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-11-16
 # Modified: 2026-11-17
 # =============================================
@@ -33,6 +33,12 @@ CASES = [
     ("prose", '"""from aipass.cli.apps.modules import console"""\nprint("aipass.cli.apps.modules")\n', []),
     ("import_as", "import aipass.trigger.apps.modules.core as core\n", [1]),
     ("nested_lib", "from aipass.skills.lib.drone_commands.apps.handlers.run import go\n", [1]),
+    ("beneath_shared", "from aipass.aipass.shared.ops import x\n", [1]),
+    ("beneath_plain", "import aipass.skills.lib.x\n", [1]),
+    ("beneath_in_function", "def run():\n    from aipass.flow.docs import b\n", [2]),
+    ("beneath_string", 'import importlib\nimportlib.import_module("aipass.aipass.shared.ops")\n', [2]),
+    ("patch_door_name", 'from unittest.mock import patch\npatch("aipass.prax.logger")\n', []),
+    ("own_deep", "from aipass.sentry.docs.x import y\n", []),
 ]
 
 #: Two sites, one at module level and one inside run().
@@ -70,6 +76,11 @@ class TestTheRow:
     def test_a_site_in_a_nested_def_names_the_innermost_function(self, tmp_path):
         source = "def outer():\n    def inner():\n        from aipass.cli.apps.modules import x\n"
         assert [c["function"] for c in checker.check_module(_write(tmp_path, source))["checks"]] == ["inner"]
+
+    def test_a_beneath_site_names_the_top_file_and_the_door_cure(self, tmp_path):
+        outcome = checker.check_module(_write(tmp_path, "from aipass.aipass.shared.ops import x\n"))
+        message = outcome["checks"][0]["message"]
+        assert "beneath aipass's top file" in message and "from aipass.aipass import <name>" in message
 
     def test_the_aipass_branch_importing_its_own_apps_is_acquitted(self, tmp_path):
         rel = "src/aipass/aipass/apps/modules/doctor.py"

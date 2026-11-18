@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: *_REGISTRY.json discovery and CRUD operations
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-05
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """*_REGISTRY.json discovery and CRUD operations.
@@ -12,11 +12,13 @@ metadata.id is the project credential; an entry's registry_id is a per-citizen U
 Entry flags owner and admin are the sealed authority; a passport never is."""
 
 import fcntl
+import os
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
+from aipass.drone import is_registry_filename, resolve_aipass_home
 from aipass.memory import fleet_branches
 from aipass.prax import logger
 from aipass.spawn.apps.handlers.json import json_handler
@@ -96,14 +98,45 @@ def branches_as_list(branches):
     return []
 
 
+def registry_files_in(directory) -> list[Path]:
+    """Every registry FILE directly inside ``directory``, sorted: drone's exact-case name rule, then is_file.
+
+    A directory named like a registry, or a lowercase lookalike such as .template_registry.json, is never one.
+    A directory that cannot be listed holds none, and says so in the log."""
+    try:
+        entries = list(Path(directory).iterdir())
+    except OSError as exc:
+        logger.warning("[spawn] cannot list %s for a registry: %s", directory, exc)
+        return []
+    return sorted(p for p in entries if is_registry_filename(p.name) and p.is_file())
+
+
 def find_registry(start_path=None):
-    """Find *_REGISTRY.json — walks up from start_path only.
+    """Find *_REGISTRY.json — walks up from start_path (or the cwd) only.
 
-    No package_root fallback: it would silently register external agents in AIPass's own registry.
-    Returns None when no registry is found."""
-    from aipass.aipass.shared.registry_discovery import find_registry as _common_find
+    An operator-named AIPASS_REGISTRY is returned unchecked. No package_root fallback: it would silently
+    register external agents in AIPass's own registry. Returns None when no registry is found."""
+    explicit = os.environ.get("AIPASS_REGISTRY")
+    if explicit:
+        return Path(explicit)
+    current = Path(start_path).resolve() if start_path else Path.cwd()
+    for directory in (current, *current.parents):
+        found = registry_files_in(directory)
+        if found:
+            return found[0]
+    return None
 
-    return _common_find(start_path=start_path)
+
+def aipass_home() -> Path:
+    """The AIPass home, drone's answer (AIPASS_HOME, the interpreter's install, the newest enrolled home).
+
+    Raises when none of the three names one: a guessed folder would misfile a citizen or a receipt."""
+    answer = resolve_aipass_home()
+    if answer.path is None:
+        msg = "AIPass home not found - tried: " + "; ".join(answer.tried)
+        logger.error("[spawn] %s", msg)
+        raise RuntimeError(msg)
+    return Path(answer.path).resolve()
 
 
 def fleet_rows(repo_root):

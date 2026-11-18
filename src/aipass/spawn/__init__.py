@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: Spawn's front door: the names other branches take, each loaded from its home
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-03-05
 # Modified: 2026-11-17
 # =============================================
@@ -32,6 +32,7 @@ _HOMES = {
     "get_owner": _REGISTRY,
     "is_owner": _REGISTRY,
     "registry_is_writable_document": _REGISTRY,
+    "render_bootstrap_trinity": f"{_HANDLERS}.bootstrap_render",
 }
 
 __all__ = list(_HOMES)

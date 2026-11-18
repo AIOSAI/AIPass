@@ -1,12 +1,12 @@
 # =================== META ====================
 # Name: test_handlers.py
 # Description: Tests for spawn update handler modules
-# Version: 1.0.3
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
-"""Tests for apps/handlers/meta_ops.py and the shared json_ops update relies on."""
+"""Tests for apps/handlers/meta_ops.py, apps/handlers/json_merge.py and apps/handlers/registry.py's listing and home."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that apps/handlers/meta_ops.py parses and imports
@@ -14,9 +14,14 @@
 
 import pytest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
-from aipass.aipass.shared.json_ops import backup_json, deep_merge
 from aipass.spawn.apps.handlers import meta_ops
+from aipass.spawn.apps.handlers.json_merge import backup_json, deep_merge
+from aipass.spawn.apps.handlers.passport_migration import repo_root
+from aipass.spawn.apps.handlers.placeholders import resolve_residency
+from aipass.spawn.apps.handlers.registry import aipass_home, find_registry, registry_files_in
 from aipass.spawn.apps.handlers.class_registry import get_template_dir
 from aipass.spawn.apps.handlers.meta_ops import (
     compute_file_hash,
@@ -420,3 +425,77 @@ class TestBackupJson:
 
         with pytest.raises(FileNotFoundError):
             backup_json(tmp_path / "nonexistent.json")
+
+
+# =============================================================================
+# registry.py: the one registry listing, the walk, the home
+# =============================================================================
+
+_RESOLVER = "aipass.spawn.apps.handlers.registry.resolve_aipass_home"
+
+
+def _home(path):
+    return SimpleNamespace(path=path, source="test", tried=("AIPASS_HOME unset", "no .venv registry"))
+
+
+class TestRegistryListing:
+    """registry_files_in lists; find_registry walks it upward, nearest first."""
+
+    @pytest.fixture(autouse=True)
+    def _no_override(self, monkeypatch):
+        monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
+
+    def test_the_walk_climbs_to_a_parent(self, tmp_path):
+        """Mutant: find_registry lists only the start directory -> red."""
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        registry.write_text("{}", encoding="utf-8")
+        start = tmp_path / "a" / "b"
+        start.mkdir(parents=True)
+
+        assert find_registry(start) == registry
+
+    def test_the_nearest_registry_wins(self, tmp_path):
+        """Mutant: the walk runs root-first -> red."""
+        (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+        nearer = tmp_path / "a" / "PROJ_REGISTRY.json"
+        nearer.parent.mkdir()
+        nearer.write_text("{}", encoding="utf-8")
+
+        assert find_registry(tmp_path / "a") == nearer
+
+    def test_an_unlistable_directory_answers_empty(self, tmp_path):
+        """Mutant: the OSError guard is dropped -> FileNotFoundError -> red."""
+        assert registry_files_in(tmp_path / "absent") == []
+
+
+class TestHomeComesFromDrone:
+    """Both home sites take drone's one answer; a None path is an ERROR and a refusal."""
+
+    def test_no_home_raises_and_logs_an_error(self):
+        """Mutant: aipass_home returns None, or warns instead of erroring -> red."""
+        with (
+            patch(_RESOLVER, return_value=_home(None)),
+            patch("aipass.spawn.apps.handlers.registry.logger") as log,
+        ):
+            with pytest.raises(RuntimeError, match="tried: AIPASS_HOME unset; no .venv registry"):
+                aipass_home()
+        log.error.assert_called_once()
+
+    def test_residency_refuses_rather_than_guessing_external(self, tmp_path):
+        """The old placeholders answered 'external' on no home. Mutant: restore that -> red."""
+        with patch(_RESOLVER, return_value=_home(None)), pytest.raises(RuntimeError):
+            resolve_residency(tmp_path)
+
+    def test_residency_reads_drones_home(self, tmp_path):
+        """Mutant: placeholders goes back to a path counted from its own file -> 'external' -> red."""
+        with patch(_RESOLVER, return_value=_home(tmp_path)):
+            assert resolve_residency(tmp_path / "src" / "aipass" / "x") == "core"
+
+    def test_passport_migration_reads_drones_home(self, tmp_path):
+        """Mutant: repo_root goes back to Path(__file__).parents[5] -> red."""
+        with patch(_RESOLVER, return_value=_home(tmp_path)):
+            assert repo_root() == tmp_path.resolve()
+
+    def test_passport_migration_refuses_without_a_home(self):
+        with patch(_RESOLVER, return_value=_home(None)), pytest.raises(RuntimeError):
+            repo_root()

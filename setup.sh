@@ -401,66 +401,15 @@ bootstrap_branch() {
 import sys
 from pathlib import Path
 
-from aipass.spawn.apps.handlers.class_registry import get_template_dir, resolve_template_class
-from aipass.spawn.apps.handlers.placeholders import build_replacements_dict, replace_placeholders
+from aipass.spawn import render_bootstrap_trinity
 
 branch_name, target_path, citizen_class, role = sys.argv[1:5]
-target = Path(target_path)
-
-# PASSPORT SEEDS (TDPLAN-0017): a branch shipping a tracked seed births its real
-# identity from it — machine-local ids minted fresh, same as spawn's seed door.
-# The template loop below only fills what this lane didn't write. A seed that
-# fails validation kills the install loudly — never a silent template fallback.
-import json
-import uuid
-
-from aipass.spawn.apps.handlers.seed_ops import find_seed, mint_and_write
-
-minted = []
-seed_file = find_seed(target)
-passport_dest = target / ".trinity" / "passport.json"
-if seed_file is not None and not passport_dest.exists():
-    registry = json.loads(Path("AIPASS_REGISTRY.json").read_text(encoding="utf-8"))
-    mint_and_write(
-        seed_file,
-        passport_dest,
-        branch_name=branch_name,
-        registry_id=registry.get("metadata", {}).get("id", ""),
-        citizen_id=str(uuid.uuid4()),
-    )
-    minted.append("passport.json(seed)")
-
-# "manager" (devpulse) isn't template-selectable — resolve_template_class picks
-# its real shape via identity.role, same logic `spawn update` heals against.
-template_class = resolve_template_class({"citizen_class": citizen_class, "role": role})
-template_dir = get_template_dir(template_class)
-
-try:
-    from aipass.memory.apps.handlers.tracking.tab_renderer import render_all_meta_tabs
-    meta_tabs = render_all_meta_tabs()
-except ImportError:
-    meta_tabs = {}
-
-replacements = build_replacements_dict(
-    target, branch_name, role=role, purpose=role, citizen_class=citizen_class, meta_tabs=meta_tabs,
+# Spawn owns the render: seed first, then the class template for each missing
+# file. A bad seed or an unreadable registry kills the install loudly.
+written = render_bootstrap_trinity(
+    branch_name, Path(target_path), citizen_class, role, Path("AIPASS_REGISTRY.json"),
 )
-# build_replacements_dict's MODULE default is bare (shared with non-package
-# project_agent branches) — every src/aipass/* branch's real import path
-# carries the aipass. package prefix.
-replacements["MODULE"] = f"aipass.{replacements['branchname']}"
-
-created = list(minted)
-for filename in ("passport.json", "local.json", "observations.json"):
-    dest = target / ".trinity" / filename
-    if dest.exists():
-        continue
-    src = template_dir / ".trinity" / filename
-    content = replace_placeholders(src.read_text(encoding="utf-8"), replacements)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(content, encoding="utf-8")
-    created.append(filename)
-
-print(",".join(created))
+print(",".join(written))
 PYEOF
 )
         if [ -n "$rendered" ]; then

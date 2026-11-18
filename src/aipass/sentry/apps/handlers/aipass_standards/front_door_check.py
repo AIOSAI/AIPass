@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: front_door_check.py
 # Description: Front Door Standards Checker - a cross-branch import goes through the branch's package top file
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-11-16
 # Modified: 2026-11-17
 # =============================================
@@ -9,8 +9,9 @@
 """Front Door Standards Checker
 
 Reference: front_door.md. One finding per site (line, enclosing function): an import of another
-branch that reaches under its ``apps/``. Detection is ``front_door_count.scan_source``, the same
-reading the ``front-door`` verb counts with. A lines, functions or whole-file bypass row waives.
+branch that names any path beneath its top file, under ``apps/`` or not. Detection is
+``front_door_count.scan_source``, the same reading the ``front-door`` verb counts with.
+A lines, functions or whole-file bypass row waives.
 A second door (``modules_check.is_second_door``) is one more finding, line 1, that no row waives; so is a
 module whose ``__all__`` hands out its own handlers' names (``handed_out_handler_names``), at the ``__all__`` line.
 A package top file with a ``__getattr__`` is a door, and each broken fact of the door model
@@ -27,6 +28,7 @@ from aipass.sentry.apps.handlers.aipass_standards.door_model import findings as 
 from aipass.sentry.apps.handlers.aipass_standards.door_model import is_package_top
 from aipass.sentry.apps.handlers.aipass_standards.front_door_count import (
     APPS_KINDS,
+    FINDING_KINDS,
     Reading,
     owner_of_path,
     scan_source,
@@ -63,8 +65,9 @@ def _function_at(functions: List[ast.FunctionDef | ast.AsyncFunctionDef], line: 
 def _message(file_name: str, reading: Reading) -> str:
     """One site's finding, with the door spelling that cures it."""
     how = {"statement": "import", "type_only": "TYPE_CHECKING import", "string": "string import"}[reading.via]
+    where = "apps/" if reading.kind in APPS_KINDS else "top file"
     return (
-        f"{file_name}:{reading.line} {how} of {reading.target} reaches under {reading.branch}'s apps/ "
+        f"{file_name}:{reading.line} {how} of {reading.target} reaches beneath {reading.branch}'s {where} "
         f"- import it from the door: from aipass.{reading.branch} import <name>"
     )
 
@@ -121,7 +124,7 @@ def _one_check(passed: bool, message: str) -> List[Dict]:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Convict every unwaived cross-branch import that reaches under another branch's apps/."""
+    """Convict every unwaived cross-branch import that names a path beneath another branch's top file."""
     path = Path(module_path)
     if not path.exists():
         return result(False, _one_check(False, f"File not found: {module_path}"), 0, STANDARD)
@@ -145,7 +148,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if is_package_top(path):
         checks += [_door_finding(line, message, functions) for line, message in door_findings(source)]
     for reading in readings:
-        if reading.kind not in APPS_KINDS:
+        if reading.kind not in FINDING_KINDS:
             continue
         function = _function_at(functions, reading.line)
         if is_bypassed(module_path, STANDARD_KEY, reading.line, bypass_rules, function):

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: passport_migration.py
 # Description: Passport 2.0 fleet migration — structure transform, backup, measured receipt
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-28
-# Modified: 2026-11-09
+# Modified: 2026-11-17
 # =============================================
 
 """One-shot fleet migration of every live passport to schema 2.0 (DPLAN-0319).
@@ -28,7 +28,7 @@ from aipass.spawn.apps.handlers.class_registry import (
     refuse_forbidden_class,
 )
 from aipass.spawn.apps.handlers.json import json_handler
-from aipass.spawn.apps.handlers.registry import fleet_rows
+from aipass.spawn.apps.handlers.registry import aipass_home, fleet_rows
 
 __all__ = [
     "BACKUP_SUFFIX",
@@ -150,8 +150,8 @@ class MigrationResult:
 
 
 def repo_root() -> Path:
-    """Return the AIPass repo root, derived from this file's own location."""
-    return Path(__file__).resolve().parents[5]
+    """The AIPass home from drone's answer, never a depth counted from this file (wrong in a wheel); raises if none."""
+    return aipass_home()
 
 
 def discover_passports(root: Path | str | None = None) -> list[PassportTarget]:

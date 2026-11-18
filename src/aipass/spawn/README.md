@@ -130,8 +130,8 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 - **aipass.prax** — logging through `system_logger`, and the fleet json service that
   `apps/handlers/json/json_handler.py` binds as a byte-identical shim
 - **aipass.cli** — console output, refusal formatting and exit-code state
-- **aipass.aipass.shared** — `deep_merge` and `backup_json`, registry discovery, and the one
-  shared home detector used by the placeholder engine
+- **aipass.drone** — `is_registry_filename`, the one registry name check, and
+  `resolve_aipass_home`, the AIPass home every home reader here takes; no home is a refusal
 - **aipass.memory** (optional) — meta tabs at create, through its `door_tab_renderer`; the
   import is guarded and degrades to empty when it is unavailable
 

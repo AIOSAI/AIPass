@@ -8,7 +8,10 @@ from aipass.cli import console, error
 
 from aipass.prax.apps.modules.logger import system_logger       # wrong: reaches under prax's apps/
 from aipass.cli.apps.modules import console                     # wrong, modules as much as handlers
+from aipass.aipass.shared.json_ops import backup_json           # wrong: beneath the top file, apps or not
 ```
+
+Any path beneath `aipass.<branch>` is a finding, whatever folder it names: `apps`, `shared`, `lib`, `docs`, `tests`. The one legal form names the branch and stops there.
 
 One spelling everywhere, so an agent that copies what it sees copies the right thing, and a branch can move anything under its `apps/` without breaking a caller.
 
@@ -101,7 +104,7 @@ Read from the parse tree, never from lines:
 |-----|---------|
 | statement | `import` and `from ... import`, at the top, inside a function, anywhere |
 | type-only | the same inside `if TYPE_CHECKING:` (its `else` branch is a statement) |
-| string | the first argument of `import_module`, `resolve_name`, `patch`, `<x>.setattr`: a literal or a module constant |
+| string | the first argument of `import_module`, `resolve_name`, `patch`, `<x>.setattr`: a literal or a module constant; `aipass.<branch>.<name>` where the door hands out `<name>` is the door form, not a path |
 
 The target's branch is the segment after `aipass.`, however deep it nests: `aipass.skills.lib.<x>.apps...` is skills'. The file's branch is the directory after `src/aipass/`; a file outside every branch owns nothing, so every `aipass.` import under `apps` it makes is a finding. A docstring, comment or log message is prose and never counts. Relative imports are always the file's own branch.
 

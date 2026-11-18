@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_front_door_count.py
 # Description: front_door_count — every cross-branch import reaching under apps/, counted; and sentry's own door
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-11-16
 # Modified: 2026-11-17
 # =============================================
@@ -31,13 +31,13 @@ OWN = "sentry"
 
 
 def _found(source, branch=OWN):
-    """(line, branch, kind, via) for every finding: a site reaching under another branch's apps/."""
-    return [(r.line, r.branch, r.kind, r.via) for r in fd.scan_source(source, branch) if r.kind in fd.APPS_KINDS]
+    """(line, branch, kind, via) for every finding: a site naming a path beneath another branch's top file."""
+    return [(r.line, r.branch, r.kind, r.via) for r in fd.scan_source(source, branch) if r.kind in fd.FINDING_KINDS]
 
 
 def _clean(source, branch=OWN):
     """(line, branch, kind) for every cross-branch site that is not a finding."""
-    return [(r.line, r.branch, r.kind) for r in fd.scan_source(source, branch) if r.kind not in fd.APPS_KINDS]
+    return [(r.line, r.branch, r.kind) for r in fd.scan_source(source, branch) if r.kind not in fd.FINDING_KINDS]
 
 
 class TestStatements:
@@ -93,8 +93,42 @@ class TestStatements:
         source = (
             "from aipass.skills.lib.drone_commands.apps.handlers.run import go\nfrom aipass.skills.lib.x import y\n"
         )
-        assert _found(source) == [(1, "skills", "handlers", "statement")]
-        assert _clean(source) == [(2, "skills", "elsewhere")]
+        assert _found(source) == [(1, "skills", "handlers", "statement"), (2, "skills", "beneath", "statement")]
+
+
+class TestBeneathTheTopFile:
+    """Any path beneath another branch's top file is a finding, not only one under its apps/."""
+
+    def test_a_from_import_beneath_a_shared_folder_is_found(self):
+        assert _found("from aipass.aipass.shared.ops import x\n") == [(1, "aipass", "beneath", "statement")]
+
+    def test_a_plain_import_beneath_the_top_file_is_found(self):
+        assert _found("import aipass.skills.lib.x as x\n") == [(1, "skills", "beneath", "statement")]
+
+    def test_one_beneath_inside_a_function_and_one_type_only_are_found(self):
+        source = (
+            "if TYPE_CHECKING:\n    from aipass.aipass.shared import a\n"
+            "def run():\n    from aipass.flow.docs import b\n"
+        )
+        assert _found(source) == [(2, "aipass", "beneath", "type_only"), (4, "flow", "beneath", "statement")]
+
+    def test_an_import_module_string_beneath_is_found(self):
+        source = 'import importlib\nimportlib.import_module("aipass.aipass.shared.ops")\n'
+        assert _found(source) == [(2, "aipass", "beneath", "string")]
+
+    def test_a_patch_string_beneath_is_found(self):
+        source = 'from unittest.mock import patch\npatch("aipass.skills.lib.x.run")\n'
+        assert _found(source) == [(2, "skills", "beneath", "string")]
+
+    def test_a_patch_of_a_door_name_is_the_door_form(self):
+        source = 'from unittest.mock import patch\npatch("aipass.prax.logger")\npatch("aipass.prax.logger.info")\n'
+        assert _found(source) == []
+
+    def test_the_top_file_form_is_a_clean_door_site(self):
+        assert _found("from aipass.aipass import shared\n") == []
+
+    def test_an_own_branch_deep_path_is_never_read(self):
+        assert fd.scan_source("from aipass.sentry.docs.x import y\nimport aipass.sentry.tools.z\n", OWN) == []
 
 
 class TestStrings:
@@ -110,9 +144,9 @@ class TestStrings:
         source = 'from unittest.mock import patch\nwith patch("aipass.sentry.apps.modules.checklist.run"):\n    pass\n'
         assert fd.scan_source(source, OWN) == []
 
-    def test_a_string_whose_apps_is_not_a_segment_is_not_counted(self):
+    def test_a_string_whose_apps_is_not_a_segment_is_beneath_not_apps(self):
         source = 'import importlib\nimportlib.import_module("aipass.cli.apps_legacy.x")\n'
-        assert fd.scan_source(source, OWN) == []
+        assert _found(source) == [(2, "cli", "beneath", "string")]
 
     def test_the_same_path_in_a_docstring_and_a_log_message_is_prose(self):
         source = (

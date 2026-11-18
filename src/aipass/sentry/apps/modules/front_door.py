@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: front_door.py
-# Description: The front-door verb: counts every cross-branch import reaching under another branch's apps/
-# Version: 1.1.0
+# Description: The front-door verb: counts every cross-branch import naming a path beneath another branch's top file
+# Version: 1.2.0
 # Created: 2026-11-16
 # Modified: 2026-11-17
 # =============================================
@@ -43,7 +43,7 @@ _COLUMNS = (
     ("string", "in:string"),
     ("door prod", "in:door:prod"),
     ("door tests", "in:door:tests"),
-    ("elsew prod", "in:elsewhere:prod"),
+    ("beneath", "in:beneath"),
 )
 
 
@@ -99,10 +99,10 @@ def _scan(root: Path, sites: bool) -> None:
 
 
 def _print_sites(found: List[front_door_count.Site]) -> None:
-    """One line per cross-branch site: FOUND under apps, clean through the door or elsewhere."""
+    """One line per cross-branch site: FOUND beneath the top file, clean through the door."""
     for site in found:
         r = site.reading
-        call = "FOUND" if r.kind in front_door_count.APPS_KINDS else "clean"
+        call = "FOUND" if r.kind in front_door_count.FINDING_KINDS else "clean"
         scope = "tests" if site.test else "prod"
         _plain(f"{site.rel}:{r.line}  {call:5} {scope:5} {r.kind:9} {r.via:9} {r.target} {' '.join(r.names)}")
     console.print()
@@ -110,19 +110,19 @@ def _print_sites(found: List[front_door_count.Site]) -> None:
 
 def _print_table(rows: Dict) -> None:
     """Per branch: findings as importer (out) and as target (in), then the clean cross-branch counts."""
-    console.print("[bold cyan]Front door, fleet counts[/bold cyan] - findings reach under another branch's apps/")
+    console.print("[bold cyan]Front door, fleet counts[/bold cyan] - findings reach beneath another branch's top file")
     header = f"{'branch':16}" + "".join(f"{label:>11}" for label, _ in _COLUMNS)
     _plain(header)
     for branch in sorted(rows):
         counts = rows[branch]
         _plain(f"{branch:16}" + "".join(f"{counts[key]:>11}" for _, key in _COLUMNS))
-    console.print("[dim]in = lines reaching into the branch; door/elsewhere in = clean cross-branch lines[/dim]")
+    console.print("[dim]in = lines reaching into the branch; door in = clean cross-branch lines[/dim]")
     console.print()
 
 
 def _print_targets(modules: Dict) -> None:
-    """What each branch's public list would have to hold: every module reached under its apps/."""
-    console.print("[bold cyan]Reached under apps/, per target[/bold cyan] (what a door would hand out)")
+    """What each branch's public list would have to hold: every module reached beneath its top file."""
+    console.print("[bold cyan]Reached beneath the top file, per target[/bold cyan] (what a door would hand out)")
     for branch in sorted(modules):
         listed = ", ".join(f"{name} {n}" for name, n in modules[branch].most_common())
         _plain(f"{branch}: {listed}")
@@ -147,9 +147,9 @@ def _print_fleet(fleet: Dict, result: Dict) -> None:
     console.print("[bold cyan]Fleet totals[/bold cyan]")
     for scope in ("prod", "tests"):
         parts = [f"findings {fleet.get(f'finding:{scope}', 0)}"]
-        parts += [f"{kind} {fleet.get(f'{kind}:{scope}', 0)}" for kind in front_door_count.APPS_KINDS]
+        parts += [f"{kind} {fleet.get(f'{kind}:{scope}', 0)}" for kind in front_door_count.FINDING_KINDS]
         parts += [f"{via} {fleet.get(f'{via}:{scope}', 0)}" for via in front_door_count.VIAS]
-        parts += [f"clean door {fleet.get(f'door:{scope}', 0)}", f"elsewhere {fleet.get(f'elsewhere:{scope}', 0)}"]
+        parts += [f"clean door {fleet.get(f'door:{scope}', 0)}"]
         _plain(f"{scope:5}: " + " | ".join(parts))
     _plain(f"{result['files_read']} tracked .py files read")
     skipped = len(result["skipped_retired"])
@@ -159,7 +159,7 @@ def _print_fleet(fleet: Dict, result: Dict) -> None:
 def print_help() -> None:
     """Usage, what counts, and exit codes."""
     console.print()
-    console.print("[bold cyan]sentry front-door[/bold cyan] - cross-branch imports reaching under apps/, counted")
+    console.print("[bold cyan]sentry front-door[/bold cyan] - cross-branch imports beneath a top file, counted")
     console.print()
     console.print("[yellow]Usage:[/yellow]")
     console.print("  drone @sentry front-door                 what the verb is")

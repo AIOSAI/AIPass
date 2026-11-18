@@ -66,7 +66,8 @@ apps/
 │   ├── regenerate_registry_ops.py
 │   ├── repair_ops.py            # pollution, relocation, ARCHIVE_EXCLUDE
 │   ├── adopt_citizen_ops.py     # move a citizen across projects, plan + apply
-│   ├── json_ops.py              # deep_merge, backup_json
+│   ├── json_merge.py            # deep_merge, backup_json
+│   ├── bootstrap_render.py      # setup.sh's .trinity render, on the door
 │   ├── atomic_write.py          # stage → fsync → os.replace
 │   ├── metadata.py              # branch name extraction
 │   └── json/json_handler.py     # the fleet json shim
@@ -79,7 +80,7 @@ tests/ · docs/ · docs.local/ · dropbox/ · artifacts/ · spawn_json/ · tools
 
 # Integration
 
- - Depends on: @prax for logging and the json service, @cli for console and exit state, aipass.shared for merge and registry discovery, @memory (optional, guarded) for meta tabs
+ - Depends on: @prax for logging and the json service, @cli for console and exit state, @drone for the registry name check and the AIPass home, @memory for meta tabs
  - Serves: every branch — creation, updates, retirement, citizenship, and the package door (`from aipass.spawn import <name>`) for the class registry and owner check
 
 # Working Habits

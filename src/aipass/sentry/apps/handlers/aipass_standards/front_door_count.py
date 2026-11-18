@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: front_door_count.py
-# Description: Front-door detection: every cross-branch import that reaches under another branch's apps/
-# Version: 1.4.0
+# Description: Front-door detection: every cross-branch import that names a path beneath another branch's top file
+# Version: 1.5.0
 # Created: 2026-11-16
 # Modified: 2026-11-17
 # =============================================
@@ -9,7 +9,8 @@
 """Front-door detection, shared by the ``front_door`` standard and the ``front-door`` verb.
 
 The rule: an import crossing into another branch goes through its front door,
-``from aipass.<branch> import <name>``. One whose path reaches under ``apps`` is a finding.
+``from aipass.<branch> import <name>``. One that names any path beneath the top file is a finding:
+under ``apps`` (``modules``/``handlers``/``other``) or anywhere else (``beneath``: shared, lib, docs...).
 This file only reads; ``front_door_check.py`` scores and waives, the verb counts the fleet.
 """
 
@@ -26,8 +27,11 @@ from aipass.sentry.apps.handlers.context_standards.name_ratchet import tracked_f
 from aipass.sentry.apps.handlers.json import json_handler
 
 TAG = "front_door"
-#: Finding kinds: the segment after ``apps``. ``door`` and ``elsewhere`` are cross-branch and clean.
+#: Finding kinds: the segment after ``apps``, or ``beneath`` for any other path below the top file. ``door`` is clean.
 APPS_KINDS = ("modules", "handlers", "other")
+FINDING_KINDS = APPS_KINDS + ("beneath",)
+#: Where the branches' top files sit: ``src/aipass/<branch>/__init__.py``.
+_PACKAGES = Path(__file__).resolve().parents[4]
 VIAS = ("statement", "type_only", "string")
 _PACKAGE_TAILS = frozenset({"apps", "modules", "handlers"})
 OUTSIDE = "(no branch)"
@@ -62,12 +66,12 @@ def target_branch(dotted: str) -> str:
 
 
 def kind_of(dotted: str) -> str:
-    """``modules``/``handlers``/``other`` under apps, ``door`` for ``aipass.<b>``, else ``elsewhere``."""
+    """``modules``/``handlers``/``other`` under apps, ``door`` for ``aipass.<b>``, else ``beneath``."""
     parts = dotted.split(".")
     if len(parts) == 2:
         return "door"
     if "apps" not in parts[2:]:
-        return "elsewhere"
+        return "beneath"
     after = parts[parts.index("apps", 2) + 1 :]
     return after[0] if after and after[0] in ("modules", "handlers") else "other"
 
@@ -101,7 +105,8 @@ def _statement_targets(node: ast.stmt) -> List[Tuple[str, Tuple[str, ...]]]:
 
 
 def scan_source(source: str, file_branch: str) -> List[Reading]:
-    """Every cross-branch ``aipass.`` import site in a source; an unparseable one raises SyntaxError.
+    """Every cross-branch ``aipass.`` import site in a source; an unparseable one raises SyntaxError,
+    and a string naming a branch whose top file is unparseable raises ValueError.
 
     Statements are read from the parse tree, top level, in functions and in TYPE_CHECKING
     blocks; strings only as the first argument of an import or patch call
@@ -118,11 +123,24 @@ def scan_source(source: str, file_branch: str) -> List[Reading]:
             branch = target_branch(dotted)
             if branch and branch != file_branch:
                 found.append(Reading(node.lineno, dotted, branch, kind_of(dotted), via, names))
-    for line, dotted in iter_string_imports(source, marker=".apps"):
+    for line, dotted in iter_string_imports(source, marker="."):
         branch, kind = target_branch(dotted), kind_of(dotted)
-        if branch and branch != file_branch and kind in APPS_KINDS:
+        if branch and branch != file_branch and kind in FINDING_KINDS and not _names_a_door_name(dotted, branch):
             found.append(Reading(line, dotted, branch, kind, "string"))
     return sorted(found)
+
+
+def _names_a_door_name(dotted: str, branch: str) -> bool:
+    """``aipass.<b>.<name>[...]`` where the door hands out ``<name>``: a patch on the door form, not a path."""
+    if kind_of(dotted) != "beneath":
+        return False
+    source = read_text(_PACKAGES / branch / "__init__.py", tag=TAG)
+    if source is None:
+        return False  # no readable top file serves nothing, so the path stands as a finding
+    try:
+        return dotted.split(".")[2] in door_names(source)
+    except SyntaxError as exc:
+        raise ValueError(f"{branch}'s top file is unparseable, so {dotted} cannot be judged: {exc}") from exc
 
 
 def owner_of(rel: str) -> str:
@@ -273,7 +291,7 @@ def tally(sites: Iterable[Site]) -> Dict[str, Dict]:
     for site in sites:
         r, scope = site.reading, "tests" if site.test else "prod"
         target = rows.setdefault(r.branch, Counter())
-        if r.kind not in APPS_KINDS:
+        if r.kind not in FINDING_KINDS:
             target[f"in:{r.kind}:{scope}"] += 1
             fleet[f"{r.kind}:{scope}"] += 1
             continue

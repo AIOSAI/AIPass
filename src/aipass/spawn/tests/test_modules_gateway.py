@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_modules_gateway.py
 # Description: Tests for spawn's front door (__init__.py); the apps.modules package hands out nothing
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-08-28
 # Modified: 2026-11-17
 # =============================================
@@ -22,7 +22,7 @@ import pytest
 import aipass.spawn as front_door
 from aipass.spawn import get_template_dir, refuse_legacy_class
 from aipass.spawn.apps import modules
-from aipass.spawn.apps.handlers import class_registry, registry
+from aipass.spawn.apps.handlers import bootstrap_render, class_registry, registry
 from aipass.spawn.apps.modules import core
 from aipass.spawn.apps.handlers import docs_page
 from aipass.spawn.apps.handlers.docs_page import docs_page_template
@@ -224,6 +224,7 @@ FRONT_DOOR_HOMES = {
     "get_owner": registry,
     "is_owner": registry,
     "registry_is_writable_document": registry,
+    "render_bootstrap_trinity": bootstrap_render,
 }
 
 

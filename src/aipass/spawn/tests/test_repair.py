@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_repair.py
 # Description: Tests for repair and adopt-citizen — move, rename, pollution, cross-project adoption
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-05-15
-# Modified: 2026-11-14
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/repair_ops.py and adopt_citizen_ops.py — move, rename, pollution, adopt-citizen."""
@@ -1144,48 +1144,30 @@ class TestTemplateFiles:
             assert (archive / retired).is_dir(), f"templates/{retired}/ was deleted, not archived"
 
 
-def _case_insensitive_listing(monkeypatch):
-    """Make repair_ops's registry listing behave the way a case-insensitive volume does.
-
-    Patches the listing seam, not Path.glob process-wide, so the pins run red on Linux too.
-    Returns the list of roots the seam was asked to list."""
-    import fnmatch
-    import re
-
-    calls = []
-    rx = re.compile(fnmatch.translate("*" + repair_ops.REGISTRY_SUFFIX), re.IGNORECASE)
-
-    def insensitive_listing(root):
-        calls.append(root)
-        return iter(sorted(p for p in root.iterdir() if rx.match(p.name)))
-
-    monkeypatch.setattr(repair_ops, "_list_registry_candidates", insensitive_listing)
-    return calls
-
-
 class TestRegistryLookupIsCaseSensitive:
-    """A repair lane must never read a template counter as the registry.
+    """A repair lane must never read a template counter, or a directory, as the registry.
 
-    On a case-insensitive volume the glob returns .template_registry.json, and it sorts first."""
+    .template_registry.json and AAA_REGISTRY.json/ both sort before AIPASS_REGISTRY.json."""
 
-    def test_a_lowercase_lookalike_is_not_served_as_the_registry(self, tmp_path, monkeypatch):
-        """The lookup reads the listing seam and filters what it lists.
-
-        Mutant: _registry_in globs inline instead of calling the seam -> red."""
+    def test_a_lowercase_lookalike_is_not_served_as_the_registry(self, tmp_path):
+        """Mutant: registry_files_in drops is_registry_filename, or compares case-folded -> red."""
 
         real = tmp_path / "AIPASS_REGISTRY.json"
         real.write_text(json.dumps({"branches": []}), encoding="utf-8")
-        decoy = tmp_path / ".template_registry.json"
-        decoy.write_text(json.dumps({"files": {}}), encoding="utf-8")
+        (tmp_path / ".template_registry.json").write_text(json.dumps({"files": {}}), encoding="utf-8")
 
-        calls = _case_insensitive_listing(monkeypatch)
-
-        # Mutant: the lookup drops its case-sensitive suffix check -> red.
         assert repair_project(tmp_path, dry_run=True)["registry"] == real.name
-        # Once for the scan, once for the pollution check.
-        assert calls == [tmp_path.resolve(), tmp_path.resolve()]
 
-    def test_repair_project_reports_the_real_registry(self, tmp_path, monkeypatch):
+    def test_a_directory_named_like_a_registry_is_not_served(self, tmp_path):
+        """Mutant: registry_files_in drops is_file -> the directory sorts first -> red."""
+
+        (tmp_path / "AAA_REGISTRY.json").mkdir()
+        real = tmp_path / "AIPASS_REGISTRY.json"
+        real.write_text(json.dumps({"branches": []}), encoding="utf-8")
+
+        assert repair_project(tmp_path, dry_run=True)["registry"] == real.name
+
+    def test_repair_project_reports_the_real_registry(self, tmp_path):
         """End-to-end through the call site, not just the helper."""
 
         project = tmp_path / "someproj"
@@ -1194,28 +1176,22 @@ class TestRegistryLookupIsCaseSensitive:
         (project / ".template_registry.json").write_text(json.dumps({"files": {}}), encoding="utf-8")
         (project / "flow_plans_registry.json").write_text("{}", encoding="utf-8")
 
-        _case_insensitive_listing(monkeypatch)
-
         result = repair_project(project, dry_run=True)
 
         assert result["success"] is True
         assert result["registry"] == "AIPASS_REGISTRY.json"
 
-    def test_an_external_lowercase_stem_is_still_a_registry(self, tmp_path, monkeypatch):
+    def test_an_external_lowercase_stem_is_still_a_registry(self, tmp_path):
         """Suffix only, never the stem — external projects name their own."""
 
         theirs = tmp_path / "vera_studio_REGISTRY.json"
         theirs.write_text(json.dumps({"branches": []}), encoding="utf-8")
 
-        _case_insensitive_listing(monkeypatch)
-
         assert repair_project(tmp_path, dry_run=True)["registry"] == theirs.name
 
-    def test_absence_is_reported_as_absence(self, tmp_path, monkeypatch):
+    def test_absence_is_reported_as_absence(self, tmp_path):
 
         (tmp_path / ".template_registry.json").write_text("{}", encoding="utf-8")
-
-        _case_insensitive_listing(monkeypatch)
 
         result = repair_project(tmp_path, dry_run=True)
         assert result["success"] is False
@@ -1240,7 +1216,7 @@ class TestRegistryLookupIsCaseSensitive:
         ]
         assert inline == [], (
             "an unfiltered registry glob is back at line(s) "
-            f"{inline} — route it through _registry_in, which case-checks the name"
+            f"{inline} — route it through registry_files_in, which case-checks the name"
         )
 
 

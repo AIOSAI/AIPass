@@ -64,6 +64,12 @@ every caller that reads through the door. `apps/modules/__init__.py` re-exports 
 | `spawn_agent` | `apps/modules/core.py` |
 | `CITIZEN_CLASSES`, `FORBIDDEN_CLASSES`, `LEGACY_CLASSES`, `get_available_classes`, `get_template_dir`, `refuse_legacy_class`, `refuse_retired_or_forbidden`, `validate_class` | `apps/handlers/class_registry.py` |
 | `find_registry`, `get_owner`, `is_owner`, `registry_is_writable_document` | `apps/handlers/registry.py` |
+| `render_bootstrap_trinity` | `apps/handlers/bootstrap_render.py` |
+
+`render_bootstrap_trinity(branch_name, target, citizen_class, role, registry_path)` is the install
+script's one call: it writes the `.trinity` files a core branch lacks (a tracked passport seed
+first, then the template) and returns the names written. It never overwrites an existing file,
+and an unreadable registry or a seed that fails validation raises.
 
 Other branches that need to resolve a `citizen_class` read spawn's registry through the door
 rather than mirroring the class table — a mirror makes the reader a fleet-wide single point

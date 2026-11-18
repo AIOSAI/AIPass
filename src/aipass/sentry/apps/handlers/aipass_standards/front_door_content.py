@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: front_door_content.py
 # Description: Front Door Standards Content Handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-11-16
 # Modified: 2026-11-17
 # =============================================
@@ -22,6 +22,8 @@ def get_front_door_standards() -> str:
         "",
         "  [green]from aipass.prax import logger[/green]                          right: the door",
         "  [red]from aipass.prax.apps.modules.logger import system_logger[/red]   wrong: under apps/",
+        "  [red]from aipass.aipass.shared.json_ops import backup_json[/red]       wrong: beneath the top file",
+        "  Any path beneath aipass.<branch> is a finding: apps, shared, lib, docs, tests alike.",
         "",
         "[bold cyan]THE DOOR FILE:[/bold cyan]",
         "  src/aipass/<branch>/__init__.py is the one door: a _HOMES name-to-home table read by",

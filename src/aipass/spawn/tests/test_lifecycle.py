@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_lifecycle.py
 # Description: Tests for spawn lifecycle commands (delete, retire-project, sync-registry)
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-07
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/delete_ops.py and apps/handlers/sync_registry_ops.py."""
@@ -15,6 +15,7 @@
 import io
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
@@ -171,6 +172,23 @@ class TestDeleteBranch:
         reg = json.loads(mock_registry.read_text(encoding="utf-8"))
         names = [b["name"] for b in reg["branches"]]
         assert "TEST_API" not in names
+
+    def test_an_unknown_home_refuses_before_the_tree_moves(self, mock_branch, mock_registry):
+        """Mutant: the home is resolved after _archive_branch, or the refusal is dropped -> red."""
+
+        no_home = SimpleNamespace(path=None, source="", tried=("AIPASS_HOME unset",))
+        with (
+            patch("aipass.spawn.apps.handlers.delete_ops.find_registry", return_value=mock_registry),
+            patch("aipass.spawn.apps.handlers.registry.resolve_aipass_home", return_value=no_home),
+            patch("aipass.spawn.apps.handlers.delete_ops._archive_branch") as archive,
+        ):
+            result = delete_branch("test_api", confirm=False)
+
+        assert result["success"] is False
+        assert "AIPass home not found - tried: AIPASS_HOME unset" in result["error"]
+        archive.assert_not_called()
+        assert mock_branch.is_dir()
+        assert "TEST_API" in _registry_names(mock_registry)
 
     def test_delete_protected_spawn(self, repo_root, mock_registry):
         """Cannot delete spawn (self-protection)."""

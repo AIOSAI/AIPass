@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: delete_ops.py
 # Description: Delete handler — branch deletion by name or path, and whole-project retirement
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-03-07
 # Modified: 2026-11-17
 # =============================================
@@ -15,7 +15,6 @@ from pathlib import Path
 
 from aipass.prax import logger
 
-from aipass.aipass.shared.registry_discovery import registries_in
 from aipass.ai_mail import is_verified_admin_caller, resolve_verified_caller
 from aipass.hooks import read_registry as read_trust, registry_path as trust_path
 from aipass.hooks import revoke as revoke_trust
@@ -26,6 +25,7 @@ from aipass.spawn.apps.handlers.registry import (
     find_registry,
     is_protected,
     load_registry,
+    registry_files_in,
     registry_lock,
     save_registry,
     branches_as_list,
@@ -237,6 +237,12 @@ def delete_branch(
         logger.error(f"[delete] {problem}")
         return _error_result(branch_name, problem)
 
+    # Resolved before anything moves: an unknown home must refuse here, not after the tree is gone.
+    try:
+        home = repo_root()
+    except RuntimeError as exc:
+        return _error_result(branch_name, f"Cannot delete '{branch_name}' - {exc}")
+
     archive_error = _archive_branch(branch_dir, archive_dir)
     if archive_error:
         return _error_result(branch_name, archive_error)
@@ -262,10 +268,10 @@ def delete_branch(
     except Exception as exc:
         msg = f"Archive created but failed to remove directory: {exc}"
         logger.error(f"[delete] {msg}")
-        write_receipts([receipt], "failed", repo_root())
+        write_receipts([receipt], "failed", home)
         return _error_result(branch_name, msg, str(archive_dir), True)
 
-    write_receipts([receipt], "retired" if retire else "deleted", repo_root())
+    write_receipts([receipt], "retired" if retire else "deleted", home)
 
     # The archive is now the only copy, so whether .trinity went with it is logged here.
     archived_trinity = (
@@ -354,12 +360,15 @@ def retire_project(requested: str, dry_run: bool = False) -> dict:
     Every receipt row is built and validated before anything is written; dry_run reports them and writes nothing.
     """
     root = Path(requested).expanduser().resolve()
-    aipass_root = repo_root().resolve()
+    try:
+        aipass_root = repo_root()
+    except RuntimeError as exc:
+        return _refused(requested, str(exc))
     if aipass_root.is_relative_to(root):
         return _refused(requested, f"{root} is or holds the AIPass root - retire-project never removes it")
     if not root.is_dir():
         return _refused(requested, f"{root} is not a directory")
-    sealing = registries_in(root)
+    sealing = registry_files_in(root)
     if not sealing:
         return _refused(requested, f"No *_REGISTRY.json in {root} - not a project root")
     admin = _admin_seat()

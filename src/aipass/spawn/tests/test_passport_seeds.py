@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_passport_seeds.py
 # Description: TDPLAN-0017 — passport seeds: export, validation, mint-from-seed
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-28
-# Modified: 2026-11-09
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/seed_ops.py and apps/modules/core.py's mint-from-seed path."""
@@ -15,6 +15,8 @@
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -36,6 +38,7 @@ from aipass.spawn.apps.handlers.seed_ops import (
     validate_passport,
     validate_seed,
 )
+from aipass.spawn import render_bootstrap_trinity
 from aipass.spawn.apps.modules.core import spawn_agent
 from aipass.spawn.tests.conftest import MACHINE_CITIZEN_ID, MACHINE_REGISTRY_ID, make_passport, write_registry
 
@@ -367,6 +370,57 @@ class TestMintFromSeed:
         before = json.dumps(seed, sort_keys=True)
         mint_from_seed(seed, seed_file, branch_name="wanderer", registry_id="r", citizen_id="c")
         assert json.dumps(seed, sort_keys=True) == before
+
+
+class TestBootstrapRender:
+    """setup.sh's one call: the seed births the passport, the template fills what is missing, nothing is overwritten."""
+
+    @pytest.fixture
+    def seeded_home(self, tmp_path, monkeypatch):
+        root = tmp_path
+        write_registry(root / "AIPASS_REGISTRY.json", {"wanderer": "src/aipass/wanderer"})
+        target = branch_dir(root)
+        seed_file = seed_path_for(target)
+        seed_file.parent.mkdir(parents=True)
+        seed_file.write_text(canonical_text(build_seed(make_passport())), encoding="utf-8")
+        home = SimpleNamespace(path=root, source="test", tried=())
+        with patch("aipass.spawn.apps.handlers.registry.resolve_aipass_home", return_value=home):
+            yield root, target
+
+    def _render(self, root, target):
+        return render_bootstrap_trinity("wanderer", target, "specialist", "wanderer", root / "AIPASS_REGISTRY.json")
+
+    def test_the_seed_births_the_passport_and_the_template_fills_the_rest(self, seeded_home):
+        """Mutant: the seed branch is skipped -> the passport comes from the template, unstamped -> red."""
+        root, target = seeded_home
+
+        written = self._render(root, target)
+
+        assert written == ["passport.json(seed)", "local.json", "observations.json"]
+        passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+        assert passport["citizenship"]["registry_id"] == "pid-test"
+        assert STAMP_KEY in passport["citizenship"]
+        local = (target / ".trinity" / "local.json").read_text(encoding="utf-8")
+        assert "{{" not in local
+
+    def test_an_existing_file_is_never_overwritten(self, seeded_home):
+        """Mutant: the exists() skip is dropped -> the hand-kept local.json is replaced -> red."""
+        root, target = seeded_home
+        kept = target / ".trinity" / "local.json"
+        kept.parent.mkdir(parents=True)
+        kept.write_text('{"mine": true}', encoding="utf-8")
+
+        assert "local.json" not in self._render(root, target)
+        assert kept.read_text(encoding="utf-8") == '{"mine": true}'
+
+    def test_an_unreadable_registry_stops_the_install_with_nothing_written(self, seeded_home):
+        """State document: never guessed. Mutant: the registry error is swallowed -> red."""
+        root, target = seeded_home
+        (root / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")
+
+        with pytest.raises(json.JSONDecodeError):
+            self._render(root, target)
+        assert not (target / ".trinity").exists()
 
 
 class TestExportSeeds:
