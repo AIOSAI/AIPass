@@ -29,6 +29,7 @@ from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.apps.handlers.host import verbs as host_verbs
 from aipass.api.tests.support_host_api import FakeBaud, agent_row
+from aipass.skills import SCREEN_LOCK_REASON_SWITCH_UNREADABLE, SCREEN_LOCK_REASON_SWITCHED_OFF
 
 PATCH_SECRETS_BASE = "aipass.api.apps.handlers.auth.secrets.SECRETS_BASE"
 PATCH_SECRETS_JSON = "aipass.api.apps.handlers.auth.secrets.json_handler"
@@ -46,6 +47,8 @@ PATCH_VERBS_FLEET = "aipass.api.apps.handlers.host.verbs.host_fleet"
 PATCH_RESOLVE = "aipass.api.apps.handlers.host.verbs.host_reads.resolve_branch_root"
 PATCH_SEATED = "aipass.api.apps.handlers.host.verbs.host_reads.seated_project"
 PATCH_HOST_FLEET = "aipass.api.apps.handlers.host.fleet"
+# The door name alone, so the served reason constants verbs.py compares against stay real.
+PATCH_SKILL_LOCK = "aipass.skills.lock_screen"
 
 # Mismatched case on purpose: @baud sends AIPASS, the directory says AIPass; a case-sensitive compare refuses all.
 PROJECT = "aipass"
@@ -57,6 +60,11 @@ fastapi_required = pytest.mark.skipif(
     not host_server.is_available(),
     reason="the [host] extra is not installed",
 )
+
+
+def _refusal(reason: Any, sentence: str) -> dict:
+    """lock_screen()'s not-locked answer in @skills' published shape, carrying *reason*."""
+    return {"locked": False, "method": None, "session": None, "error": sentence, "reason": reason}
 
 
 @pytest.fixture
@@ -503,14 +511,41 @@ class TestTheSkillOwnsTheFailureText:
 
             assert host_verbs.lock_screen()["detail"] == sentence
 
-    def test_a_switched_off_skill_is_a_refusal_with_its_sentence_intact_and_an_error_logged(self) -> None:
-        with patch(PATCH_VERBS_JSON), patch(PATCH_VERBS_LOGGER) as log, patch.object(host_verbs, "skills") as skill:
-            skill.lock_screen.return_value = {"locked": False, "method": None, "session": None, "error": SWITCHED_OFF}
-
+    def test_a_switched_off_skill_is_a_refusal_with_its_sentence_intact_logged_at_info_never_error(self) -> None:
+        answer = _refusal(SCREEN_LOCK_REASON_SWITCHED_OFF, SWITCHED_OFF)
+        with patch(PATCH_VERBS_JSON), patch(PATCH_VERBS_LOGGER) as log, patch(PATCH_SKILL_LOCK, return_value=answer):
             result = host_verbs.lock_screen()
 
         assert result == {"ok": False, "detail": SWITCHED_OFF, "method": None, "session": None}
-        assert SWITCHED_OFF in log.error.call_args.args[-1]
+        assert SWITCHED_OFF in log.info.call_args.args[-1]
+        log.error.assert_not_called()
+        log.warning.assert_not_called()
+
+
+class TestTheLockVerbLogsByTheOwnersTable:
+    """On and worked: info. Off and refused: info. On and failed, an unreadable switch included: error."""
+
+    @pytest.mark.parametrize(
+        "reason",
+        [SCREEN_LOCK_REASON_SWITCH_UNREADABLE, None],
+        ids=["switch_unreadable", "lock_ran_and_failed"],
+    )
+    def test_a_refusal_that_is_not_a_deliberate_off_logs_an_error(self, reason: Any) -> None:
+        answer = _refusal(reason, "the screen locker refused and no fallback is installed")
+        with patch(PATCH_VERBS_JSON), patch(PATCH_VERBS_LOGGER) as log, patch(PATCH_SKILL_LOCK, return_value=answer):
+            assert host_verbs.lock_screen()["ok"] is False
+
+        assert "no fallback is installed" in log.error.call_args.args[-1]
+        log.info.assert_not_called()
+
+    def test_a_lock_that_ran_logs_info_and_no_error(self) -> None:
+        answer = {"locked": True, "method": "loginctl", "session": "3", "error": None}
+        with patch(PATCH_VERBS_JSON), patch(PATCH_VERBS_LOGGER) as log, patch(PATCH_SKILL_LOCK, return_value=answer):
+            assert host_verbs.lock_screen()["ok"] is True
+
+        assert log.info.call_args.args[-1] == "loginctl"
+        log.error.assert_not_called()
+        log.warning.assert_not_called()
 
     def test_a_lock_with_no_error_text_still_says_something(self, quiet: Any) -> None:
         """A falsy 'locked' with an empty error must not render as a blank chip."""
