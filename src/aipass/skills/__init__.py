@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: Skills' front door: the skill functions and contract constants other branches import
-# Version: 2.2.0
+# Version: 2.3.0
 # Created: 2026-03-07
 # Modified: 2026-11-17
 # =============================================
@@ -21,6 +21,10 @@ if TYPE_CHECKING:
     from aipass.skills.lib.screen_lock.handler import REASON_SWITCHED_OFF as SCREEN_LOCK_REASON_SWITCHED_OFF
     from aipass.skills.lib.screen_lock.handler import lock_screen, lock_state
     from aipass.skills.lib.system_status.handler import PSUTIL_RECIPE as SYSTEM_STATUS_PSUTIL_RECIPE
+    from aipass.skills.lib.system_status.handler import (
+        REASON_SWITCH_UNREADABLE as SYSTEM_STATUS_REASON_SWITCH_UNREADABLE,
+    )
+    from aipass.skills.lib.system_status.handler import REASON_SWITCHED_OFF as SYSTEM_STATUS_REASON_SWITCHED_OFF
     from aipass.skills.lib.system_status.handler import REASONS as SYSTEM_STATUS_REASONS
     from aipass.skills.lib.system_status.handler import SECTIONS as SYSTEM_STATUS_SECTIONS
     from aipass.skills.lib.system_status.handler import machine_processes, machine_vitals
@@ -36,6 +40,8 @@ _HOMES = {
     "SYSTEM_STATUS_REASONS": (_SYSTEM_STATUS, "REASONS"),
     "SYSTEM_STATUS_SECTIONS": (_SYSTEM_STATUS, "SECTIONS"),
     "SYSTEM_STATUS_PSUTIL_RECIPE": (_SYSTEM_STATUS, "PSUTIL_RECIPE"),
+    "SYSTEM_STATUS_REASON_SWITCHED_OFF": (_SYSTEM_STATUS, "REASON_SWITCHED_OFF"),
+    "SYSTEM_STATUS_REASON_SWITCH_UNREADABLE": (_SYSTEM_STATUS, "REASON_SWITCH_UNREADABLE"),
     "SCREEN_LOCK_METHOD_LOGINCTL": (_SCREEN_LOCK, "METHOD_LOGINCTL"),
     "SCREEN_LOCK_METHOD_DBUS": (_SCREEN_LOCK, "METHOD_DBUS"),
     "SCREEN_LOCK_REASON_NO_SESSION": (_SCREEN_LOCK, "REASON_NO_SESSION"),

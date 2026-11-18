@@ -41,11 +41,14 @@ vitals = machine_vitals()
   `available`, `reason`, `sentence`, `detail` beside its values. Never raises
   for a reading; a value the host cannot give is `None`, never a zero.
 - Whole-function refusal: `{"ok": False, "reason", "detail"}` with
-  `psutil_missing` or `switched_off` (the off-switch is consulted, and an
-  unreadable switch state fails closed).
+  `psutil_missing`, `switched_off` (switched off on purpose, logged as INFO)
+  or `switch_unreadable` (the switch state cannot be read, so the skill counts
+  as off and fails closed, logged as ERROR). The package door serves the two
+  as `SYSTEM_STATUS_REASON_SWITCHED_OFF` and
+  `SYSTEM_STATUS_REASON_SWITCH_UNREADABLE`.
 - Reason codes (closed set, one sentence each in `REASONS`): `platform`,
   `no_sensor`, `no_allowlisted_sensor`, `read_failed`, `warming`, `no_range`,
-  `switched_off`, `psutil_missing`.
+  `switched_off`, `switch_unreadable`, `psutil_missing`.
 - `cpu` carries `percent` and `window_s`, plus `cores` (busy percent per
   logical CPU, in index order), `logical` and `physical` (the counts) and `mhz`
   / `mhz_max` (frequency now and its ceiling). One `cpu_times(percpu=True)`

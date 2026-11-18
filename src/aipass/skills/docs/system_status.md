@@ -40,10 +40,14 @@ vitals = machine_vitals()
   when the host cannot give it, never a zero. It never raises for a reading: a
   call that raises costs its own section (`read_failed`), never its siblings.
 - **Whole-function refusal** is `{"ok": False, "reason": ..., "detail": ...}`,
-  and only for two codes: `psutil_missing` (detail is the install recipe) and
-  `switched_off`. The off-switch is consulted inside the function, because this
-  door is imported directly and never passes the runner's gate; an unreadable
-  switch state fails closed, exactly as the runner does.
+  and only for three codes: `psutil_missing` (detail is the install recipe),
+  `switched_off` and `switch_unreadable`. The off-switch is consulted inside
+  the function, because this door is imported directly and never passes the
+  runner's gate. A skill switched off on purpose answers `switched_off` and logs
+  INFO; an unreadable switch state fails closed, exactly as the runner does,
+  answers `switch_unreadable` and logs ERROR. The package door serves both
+  codes as `SYSTEM_STATUS_REASON_SWITCHED_OFF` and
+  `SYSTEM_STATUS_REASON_SWITCH_UNREADABLE`.
 - **Reason codes** — a closed set, one sentence each in `REASONS`:
 
 | Code | When |
@@ -54,7 +58,8 @@ vitals = machine_vitals()
 | `read_failed` | The call raised; `detail` carries the error |
 | `warming` | A rate needs two samples — the first call in a process |
 | `no_range` | The fan's rpm is real, but its min/max is missing, unreadable, or not a range; `current` is still published, `range` and `percent_of_range` are `None` |
-| `switched_off` | Refusal only |
+| `switched_off` | Refusal only: the skill is switched off on purpose |
+| `switch_unreadable` | Refusal only: the switch state cannot be read, so the skill counts as off |
 | `psutil_missing` | Refusal only |
 
 - **The cpu section carries the cores.** Beside `percent` and `window_s`:

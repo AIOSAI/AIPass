@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_machine_vitals.py
 # Description: The machine_vitals() contract
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-09-12
-# Modified: 2026-11-14
+# Modified: 2026-11-17
 # Category: skills/tests
 # =============================================
 
@@ -68,6 +68,7 @@ REASON_CODES = {
     "warming",
     "no_range",
     "switched_off",
+    "switch_unreadable",
     "psutil_missing",
 }
 
@@ -534,10 +535,14 @@ class TestTheWholeFunctionRefusal:
 
         result = status.machine_vitals()
 
-        assert list(result) == ["ok", "reason", "detail"]
-        assert result["ok"] is False
-        assert result["reason"] == "switched_off"
-        assert "drone @skills on system_status" in result["detail"]
+        assert result == {
+            "ok": False,
+            "reason": "switched_off",
+            "detail": (
+                "Skill 'system_status' is switched OFF and takes no readings. "
+                "Turn it back on with: drone @skills on system_status"
+            ),
+        }
         assert untouchable.touched == []
 
     def test_switching_it_back_on_is_what_lifts_the_refusal(self, machine):
@@ -562,13 +567,15 @@ class TestTheWholeFunctionRefusal:
 
         result = status.machine_vitals()
 
-        assert list(result) == ["ok", "reason", "detail"]
-        assert result["ok"] is False
-        assert result["reason"] == "switched_off"
-        assert result["detail"] == (
-            f"The switch state {switch_handler.STATE_FILENAME} could not be read (SwitchStateUnreadable), "
-            f"so this skill counts as switched OFF; the error is in the host log."
-        )
+        assert result == {
+            "ok": False,
+            "reason": "switch_unreadable",
+            "detail": (
+                f"The switch state {switch_handler.STATE_FILENAME} could not be read (SwitchStateUnreadable), "
+                f"so this skill counts as switched OFF; the error is in the host log."
+            ),
+        }
+        assert status.machine_processes() == result
         assert untouchable.touched == []
         assert state_path.read_text(encoding="utf-8") == document
 

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: handler.py
 # Description: System Status skill - disk, memory, uptime, processes, battery, machine_vitals(), machine_processes()
-# Version: 2.6.1
+# Version: 2.7.0
 # Created: 2026-03-07
 # Modified: 2026-11-17
 # =============================================
@@ -236,6 +236,10 @@ def _summary():
 SKILL_NAME = "system_status"
 VITALS_SCHEMA = 2
 
+# Why a published function refused outright: off on purpose, or the switch state cannot be read.
+REASON_SWITCHED_OFF = "switched_off"
+REASON_SWITCH_UNREADABLE = "switch_unreadable"
+
 # A value the host cannot give is None, never a zero.
 _SECTION_VALUES = {
     "cpu": ("percent", "window_s", "cores", "logical", "physical", "mhz", "mhz_max"),
@@ -266,8 +270,9 @@ REASONS = {
     "no_range": (
         "The fan speed is real but its range is not known on this host, so there is no scale to draw it against."
     ),
-    "switched_off": (
-        "The system_status skill is switched off, or its switch state cannot be read, so it takes no readings."
+    REASON_SWITCHED_OFF: "The system_status skill is switched off on purpose, so it takes no readings.",
+    REASON_SWITCH_UNREADABLE: (
+        "The switch state cannot be read, so the system_status skill counts as switched off and takes no readings."
     ),
     "psutil_missing": (
         "psutil is not importable on this host, so no reading can be taken - detail carries the install recipe."
@@ -414,7 +419,7 @@ def _gate(door):
         # Cannot tell whether it is off, so it is off - the runner's answer.
         logger.error(f"Refusing {door} - switch state unreadable: %s", exc, exc_info=True)
         return _refusal(
-            "switched_off",
+            REASON_SWITCH_UNREADABLE,
             f"The switch state {STATE_FILENAME} could not be read ({_describe(exc)}), so this skill "
             f"counts as switched OFF; the error is in the host log.",
         )
@@ -423,7 +428,7 @@ def _gate(door):
         # Off on purpose is the switch working, not a fault: INFO.
         logger.info(f"Refusing {door} - the skill is switched off")
         return _refusal(
-            "switched_off",
+            REASON_SWITCHED_OFF,
             f"Skill '{SKILL_NAME}' is switched OFF and takes no readings. "
             f"Turn it back on with: drone @skills on {SKILL_NAME}",
         )
