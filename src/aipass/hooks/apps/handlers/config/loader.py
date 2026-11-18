@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: loader.py
-# Version: 2.4.0
+# Version: 2.4.1
 # Description: Hook config loader — the AIPass config from AIPASS_HOME, a project's own behind trust, gates always
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-05-19
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """Which hook config a session runs. Security never depends on trust (DPLAN-0356 item 1).
@@ -58,16 +58,20 @@ def _absolute(raw: str) -> Path:
 def aipass_home() -> Path | None:
     """The AIPass install: $AIPASS_HOME, else the repo this code was loaded from, else None.
 
+    The repo is found by shape, not depth: the package this file sits in is its nearest folder named
+    aipass, and only a src/aipass checkout has a home. An installed aipass (site-packages) answers None,
+    even inside a checkout: the home runs its config with no trust check, so it is never a guess.
     Read per call so a test's environment patch is honoured.
     """
     raw = os.environ.get("AIPASS_HOME", "")
     if raw:
         return _absolute(raw)
-    here = Path(__file__).resolve()
-    if len(here.parents) > 6:
-        root = here.parents[6]
-        if (root / _CONFIG).is_file() and (root / "src" / "aipass").is_dir():
-            return root
+    package = next((folder for folder in Path(__file__).resolve().parents if folder.name == "aipass"), None)
+    if package is None or package.parent.name != "src":
+        return None
+    root = package.parent.parent
+    if (root / _CONFIG).is_file() and (root / "src" / "aipass").is_dir():
+        return root
     return None
 
 

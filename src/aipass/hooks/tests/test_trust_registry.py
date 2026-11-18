@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_trust_registry.py
-# Version: 2.2.2
+# Version: 2.3.0
 # Description: Tests for trusted-project registry — DPLAN-0244 Layer B
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-15
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/config/trust_registry.py and apps/handlers/config/loader.py's trust integration."""
@@ -16,6 +16,7 @@
 # sentry: no-test-needed(documentation) — that the registry functions carry docstrings
 
 import contextlib
+import importlib.util
 import json
 import os
 from collections.abc import Iterator
@@ -687,6 +688,51 @@ class TestBootstrap:
 
             assert is_trusted(str(hostile_dir)) is False
             assert is_trusted(str(aipass_dir)) is True
+
+
+class TestAipassHomeIsFoundByShape:
+    """With AIPASS_HOME unset, the home is the parent of the src folder holding the aipass package this file is in.
+
+    The home runs its config with no trust check: an installed copy, even one inside a checkout, has none.
+    """
+
+    _SITE = Path("lib") / "python3.12" / "site-packages" / "aipass"
+
+    @staticmethod
+    def _home_from(folder: Path, monkeypatch) -> Path | None:
+        """aipass_home() as a copy of the loader placed in *folder* answers it."""
+        folder.mkdir(parents=True)
+        copy = folder / "loader.py"
+        copy.write_bytes(Path(loader.__file__).read_bytes())
+        spec = importlib.util.spec_from_file_location("placed_loader", copy)
+        assert spec is not None and spec.loader is not None
+        placed = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(placed)
+        monkeypatch.delenv("AIPASS_HOME", raising=False)
+        return placed.aipass_home()
+
+    @pytest.fixture
+    def repo(self, tmp_path: Path) -> Path:
+        (tmp_path / "repo" / ".aipass").mkdir(parents=True)
+        (tmp_path / "repo" / ".aipass" / "hooks.json").write_text("{}", encoding="utf-8")
+        return tmp_path / "repo"
+
+    @pytest.mark.parametrize(
+        "where",
+        [
+            "src/aipass/hooks/apps/handlers/config",
+            "src/aipass/hooks/.live-20990101T000000Z/handlers/config",
+            "src/aipass/hooks/.live-20990101T000000Z/nested/handlers/config",
+        ],
+    )
+    def test_a_checkout_or_any_snapshot_of_it_answers_the_repo(self, repo, monkeypatch, where):
+        assert self._home_from(repo / where, monkeypatch) == repo
+
+    def test_an_installed_copy_inside_a_checkout_answers_none(self, repo, monkeypatch):
+        assert self._home_from(repo / ".venv" / self._SITE / "hooks/apps/handlers/config", monkeypatch) is None
+
+    def test_an_installed_copy_outside_any_checkout_answers_none(self, tmp_path, monkeypatch):
+        assert self._home_from(tmp_path / "venv" / self._SITE / "hooks/apps/handlers/config", monkeypatch) is None
 
 
 class TestConfigUnavailableReason:

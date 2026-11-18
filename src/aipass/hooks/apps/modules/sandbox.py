@@ -1,14 +1,14 @@
 # =================== AIPass ====================
 # Name: sandbox.py
-# Version: 1.1.0
-# Description: Sandbox wrapper — launches commands inside srt (kernel FS boundary)
+# Version: 1.2.0
+# Description: Sandbox building blocks — policy, srt config and the bwrap command (kernel FS boundary)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-09
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
-"""Sandbox wrapper — launches commands inside srt kernel filesystem boundary.
+"""Sandbox building blocks for the srt kernel filesystem boundary; callers spawn the wrapped command.
 
 Reference: docs/sandbox.md
 """
@@ -23,7 +23,6 @@ from pathlib import Path
 from aipass.cli import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.json import json_handler
-from aipass.prax import logger
 
 CONSOLE = err_console
 
@@ -211,35 +210,11 @@ def resolve_bwrap_command(command: str, srt_config: dict) -> str:
         Path(config_path).unlink(missing_ok=True)
 
 
-def sandbox_launch(
-    command: str,
-    *,
-    cwd: str | Path | None = None,
-    policy: dict,
-    env: dict | None = None,
-) -> subprocess.Popen:
-    """Launch a command inside the srt kernel sandbox."""
-    srt_config = build_srt_config(policy)
-    bwrap_cmd = resolve_bwrap_command(command, srt_config)
-
-    logger.info("sandbox_launch: wrapping command in srt sandbox")
-
-    launch_env = env if env is not None else dict(os.environ)
-
-    return subprocess.Popen(
-        ["/bin/bash", "-c", bwrap_cmd],
-        cwd=str(cwd) if cwd else None,
-        env=launch_env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-
-
 def print_introspection() -> None:
     """Print module structure for drone routing."""
     CONSOLE.print("[bold cyan]sandbox[/bold cyan] — Kernel filesystem boundary via srt")
     CONSOLE.print("  Phase 1: wrapper module only (not yet wired into dispatch)")
-    CONSOLE.print("  Use sandbox_launch() programmatically.")
+    CONSOLE.print("  Callers compose build_policy, build_srt_config and resolve_bwrap_command.")
 
 
 def handle_command(command: str, args: list) -> bool:

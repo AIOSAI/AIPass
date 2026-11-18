@@ -1,15 +1,15 @@
 # =================== AIPass ====================
 # Name: test_sound.py
-# Version: 2.0.1
+# Version: 2.1.0
 # Description: Tests for shared sound module
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-11-15
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/sound.py."""
 
-# Shared speak/play; silent unless hook sounds are switched on.
+# Shared speak; silent unless hook sounds are switched on.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(constant) — PIPER_BIN and PIPER_VOICE's install locations under the home directory
@@ -22,7 +22,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from aipass.hooks.apps import sound
-from aipass.hooks.apps.sound import is_muted, mute, play, speak, unmute
+from aipass.hooks.apps.sound import is_muted, mute, speak, unmute
 
 
 class TestIsMuted:
@@ -173,68 +173,6 @@ class TestSpeak:
         template, exc = mock_logger.info.call_args[0]
         assert template == "[HOOKS] speak: playback error: %s"
         assert str(exc) == "broken"
-
-
-class TestPlay:
-    """WAV playback with mute support."""
-
-    def test_play_calls_aplay_when_not_muted(self):
-        with (
-            patch("aipass.hooks.apps.sound.is_muted", return_value=False),
-            patch("aipass.hooks.apps.sound.subprocess") as mock_sub,
-        ):
-            mock_path = MagicMock()
-            mock_path.exists.return_value = True
-
-            play(mock_path)
-
-        assert mock_sub.Popen.call_count == 1
-        (play_cmd,), play_kwargs = mock_sub.Popen.call_args
-        assert play_cmd[-1] == str(mock_path)
-        assert play_kwargs == {"stdout": mock_sub.DEVNULL, "stderr": mock_sub.DEVNULL}
-
-    def test_play_skips_when_muted(self, tmp_path):
-        with (
-            patch("aipass.hooks.apps.sound.is_muted", return_value=True),
-            patch("aipass.hooks.apps.sound.subprocess") as mock_sub,
-        ):
-            play(tmp_path / "sound.wav")
-
-        mock_sub.Popen.assert_not_called()
-
-    def test_play_skips_when_file_missing(self):
-        with (
-            patch("aipass.hooks.apps.sound.is_muted", return_value=False),
-            patch("aipass.hooks.apps.sound.subprocess") as mock_sub,
-        ):
-            mock_path = MagicMock()
-            mock_path.exists.return_value = False
-
-            play(mock_path)
-
-        mock_sub.Popen.assert_not_called()
-
-    def test_play_graceful_on_os_error(self):
-        """A missing player is caught and the reason carried into the log.
-
-        Had no oracle. Note the file-not-found leg logs a DIFFERENT line, so
-        pinning the template is what separates "the player is missing" from
-        "the sound file is missing" - two failures with one silent outcome.
-        """
-        with (
-            patch("aipass.hooks.apps.sound.is_muted", return_value=False),
-            patch("aipass.hooks.apps.sound.subprocess.Popen", side_effect=OSError("no player")),
-            patch("aipass.hooks.apps.sound.logger") as mock_logger,
-        ):
-            mock_path = MagicMock()
-            mock_path.exists.return_value = True
-
-            play(mock_path)
-
-        assert mock_logger.info.call_count == 1
-        template, exc = mock_logger.info.call_args[0]
-        assert template == "[HOOKS] play: playback error: %s"
-        assert str(exc) == "no player"
 
 
 class TestMuteWritePair:

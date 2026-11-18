@@ -1,17 +1,17 @@
 # =================== AIPass ====================
 # Name: test_sandbox.py
-# Version: 1.0.4
+# Version: 1.1.0
 # Description: Tests for sandbox wrapper module
 # Branch: hooks
 # Created: 2026-06-09
-# Modified: 2026-11-15
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/sandbox.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that sandbox.py parses and every import resolves
-# sentry: no-test-needed(documentation) — that build_policy and sandbox_launch carry docstrings
+# sentry: no-test-needed(documentation) — that build_policy and resolve_bwrap_command carry docstrings
 # sentry: no-test-needed(constant) — HELP_COMMANDS' display text and the CONSOLE binding
 # sentry: no-test-needed(stdlib) — shutil.which and tempfile.gettempdir's own path-resolution correctness
 
@@ -26,7 +26,6 @@ from aipass.hooks.apps.modules.sandbox import (
     build_srt_config,
     handle_command,
     resolve_bwrap_command,
-    sandbox_launch,
 )
 
 
@@ -237,69 +236,6 @@ class TestResolveBwrapCommand:
         assert not Path(created_files[0]).exists()
 
 
-class TestSandboxLaunch:
-    """Full launch flow (mocked resolver)."""
-
-    def test_returns_popen(self, tmp_path):
-        fake_popen = MagicMock()
-
-        with (
-            patch(
-                "aipass.hooks.apps.modules.sandbox.resolve_bwrap_command",
-                return_value="bwrap --test -- /bin/bash -c 'echo hi'",
-            ),
-            patch(
-                "aipass.hooks.apps.modules.sandbox.build_srt_config",
-                return_value={"network": {}},
-            ),
-            patch(
-                "aipass.hooks.apps.modules.sandbox.subprocess.Popen",
-                return_value=fake_popen,
-            ) as mock_popen,
-        ):
-            result = sandbox_launch("echo hi", policy={"allow_write": [str(tmp_path)]})
-
-        assert result is fake_popen
-        call_args = mock_popen.call_args
-        assert call_args[0][0] == ["/bin/bash", "-c", "bwrap --test -- /bin/bash -c 'echo hi'"]
-
-    def test_passes_cwd(self, tmp_path):
-        launch_cwd = tmp_path / "test"
-
-        with (
-            patch(
-                "aipass.hooks.apps.modules.sandbox.resolve_bwrap_command",
-                return_value="bwrap --test",
-            ),
-            patch(
-                "aipass.hooks.apps.modules.sandbox.build_srt_config",
-                return_value={"network": {}},
-            ),
-            patch("aipass.hooks.apps.modules.sandbox.subprocess.Popen") as mock_popen,
-        ):
-            sandbox_launch("echo hi", cwd=str(launch_cwd), policy={"allow_write": [str(tmp_path)]})
-
-        assert mock_popen.call_args[1]["cwd"] == str(launch_cwd)
-
-    def test_passes_custom_env(self, tmp_path):
-        custom_env = {"PATH": "/usr/bin", "HOME": str(tmp_path)}
-
-        with (
-            patch(
-                "aipass.hooks.apps.modules.sandbox.resolve_bwrap_command",
-                return_value="bwrap --test",
-            ),
-            patch(
-                "aipass.hooks.apps.modules.sandbox.build_srt_config",
-                return_value={"network": {}},
-            ),
-            patch("aipass.hooks.apps.modules.sandbox.subprocess.Popen") as mock_popen,
-        ):
-            sandbox_launch("echo hi", policy={"allow_write": [str(tmp_path)]}, env=custom_env)
-
-        assert mock_popen.call_args[1]["env"] is custom_env
-
-
 class TestSrtResolveCwd:
     """CWD selection for srt resolver — prevents mask-placeholder pollution."""
 
@@ -485,7 +421,7 @@ class TestHandleCommand:
         assert result is True
         err = capsys.readouterr().err
         assert "Phase 1: wrapper module only" in err
-        assert "sandbox_launch()" in err
+        assert "resolve_bwrap_command" in err
 
     def test_sandbox_help(self, capsys):
         result = handle_command("sandbox", ["--help"])

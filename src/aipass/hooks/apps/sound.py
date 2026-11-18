@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: sound.py
-# Version: 2.0.1
-# Description: Shared sound utilities — Piper TTS and WAV playback with mute support
+# Version: 2.1.0
+# Description: Shared sound utilities — Piper TTS speech with mute support
 # Branch: hooks
 # Layer: apps
 # Created: 2026-05-22
-# Modified: 2026-11-15
+# Modified: 2026-11-18
 # =============================================
 
 """Shared sound functions for hook handlers. Silent unless hook sounds are switched on."""
@@ -28,7 +28,7 @@ _PLAY_CMD: list[str] = ["aplay", "-q"]
 
 def print_introspection():
     """Print module structure for drone routing."""
-    CONSOLE.print("[bold cyan]sound[/bold cyan] — Shared sound utilities (speak, play, mute)")
+    CONSOLE.print("[bold cyan]sound[/bold cyan] — Shared sound utilities (speak, mute)")
 
 
 def is_muted() -> bool:
@@ -94,22 +94,3 @@ def speak(text: str, tmp_dir: str | None = None) -> None:
     finally:
         if wav_path and not playing:
             Path(wav_path).unlink(missing_ok=True)
-
-
-def play(sound_path: Path) -> None:
-    """Play a WAV file. Skips if muted."""
-    if is_muted():
-        return
-
-    if not sound_path.exists():
-        logger.info("[HOOKS] play: file not found: %s", sound_path)
-        return
-
-    try:
-        subprocess.Popen(
-            _PLAY_CMD + [str(sound_path)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except OSError as exc:
-        logger.info("[HOOKS] play: playback error: %s", exc)

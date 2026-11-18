@@ -70,7 +70,7 @@ per handler, so the name is reserved.
 nearest `.trinity/passport.json` and recalls nothing unless the passport declares `citizen_class: manager`.
 Compass is the managers' decision store, so a builder seat, or a directory with no passport, hears nothing.
 
-**Sound is off by default.** `apps/sound.py`'s `speak()` and `play()` check `is_muted()`, which is True
+**Sound is off by default.** `apps/sound.py`'s `speak()` checks `is_muted()`, which is True
 unless `~/.aipass/aipass-hooks-sound-on` exists (outside the temp dir, so a reboot or `TMPDIR` cannot move it).
 `hooksound on` creates it, `off` removes it, `--json` prints `{"active": bool}` on stdout; a fresh install is silent.
 `tests/conftest.py` points it at a temp dir.

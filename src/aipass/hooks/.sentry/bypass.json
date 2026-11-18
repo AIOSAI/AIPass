@@ -577,7 +577,7 @@
       "file": "apps/handlers/config/loader.py",
       "standard": "fallback",
       "lines": [
-        167
+        171
       ],
       "reason": "Fails toward MORE enforcement: an unreadable AIPass config runs the built-in gate set from gates.builtin_config(), never no gates. It logs at ERROR, which @trigger's log watcher escalates."
     },
@@ -585,7 +585,7 @@
       "file": "apps/handlers/config/loader.py",
       "standard": "fallback",
       "lines": [
-        315
+        319
       ],
       "reason": "The guard file only stops a repeat of the one-per-session never-enrolled nudge; if it cannot be written the user sees the nudge again, which is itself the visible signal. No decision rests on it."
     },
@@ -973,8 +973,7 @@
       "standard": "fallback",
       "lines": [
         90,
-        92,
-        114
+        92
       ],
       "reason": "Sound is cosmetic: a voice or chime that cannot play (piper timed out, no player) costs only that sound, and the hook's real output is already delivered. The event's engine.jsonl row still records the hook; a raise would only fail the hook for a missing beep."
     },
@@ -1259,7 +1258,7 @@
       "file": "apps/handlers/config/loader.py",
       "standard": "logged_fallback",
       "lines": [
-        194
+        198
       ],
       "reason": "None here is the documented answer to find_project_config: serve the AIPass gate set, never no hooks. An unreadable trust registry fails toward MORE enforcement. It logs at ERROR naming the project and the cure, which @trigger escalates."
     },
