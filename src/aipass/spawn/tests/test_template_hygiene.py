@@ -255,6 +255,8 @@ class TestMintCompleteness:
         assert result["success"] is True, result.get("error")
         assert (target / "apps" / "bare_minted.py").is_file()
         assert (target / "notes.md").is_file()
+        assert not (target / ".aipass" / "passport.seed.json").exists()
+        assert any("No seed written" in issue for issue in result["validation_issues"])
 
 
 class TestExpectedMintPaths:

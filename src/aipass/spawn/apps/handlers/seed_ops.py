@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: seed_ops.py
 # Description: Passport seeds — tracked identity, untracked live file (TDPLAN-0017)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-28
-# Modified: 2026-11-09
+# Modified: 2026-11-18
 # =============================================
 
 """Passport seeds: the identity that ships with the repo (TDPLAN-0017).
@@ -29,8 +29,16 @@ from aipass.spawn.apps.handlers.passport_migration import (
     BLOCK_ORDER,
     KEY_ORDER,
     SCHEMA_VERSION,
+    PassportTarget,
     discover_passports,
-    repo_root,
+)
+from aipass.spawn.apps.handlers.placeholders import resolve_residency
+from aipass.spawn.apps.handlers.registry import (
+    _validate_path_containment,
+    branches_as_list,
+    entry_path,
+    find_registry,
+    load_registry,
 )
 
 __all__ = [
@@ -73,8 +81,10 @@ OPTIONAL_KEYS = {
     "identity": ("class_extension",),
 }
 
-# Residents belong to their own project's repo, so only core citizens get seeds.
+# The AIPass tree's export seeds core citizens only: a resident belongs to its own project's repo,
+# and that project's own export (run at its registry) seeds it there.
 SEED_RESIDENCY = "core"
+TREE_REGISTRY_NAME = "AIPASS_REGISTRY.json"
 
 # Deliberately small, not a second schema engine. Unlisted fields must be strings.
 _FIELD_TYPES = {
@@ -440,16 +450,47 @@ def export_seed(target, *, confirm: bool = False) -> dict:
     return record
 
 
+def _project_targets(registry_path: Path) -> list[PassportTarget]:
+    """Every citizen one project's registry lists with a passport inside that project."""
+    targets: list[PassportTarget] = []
+    for row in branches_as_list(load_registry(registry_path).get("branches", [])):
+        name = row.get("name", "?")
+        if not _validate_path_containment(row.get("path", ""), registry_path):
+            logger.warning("[export-seeds] %s: path %r is outside %s, skipped", name, row.get("path"), registry_path)
+            continue
+        branch_dir = registry_path.parent / entry_path(row)
+        passport = branch_dir / ".trinity" / "passport.json"
+        if not passport.is_file():
+            logger.warning("[export-seeds] %s at %s has no passport, not exported", name, branch_dir)
+            continue
+        targets.append(PassportTarget(passport, branch_dir, registry_path.parent, resolve_residency(branch_dir)))
+    return targets
+
+
 def export_seeds(root=None, *, only: str | None = None, confirm: bool = False) -> dict:
-    """Export every core citizen's seed and return a measured receipt.
+    """Export the seeds of the project at ``root`` (default: the cwd) and return a measured receipt.
 
-    Shares discovery with the 2.0 migration so the fleet commands agree on the fleet.
+    The nearest registry decides the scope. The AIPass tree's own registry exports core citizens
+    only, through the 2.0 migration's discovery so the fleet commands agree on the fleet. Any other
+    registry is a project: every citizen it lists is exported, whatever its residency.
     """
-    base = Path(root) if root is not None else repo_root()
+    start = Path(root) if root is not None else Path.cwd()
+    registry_path = find_registry(start_path=start)
+    if registry_path is None:
+        logger.error("[export-seeds] no *_REGISTRY.json at or above %s", start)
+        raise FileNotFoundError(f"no *_REGISTRY.json at or above {start}: run export-seeds inside a project")
+    registry_path = Path(registry_path)
+    base = registry_path.parent
 
-    discovered = discover_passports(base)
-    core = [t for t in discovered if t.residency == SEED_RESIDENCY]
-    skipped_resident = len(discovered) - len(core)
+    if registry_path.name == TREE_REGISTRY_NAME:
+        scope = "core"
+        discovered = discover_passports(base)
+        core = [t for t in discovered if t.residency == SEED_RESIDENCY]
+        skipped_resident = len(discovered) - len(core)
+    else:
+        scope = "project"
+        core = _project_targets(registry_path)
+        skipped_resident = 0
 
     wanted = (only or "").lstrip("@").strip().lower()
     targets = [t for t in core if t.branch_dir.name.lower() == wanted] if wanted else core
@@ -459,6 +500,7 @@ def export_seeds(root=None, *, only: str | None = None, confirm: bool = False) -
 
     receipt = {
         "root": str(base),
+        "scope": scope,
         "confirm": confirm,
         "only": wanted or None,
         "scanned": len(records),

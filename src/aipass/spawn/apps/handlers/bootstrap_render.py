@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: bootstrap_render.py
 # Description: The install script's .trinity render for a core branch: seed first, then the template
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-11-17
 # Modified: 2026-11-18
 # =============================================
@@ -100,8 +100,12 @@ def restore_citizen(branch_name: str, registry_path: Path) -> list[str]:
     target = registry_path.parent / entry_path(rows[0])
     seed_file = find_seed(target)
     if seed_file is None:
-        logger.error("[spawn] restore: %s carries no seed at %s", branch_name, seed_path_for(target))
-        raise FileNotFoundError(f"{branch_name} carries no seed at {seed_path_for(target)}")
+        reason = (
+            f"{branch_name} carries no seed at {seed_path_for(target)} - while a passport still exists, "
+            f"run `drone @spawn export-seeds --confirm` in {registry_path.parent} to write one"
+        )
+        logger.error("[spawn] restore: %s", reason)
+        raise FileNotFoundError(reason)
     seed = load_seed(seed_file)
     identity = seed.get("identity", {})
     return render_bootstrap_trinity(

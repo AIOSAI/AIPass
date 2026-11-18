@@ -141,9 +141,26 @@ carries the convention that depth goes one file per module or handler group.
 
 ## Passport seeds
 
-Each branch carries a tracked `.aipass/passport.seed.json` — the identity that ships with
-the repository, with machine-local values stripped. `export-seeds` regenerates them from the
-live passports (preview by default), and a mint can birth from a seed when one is present.
+Every citizen carries a tracked `.aipass/passport.seed.json`: core, resident and external
+alike. It is the identity that ships with the repository, the passport with its machine-local
+values stripped (registered, registry_id, citizen_id).
+
+ - **Written at birth.** A mint writes the newborn's seed from its own passport before the
+   registry row. A seed that cannot be written refuses the birth, and nothing is registered.
+   A bare `--template` that renders no passport has nothing to seed; the result reports it.
+ - **Refreshed by `export-seeds`.** Run in a project root, it refreshes every citizen in that
+   project's registry: `drone @spawn export-seeds --confirm`, or `--root <project root>` from
+   elsewhere, `--only <branch>` for one. Run in the AIPass tree, it refreshes the core citizens
+   only and never reaches a project. Preview is the default; an up-to-date seed reports
+   `current`.
+ - **As fresh as its last write.** Nothing watches the passport. A role or trait changed after
+   the last export is not in the seed until `export-seeds` runs again; `update --apply` does
+   not refresh seeds.
+ - **Read back by restore.** A citizen whose passport is lost is restored from its seed with
+   the same name, class, role and traits. A citizen with no seed is refused, and the refusal
+   names the cure: run `export-seeds` in its project while a passport still exists.
+
+A mint at a target that already holds a seed but no passport births from the seed.
 `tests/test_passport_seeds.py` pins the lane.
 
 ---

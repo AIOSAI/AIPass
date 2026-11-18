@@ -499,6 +499,106 @@ class TestRestoreCitizen:
         assert not (branch_dir(root) / ".trinity" / "passport.json").exists()
 
 
+def project_citizen(tmp_path, branch: str = "finch"):
+    """A project-shaped citizen in tmp_path: home/projects/<branch>, its own registry, a resident passport."""
+    project = tmp_path / "projects" / branch
+    registry = write_registry(project / f"{branch.upper()}_REGISTRY.json", {branch: f"src/{branch}/{branch}"})
+    target = project / "src" / branch / branch
+    trinity = target / ".trinity"
+    trinity.mkdir(parents=True)
+    passport = make_passport(branch)
+    passport["citizenship"]["residency"] = "resident"
+    passport["branch_info"]["module"] = branch
+    passport["identity"]["traits"] = ["canary", "projects tier"]
+    (trinity / "passport.json").write_text(canonical_text(passport), encoding="utf-8")
+    return project, registry, target, passport
+
+
+class TestEveryCitizenCarriesASeed:
+    """A seed is written at birth for every residency, and a project's own export reaches its citizens."""
+
+    def test_a_newborn_carries_its_own_seed(self, tmp_path):
+        """Mutant: mint_citizen skips the seed -> red."""
+        target = tmp_path / "newborn"
+        result = spawn_agent(str(target), registry_path=str(tmp_path / "AIPASS_REGISTRY.json"), role="scout")
+        assert result["success"] is True, result.get("error")
+
+        seed = load_seed(seed_path_for(target))
+        passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+        assert seed == build_seed(passport)
+        assert seed["identity"]["role"] == "scout"
+
+    def test_a_seed_that_cannot_be_written_fails_the_birth(self, tmp_path):
+        """Mutant: the seed write's failure is ignored and the citizen registers -> red."""
+        target = tmp_path / "halfborn"
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+
+        with patch("aipass.spawn.apps.handlers.seed_ops.atomic_write_text", side_effect=OSError("disk full")):
+            result = spawn_agent(str(target), registry_path=str(registry))
+
+        assert result["success"] is False
+        assert "seed" in result["error"] and "disk full" in result["error"]
+        assert not registry.exists() or "HALFBORN" not in registry.read_text(encoding="utf-8")
+
+    def test_export_run_in_a_project_seeds_that_projects_citizens(self, tmp_path):
+        """Mutant: export keeps the core-only filter in a project -> scanned 0 -> red."""
+        project, _, target, passport = project_citizen(tmp_path)
+
+        receipt = export_seeds(project, confirm=True)
+
+        assert (receipt["scope"], receipt["scanned"], receipt["written"]) == ("project", 1, 1)
+        assert load_seed(seed_path_for(target)) == build_seed(passport)
+
+    def test_export_in_the_aipass_tree_still_never_reaches_a_project(self, tmp_path):
+        """Mutant: the tree lane drops its core filter -> the resident gets a seed -> red."""
+        root = write_repo(tmp_path, residents=("visitor",))
+
+        receipt = export_seeds(root, confirm=True)
+
+        assert (receipt["scope"], receipt["scanned"], receipt["skipped_resident"]) == ("core", 1, 1)
+        resident = root / "projects" / "somewhere" / "src" / "pkg" / "visitor"
+        assert not seed_path_for(resident).exists()
+
+    def test_a_resident_seed_validates_like_a_core_one(self, tmp_path):
+        """Already true before this build; the guard against a core-only validator."""
+        _, _, _, passport = project_citizen(tmp_path)
+
+        assert validate_seed(build_seed(passport)) == []
+
+    def test_a_project_citizen_with_a_seed_is_restored_from_it(self, tmp_path):
+        """restore_citizen is unchanged; this pins its seed route for a project citizen."""
+        project, registry, target, passport = project_citizen(tmp_path)
+        export_seeds(project, confirm=True)
+        (target / ".trinity" / "passport.json").unlink()
+        keep = [target / ".trinity" / "local.json", target / ".trinity" / "observations.json", registry]
+        keep[0].write_text('{"mine": 1}', encoding="utf-8")
+        keep[1].write_text('{"seen": 1}', encoding="utf-8")
+        certificate = target / "artifacts" / "birth_certificate.json"
+        certificate.parent.mkdir()
+        certificate.write_text('{"id": "1"}', encoding="utf-8")
+        keep.append(certificate)
+        before = [p.read_bytes() for p in keep]
+        home = SimpleNamespace(path=tmp_path, source="test", tried=())
+
+        with patch("aipass.spawn.apps.handlers.registry.resolve_aipass_home", return_value=home):
+            written = restore_citizen("FINCH", registry)
+
+        assert written == ["passport.json(seed)"]
+        restored = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+        assert restored["identity"] == passport["identity"]
+        assert restored["branch_info"]["module"] == "finch"
+        assert restored["citizenship"]["residency"] == "resident"
+        assert [p.read_bytes() for p in keep] == before
+
+    def test_a_seedless_citizen_is_refused_with_the_cure_named(self, tmp_path):
+        """Mutant: the refusal drops the cure -> red."""
+        project, registry, target, _ = project_citizen(tmp_path)
+        (target / ".trinity" / "passport.json").unlink()
+
+        with pytest.raises(FileNotFoundError, match="export-seeds --confirm"):
+            restore_citizen("finch", registry)
+
+
 class TestExportSeeds:
     """Dry run is the default; --confirm is the only thing that writes."""
 

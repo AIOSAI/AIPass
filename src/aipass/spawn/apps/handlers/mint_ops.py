@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: mint_ops.py
 # Description: The mint of a new citizen from the template, step by step
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-09-28
-# Modified: 2026-11-15
+# Modified: 2026-11-18
 # =============================================
 
 """The mint body: a validated target becomes a registered citizen."""
@@ -42,7 +42,8 @@ from aipass.spawn.apps.handlers.class_registry import (
 )
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.json import json_handler
-from aipass.spawn.apps.handlers.seed_ops import find_seed
+from aipass.spawn.apps.handlers.passport_migration import PassportTarget
+from aipass.spawn.apps.handlers.seed_ops import export_seed, find_seed
 
 # Left in a tree the mint refused, so a retry refuses instead of adopting the partial tree.
 INCOMPLETE_MARKER = "INCOMPLETE_MINT.txt"
@@ -230,6 +231,30 @@ def mint_citizen(
             logger.warning("[spawn] Could not mark the refused tree %s: %s", target, e)
         return refusal
 
+    # The seed is how a lost passport comes back, so a birth without one stops before it registers.
+    # A bare --template that renders no passport has no identity to seed; that is reported, not refused.
+    seed_issues = []
+    passport_target = PassportTarget(
+        target / ".trinity" / "passport.json", target, reg_path.parent, replacements["RESIDENCY"]
+    )
+    if passport_target.path.is_file():
+        seed_record = export_seed(passport_target, confirm=True)
+    else:
+        seed_record = {"error": None}
+        seed_issues.append(f"No seed written: the template rendered no passport at {passport_target.path}")
+        logger.warning("[spawn] %s", seed_issues[0])
+    if seed_record["error"]:
+        refusal = error_result(
+            f"BIRTH REFUSED: the seed for {branch_upper} could not be written ({seed_record['error']}). "
+            f"Nothing was registered; the tree is left at {target}."
+        )
+        logger.error("[spawn] %s", refusal["error"])
+        try:
+            atomic_write_text(target / INCOMPLETE_MARKER, refusal["error"] + "\n")
+        except OSError as e:
+            logger.warning("[spawn] Could not mark the refused tree %s: %s", target, e)
+        return refusal
+
     # Receipts go before registration; a failed stamp is surfaced, never fatal (the gold files are another branch's).
     receipt_result = write_birth_receipt(target / ".trinity")
     receipt_issues = [] if receipt_result["success"] else [f"Birth receipt not stamped: {receipt_result['error']}"]
@@ -259,7 +284,7 @@ def mint_citizen(
     ensure_project_has_owner(reg_path)
 
     placeholder_issues = [f"Unreplaced {sorted(names)} in {path}" for path, names in validate_no_placeholders(target)]
-    issues = placeholder_issues + receipt_issues + traits_issues
+    issues = placeholder_issues + receipt_issues + traits_issues + seed_issues
 
     logger.info(
         "[spawn] BORN %s at %s (class %s, citizen %s, receipt %s)",
