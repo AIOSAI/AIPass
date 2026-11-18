@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: hook_test.py
-# Version: 1.6.0
+# Version: 1.6.1
 # Description: Portable hook test runner — every hook with mock data; provider parity and smoke with real sessions
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-10
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """Portable hook test runner.
@@ -35,7 +35,7 @@ from aipass.hooks.apps.handlers.json import files as json_files
 from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.handlers.parity import runner, smoke
 from aipass.hooks.apps.modules.write_ownership import project_of
-from aipass.prax import logger
+from aipass.prax import branch_state_root, logger
 from aipass.cli import console, err_console
 
 CONSOLE = err_console
@@ -46,7 +46,7 @@ HELP_COMMANDS = [
     ("smoke [--provider ..] [--branch @x] [--json]", "One live turn per provider: pass, fail or skip, and why"),
 ]
 
-REPORTS_DIR = Path(__file__).resolve().parents[2] / "artifacts" / "reports"
+REPORTS_DIR = branch_state_root("hooks") / "artifacts" / "reports"
 
 _SYNTHETIC_PATH = os.path.join(tempfile.gettempdir(), "hook_test_synthetic.txt")
 

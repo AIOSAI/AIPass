@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_hook_test.py
-# Version: 1.5.0
+# Version: 1.6.0
 # Description: Tests for the portable hook test runner
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-10
-# Modified: 2026-11-16
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/hook_test.py and the parity and smoke handlers it drives."""
@@ -15,6 +15,7 @@
 # sentry: no-test-needed(stdlib) — tempfile.gettempdir() choosing where the synthetic file lands
 # sentry: no-test-needed(ruff) — that modules/hook_test.py parses and imports the engine it drives
 
+import importlib
 import json
 import os
 import sqlite3
@@ -25,6 +26,7 @@ from unittest.mock import patch
 
 import pytest
 
+import aipass.prax as prax
 from aipass.hooks.apps.handlers.config import diagnostics
 from aipass.hooks.apps.handlers.parity import runner, smoke
 from aipass.hooks.apps.handlers.prompt import temporal
@@ -478,6 +480,16 @@ class TestParity:
         written = json.loads(report.read_text(encoding="utf-8"))
         assert written["ok"] is True
         assert [row["verdict"] for row in written["rows"]] == ["same"] * 4
+
+    def test_json_reports_follow_praxs_state_root_never_the_package(self, monkeypatch, tmp_path):
+        FakeClis(monkeypatch, tmp_path, {"claude": _ALL_FOUR_REFUSE, "codex": _ALL_FOUR_REFUSE})
+        try:
+            with patch.object(prax, "branch_state_root", lambda branch: tmp_path / "state" / branch):
+                importlib.reload(hook_test)
+            _parity(tmp_path, "--lane", "C", "--json")
+            assert len(list((tmp_path / "state" / "hooks" / "artifacts" / "reports").glob("parity_*.json"))) == 1
+        finally:
+            importlib.reload(hook_test)
 
     def test_one_provider_launches_only_that_cli_and_compares_nothing(self, monkeypatch, tmp_path, capsys):
         fake = FakeClis(monkeypatch, tmp_path, {"claude": _ALL_FOUR_REFUSE})

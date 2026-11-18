@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_json_durability.py
-# Version: 2.1.0
-# Description: Torn-write durability tests for hooks' arbitrary-path json module
+# Version: 2.2.0
+# Description: Torn-write durability tests for hooks' arbitrary-path json module; the shim binds by name
 # Branch: hooks
 # Layer: tests
 # Created: 2026-08-16
-# Modified: 2026-11-15
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/json/files.py's torn-write durability."""
@@ -18,6 +18,7 @@
 # sentry: no-test-needed(stdlib) — os.replace's atomicity and json.dumps' encoding
 # sentry: no-test-needed(documentation) — that read_json_file / write_json_file carry docstrings
 
+import importlib.util
 import json
 import os
 import re
@@ -28,6 +29,7 @@ from pathlib import Path
 import pytest
 
 from aipass.hooks.apps.handlers.json import files as json_files
+from aipass.hooks.apps.handlers.json import json_handler
 
 MODULE_SOURCE = Path(json_files.__file__)
 
@@ -211,3 +213,19 @@ class TestConcurrentReadsStayUsable:
 
     def test_race_leaves_no_staged_files(self, tmp_path: Path):
         assert list(tmp_path.glob("*.tmp")) == []
+
+
+class TestTheShimBindsByName:
+    """The engine runs the shim from a .live-<stamp> copy: its json paths must not depend on where the file sits."""
+
+    def test_a_snapshot_copy_answers_the_same_json_paths_as_the_source(self, tmp_path: Path):
+        source = MODULE_SOURCE.with_name("json_handler.py")
+        copy = tmp_path / ".live-20990101T000000Z" / "handlers" / "json" / "json_handler.py"
+        copy.parent.mkdir(parents=True)
+        copy.write_bytes(source.read_bytes())
+        spec = importlib.util.spec_from_file_location("snapshot_shim", copy)
+        assert spec is not None and spec.loader is not None
+        snapshot = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(snapshot)
+
+        assert snapshot.get_json_path("engine", "log") == json_handler.get_json_path("engine", "log")

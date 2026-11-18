@@ -445,9 +445,9 @@
       "file": "tests/test_json_durability.py",
       "standard": "stdlib_patch",
       "lines": [
-        75,
-        89,
-        98
+        77,
+        91,
+        100
       ],
       "reason": "files.os.replace is the move. 75 spies the real rename to prove the temp is staged in the target directory; 89 and 98 make it raise the test's own OSError to prove the original survives, the temp is cleaned and the error reaches the caller. No platform fails a rename on demand under tmp_path; monkeypatch undoes it at the test's end."
     },
