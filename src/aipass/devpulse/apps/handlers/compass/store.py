@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: store.py
 # Description: Compass storage core — SQLite/FTS5 rated decision store
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-06-16
-# Modified: 2026-10-22
+# Modified: 2026-11-17
 # =============================================
 
 """Compass storage core — the SQLite/FTS5 layer for rated decisions.
@@ -17,12 +17,11 @@ from datetime import date
 from pathlib import Path
 from typing import Optional
 
-from aipass.prax import logger
+from aipass.prax import branch_state_root, logger
 
 from aipass.devpulse.apps.handlers.json import json_handler
 
-_BRANCH_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_DB_PATH = _BRANCH_ROOT / "devpulse_json" / "compass" / "compass.db"
+DEFAULT_DB_PATH = branch_state_root("devpulse") / "devpulse_json" / "compass" / "compass.db"
 
 VALID_RATINGS = ("good", "bad", "impressive", "interesting")
 VALID_SOURCES = ("devpulse", "user")
