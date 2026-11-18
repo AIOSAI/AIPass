@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: adopt.py
 # Description: aipass adopt — bring an existing directory anywhere on disk into AIPass
-# Version: 2.0.1
+# Version: 2.1.0
 # Created: 2026-07-20
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -44,6 +44,7 @@ from aipass.aipass.apps.handlers.init.bootstrap import (
 )
 from aipass.aipass.shared import scaffold_content as sc
 from aipass.aipass.shared.project_home import (
+    NO_HOME,
     claude_local_settings,
     _claude_settings,
     _detect_aipass_home,
@@ -176,6 +177,8 @@ def _adopt_framework(target: Path, *, no_agent: bool, dry_run: bool, citizen: st
             raise RuntimeError(f"@spawn adopt-citizen {citizen} refused: {citizen_result['reason']}")
 
     aipass_home = _detect_aipass_home()
+    if aipass_home is None:
+        raise RuntimeError(NO_HOME)
     files: list[str] = []
     rows: list[dict] = []
     notes: list[str] = []
@@ -335,6 +338,8 @@ def _adopt_contractor(target: Path, *, no_agent: bool, dry_run: bool, citizen: s
         )
     tracked = _tracked_files(target)
     aipass_home = _detect_aipass_home()
+    if aipass_home is None:
+        raise RuntimeError(NO_HOME)
     name = target.name
     reg = _registry_name(name)
     registry_filename = f"{reg}_REGISTRY.json"

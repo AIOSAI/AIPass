@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.17.0
+# Version: 1.18.0
 # Created: 2026-04-16
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """aipass doctor — system health aggregation."""
@@ -880,7 +880,9 @@ def _check_structure() -> List[CheckResult]:
 
     # Nested projects/<name> must exclude the host's AGENTS.md and CLAUDE.md pairs,
     # or Claude Code inherits them through the ancestor walk.
-    if aipass_home:
+    if aipass_home is None:
+        results.append(CheckResult("aipass home", GLYPH_FAIL, "not found", "Set AIPASS_HOME=/path/to/AIPass"))
+    else:
         fenceless = find_fenceless_projects(aipass_home)
         if fenceless:
             for proj in fenceless:
@@ -1137,6 +1139,8 @@ def _check_scaffold() -> List[CheckResult]:
         results.append(CheckResult("scaffold version", GLYPH_WARN, f"{stamped or 'unstamped'} → {installed}", preview))
 
     aipass_home = _detect_aipass_home()
+    if aipass_home is None:
+        results.append(CheckResult("aipass home", GLYPH_FAIL, "not found", "Set AIPASS_HOME=/path/to/AIPass"))
 
     # tier0 is the prompt injected every turn — the one file whose drift a
     # manager feels immediately, so it gets its own line rather than a count.

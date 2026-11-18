@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: New project handler — create projects inside AIPass
-# Version: 1.6.2
+# Version: 1.7.0
 # Created: 2026-07-17
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -148,13 +148,12 @@ def _write_template(target: Path, name: str, template: str) -> list[str]:
     return created
 
 
-def _scaffold_aipass(target: Path, name: str) -> tuple[list[str], list[str]]:
+def _scaffold_aipass(target: Path, name: str, aipass_home: str) -> tuple[list[str], list[str]]:
     """Write AIPass scaffold files (kernel, navmap stub, ignore seeds, hooks, AGENTS.md, settings, the prep skill,
     .venv); returns files, notes."""
     from aipass.aipass.shared.project_home import (
         claude_local_settings,
         _claude_settings,
-        _detect_aipass_home,
         _enroll_project,
         agents_md_seed,
         is_projects_child,
@@ -164,7 +163,6 @@ def _scaffold_aipass(target: Path, name: str) -> tuple[list[str], list[str]]:
 
     created: list[str] = []
     notes: list[str] = []
-    aipass_home = _detect_aipass_home()
     reg = _registry_name(name)
 
     aipass_dir = target / ".aipass"
@@ -328,7 +326,7 @@ def create_project(
     """Create a new project inside the AIPass host installation.
 
     *host* None finds the root from cwd; a server names it, since it cannot chdir per
-    request. Raises ValueError (name, template) or RuntimeError (no host, exists, git).
+    request. Raises ValueError (name, template) or RuntimeError (no host, exists, git, no AIPass home).
     """
     _validate_name(name)
     if template not in TEMPLATES:
@@ -348,7 +346,12 @@ def create_project(
     if target.exists():
         raise RuntimeError(f"Project already exists: {target}")
 
+    from aipass.aipass.shared.project_home import NO_HOME, _detect_aipass_home
+
     _require_git_identity(host)
+    aipass_home = _detect_aipass_home()
+    if aipass_home is None:
+        raise RuntimeError(NO_HOME)
     target.mkdir(parents=True)
 
     try:
@@ -356,7 +359,7 @@ def create_project(
         logger.info("[aipass new] registry minted: %s (%s)", registry_file, registry_id)
 
         template_files = _write_template(target, name, template)
-        scaffold_files, notes = _scaffold_aipass(target, name)
+        scaffold_files, notes = _scaffold_aipass(target, name, aipass_home)
 
         spawn_result = None
         if not no_agent:

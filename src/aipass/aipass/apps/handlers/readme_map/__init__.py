@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: readme_map/__init__.py
 # Description: Branch-name to README-path lookup and live README reads
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-04-16
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """readme_map — branch-name → README-path lookup for `aipass read`; the map is cached, content never."""
@@ -13,25 +13,25 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from aipass.aipass.shared.project_home import _detect_aipass_home
 from aipass.prax import logger
 
 _AIPASS_ROOT: Path | None = None
 
 
 def _detect_aipass_root() -> Path:
-    """Detect the AIPass project root (parent of src/aipass/)."""
+    """The AIPass project root (parent of src/aipass/); raises, never an empty map, when there is none."""
     env_home = os.environ.get("AIPASS_HOME")
     if env_home:
         return Path(env_home)
 
-    current = Path(__file__).resolve()
-    for parent in current.parents:
-        src_aipass = parent / "src" / "aipass"
-        if src_aipass.is_dir():
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "src" / "aipass").is_dir():
             return parent
 
-    # parents[5] is the root in the source layout: src/aipass/aipass/apps/handlers/readme_map/.
-    return Path(__file__).resolve().parents[5]
+    if not (home := _detect_aipass_home()):
+        raise RuntimeError("No AIPass home found, so no branch README can be read: set AIPASS_HOME=/path/to/AIPass")
+    return Path(home)
 
 
 _README_MAP: dict[str, Path] | None = None

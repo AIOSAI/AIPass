@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_readme_map.py
 # Description: Tests for readme_map handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-05-12
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/readme_map.py and the handlers it drives."""
@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
 
@@ -78,6 +79,34 @@ class TestDetectAipassRoot:
         assert isinstance(readme, Path)
         root = readme.parents[3]
         assert (root / "src" / "aipass").is_dir(), f"{root} does not hold src/aipass/"
+
+
+class TestNoSourceTree:
+    """A wheel install: no AIPASS_HOME, no src/aipass above the package; the home comes from drone."""
+
+    @pytest.fixture(autouse=True)
+    def _installed(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
+        monkeypatch.delenv("AIPASS_HOME", raising=False)
+        site = tmp_path / "site-packages" / "aipass" / "aipass" / "apps" / "handlers" / "readme_map"
+        site.mkdir(parents=True)
+        _root_at(monkeypatch, None)
+        with patch(f"{_MOD}.__file__", str(site / "__init__.py")):
+            yield
+
+    def test_the_home_drone_names_is_the_root(self, tmp_path: Path) -> None:
+        branch = tmp_path / "home" / "src" / "aipass" / "drone"
+        branch.mkdir(parents=True)
+        (branch / "README.md").write_text("# drone\n", encoding=_ENCODING)
+        with patch(f"{_MOD}._detect_aipass_home", return_value=str(tmp_path / "home")):
+            assert list_branches() == ["drone"]
+
+    def test_no_home_refuses_naming_aipass_home_and_the_next_call_detects_again(self, tmp_path: Path) -> None:
+        with patch(f"{_MOD}._detect_aipass_home", return_value=None):
+            with pytest.raises(RuntimeError, match="AIPASS_HOME"):
+                list_branches()
+        (tmp_path / "home" / "src" / "aipass").mkdir(parents=True)
+        with patch(f"{_MOD}._detect_aipass_home", return_value=str(tmp_path / "home")):
+            assert list_branches() == []
 
 
 class TestBuildReadmeMap:

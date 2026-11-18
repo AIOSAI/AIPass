@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor_fix.py
 # Description: Tests for doctor --fix remediation report (DPLAN-0177 Phase 2)
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-05-15
-# Modified: 2026-11-14
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/_doctor_fix.py."""
@@ -211,6 +211,16 @@ class TestGenerateRemediation:
         root_items = [i for i in items if i.category == "root_artifact"]
         assert "--relocate-root logs" in root_items[0].fix_command
         assert "@test" in root_items[0].fix_command
+
+    def test_no_aipass_home_is_a_critical_item_naming_the_cure(self, tmp_path: Path) -> None:
+        _make_agent(tmp_path, "agent1", "uuid-1")
+        _make_registry(tmp_path, [{"name": "agent1", "path": str(tmp_path / "src" / "agent1")}])
+        (tmp_path / "pyproject.toml").write_text("[project]", encoding="utf-8")
+        with patch("aipass.aipass.apps.modules._doctor_fix._detect_aipass_home", return_value=None):
+            items = generate_remediation(tmp_path)
+        assert items == [
+            RemediationItem("critical", "aipass_home", "AIPass home not found", "Set AIPASS_HOME=/path/to/AIPass")
+        ]
 
     def test_missing_pyproject_is_info(self, tmp_path: Path) -> None:
         """Missing pyproject.toml produces info severity."""

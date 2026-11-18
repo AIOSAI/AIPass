@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: bootstrap.py
 # Description: Init handler — bootstrap an AIPass project in any directory
-# Version: 2.7.0
+# Version: 2.8.0
 # Created: 2026-03-14
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -25,6 +25,7 @@ from aipass.aipass.shared import scaffold_content as sc
 from aipass.aipass.shared.project_home import (
     claude_local_settings,
     _claude_settings,
+    NO_HOME,
     _detect_aipass_home,
     _enroll_project,
     _normalize_exclude,
@@ -407,10 +408,13 @@ def init_project(
 ) -> dict:
     """Initialize an AIPass project in the target directory.
 
-    Raises ValueError on an empty sanitized name, RuntimeError inside a branch or project.
+    Raises ValueError on an empty sanitized name, RuntimeError inside a branch or project or with no AIPass home.
     """
     target = target.resolve()
     _guard_init(target, allow_projects_child=allow_projects_child)
+    aipass_home = _detect_aipass_home()
+    if aipass_home is None:
+        raise RuntimeError(NO_HOME)
     if not target.exists():
         target.mkdir(parents=True)
 
@@ -422,7 +426,6 @@ def init_project(
     registry_id = str(uuid.uuid4())
     today = date.today().isoformat()
     created = []
-    aipass_home = _detect_aipass_home()
 
     registry_filename = f"{name}_REGISTRY.json"
     registry_path = target / registry_filename
@@ -651,6 +654,8 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
     name = registry_path.stem.replace("_REGISTRY", "")
 
     aipass_home = _detect_aipass_home()
+    if aipass_home is None:
+        raise ValueError(NO_HOME)
     recorded = sm.trusted_hashes(target)
     installed = sm.installed_version()
     stamped = sm.stamped_version(target)

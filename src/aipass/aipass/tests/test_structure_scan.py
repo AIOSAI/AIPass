@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_structure_scan.py
 # Description: Tests for doctor structure scanner (DPLAN-0177)
-# Version: 1.2.5
+# Version: 1.3.0
 # Created: 2026-05-14
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/structure_scan/structure_scanner.py and the handlers it drives."""
@@ -652,12 +652,24 @@ class TestCheckStructureIntegration:
         (tmp_path / "pyproject.toml").write_text("[project]", encoding="utf-8")
         with (
             patch("aipass.aipass.apps.modules.doctor.find_project_root", return_value=tmp_path),
-            patch("aipass.aipass.apps.modules.doctor._detect_aipass_home", return_value=None),
+            patch("aipass.aipass.apps.modules.doctor._detect_aipass_home", return_value=str(tmp_path / "home")),
         ):
             results = _structure_via_doctor()
         glyphs = {r.glyph for r in results}
         assert GLYPH_FAIL not in glyphs
         assert GLYPH_WARN not in glyphs
+
+    def test_no_aipass_home_is_a_fail_row_and_the_fence_check_never_passes(self, tmp_path: Path) -> None:
+        _make_agent(tmp_path, "agent1", "uuid-1")
+        _make_registry(tmp_path, [{"name": "agent1", "path": str(tmp_path / "src" / "agent1")}])
+        with (
+            patch("aipass.aipass.apps.modules.doctor.find_project_root", return_value=tmp_path),
+            patch("aipass.aipass.apps.modules.doctor._detect_aipass_home", return_value=None),
+        ):
+            results = _structure_via_doctor()
+        home_rows = [(r.glyph, r.detail, r.remediation) for r in results if r.label == "aipass home"]
+        assert home_rows == [(GLYPH_FAIL, "not found", "Set AIPASS_HOME=/path/to/AIPass")]
+        assert not [r for r in results if r.label.startswith("instruction fence")]
 
     @staticmethod
     def _unknown_rows(tmp_path: Path) -> tuple:

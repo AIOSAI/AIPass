@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: _doctor_fix.py
 # Description: Structure remediation report for aipass doctor --fix
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-05-15
-# Modified: 2026-10-24
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -110,7 +110,13 @@ def _build_registry_items(project_root: Path, agents: list, project: str) -> Lis
 def _build_root_artifact_items(project_root: Path, project: str) -> List[RemediationItem]:
     """Remediation items for stray root-level artifacts."""
     items: List[RemediationItem] = []
-    for hit in check_root_artifacts(project_root, aipass_home=_detect_aipass_home()):
+    aipass_home = _detect_aipass_home()
+    if aipass_home is None:
+        # Without the home, its own .venv cannot be told from a stray one.
+        items.append(
+            RemediationItem("critical", "aipass_home", "AIPass home not found", "Set AIPASS_HOME=/path/to/AIPass")
+        )
+    for hit in check_root_artifacts(project_root, aipass_home=aipass_home):
         if hit.severity == "pass":
             continue
         severity = "info" if hit.severity == "info" else "warning"

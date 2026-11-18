@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_bootstrap_update.py
 # Description: Tests for update_project: the plan, stamp-only, the retrofit, seeds and cleanup
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-10-08
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py: update_project and the plans it reads."""
@@ -14,6 +14,7 @@
 import json
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest  # pyright: ignore[reportMissingImports]
 
@@ -321,6 +322,17 @@ def test_update_project_skipped_files_count(tmp_path):
     result = update_project(target)
 
     assert len(result["skipped_files"]) == 2
+
+
+def test_update_with_no_aipass_home_refuses_naming_it_and_writes_nothing(tmp_path):
+    """The wheel's answer (the Python lib folder) used to overwrite settings.local.json's AIPASS_HOME."""
+    _, target = _make_nested_project(tmp_path)
+    with (
+        patch("aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home", return_value=None),
+        pytest.raises(ValueError, match="AIPASS_HOME"),
+    ):
+        update_project(target)
+    assert sorted(p.name for p in target.iterdir()) == ["MYAPP_REGISTRY.json"]
 
 
 def _make_nested_project(tmp_path):

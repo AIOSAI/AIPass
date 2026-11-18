@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_bootstrap_hooks.py
 # Description: Tests for the hooks.json and tier files init and update scaffold into a project
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-10-08
-# Modified: 2026-11-03
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py: hooks.json, its union merge, and the tier files."""
@@ -90,14 +90,13 @@ def test_init_project_hooks_json_in_created_files(tmp_path):
     assert any("hooks.json" in f for f in result["created_files"])
 
 
-def test_init_project_no_hooks_json_without_aipass_home(tmp_path, monkeypatch):
-    """When AIPASS_HOME is not detectable, hooks.json is not created."""
+def test_init_project_no_hooks_json_from_a_home_without_the_template(tmp_path, monkeypatch):
     target = tmp_path / "proj"
     target.mkdir()
 
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home",
-        lambda: None,
+        lambda: str(tmp_path / "bare_home"),
     )
 
     init_project(target, project_name="nohooks")
@@ -338,13 +337,13 @@ def test_init_project_tier_files_in_created_list(tmp_path):
     assert any("tier1_navmap.md" in f for f in result["created_files"])
 
 
-def test_init_project_without_aipass_home_writes_no_kernel_but_still_the_navmap_stub(tmp_path, monkeypatch):
+def test_init_project_from_a_home_without_the_kernel_writes_no_kernel_but_still_the_navmap_stub(tmp_path, monkeypatch):
     target = tmp_path / "proj"
     target.mkdir()
 
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home",
-        lambda: None,
+        lambda: str(tmp_path / "bare_home"),
     )
 
     init_project(target, project_name="notiers")

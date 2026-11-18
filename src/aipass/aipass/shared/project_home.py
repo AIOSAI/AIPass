@@ -1,17 +1,16 @@
 # =================== AIPass ====================
 # Name: project_home.py
 # Description: Shared AIPass-home detection, project-path validation, and settings content
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-07-21
 # Modified: 2026-11-17
 # =============================================
 
 """Project home — AIPASS_HOME detection, path validation, settings content.
 
-One copy per helper for init, new and adopt. Logs through prax; no other branch loads at import.
+One copy per helper for init, new and adopt. Logs through prax; no branch but prax loads at import.
 """
 
-import importlib.util
 import json
 import os
 import tempfile
@@ -36,11 +35,12 @@ def is_throwaway_path(path: str | Path) -> bool:
 
 
 def _detect_aipass_home() -> str | None:
-    """Detect the AIPass installation root from the aipass package location; None when it has no file origin."""
-    spec = importlib.util.find_spec("aipass")
-    if spec and spec.origin:
-        return str(Path(spec.origin).resolve().parent.parent.parent)
-    return None
+    """The AIPass home drone's resolve_aipass_home names; None, logged as an ERROR, and every caller refuses."""
+    from aipass.drone import resolve_aipass_home
+
+    if (home := resolve_aipass_home()).path is None:
+        logger.error("No AIPass home found (tried: %s); set AIPASS_HOME=/path/to/AIPass", "; ".join(home.tried))
+    return None if home.path is None else str(home.path)
 
 
 def _claude_settings() -> str:
@@ -201,3 +201,6 @@ def find_fenceless_projects(aipass_home: str) -> list[Path]:
         if not {_normalize_exclude(e) for e in expected}.issubset(present):
             fenceless.append(child)
     return fenceless
+
+
+NO_HOME = "No AIPass home found, so nothing was written: set AIPASS_HOME=/path/to/AIPass and run it again"

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_registry_case_sweep.py
 # Description: Pins for *_REGISTRY.json discovery
-# Version: 1.2.2
+# Version: 1.3.0
 # Created: 2026-08-31
-# Modified: 2026-11-14
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for shared/registry_discovery.py."""
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from types import SimpleNamespace
 
 from aipass.aipass.shared.registry_discovery import registries_in
 
@@ -29,6 +30,12 @@ class TestRegistriesIn:
 
     def test_unreadable_directory_is_empty_not_an_exception(self, tmp_path: Path) -> None:
         assert registries_in(tmp_path / "does_not_exist") == []
+
+    def test_a_lowercase_registry_name_glob_answers_is_dropped_and_the_exact_one_kept(self, tmp_path: Path) -> None:
+        """A case-insensitive filesystem's glob also answers ``x_registry.json``; Linux cannot make one."""
+        listing = [tmp_path / "x_registry.json", tmp_path / "X_REGISTRY.json"]
+        directory = SimpleNamespace(glob=lambda _pattern: iter(listing))
+        assert [p.name for p in registries_in(directory)] == ["X_REGISTRY.json"]
 
 
 def _private_registry_globs(root: Path) -> tuple[list[str], int]:

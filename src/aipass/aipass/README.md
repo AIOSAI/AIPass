@@ -111,8 +111,8 @@ binary, install and point;
 and `provider_reconcile.py` for the provider settings, with `settings_backup.py`
 for the backup and receipt each of their writes takes first; `opencode_cli.py`
 for the OpenCode rows; `help_flag.py`, `json/` and `ui/` for the
-plumbing. `shared/` is a separate contract — no branch but prax at import, because other
-branches import it.
+plumbing. `shared/` holds the install-time helpers under a separate contract — no branch
+but prax at import, and the AIPass home from drone's resolver.
 
 The directory tree lives in the branch prompt, where it is re-derived from the
 real tree rather than copied.
@@ -129,7 +129,7 @@ Depth lives in [docs/](docs/), one page per command group:
 | [trust_and_projects.md](docs/trust_and_projects.md) | The enrolled hash, and `new` / `adopt` |
 | [baud_phone_face.md](docs/baud_phone_face.md) | Fetch, verify, unpack, swap, point — and every refusal |
 | [admin_setup.md](docs/admin_setup.md) | The admin lane: the five legs, the threat model, lighting it |
-| [shared_contract.md](docs/shared_contract.md) | `shared/`, the part of this branch @spawn imports |
+| [shared_contract.md](docs/shared_contract.md) | `shared/`, the install-time helpers, and the AIPass home they answer |
 | [probe_hygiene.md](docs/probe_hygiene.md) | How this branch probes the system without mutating it |
 | [two_clis.md](docs/two_clis.md) | One citizen on Claude Code, Codex and OpenCode: what each reads, the ritual spellings, the compact flow |
 
@@ -153,10 +153,10 @@ before "done", plans for builds — but no code path here calls either.
 
 ### Provides To
 
-Humans, first — the CLI is the product and nothing in the fleet drives it. Two
-exceptions: `shared/`, which @spawn imports in production code, and the
-package door `from aipass.aipass import create_project, TEMPLATES`, for
-@api's host verbs; both are in [shared_contract.md](docs/shared_contract.md).
+Humans, first — the CLI is the product and nothing in the fleet drives it. One
+exception: the package door `from aipass.aipass import create_project, TEMPLATES`,
+for @api's host verbs, in [shared_contract.md](docs/shared_contract.md). No other
+branch imports `shared/`.
 
 ---
 

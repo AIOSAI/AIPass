@@ -1,15 +1,15 @@
 # =================== AIPass ====================
 # Name: test_shared_bootstrap_safety.py
 # Description: Guard test — shared/ and init's pure files log through prax and load no other branch
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-06-10
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
-"""Tests for shared/project_home.py, shared/json_ops.py, apps/handlers/init/bootstrap.py and scaffold_manifest.py."""
+"""Tests for shared/project_home.py, apps/handlers/init/bootstrap.py and scaffold_manifest.py."""
 
-# prax ships in the same wheel as these files, so it is importable wherever they are; @spawn imports
-# shared/ into its own process, so any other branch loaded here would ride into spawn too.
+# prax ships in the same wheel as these files, so it is importable wherever they are; drone's names
+# load inside the functions that use them, so importing shared/ loads no branch but prax.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(covered_elsewhere) — the modules' own return values; see tests/test_project_home.py,
@@ -19,7 +19,6 @@ import subprocess
 import sys
 
 MODULES = (
-    "aipass.aipass.shared.json_ops",
     "aipass.aipass.shared.project_home",
     "aipass.aipass.shared.registry_discovery",
     "aipass.aipass.shared.scaffold_content",
@@ -27,7 +26,6 @@ MODULES = (
     "aipass.aipass.apps.handlers.init.scaffold_manifest",
 )
 LOGGING = (
-    "aipass.aipass.shared.json_ops",
     "aipass.aipass.shared.project_home",
     "aipass.aipass.apps.handlers.init.bootstrap",
     "aipass.aipass.apps.handlers.init.scaffold_manifest",
@@ -56,7 +54,7 @@ print("OK")
 
 
 class TestSharedBootstrapSafety:
-    def test_the_four_logging_files_use_prax_and_no_other_branch_loads(self):
+    def test_the_logging_files_use_prax_and_no_other_branch_loads(self):
         result = subprocess.run(
             [sys.executable, "-c", SCRIPT],
             capture_output=True,

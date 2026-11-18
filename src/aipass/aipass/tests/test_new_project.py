@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_new_project.py
 # Description: Tests for aipass new — project creation handler
-# Version: 1.6.1
+# Version: 1.7.0
 # Created: 2026-07-17
 # Modified: 2026-11-17
 # =============================================
@@ -97,7 +97,7 @@ def _built(host_env, monkeypatch, name: str, template: str = "empty") -> dict:
     monkeypatch.chdir(host_env)
     with (
         patch("subprocess.run", side_effect=_mock_git_run),
-        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=None),
+        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=str(host_env)),
         patch("aipass.aipass.shared.project_home._enroll_project"),
     ):
         return create_project(name, template=template, no_agent=True)
@@ -116,12 +116,12 @@ def test_registry_name_uppercases(host_env, monkeypatch):
 def test_registry_name_replaces_special(host_env):
     """A dot reaches the registry name only through adopt (create_project's name check refuses it).
 
-    A dry run writes nothing, and with no AIPass home detected no live template is read.
+    A dry run writes nothing, and the tmp host's home holds no live template to read.
     Mutant: `"_", name.upper()` -> `"", name.upper()` in _registry_name -> red.
     """
     target = host_env / "projects" / "my.app"
     target.mkdir()
-    with patch("aipass.aipass.apps.handlers.new_project.adopt._detect_aipass_home", return_value=None):
+    with patch("aipass.aipass.apps.handlers.new_project.adopt._detect_aipass_home", return_value=str(host_env)):
         planned = adopt_project(target, no_agent=True, dry_run=True)
     assert planned["registry_file"] == "MY_APP_REGISTRY.json"
     assert list(target.iterdir()) == []
@@ -219,7 +219,7 @@ def test_create_project_empty_template(host_env, monkeypatch):
         patch("subprocess.run", side_effect=_mock_git_run),
         patch(
             "aipass.aipass.shared.project_home._detect_aipass_home",
-            return_value=None,
+            return_value=str(host_env),
         ),
         patch(
             "aipass.aipass.shared.project_home._enroll_project",
@@ -246,13 +246,24 @@ def test_create_project_empty_template(host_env, monkeypatch):
         assert hashlib.sha256((target / rel).read_bytes()).hexdigest() == digest, rel
 
 
+def test_create_project_with_no_aipass_home_refuses_naming_it_and_writes_nothing(host_env, monkeypatch):
+    monkeypatch.chdir(host_env)
+    with (
+        patch("subprocess.run", side_effect=_mock_git_run),
+        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=None),
+        pytest.raises(RuntimeError, match="AIPASS_HOME"),
+    ):
+        create_project("testproj", template="empty", no_agent=True)
+    assert list((host_env / "projects").iterdir()) == []
+
+
 def test_create_project_python_template(host_env, monkeypatch):
     monkeypatch.chdir(host_env)
     with (
         patch("subprocess.run", side_effect=_mock_git_run),
         patch(
             "aipass.aipass.shared.project_home._detect_aipass_home",
-            return_value=None,
+            return_value=str(host_env),
         ),
         patch(
             "aipass.aipass.shared.project_home._enroll_project",
@@ -326,7 +337,7 @@ def test_create_project_explicit_host_ignores_cwd(host_env, tmp_path, monkeypatc
     monkeypatch.chdir(elsewhere)
     with (
         patch("subprocess.run", side_effect=_mock_git_run),
-        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=None),
+        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=str(host_env)),
         patch("aipass.aipass.shared.project_home._enroll_project"),
     ):
         result = create_project("hosted", template="empty", no_agent=True, host=host_env)
@@ -360,7 +371,7 @@ def test_create_project_cleans_up_on_failure(host_env, monkeypatch):
         patch("subprocess.run", side_effect=_fail_git),
         patch(
             "aipass.aipass.shared.project_home._detect_aipass_home",
-            return_value=None,
+            return_value=str(host_env),
         ),
         patch("aipass.aipass.shared.project_home._enroll_project"),
         pytest.raises(RuntimeError, match="simulated failure"),
@@ -385,7 +396,7 @@ def test_create_project_refuses_without_git_identity_before_building(host_env, m
 
     with (
         patch("subprocess.run", side_effect=_no_identity),
-        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=None),
+        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=str(host_env)),
         patch("aipass.aipass.shared.project_home._enroll_project") as enroll,
         pytest.raises(RuntimeError, match="user.email"),
     ):
@@ -435,7 +446,7 @@ def test_create_project_registry_before_scaffold(host_env, monkeypatch):
         ),
         patch(
             "aipass.aipass.shared.project_home._detect_aipass_home",
-            return_value=None,
+            return_value=str(host_env),
         ),
         patch("aipass.aipass.shared.project_home._enroll_project"),
     ):
@@ -463,7 +474,7 @@ def _built_with_agent(host_env, monkeypatch, name: str, spawn_answer: dict):
     monkeypatch.chdir(host_env)
     with (
         patch("subprocess.run", side_effect=_mock_git_run),
-        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=None),
+        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=str(host_env)),
         patch("aipass.aipass.shared.project_home._enroll_project"),
         patch("aipass.aipass.apps.handlers.new_project._localize_imports"),
         patch("aipass.aipass.apps.handlers.new_project.spawn_agent", return_value=spawn_answer) as mock_spawn,
@@ -539,7 +550,7 @@ def test_create_project_with_agent(host_env, monkeypatch):
         patch("subprocess.run", side_effect=_mock_git_run),
         patch(
             "aipass.aipass.shared.project_home._detect_aipass_home",
-            return_value=None,
+            return_value=str(host_env),
         ),
         patch("aipass.aipass.shared.project_home._enroll_project"),
         patch("aipass.aipass.apps.handlers.new_project._localize_imports"),
@@ -567,7 +578,7 @@ def test_create_project_spawn_failure_cleans_up(host_env, monkeypatch):
         patch("subprocess.run", side_effect=_mock_git_run),
         patch(
             "aipass.aipass.shared.project_home._detect_aipass_home",
-            return_value=None,
+            return_value=str(host_env),
         ),
         patch("aipass.aipass.shared.project_home._enroll_project"),
         patch(
@@ -588,7 +599,7 @@ def test_create_project_no_agent_next_steps(host_env, monkeypatch, capsys: pytes
         patch("subprocess.run", side_effect=_mock_git_run),
         patch(
             "aipass.aipass.shared.project_home._detect_aipass_home",
-            return_value=None,
+            return_value=str(host_env),
         ),
         patch("aipass.aipass.shared.project_home._enroll_project"),
     ):
@@ -605,7 +616,7 @@ def test_create_project_no_agent_flag(host_env, monkeypatch):
         patch("subprocess.run", side_effect=_mock_git_run),
         patch(
             "aipass.aipass.shared.project_home._detect_aipass_home",
-            return_value=None,
+            return_value=str(host_env),
         ),
         patch("aipass.aipass.shared.project_home._enroll_project"),
     ):
@@ -821,7 +832,7 @@ def test_tty_auto_launches_agent(host_env, monkeypatch):
         patch("subprocess.run", side_effect=_mock_git_run),
         patch(
             "aipass.aipass.shared.project_home._detect_aipass_home",
-            return_value=None,
+            return_value=str(host_env),
         ),
         patch("aipass.aipass.shared.project_home._enroll_project"),
         patch("aipass.aipass.apps.handlers.new_project._localize_imports"),
@@ -858,7 +869,7 @@ def test_no_tty_skips_auto_launch(host_env, monkeypatch, capsys: pytest.CaptureF
         patch("subprocess.run", side_effect=_mock_git_run),
         patch(
             "aipass.aipass.shared.project_home._detect_aipass_home",
-            return_value=None,
+            return_value=str(host_env),
         ),
         patch("aipass.aipass.shared.project_home._enroll_project"),
         patch("aipass.aipass.apps.handlers.new_project._localize_imports"),
@@ -885,7 +896,7 @@ def test_no_agent_skips_auto_launch(host_env, monkeypatch):
         patch("subprocess.run", side_effect=_mock_git_run),
         patch(
             "aipass.aipass.shared.project_home._detect_aipass_home",
-            return_value=None,
+            return_value=str(host_env),
         ),
         patch("aipass.aipass.shared.project_home._enroll_project"),
         patch("aipass.aipass.apps.modules.new_project.sys.stdin") as mock_stdin,
@@ -950,7 +961,7 @@ def _born(host_env, monkeypatch) -> Path:
     _git_env(monkeypatch)
     monkeypatch.chdir(host_env)
     with (
-        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=None),
+        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=str(host_env)),
         patch("aipass.aipass.shared.project_home._enroll_project"),
     ):
         return Path(create_project("demo", no_agent=True)["target"])
@@ -1011,7 +1022,7 @@ def test_a_new_project_agent_imports_its_own_package_so_its_tests_and_modules_lo
     _git_env(monkeypatch)
     monkeypatch.chdir(host_env)
     with (
-        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=None),
+        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=str(host_env)),
         patch("aipass.aipass.shared.project_home._enroll_project"),
     ):
         result = create_project("my-app", template=template)
@@ -1043,7 +1054,7 @@ def test_a_new_project_agent_imports_its_own_package_so_its_tests_and_modules_lo
 def test_git_init_still_refuses_an_existing_repo(host_env, monkeypatch):
     """The re-init guard survives the R6 change — no branch work on a live repo; the half-born project rolls back."""
 
-    def a_repo_appears(target, name):
+    def a_repo_appears(target, name, aipass_home):
         (target / ".git").mkdir()
         (target / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
         return [], []
@@ -1060,7 +1071,7 @@ def test_git_init_still_refuses_an_existing_repo(host_env, monkeypatch):
 def test_an_empty_dot_git_is_no_repo_so_the_birth_commit_lands_in_it(host_env, monkeypatch):
     """Codex's sandbox leaves an empty .git in a cwd it starts in; it holds no history to refuse over."""
 
-    def an_empty_git_appears(target, name):
+    def an_empty_git_appears(target, name, aipass_home):
         (target / ".git").mkdir()
         return [], []
 
@@ -1113,7 +1124,7 @@ def _e2e_project(host_env, monkeypatch):
     _git_env(monkeypatch)
     monkeypatch.chdir(host_env)
     with (
-        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=None),
+        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=str(host_env)),
         patch("aipass.aipass.shared.project_home._enroll_project"),
     ):
         result = create_project("e2edemo", template="empty", no_agent=False)
@@ -1168,7 +1179,7 @@ def test_create_project_writes_the_prep_skill_the_switch_pair_and_links_claude_s
     monkeypatch.chdir(host_env)
     with (
         patch("subprocess.run", side_effect=_mock_git_run),
-        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=None),
+        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=str(host_env)),
         patch("aipass.aipass.shared.project_home._enroll_project"),
     ):
         result = create_project("skillproj", template="empty", no_agent=True)

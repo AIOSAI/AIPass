@@ -84,8 +84,8 @@ aipass/
 │   │   └── ui/                    # progress bars, spinners, glyphs, headers
 │   ├── integrations/              # placeholder, README only
 │   └── plugins/                   # placeholder
-├── shared/                        # no branch but prax at import (spawn loads it)
-│                                  #   json_ops, project_home, registry_discovery, scaffold_content
+├── shared/                        # install-time helpers; no branch but prax at import
+│                                  #   project_home, registry_discovery, scaffold_content
 ├── docs/                          # README depth, one page per group
 ├── tests/                         # test_*.py per module + conftest.py
 ├── templates/
@@ -100,7 +100,7 @@ aipass/
 # Integration
 
  - Depends on: @drone (routing), @spawn (agent creation, registry sync, identity repair), @hooks (trust registry, verify, smoke), @prax (logging), @trigger (soft, degrades), pytest, the CLI tools.
- - Serves humans. Fleet importers: @spawn, three `shared/` modules (no branch but prax at import, docs/shared_contract.md); @api, `from aipass.aipass import create_project, TEMPLATES` (`__init__.py`, the one import door; the phone's project door).
+ - Serves humans. Fleet importers: none of `shared/` (no branch but prax at import, docs/shared_contract.md); @api, `from aipass.aipass import create_project, TEMPLATES` (`__init__.py`, the one import door; the phone's project door).
  - Hands the install to devpulse through `devpulse/dropbox/install_report.json`; setup.sh's items arrive via `<home>/.aipass/setup_attention.txt`.
 
 # Working habits

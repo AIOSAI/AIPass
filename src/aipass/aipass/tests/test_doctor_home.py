@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor_home.py
 # Description: Tests for doctor's home, owner-seating, preflight, citizen-count, shared-skills, shadow and smoke rows
-# Version: 1.8.1
+# Version: 1.9.0
 # Created: 2026-10-08
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/doctor.py and _doctor_smoke.py: home, seating, preflight, drone, skills, shadows, smoke."""
@@ -651,6 +651,19 @@ class TestSharedSkillsRows:
     def _rows(self, **kwargs) -> dict:
         run_doctor(**kwargs)
         return {r.label: r for r in self.printed["Scaffold"]}
+
+    def test_no_aipass_home_is_a_fail_row_and_the_template_compares_never_pass(self) -> None:
+        (self.root / ".aipass").mkdir()
+        (self.root / ".aipass" / "tier0_kernel.md").write_text("# kernel\n", encoding="utf-8")
+        (self.root / ".aipass" / "hooks.json").write_text("{}\n", encoding="utf-8")
+
+        with patch("aipass.aipass.apps.modules.doctor._detect_aipass_home", return_value=None):
+            rows = self._rows()
+
+        assert (rows["aipass home"].glyph, rows["aipass home"].detail) == (GLYPH_FAIL, "not found")
+        assert rows["aipass home"].remediation == "Set AIPASS_HOME=/path/to/AIPass"
+        assert "tier0_kernel.md" not in rows
+        assert "hooks handlers" not in rows
 
     def test_named_skills_behind_a_link_pass_both_rows(self) -> None:
         self._skill("prep", "name: prep\ndescription: wrap up\n")
