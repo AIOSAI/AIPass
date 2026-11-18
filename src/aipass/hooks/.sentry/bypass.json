@@ -241,13 +241,13 @@
       "file": "apps/modules/cadence.py",
       "standard": "logged_fallback",
       "lines": [
-        476,
-        481,
-        569,
-        753,
-        835,
-        888,
-        972
+        475,
+        480,
+        568,
+        752,
+        834,
+        887,
+        971
       ],
       "reason": "Fleet green leg 5: cadence decides which turn an injector fires on and guards no write. On doubt each answers its documented empty value ('never fired', not grounded, nothing pending), logged: the worst case is a grounding block early, late or twice, never a write let through."
     },
@@ -407,7 +407,7 @@
       "file": "tests/test_engine.py",
       "standard": "through_the_command",
       "lines": [
-        30
+        33
       ],
       "reason": "Fleet green leg 9, hooks' decision. _run_hook, ruling (c): dispatch() runs a command hook as a shell subprocess (a spawn); contract: exit code, stdout, stderr and elapsed_ms answered, TIMEOUT and OSError answered as exit -1, never raised. _run_handler, ruling (c): on a timeout dispatch()'s far side speaks the timeout through the sound player (a spawn); contract: a handler outside aipass.* is refused before import, a hung handler answers TIMEOUT at its timeout, a raising one answers exit -1. _log, ruling (b): the JSONL diagnostics writer, one JSON object appended per line, a failed write never raises; dispatch writes the same file, and line 1614's hasattr pin is the json-handler shape the module keeps. _matches is read through dispatch() (_fires), _cc_len through a test-own UTF-16 count."
     },
@@ -845,7 +845,7 @@
       "file": "apps/handlers/lifecycle/comment_budget.py",
       "standard": "fallback",
       "lines": [
-        55
+        54
       ],
       "reason": "Append-only ledger, read and never rewritten from these rows: a torn line (two appends racing) costs that one row from the comment counts and the file is left as found. Raising would darken the whole comment budget for every later edit."
     },
@@ -1192,9 +1192,9 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        474,
-        479,
-        608
+        473,
+        478,
+        607
       ],
       "reason": "Fails toward showing: unreadable mail or advisory throttle state reads as never fired, so the banner or advisory fires rather than hides. The file holds one turn number, wholly rewritten by the next fire, so nothing else is lost. WARNING, escalated by @trigger."
     },
@@ -1202,7 +1202,7 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        567
+        566
       ],
       "reason": "None is handed on as \"cannot be read\", documented in the signature: tier0_kernel raises its DEGRADED line to WARNING on it and the advisory throttle falls to elapsed seconds. Nothing reads None as a turn."
     },
@@ -1210,7 +1210,7 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        663
+        662
       ],
       "reason": "reset_counter rewrites the counter whole by purpose (a compaction or new session): unreadable old state only costs the prior turn in its log line and the debounce of a second reset on one boundary. The reset itself is the repair of a corrupt counter."
     },
@@ -1218,7 +1218,7 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        711
+        710
       ],
       "reason": "A reset that cannot open or write the counter file leaves the counter as it was, and the post-compact re-ground is not armed. Raising would fail the compaction hook; WARNING, escalated by @trigger, names the caller and session."
     },
@@ -1226,7 +1226,7 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        751
+        750
       ],
       "reason": "None reads as \"never stamped\": consumers then keep their counts for the current window instead of opening a new one. The stamp is rewritten whole at the next reset. WARNING, escalated by @trigger, names it."
     },
@@ -1234,8 +1234,8 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        931,
-        968
+        930,
+        967
       ],
       "reason": "A corrupt counter is never overwritten here: the parse fails before the truncate, so the queue is left as found and only the queued re-ground parts are skipped. WARNING on each, escalated by @trigger, names the session."
     },
@@ -1251,7 +1251,7 @@
       "file": "apps/modules/cadence.py",
       "standard": "silent_catch",
       "lines": [
-        107
+        106
       ],
       "reason": "The read error is handed on as the value; the next lines log it at ERROR and keep the built-in cadence (a raise would refuse every memory write through edit_gate)."
     },

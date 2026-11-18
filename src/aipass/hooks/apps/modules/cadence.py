@@ -24,7 +24,7 @@ from typing import Any
 from aipass.cli import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.json import json_handler
-from aipass.prax import logger
+from aipass.prax import branch_state_root, logger
 from aipass.hooks.apps.modules.grounding_content import find_branch_root
 
 import fcntl
@@ -32,8 +32,7 @@ import fcntl
 CONSOLE = err_console
 
 _GUARD_DIR = Path(tempfile.gettempdir())
-_BRANCH_ROOT = Path(__file__).resolve().parent.parent.parent
-_CONFIG_PATH = _BRANCH_ROOT / "hooks_json" / "custom_config" / "cadence_config.json"
+_CONFIG_PATH = branch_state_root("hooks") / "hooks_json" / "custom_config" / "cadence_config.json"
 _DEBOUNCE_S = 2.0
 
 HELP_COMMANDS = [

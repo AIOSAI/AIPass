@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_engine.py
-# Version: 2.6.0
+# Version: 2.7.0
 # Description: Tests for hook engine dispatch logic: the dispatcher core; contracts and safeguards in two siblings
 # Branch: hooks
 # Layer: tests
@@ -18,6 +18,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(stdlib) — subprocess.run's process spawn and timeout mechanics; the tests stub it at the edge
 
+import importlib
 import json
 import subprocess
 from pathlib import Path
@@ -25,6 +26,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import aipass.prax as prax
+from aipass.hooks.apps.handlers.config import diagnostics
 from aipass.hooks.apps.hooks import handle_command, main, print_introspection
 from aipass.hooks.apps.modules import engine as engine_module
 from aipass.hooks.apps.modules.engine import (
@@ -890,6 +893,19 @@ class TestEveryEventLeavesOneTrailEntry:
             (c.args[0], c.args[1]) for c in logged.call_args_list
         ]
         assert not (trail / "engine_log.json").exists()
+
+
+class TestEngineJsonlFollowsPraxsStateRoot:
+    """engine.jsonl lives in branch_state_root("hooks")/logs: on a wheel that is the home folder, never the package."""
+
+    def test_the_log_file_is_the_state_roots_logs_folder(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(prax, "branch_state_root", lambda branch: tmp_path / "state" / branch)
+        try:
+            importlib.reload(diagnostics)
+            assert diagnostics.LOG_FILE == tmp_path / "state" / "hooks" / "logs" / "engine.jsonl"
+        finally:
+            monkeypatch.undo()
+            importlib.reload(diagnostics)
 
 
 _FAULT_HANDLER = "aipass.hooks.apps.handlers.fake.handle"

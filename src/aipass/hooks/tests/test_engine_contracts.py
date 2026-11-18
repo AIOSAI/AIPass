@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_engine_contracts.py
 # Description: The hook engine's contracts and resilience: bad config, log writes, fixtures, CLI routing, paths
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-10-08
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/engine.py: its contracts and error resilience."""
@@ -370,10 +370,11 @@ class TestPathContracts:
         """BRANCH_ROOT resolves to this branch, not to whatever the cwd was.
 
         A type check is blind to a BRANCH_ROOT pointing at the caller's directory; a landmark under it is not.
+        The engine log is state, so it follows prax's state root, not BRANCH_ROOT.
         """
         assert BRANCH_ROOT.name == "hooks"
         assert (BRANCH_ROOT / "apps" / "modules" / "engine.py").is_file()
-        assert LOG_FILE == BRANCH_ROOT / "logs" / "engine.jsonl"
+        assert LOG_FILE.parts[-3:] == ("hooks", "logs", "engine.jsonl")
 
 
 class TestErrorResilienceExtended:

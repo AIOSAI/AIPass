@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_comment_budget.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Tests for the comment budget: counter, PostToolUse handler, comments verb
 # Branch: hooks
 # Created: 2026-10-16
-# Modified: 2026-11-10
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/lifecycle/comment_budget.py, apps/modules/comment_scan.py and apps/modules/comments.py."""
@@ -13,12 +13,15 @@
 # sentry: no-test-needed(documentation) — that the three files' functions carry docstrings
 # sentry: no-test-needed(stdlib) — tokenize's own token stream and append_jsonl's rotation
 
+import importlib
 import json
 import os
+import sys
 import time
 
 import pytest
 
+import aipass.prax as prax
 from aipass.hooks.apps.handlers.lifecycle import comment_budget
 from aipass.hooks.apps.modules import comment_scan, comments
 
@@ -53,6 +56,20 @@ def _answer(result: dict) -> dict:
 
 def _rows() -> list[dict]:
     return comment_budget.ledger_rows()
+
+
+class TestTheLedgerFollowsPraxsStateRoot:
+    """comments.jsonl lives in branch_state_root("hooks")/logs: on a wheel the home folder, never the package."""
+
+    def test_the_ledger_outside_pytest_is_the_state_roots_logs_folder(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(prax, "branch_state_root", lambda branch: tmp_path / "state" / branch)
+        try:
+            importlib.reload(comment_budget)
+            monkeypatch.delitem(sys.modules, "_pytest")
+            assert comment_budget.ledger_file() == tmp_path / "state" / "hooks" / "logs" / "comments.jsonl"
+        finally:
+            monkeypatch.undo()
+            importlib.reload(comment_budget)
 
 
 class TestPythonCounter:

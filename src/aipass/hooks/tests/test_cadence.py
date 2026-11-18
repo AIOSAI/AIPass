@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_cadence.py
-# Version: 1.11.0
+# Version: 1.12.0
 # Description: Tests for cadence module (DPLAN-0200): the fire decision; regroup and counter in test_cadence_regroup.py
 # Branch: hooks
 # Created: 2026-06-08
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/cadence.py: the fire decision."""
@@ -19,6 +19,7 @@
 # sentry: no-test-needed(documentation) — is_automated(), reset_counter() and should_fire() carry docstrings
 
 import contextlib
+import importlib
 import json
 import os
 import time
@@ -26,6 +27,7 @@ from unittest.mock import patch
 
 import pytest
 
+import aipass.prax as prax
 from aipass.hooks.apps.modules import cadence
 from aipass.hooks.apps.modules.cadence import (
     is_automated,
@@ -978,6 +980,26 @@ class TestShippedDefaults:
 
         assert self._decide(tmp_path, monkeypatch, "tier0", 5, config) is True
         assert self._decide(tmp_path, monkeypatch, "navmap", 5, config) is False
+
+
+class TestTheConfigFollowsPraxsStateRoot:
+    """cadence_config.json never ships: it is read from branch_state_root("hooks"), on a wheel the home folder."""
+
+    def test_a_config_in_the_state_root_puts_the_kernel_back_on_the_beat(self, tmp_path, monkeypatch):
+        custom = tmp_path / "state" / "hooks" / "hooks_json" / "custom_config"
+        custom.mkdir(parents=True)
+        config = {"loaders": {"tier0": {"beat": True}}}
+        (custom / "cadence_config.json").write_text(json.dumps(config), encoding="utf-8")
+        try:
+            with patch.object(prax, "branch_state_root", lambda branch: tmp_path / "state" / branch):
+                importlib.reload(cadence)
+            monkeypatch.setattr(cadence, "_GUARD_DIR", tmp_path)
+            monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "test-session")
+            _reset_module_globals()
+            _write_state(tmp_path, turn=4)
+            assert should_fire("tier0") is True
+        finally:
+            importlib.reload(cadence)
 
 
 class TestDamagedStateIsSetAsideOnce:

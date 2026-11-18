@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: diagnostics.py
-# Version: 1.2.0
+# Version: 1.2.1
 # Description: JSONL diagnostic logging for hook engine
 # Branch: hooks
 # Layer: apps/handlers/config
@@ -15,11 +15,10 @@ import tempfile
 from pathlib import Path
 
 from aipass.hooks.apps.handlers.json import json_handler
-from aipass.prax import append_jsonl
+from aipass.prax import append_jsonl, branch_state_root
 from aipass.prax import logger
 
-BRANCH_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-_PROD_LOG_FILE = BRANCH_ROOT / "logs" / "engine.jsonl"
+_PROD_LOG_FILE = branch_state_root("hooks") / "logs" / "engine.jsonl"
 
 
 def _is_pytest_session() -> bool:
