@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: bootstrap_render.py
 # Description: The install script's .trinity render for a core branch: seed first, then the template
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-11-17
 # Modified: 2026-11-18
 # =============================================
@@ -64,7 +64,8 @@ def render_bootstrap_trinity(
         meta_tabs=render_all_meta_tabs(),
     )
     # The default MODULE is bare, for project branches; every core branch imports as aipass.<name>.
-    replacements["MODULE"] = f"aipass.{replacements['branchname']}"
+    if replacements["RESIDENCY"] == "core":
+        replacements["MODULE"] = f"aipass.{replacements['branchname']}"
 
     for filename in TRINITY_FILES:
         dest = target / ".trinity" / filename

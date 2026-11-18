@@ -424,6 +424,31 @@ class TestBootstrapRender:
         assert "local.json" not in self._render(root, target)
         assert kept.read_text(encoding="utf-8") == '{"mine": true}'
 
+    def test_a_project_citizen_renders_its_bare_module(self, tmp_path):
+        """Only a core branch imports as aipass.<name>. Mutant: MODULE forced to aipass.<name> -> red."""
+        project = tmp_path / "projects" / "finch"
+        write_registry(project / "FINCH_REGISTRY.json", {"finch": "src/finch/finch"})
+        target = project / "src" / "finch" / "finch"
+        target.mkdir(parents=True)
+        home = SimpleNamespace(path=tmp_path, source="test", tried=())
+
+        with patch("aipass.spawn.apps.handlers.registry.resolve_aipass_home", return_value=home):
+            render_bootstrap_trinity("finch", target, "manager", "canary", project / "FINCH_REGISTRY.json")
+
+        passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+        assert passport["branch_info"]["module"] == "finch"
+        assert passport["citizenship"]["residency"] == "resident"
+
+    def test_a_core_citizen_renders_its_package_module(self, seeded_home):
+        """Mutant: MODULE left bare for core too -> red."""
+        root, target = seeded_home
+        seed_path_for(target).unlink()
+
+        self._render(root, target)
+
+        passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+        assert passport["branch_info"]["module"] == "aipass.wanderer"
+
     def test_an_unreadable_registry_stops_the_install_with_nothing_written(self, seeded_home):
         """State document: never guessed. Mutant: the registry error is swallowed -> red."""
         root, target = seeded_home

@@ -69,7 +69,8 @@ every caller that reads through the door. `apps/modules/__init__.py` re-exports 
 `render_bootstrap_trinity(branch_name, target, citizen_class, role, registry_path)` is the install
 script's one call: it writes the `.trinity` files a core branch lacks (a tracked passport seed
 first, then the template) and returns the names written. It never overwrites an existing file,
-and an unreadable registry or a seed that fails validation raises.
+and an unreadable registry or a seed that fails validation raises. A core citizen's module renders
+as `aipass.<name>`; a project citizen's stays the bare name.
 
 `restore_citizen(branch_name, registry_path)` is the same render for a repair: the folder comes
 from the citizen's registry row, and its name, class and role from its own seed, so no class or
