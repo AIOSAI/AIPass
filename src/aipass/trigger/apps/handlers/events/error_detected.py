@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_detected.py
 # Description: Error detected event handler with Medic v2 dispatch gating
-# Version: 2.15.0
+# Version: 2.16.0
 # Created: 2026-02-10
-# Modified: 2026-11-16
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from aipass.prax import append_jsonl, logger
-from aipass.trigger.apps.config import TRIGGER_ROOT
+from aipass.trigger.apps.config import TRIGGER_LOGS_DIR
 from aipass.trigger.apps.handlers.repo_root import find_repo_root
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers import escalation, medic_state
@@ -265,13 +265,13 @@ def _write_suppression_log(reason: str, branch: str, module: str, message: str) 
         "module": module,
         "msg": message[:100],
     }
-    append_jsonl(TRIGGER_ROOT / "logs" / "medic_suppressed.jsonl", entry)
+    append_jsonl(TRIGGER_LOGS_DIR / "medic_suppressed.jsonl", entry)
 
 
 def _write_rate_log(reason: str, detail: str) -> None:
     """Write a line to the rate-limited log."""
     entry = {"ts": datetime.now().isoformat(), "reason": reason, "detail": detail}
-    append_jsonl(TRIGGER_ROOT / "logs" / "rate_limited.jsonl", entry)
+    append_jsonl(TRIGGER_LOGS_DIR / "rate_limited.jsonl", entry)
 
 
 def breaker_gate(recipient: str, fingerprint: str, note: str) -> str:

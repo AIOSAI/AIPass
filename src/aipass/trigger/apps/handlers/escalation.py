@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: escalation.py
 # Description: Repeat-signature escalation digest — repeat warns/errors email the operator
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2026-08-08
-# Modified: 2026-11-16
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -29,6 +29,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from aipass.prax import trail
 from aipass.trigger.apps.config import (
     TRIGGER_JSON_DIR,
+    TRIGGER_LOGS_DIR,
     TRIGGER_ROOT,
     atomic_write_json,
     json_file_lock,
@@ -40,7 +41,7 @@ from aipass.memory import fleet_branches
 
 STATE_FILE = TRIGGER_JSON_DIR / "escalation_state.json"
 
-ESCALATION_LOG = TRIGGER_ROOT / "logs" / "escalation.jsonl"
+ESCALATION_LOG = TRIGGER_LOGS_DIR / "escalation.jsonl"
 
 MAX_MESSAGE_CHARS = 400
 MAX_SAMPLE_CHARS = 500

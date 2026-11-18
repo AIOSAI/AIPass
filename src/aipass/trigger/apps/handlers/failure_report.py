@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: failure_report.py
 # Description: The loud route for a failure its caller must survive: trail line, medic status row, one mail
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-11-15
-# Modified: 2026-11-15
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -16,12 +16,12 @@ Its first failure adds a medic status row and mails the manager once per name; a
 from time import monotonic
 
 from aipass.prax import trail
-from aipass.trigger.apps.config import TRIGGER_ROOT
+from aipass.trigger.apps.config import TRIGGER_LOGS_DIR
 from aipass.trigger.apps.handlers import medic_state
 from aipass.trigger.apps.handlers.ci import outbound
 from aipass.trigger.apps.handlers.json import json_handler
 
-FAILURES_LOG = TRIGGER_ROOT / "logs" / "failures.jsonl"
+FAILURES_LOG = TRIGGER_LOGS_DIR / "failures.jsonl"
 # Trail: a failure line on a watched log would re-enter the watcher or the bus that just failed.
 logger = trail(FAILURES_LOG)
 LOG_INTERVAL_SECONDS = 600.0

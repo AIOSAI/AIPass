@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Branch log watcher event producer for error detection
-# Version: 2.13.0
+# Version: 2.14.0
 # Created: 2026-02-02
-# Modified: 2026-11-15
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -18,7 +18,8 @@ import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePath
 from typing import Any, Dict, Set, Optional, Callable, Tuple
-from aipass.trigger.apps.config import TRIGGER_ROOT, AIPASS_PKG_ROOT, atomic_write_json, json_file_lock
+from aipass.trigger.apps.config import TRIGGER_STATE_ROOT, AIPASS_PKG_ROOT, atomic_write_json, json_file_lock
+from aipass.drone import resolve_aipass_home
 from aipass.memory import fleet_branches
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers.error_registry import report as registry_report
@@ -28,7 +29,7 @@ from aipass.prax import log_backup_count
 from aipass.trigger.apps.handlers import failure_report
 
 
-TRIGGER_DATA_FILE = TRIGGER_ROOT / "trigger_data.json"
+TRIGGER_DATA_FILE = TRIGGER_STATE_ROOT / "trigger_data.json"
 
 STALE_ENTRY_THRESHOLD_SECONDS = 300
 
@@ -243,8 +244,15 @@ def fleet_logs_dirs() -> Dict[Path, str]:
     now = time.monotonic()
     if cached_at and (now - cached_at) < FLEET_TTL_SECONDS:
         return dirs
+    home = resolve_aipass_home()
+    if home.path is None:
+        # Refused, not defaulted: a guessed home would census the wrong fleet without a word.
+        tried = "; ".join(home.tried)
+        logger.error("Fleet census refused, no AIPass home (%s); keeping the last one (%d dirs)", tried, len(dirs))
+        _fleet_cache = (now, dirs)
+        return dirs
     try:
-        rows = fleet_branches(repo_root=AIPASS_PKG_ROOT.parent.parent, name_from="registry")
+        rows = fleet_branches(repo_root=home.path, name_from="registry")
     except Exception as exc:
         logger.warning("Fleet census unreadable, keeping the last one (%d dirs): %s", len(dirs), exc)
         _fleet_cache = (now, dirs)

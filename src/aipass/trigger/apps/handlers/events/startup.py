@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: startup.py
 # Description: Startup event handler with error catch-up scanning
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2025-12-04
-# Modified: 2026-11-16
+# Modified: 2026-11-18
 # =============================================
 
 """Startup Event Handler - Run startup checks
@@ -20,6 +20,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set
 from aipass.prax import append_jsonl, logger
 from aipass.trigger.apps.config import (
     TRIGGER_JSON_DIR,
+    TRIGGER_LOGS_DIR,
     TRIGGER_ROOT,
     atomic_write_json,
     migrate_json_file,
@@ -29,7 +30,7 @@ from aipass.trigger.apps.handlers.json import json_handler
 SYSTEM_LOGS_DIR = TRIGGER_ROOT.parent.parent.parent / "system_logs"
 CATCHUP_STATE_FILE = TRIGGER_JSON_DIR / "error_catchup.json"
 LEGACY_CATCHUP_STATE_FILE = TRIGGER_JSON_DIR / "trigger_data.json"
-SUPPRESSED_LOG = TRIGGER_ROOT / "logs" / "medic_suppressed.jsonl"
+SUPPRESSED_LOG = TRIGGER_LOGS_DIR / "medic_suppressed.jsonl"
 
 MAX_HASHES = 500
 MAX_LOOKBACK_HOURS = 24

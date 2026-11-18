@@ -3,7 +3,7 @@
 # Description: Tests for migrate_json_file - moving live state off trio-owned paths
 # Version: 1.0.0
 # Created: 2026-08-07
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/config.py: migrate_json_file, _archive_legacy_file and where trigger_json lives."""
@@ -17,6 +17,13 @@ from pathlib import Path
 import pytest
 
 from aipass.trigger.apps.config import ARCHIVE_DIR_NAME, TRIGGER_JSON_DIR, TRIGGER_ROOT, migrate_json_file
+from aipass.trigger.apps.handlers import error_registry, escalation, failure_report, log_watcher, medic_state
+from aipass.trigger.apps.handlers.events import runaway_handler, startup
+from aipass.trigger.apps.handlers.json import config_loader
+
+# conftest's sandboxes swap these per test; the values bound at import are the ones under test.
+_STARTUP_SUPPRESSED_LOG = startup.SUPPRESSED_LOG
+_CONFIG_LOADER_TRAIL = config_loader.logger.path
 
 LIVE_STATE = {
     "config": {"medic_enabled": True, "muted_branches": [{"name": "flow", "expires_at": None}]},
@@ -129,3 +136,30 @@ class TestStateFolder:
         assert TRIGGER_JSON_DIR.name == "trigger_json"
         assert TRIGGER_JSON_DIR.parent.name == "trigger"
         assert not TRIGGER_JSON_DIR.is_relative_to(TRIGGER_ROOT)
+
+    def test_every_state_file_and_log_sits_under_the_state_root_beside_trigger_json(self) -> None:
+        root = TRIGGER_JSON_DIR.parent
+        logs = root / "logs"
+        assert [
+            error_registry.REGISTRY_FILE,
+            error_registry.CB_STATE_FILE,
+            log_watcher.TRIGGER_DATA_FILE,
+            escalation.ESCALATION_LOG,
+            failure_report.FAILURES_LOG,
+            runaway_handler.DECISION_LOG,
+            _STARTUP_SUPPRESSED_LOG,
+            medic_state.MEDIC_SUPPRESSED_LOG,
+            medic_state.RATE_LIMITED_LOG,
+            _CONFIG_LOADER_TRAIL,
+        ] == [
+            root / "trigger_json" / "error_registry.json",
+            root / "trigger_json" / "trigger_cb_state.json",
+            root / "trigger_data.json",
+            logs / "escalation.jsonl",
+            logs / "failures.jsonl",
+            logs / "runaway_suppressed.jsonl",
+            logs / "medic_suppressed.jsonl",
+            logs / "medic_suppressed.jsonl",
+            logs / "rate_limited.jsonl",
+            logs / "config_loader.jsonl",
+        ]

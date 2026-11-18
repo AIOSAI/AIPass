@@ -3,7 +3,7 @@
 # Description: Tests for error_detected event handler with Medic v2 dispatch gating
 # Version: 1.5.0
 # Created: 2026-04-25
-# Modified: 2026-11-16
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/events/error_detected.py and the dispatch gates it runs."""
@@ -64,7 +64,7 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     monkeypatch.setattr(medic_state, "LEGACY_MEDIC_STATE_FILE", json_dir / "trigger_config.json")
     monkeypatch.setattr(medic_state, "logger", MagicMock())
     monkeypatch.setattr(error_detected, "BRANCH_REGISTRY_FILE", tmp_path / "AIPASS_REGISTRY.json")
-    monkeypatch.setattr(error_detected, "TRIGGER_ROOT", tmp_path)
+    monkeypatch.setattr(error_detected, "TRIGGER_LOGS_DIR", tmp_path / "logs")
     monkeypatch.setattr(error_detected, "logger", MagicMock())
     monkeypatch.setattr(error_detected, "_dispatch_timestamps", {})
     # Tests assign over these directly; setattr them first so teardown undoes it.

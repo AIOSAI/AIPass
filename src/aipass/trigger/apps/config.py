@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config.py
 # Description: Trigger package paths and atomic JSON writes
-# Version: 1.10.0
+# Version: 1.11.0
 # Created: 2026-03-09
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -23,9 +23,13 @@ TRIGGER_ROOT = Path(__file__).resolve().parents[1]
 
 AIPASS_PKG_ROOT = TRIGGER_ROOT.parent
 
-# json_handler creates any absent `<module>_<config|data|log>.json` here; a misshaped one raises, never overwritten.
 # Prax's state root: the branch folder on a checkout, the home folder on an install, never inside a wheel.
-TRIGGER_JSON_DIR = branch_state_root("trigger") / "trigger_json"
+TRIGGER_STATE_ROOT = branch_state_root("trigger")
+
+# json_handler creates any absent `<module>_<config|data|log>.json` here; a misshaped one raises, never overwritten.
+TRIGGER_JSON_DIR = TRIGGER_STATE_ROOT / "trigger_json"
+
+TRIGGER_LOGS_DIR = TRIGGER_STATE_ROOT / "logs"
 
 ARCHIVE_DIR_NAME = ".archive"
 

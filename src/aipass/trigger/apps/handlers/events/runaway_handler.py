@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runaway_handler.py
 # Description: Runaway log event handler with per-file cooldown gating
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-07-14
-# Modified: 2026-11-16
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -22,12 +22,12 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from aipass.prax import append_jsonl, logger
-from aipass.trigger.apps.config import TRIGGER_ROOT, atomic_write_json, json_file_lock
+from aipass.trigger.apps.config import TRIGGER_LOGS_DIR, atomic_write_json, json_file_lock
 from aipass.trigger.apps.handlers.repo_root import find_repo_root
 from aipass.trigger.apps.handlers import medic_state
 from aipass.trigger.apps.handlers.json import json_handler
 
-DECISION_LOG = TRIGGER_ROOT / "logs" / "runaway_suppressed.jsonl"
+DECISION_LOG = TRIGGER_LOGS_DIR / "runaway_suppressed.jsonl"
 
 
 _REPO_ROOT = find_repo_root(caller="runaway_handler")

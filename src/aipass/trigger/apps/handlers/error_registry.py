@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_registry.py
 # Description: Structured error tracking and registry for Medic v2
-# Version: 2.10.0
+# Version: 2.11.0
 # Created: 2026-02-13
-# Modified: 2026-11-16
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -22,11 +22,11 @@ from typing import Dict, Iterator, Optional, Tuple
 
 
 from aipass.prax import logger
-from aipass.trigger.apps.config import TRIGGER_ROOT, atomic_write_json, json_file_lock
+from aipass.trigger.apps.config import TRIGGER_JSON_DIR, atomic_write_json, json_file_lock
 from aipass.trigger.apps.handlers.json import json_handler
 
-REGISTRY_FILE = TRIGGER_ROOT / "trigger_json" / "error_registry.json"
-CB_STATE_FILE = TRIGGER_ROOT / "trigger_json" / "trigger_cb_state.json"
+REGISTRY_FILE = TRIGGER_JSON_DIR / "error_registry.json"
+CB_STATE_FILE = TRIGGER_JSON_DIR / "trigger_cb_state.json"
 
 VALID_STATUSES = ("new", "investigating", "suppressed", "resolved")
 VALID_SEVERITIES = ("low", "medium", "high", "critical")

@@ -3,7 +3,7 @@
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for trigger tests
 # Created: 2025-11-08
-# Modified: 2026-11-16
+# Modified: 2026-11-18
 # Version: 1.8.0
 # Category: trigger/tests
 #
@@ -126,7 +126,7 @@ def _resync_module_attrs() -> Generator[None, None, None]:
 
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
-    """Rich sizes an unpinned console on every print: 80 under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    """Rich sizes an unpinned console on every print: 80 under capture, the terminal's width under -s, else COLUMNS."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
 
@@ -390,7 +390,7 @@ def ci_lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
     monkeypatch.setattr(medic_state, "MEDIC_STATE_FILE", tmp_path / "medic_state.json")
     monkeypatch.setattr(medic_state, "LEGACY_MEDIC_STATE_FILE", tmp_path / "trigger_config.json")
     monkeypatch.setattr(medic_state, "logger", MagicMock())
-    monkeypatch.setattr(error_detected, "TRIGGER_ROOT", tmp_path)
+    monkeypatch.setattr(error_detected, "TRIGGER_LOGS_DIR", tmp_path / "logs")
     lane.breaker_open = False
     lane.backoff = False
     monkeypatch.setattr(

@@ -3,7 +3,7 @@
 # Description: Unit tests for the branch log watcher's parsing, detection and line pipeline
 # Version: 1.6.0
 # Created: 2026-04-03
-# Modified: 2026-11-16
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/log_watcher.py — parsing, detection and the line pipeline that fires events."""
@@ -18,7 +18,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -438,7 +438,7 @@ class TestProcessLogLineDeeper:
     def test_an_error_path_failure_is_reported_and_the_watcher_survives(self, tmp_path):
         """Pins the warning-only catch: a failing error path was one more watched line, and nobody was told."""
         lw.set_event_callback(MagicMock())
-        lw.registry_report.side_effect = RuntimeError("registry gone")
+        cast(MagicMock, lw.registry_report).side_effect = RuntimeError("registry gone")
         watcher = lw.BranchLogWatcher()
 
         watcher._process_log_line(self._make_error_line("Disk full"), _BRANCH_LOG_PATH)
@@ -447,7 +447,7 @@ class TestProcessLogLineDeeper:
         assert [(r["handler"], r["branch"]) for r in rows] == [("log_watcher.error_line", _BRANCH_LOG_PATH)]
         assert "registry gone" in rows[0]["error"]
         assert "registry gone" in _failure_trail(tmp_path)[0]["msg"]
-        lw.logger.warning.assert_not_called()
+        cast(MagicMock, lw.logger).warning.assert_not_called()
 
     def test_registry_path_fires_event_with_registry_data(self, monkeypatch):
         """Registry available: fires event with registry metadata."""
@@ -666,7 +666,7 @@ class TestProcessWarningLine:
         assert [(r["handler"], r["branch"]) for r in rows] == [("log_watcher.warning_line", _BRANCH_LOG_PATH)]
         assert [m["to_branch"] for m in bus_alerts_off_the_live_state] == ["@devpulse"]
         assert "bus down" in _failure_trail(tmp_path)[0]["msg"]
-        lw.logger.warning.assert_not_called()
+        cast(MagicMock, lw.logger).warning.assert_not_called()
 
         lw.set_event_callback(MagicMock())
         watcher._process_warning_line(_warning_line("Queue depth at 92%"), _BRANCH_LOG_PATH)
@@ -888,7 +888,7 @@ class TestSystemLogTwinIsNotProcessedTwice:
         watcher = lw.BranchLogWatcher()
         watcher.watched_dirs.add(branch_log.parent)
         for path in (branch_log, system_log):
-            watcher.on_modified(SimpleNamespace(is_directory=False, src_path=str(path)))
+            watcher.on_modified(cast(Any, SimpleNamespace(is_directory=False, src_path=str(path))))
 
         assert fire.call_count == 1
         assert fire.call_args.kwargs["branch"] == "HOOKS"
@@ -956,7 +956,29 @@ class TestTheFleetCensusComesFromMemorysDoor:
     def real_door(self, log_watcher_infrastructure, fleet, monkeypatch):
         monkeypatch.setattr(lw, "fleet_branches", door_fleet_branches)
         monkeypatch.setattr(lw, "AIPASS_PKG_ROOT", fleet.pkg_root)
+        monkeypatch.setenv("AIPASS_HOME", str(fleet.root))
         monkeypatch.setattr(lw, "SYSTEM_LOGS_DIR", fleet.root / "system_logs")
+
+    def test_the_census_reads_the_home_drone_resolves_not_a_climb_from_the_code(self, tmp_path, monkeypatch):
+        census = MagicMock(return_value=[])
+        monkeypatch.setattr(lw, "fleet_branches", census)
+        monkeypatch.setenv("AIPASS_HOME", str(tmp_path / "elsewhere"))
+
+        lw.fleet_logs_dirs()
+
+        assert census.call_args.kwargs["repo_root"] == tmp_path / "elsewhere"
+
+    def test_no_aipass_home_refuses_the_census_at_error_and_keeps_the_last_one(self, tmp_path, monkeypatch):
+        census = MagicMock()
+        monkeypatch.setattr(lw, "fleet_branches", census)
+        no_home = SimpleNamespace(path=None, tried=("AIPASS_HOME is unset",))
+        monkeypatch.setattr(lw, "resolve_aipass_home", lambda: no_home)
+        monkeypatch.setattr(lw, "_fleet_cache", (0.0, {tmp_path: "KEPT"}))
+
+        assert lw.fleet_logs_dirs() == {tmp_path: "KEPT"}
+        census.assert_not_called()
+        message, tried, _kept = cast(MagicMock, lw.logger).error.call_args.args
+        assert ("no AIPass home" in message, tried) == (True, "AIPASS_HOME is unset")
 
     def test_an_external_citizens_logs_are_watched_and_its_errors_fire_as_its_own(self, fleet):
         watcher = lw.start_branch_log_watcher().schedule.call_args.args[0]
@@ -978,7 +1000,7 @@ class TestTheFleetCensusComesFromMemorysDoor:
         watcher = lw.start_branch_log_watcher().schedule.call_args.args[0]
 
         assert fleet.sprout / "logs" not in watcher.watched_dirs
-        named = [c for c in lw.logger.info.call_args_list if str(fleet.sprout) in str(c)]
+        named = [c for c in cast(MagicMock, lw.logger).info.call_args_list if str(fleet.sprout) in str(c)]
         assert len(named) == 1
 
     def test_a_root_declared_after_start_joins_on_the_refresh_without_a_restart(self, fleet, monkeypatch):

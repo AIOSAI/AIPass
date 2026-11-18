@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: medic_state.py
 # Description: Medic state persistence and status collection handler
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-02-12
-# Modified: 2026-11-15
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional
 from aipass.prax import logger
 from aipass.trigger.apps.config import (
     TRIGGER_JSON_DIR,
-    TRIGGER_ROOT,
+    TRIGGER_LOGS_DIR,
     atomic_write_json,
     json_file_lock,
     migrate_json_file,
@@ -33,8 +33,8 @@ from aipass.trigger.apps.handlers.json import json_handler
 
 MEDIC_STATE_FILE = TRIGGER_JSON_DIR / "medic_state.json"
 LEGACY_MEDIC_STATE_FILE = TRIGGER_JSON_DIR / "trigger_config.json"
-MEDIC_SUPPRESSED_LOG = TRIGGER_ROOT / "logs" / "medic_suppressed.jsonl"
-RATE_LIMITED_LOG = TRIGGER_ROOT / "logs" / "rate_limited.jsonl"
+MEDIC_SUPPRESSED_LOG = TRIGGER_LOGS_DIR / "medic_suppressed.jsonl"
+RATE_LIMITED_LOG = TRIGGER_LOGS_DIR / "rate_limited.jsonl"
 
 _DURATION_RE = re.compile(r"^(\d+)(h|d)$")
 
