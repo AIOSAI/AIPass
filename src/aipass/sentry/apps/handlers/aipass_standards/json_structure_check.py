@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_structure_check.py
 # Description: JSON Structure Standards Checker Handler
-# Version: 3.6.0
+# Version: 3.7.0
 # Created: 2026-03-05
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from aipass.prax import logger
+from aipass.sentry.apps.handlers.aipass_standards import stdlib_only_check
 from aipass.sentry.apps.handlers.aipass_standards.check_support import parse
 from aipass.sentry.apps.handlers.aipass_standards.json_handler_check import _is_canonical_shim
 from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE, is_bypassed
@@ -126,6 +127,25 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
                     "message": (
                         "Declarations only — no functions or methods, so the module performs "
                         "no operations to log (not applicable)"
+                    ),
+                    "declined": True,
+                }
+            ],
+            "score": 100,
+            "standard": "JSON STRUCTURE",
+        }
+
+    # --- A proven stdlib_only claim: other branches import it before any aipass service, so it cannot log ---
+    if (in_modules or in_handlers) and stdlib_only_check.proven_claim(path):
+        return {
+            "passed": True,
+            "checks": [
+                {
+                    "name": "JSON structure check",
+                    "passed": True,
+                    "message": (
+                        "Listed under the stdlib_only standard and proven there (standard library only, no disk, "
+                        "environment or process access), so the json_handler wiring does not apply"
                     ),
                     "declined": True,
                 }

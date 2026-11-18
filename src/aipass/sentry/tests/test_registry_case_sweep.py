@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_registry_case_sweep.py
 # Description: Case-exact registry discovery and the lanes that delegate to it
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-31
-# Modified: 2026-11-14
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/registry_scan.py and the lanes that delegate to it."""
@@ -19,6 +19,7 @@ import json
 
 import pytest
 
+from aipass.drone import is_registry_filename
 from aipass.sentry.apps.handlers import registry_scan
 from aipass.sentry.apps.handlers.audit import discovery
 
@@ -32,30 +33,33 @@ class TestTheNameCheckIsCaseExactWithoutAnyEmulation:
 
     def test_a_lowercase_counter_is_not_a_registry(self, tmp_path):
         (tmp_path / COUNTER_DECOY).write_text("{}", encoding="utf-8")
-        assert registry_scan.registries_in(tmp_path) == []
+        assert registry_scan.registry_files_in(tmp_path) == []
 
     def test_a_dotted_counter_is_not_a_registry(self, tmp_path):
         """pathlib's ``*`` matches dotfiles where the glob module does not."""
         (tmp_path / DOT_DECOY).write_text("{}", encoding="utf-8")
-        assert registry_scan.registries_in(tmp_path) == []
+        assert registry_scan.registry_files_in(tmp_path) == []
 
     def test_an_external_projects_own_registry_survives(self, tmp_path):
         """The suffix is matched case-exact, never the stem: Vera-Studio_REGISTRY.json is a real registry."""
         target = tmp_path / "Vera-Studio_REGISTRY.json"
         target.write_text("{}", encoding="utf-8")
-        assert registry_scan.registries_in(tmp_path) == [target]
+        assert registry_scan.registry_files_in(tmp_path) == [target]
 
     def test_a_lowercase_stem_still_survives(self, tmp_path):
         target = tmp_path / "vera-studio_REGISTRY.json"
         target.write_text("{}", encoding="utf-8")
-        assert registry_scan.registries_in(tmp_path) == [target]
+        assert registry_scan.registry_files_in(tmp_path) == [target]
 
     def test_a_directory_wearing_the_name_is_not_a_registry(self, tmp_path):
-        (tmp_path / f"folder{registry_scan.REGISTRY_SUFFIX}").mkdir()
-        assert registry_scan.registries_in(tmp_path) == []
+        (tmp_path / "folder_REGISTRY.json").mkdir()
+        assert registry_scan.registry_files_in(tmp_path) == []
+
+    def test_the_name_test_is_drones_one_predicate(self):
+        assert registry_scan.is_registry_filename is is_registry_filename
 
     def test_a_missing_directory_answers_empty_rather_than_raising(self, tmp_path):
-        assert registry_scan.registries_in(tmp_path / "absent") == []
+        assert registry_scan.registry_files_in(tmp_path / "absent") == []
 
     def test_the_walk_answers_none_when_nothing_is_above(self, tmp_path):
         (tmp_path / COUNTER_DECOY).write_text("{}", encoding="utf-8")
