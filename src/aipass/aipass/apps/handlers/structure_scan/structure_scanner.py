@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: structure_scanner.py
 # Description: Project structure validation for aipass doctor
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-05-14
-# Modified: 2026-10-27
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -73,7 +73,7 @@ class RegistryIssue(NamedTuple):
 
     branch_name: str
     registered_path: str
-    problem: str  # "missing" or "mismatch"
+    problem: str  # "missing" or "no_passport" (missing or unreadable)
 
 
 def find_project_root(start: Path) -> Optional[Path]:
@@ -315,6 +315,15 @@ def detect_pollution(agents: List[AgentInfo]) -> List[PollutionHit]:
     return hits
 
 
+def _passport_readable(passport: Path) -> bool:
+    """True when the passport file parses as JSON; missing and unreadable are the same damage."""
+    try:
+        json.loads(passport.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return True
+
+
 def check_registry_consistency(
     registry_path: Path,
     agents: List[AgentInfo],
@@ -344,10 +353,8 @@ def check_registry_consistency(
         reg_path = p.resolve() if p.is_absolute() else (anchor / p).resolve()
         if not reg_path.exists():
             issues.append(RegistryIssue(name, path_str, "missing"))
-        elif str(reg_path) not in agent_paths:
-            trinity = reg_path / ".trinity" / "passport.json"
-            if not trinity.exists():
-                issues.append(RegistryIssue(name, path_str, "no_passport"))
+        elif str(reg_path) not in agent_paths and not _passport_readable(reg_path / ".trinity" / "passport.json"):
+            issues.append(RegistryIssue(name, path_str, "no_passport"))
 
     return issues
 

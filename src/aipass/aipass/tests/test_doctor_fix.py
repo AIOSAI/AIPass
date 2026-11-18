@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor_fix.py
 # Description: Tests for doctor --fix remediation report (DPLAN-0177 Phase 2)
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-05-15
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/_doctor_fix.py."""
@@ -167,6 +167,14 @@ class TestGenerateRemediation:
         items = generate_remediation(tmp_path)
         registry = [i for i in items if i.category == "registry"]
         assert "--dedup-registry" in registry[0].fix_command
+
+    def test_a_lost_passport_is_critical_and_names_doctor_fix_not_a_registry_dedup(self, tmp_path: Path) -> None:
+        (tmp_path / "src" / "bare").mkdir(parents=True)
+        _make_registry(tmp_path, [{"name": "bare", "path": str(tmp_path / "src" / "bare")}])
+        (tmp_path / "pyproject.toml").write_text("[project]", encoding="utf-8")
+        items = generate_remediation(tmp_path)
+        registry = [(i.severity, i.fix_command) for i in items if i.category == "registry"]
+        assert registry == [("critical", "aipass doctor --fix")]
 
     def test_root_artifact_warn(self, tmp_path: Path) -> None:
         """Root artifact with warn severity produces warning remediation."""

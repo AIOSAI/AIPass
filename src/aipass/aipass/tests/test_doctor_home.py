@@ -347,6 +347,83 @@ class TestFixOwnerSeating:
         assert [(r.label, r.glyph, r.detail) for r in results] == [("owner fix", GLYPH_FAIL, refusal[:120])]
 
 
+class TestFixRestoresALostPassport:
+    """doctor --fix restores a citizen's lost passport through spawn's door, before the owner repair runs."""
+
+    REINSTALL = "Run the installer again: ./aipass install (rebuilds the environment, keeps personal files)"
+
+    @pytest.fixture(autouse=True)
+    def _a_citizen_without_its_passport(self, tmp_path, monkeypatch) -> None:
+        mod = "aipass.aipass.apps.modules.doctor"
+        monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
+        monkeypatch.chdir(tmp_path)
+        for name in ("_check_system", "_check_community", "_check_scaffold", "_check_sandbox", "check_wire_verify"):
+            monkeypatch.setattr(f"{mod}.{name}", lambda: [])
+        monkeypatch.setattr(f"{mod}._check_services", lambda **_kw: [])
+        monkeypatch.setattr(f"{mod}.check_provider_manifest", lambda **_kw: [])
+        monkeypatch.setattr(f"{mod}.reconcile_stale_deny", lambda **_kw: [])
+        monkeypatch.setattr(f"{mod}._detect_aipass_home", lambda: str(tmp_path / "home"))
+        lost = [CheckResult("owner/owner_passport_missing", GLYPH_FAIL, "x", "")]
+        monkeypatch.setattr(f"{mod}.check_identity", lambda: lost)
+        self.citizen = tmp_path / "src" / "devpulse"
+        self.passport = self.citizen / ".trinity" / "passport.json"
+        self.registry = tmp_path / "AIPASS_REGISTRY.json"
+        rows = {"branches": [{"name": "devpulse", "path": "src/devpulse"}]}
+        self.registry.write_text(json.dumps(rows), encoding="utf-8")
+        self.kept = {
+            self.citizen / ".trinity" / "local.json": '{"sessions": []}',
+            self.citizen / ".trinity" / "observations.json": '{"observations": []}',
+            self.citizen / "artifacts" / "birth_certificate.json": '{"born": "2026-04-16"}',
+            self.citizen / ".ai_mail.local" / "inbox.json": '{"messages": []}',
+        }
+        for path, text in self.kept.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        self.seat_saw_passport: list = []
+        seated = [CheckResult("owner", GLYPH_PASS, "ok", "")]
+        monkeypatch.setattr(
+            f"{mod}._check_owner_seating", lambda: self.seat_saw_passport.append(self.passport.exists()) or seated
+        )
+        self.owner_repairs: list = []
+        monkeypatch.setattr(f"{mod}._fix_owner_seating", lambda: self.owner_repairs.append(1) or [])
+        self.printed: dict = {}
+        monkeypatch.setattr(f"{mod}._print_doctor_groups", lambda groups: self.printed.update(groups) or (0, 0, 0))
+
+    def _restored_rows(self, restore) -> list:
+        with patch("aipass.spawn.restore_citizen", side_effect=restore) as door:
+            run_doctor(fix=True)
+        self.door = door
+        rows = self.printed["Structure"]
+        return [(r.glyph, r.detail, r.remediation) for r in rows if r.label == "registry: devpulse"]
+
+    def _write_passport(self, *_args) -> list:
+        self.passport.write_text('{"branch_info": {"branch_name": "devpulse"}}', encoding="utf-8")
+        return ["passport.json(seed)"]
+
+    def test_a_restore_names_what_it_wrote_and_the_seat_check_sees_it_before_any_owner_repair(self) -> None:
+        before = self.registry.read_bytes()
+
+        rows = self._restored_rows(self._write_passport)
+
+        assert rows == [(GLYPH_PASS, "passport restored: passport.json(seed)", "")]
+        assert self.door.call_args.args == ("devpulse", self.registry)
+        assert self.seat_saw_passport == [True]
+        assert self.owner_repairs == []
+        assert self.registry.read_bytes() == before
+        assert {path: path.read_text(encoding="utf-8") for path in self.kept} == self.kept
+
+    def test_a_restore_that_raises_fails_naming_the_installer(self) -> None:
+        rows = self._restored_rows(FileNotFoundError("devpulse carries no seed"))
+
+        assert rows == [(GLYPH_FAIL, "passport not restored: devpulse carries no seed", self.REINSTALL)]
+
+    def test_a_restore_that_leaves_the_passport_unreadable_fails_naming_the_installer(self) -> None:
+        rows = self._restored_rows(lambda *_a: ["passport.json(seed)"])
+
+        detail = "passport restored: passport.json(seed); still not readable"
+        assert rows == [(GLYPH_FAIL, detail, self.REINSTALL)]
+
+
 class TestRunDoctorPreflight:
     """run_doctor_preflight: the install's doctor --fix, returning the groups and their counts."""
 

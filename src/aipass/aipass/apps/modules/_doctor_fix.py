@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: _doctor_fix.py
 # Description: Structure remediation report for aipass doctor --fix
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-05-15
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -24,6 +24,7 @@ from aipass.aipass.shared.registry_discovery import find_registry as _discover_r
 from aipass.aipass.shared.project_home import _detect_aipass_home
 
 from aipass.aipass.apps.handlers.json import json_handler
+from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS
 from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
     check_placement,
     check_pyproject,
@@ -96,6 +97,16 @@ def _build_registry_items(project_root: Path, agents: list, project: str) -> Lis
     if not reg_path or not reg_path.exists():
         return items
     for issue in check_registry_consistency(reg_path, agents):
+        if issue.problem == "no_passport":
+            items.append(
+                RemediationItem(
+                    severity="critical",
+                    category="registry",
+                    description=f"No readable passport: {issue.branch_name} at {issue.registered_path}",
+                    fix_command="aipass doctor --fix",
+                )
+            )
+            continue
         items.append(
             RemediationItem(
                 severity="warning",
@@ -105,6 +116,48 @@ def _build_registry_items(project_root: Path, agents: list, project: str) -> Lis
             )
         )
     return items
+
+
+REINSTALL = "Run the installer again: ./aipass install (rebuilds the environment, keeps personal files)"
+
+
+def _damaged_citizens(project_root: Path, reg_path: Path) -> List[str]:
+    """Registered citizens whose folder exists and whose passport is missing or unreadable."""
+    issues = check_registry_consistency(reg_path, scan_agents(project_root), project_root=project_root)
+    return [i.branch_name for i in issues if i.problem == "no_passport"]
+
+
+def repair_passports(project_root: Optional[Path]) -> List[tuple]:
+    """doctor --fix: restore each damaged citizen's passport through spawn's door, then re-read the check.
+
+    Rows are (label, glyph, detail, remediation). spawn's restore_citizen writes only the missing .trinity
+    files; a restore that raises, or a passport still unreadable afterwards, is a FAIL naming the installer.
+    """
+    reg_path = _discover_registry(start_path=project_root) if project_root else None
+    if project_root is None or reg_path is None or not reg_path.exists():
+        return []
+    damaged = _damaged_citizens(project_root, reg_path)
+    if not damaged:
+        return []
+
+    from aipass.spawn import restore_citizen
+
+    rows: List[tuple] = []
+    for name in damaged:
+        try:
+            written = restore_citizen(name, reg_path)
+        except (LookupError, OSError, ValueError) as exc:
+            logger.error("[doctor] passport restore for %s failed: %s", name, exc)
+            rows.append((f"registry: {name}", GLYPH_FAIL, f"passport not restored: {exc}", REINSTALL))
+            continue
+        rows.append((f"registry: {name}", GLYPH_PASS, "passport restored: " + ", ".join(map(str, written)), ""))
+
+    still = set(_damaged_citizens(project_root, reg_path))
+    for i, (label, glyph, detail, _fix) in enumerate(rows):
+        if glyph == GLYPH_PASS and label.removeprefix("registry: ") in still:
+            logger.error("[doctor] passport for %s is still not readable after its restore", label)
+            rows[i] = (label, GLYPH_FAIL, f"{detail}; still not readable", REINSTALL)
+    return rows
 
 
 def _build_root_artifact_items(project_root: Path, project: str) -> List[RemediationItem]:

@@ -23,7 +23,15 @@ One pass produces seven groups, in this order:
   pytest collection, the provider manifest rows (hooks, env vars, permission
   rules, the settings scalars), the wire verification and stale deny rules.
 - **Community** — the mailbox is readable and `dropbox/` is writable.
-- **Structure** — agent placement, stray-file detection, and the instruction
+- **Structure** — agent placement, stray-file detection, the registry's paths
+  (a registered citizen whose folder exists but whose `.trinity/passport.json`
+  is missing or unreadable is one FAIL row, `registry: <name>`,
+  `no readable passport`, `Run 'aipass doctor --fix'`; `--fix` restores it
+  through `from aipass.spawn import restore_citizen`, which writes only the
+  missing `.trinity` files, before the owner repair runs, then re-reads the
+  check: the row names the files written, or FAILs with the reason and
+  `./aipass install`, which rebuilds the environment and keeps personal files),
+  and the instruction
   fence: every nested `projects/<name>` excludes the host's `AGENTS.md` and
   `CLAUDE.md` pairs through `claudeMdExcludes`; and the instruction shadow:
   Claude Code reads `AGENTS.md` only when no `CLAUDE.md` or `CLAUDE.local.md`

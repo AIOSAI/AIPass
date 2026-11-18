@@ -799,6 +799,9 @@ def _check_community() -> List[CheckResult]:
     return results
 
 
+_NO_PASSPORT = ("no readable passport", "Run 'aipass doctor --fix'")
+
+
 def _check_structure() -> List[CheckResult]:
     """Run Structure group checks — agent placement, pollution, registry consistency."""
     results: List[CheckResult] = []
@@ -852,6 +855,9 @@ def _check_structure() -> List[CheckResult]:
         reg_issues = check_registry_consistency(reg_path, agents, project_root=project_root)
         if reg_issues:
             for issue in reg_issues:
+                if issue.problem == "no_passport":
+                    results.append(CheckResult(f"registry: {issue.branch_name}", GLYPH_FAIL, *_NO_PASSPORT))
+                    continue
                 glyph = GLYPH_FAIL if issue.problem == "missing" else GLYPH_WARN
                 results.append(
                     CheckResult(f"registry: {issue.branch_name}", glyph, issue.problem, issue.registered_path)
@@ -1241,6 +1247,16 @@ def _compute_doctor_groups(
         wire_recheck = [CheckResult(*r) for r in check_wire_verify()]
         services = groups.get("Services", [])
         groups["Services"] = [r for r in services if r.label != "wire verify"] + wire_recheck
+
+        from aipass.aipass.apps.modules._doctor_fix import repair_passports
+
+        # Passports before seating: the seating check must see the restored seat (spawn's --fix cannot restore one).
+        if passport_fix := [CheckResult(*row) for row in repair_passports(find_project_root(Path.cwd()))]:
+            repaired = {r.label for r in passport_fix}
+            structure = [r for r in groups.get("Structure", []) if r.label not in repaired]
+            groups["Structure"] = structure + passport_fix
+            seat = [r for r in groups.get("Identity", []) if not r.label.startswith("owner")]
+            groups["Identity"] = seat + _check_owner_seating()
 
         identity = groups.get("Identity", [])
         owner_rows = [r for r in identity if r.label.startswith("owner")]

@@ -227,7 +227,7 @@
     {
       "file": "apps/modules/_doctor_fix.py",
       "standard": "fallback",
-      "lines": [77],
+      "lines": [78],
       "reason": "_build_placement_items: an agent path outside project_root cannot be made relative, so the remediation shows its absolute path, which is the accurate path, not a stand-in; the 'Misplaced agent' item and its fix command still print with it"
     },
     {
