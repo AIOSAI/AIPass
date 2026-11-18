@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_json_handler.py
 # Description: Tests for the fleet json service through prax's own shim
-# Version: 2.5.0
+# Version: 2.6.0
 # Created: 2026-03-28
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/json/json_handler.py and apps/handlers/json/json_service.py."""
@@ -99,6 +99,49 @@ class TestForModule:
         resolved = json_service.for_module(tmp_path / caller)
 
         assert resolved.branch_root == tmp_path / root
+
+
+_SOURCE = Path(aipass.prax.__path__[0]).parent
+
+
+class TestForBranch:
+    """for_branch(name): the handle for_module gives a file in that branch's apps/, found by name, never by depth."""
+
+    @pytest.mark.parametrize("name", ["hooks", "prax", "flow", "ai_mail", "sentry"])
+    def test_the_name_gives_what_the_branchs_own_shim_gets(self, name):
+        shim = _SOURCE / name / "apps" / "handlers" / "json" / "json_handler.py"
+        by_file = json_service.for_module(shim)
+
+        by_name = json_service.for_branch(name)
+
+        assert by_name.branch_root == by_file.branch_root
+        assert by_name.json_dir == by_file.json_dir
+        assert by_name.get_json_path("probe", "log") == by_file.get_json_path("probe", "log")
+
+    def test_the_hook_engines_snapshot_gets_the_hooks_branch_by_name(self):
+        """From .live-<stamp>/ the depth lands on hooks/ only by coincidence; the name lands there by definition."""
+        pointer = _SOURCE / "hooks" / ".live-current"
+        if not pointer.is_file():
+            pytest.skip("no hook engine snapshot on this machine")
+        shim = _SOURCE / "hooks" / pointer.read_text(encoding="utf-8").strip() / "handlers" / "json" / "json_handler.py"
+
+        assert json_service.for_branch("hooks").json_dir == json_service.for_module(shim).json_dir
+
+    @pytest.mark.parametrize("name", ["no_such_branch", "", "../prax", "prax.apps"])
+    def test_a_name_that_is_no_branch_raises_lookup_error(self, name):
+        """Loud at the shim's import, one exception type to catch; never a default branch."""
+        with pytest.raises(LookupError, match="no AIPass branch"):
+            json_service.for_branch(name)
+
+    def test_a_package_without_apps_is_not_a_branch(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(json_service, "branch_root", lambda name: tmp_path / name)
+        (tmp_path / "loose").mkdir()
+
+        with pytest.raises(LookupError, match="no AIPass branch"):
+            json_service.for_branch("loose")
+
+    def test_the_door_serves_it(self):
+        assert aipass.prax.json_handler.for_branch is json_service.for_branch
 
 
 class TestTheJsonDirectoryIsResolvedPerCall:

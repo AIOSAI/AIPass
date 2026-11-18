@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_service.py
 # Description: The fleet's one JSON handler service (prax-owned)
-# Version: 2.4.0
+# Version: 2.5.0
 # Created: 2026-09-03
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """The fleet's one JSON handler implementation (DPLAN-0325).
@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from aipass.prax.apps.handlers.logging.trail import PraxTrail
-from aipass.prax.apps.handlers.state_root import StateRootUnwritable, state_root_of, writable_dir
+from aipass.prax.apps.handlers.state_root import StateRootUnwritable, branch_root, state_root_of, writable_dir
 
 # The trail, never door one: every branch's logger build reaches this service.
 logger = PraxTrail("json_service")
@@ -243,6 +243,17 @@ def for_module(file: "str | os.PathLike") -> "JsonHandle":
     ``parents[3]`` is the branch root; no resolve(), which would follow a symlink to the wrong branch.
     """
     return JsonHandle(Path(file).parents[3])
+
+
+def for_branch(name: str) -> "JsonHandle":
+    """Build the handle for the branch named ``name``, found by its package, wherever the caller's file runs from.
+
+    A name that is not an AIPass branch (no package, or no apps/ in it) raises LookupError: no default branch.
+    """
+    root = branch_root(name) if name.isidentifier() else None
+    if root is None or not (root / "apps").is_dir():
+        raise LookupError(f"no AIPass branch named {name!r}")
+    return JsonHandle(root)
 
 
 class JsonHandle:

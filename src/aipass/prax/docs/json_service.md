@@ -169,7 +169,17 @@ branch_state_root("flow") / "flow_json"
 
 `for_module(__file__)` takes the branch root as `parents[3]` of the shim's
 path, which also holds for the hook engine's snapshot
-(`hooks/.live-<stamp>/handlers/json/json_handler.py` gives `hooks/`).
+(`hooks/.live-<stamp>/handlers/json/json_handler.py` gives `hooks/`), but only
+by coincidence of depth. `for_branch(name)` gives the same handle by the
+branch's package name, wherever the calling file runs from:
+
+```python
+_h = json_handler.for_branch("hooks")
+```
+
+A name that is no AIPass branch (no `aipass.<name>` package, no `apps/` in it,
+or not an identifier) raises `LookupError` at that call, so a shim fails at its
+own import, never inside a later `log_operation`. There is no default branch.
 
 **Resolved per call, never captured at import**, and that is the whole reason it
 works. A module-level constant cannot be redirected by a conftest that runs after
