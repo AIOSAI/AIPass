@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: fixed_depth_path_check.py
 # Description: Fixed Depth Path Standards Checker - a path climbed a fixed depth off __file__ that a wheel answers wrong
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-11-17
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """Fixed Depth Path Standards Checker
@@ -14,7 +14,8 @@ bound to one. Two sites, each at its line and enclosing function:
 
 - the climb leaves ``src/aipass``: on a wheel it lands in site-packages or the interpreter's lib directory;
 - a climb joined to a folder the wheel does not ship (a dot name, ``logs``, ``system_logs``, ``*_json``):
-  on a wheel that state is written inside the installed package.
+  on a wheel that state is written inside the installed package. A dot folder at the branch's own root is part
+  of the branch folder and passes.
 
 A climb that stays inside the package and names shipped files is the package's own data and passes.
 """
@@ -76,10 +77,13 @@ def _git_ignored(rel: str, segment: str, repo: Path) -> bool:
     return False
 
 
+def _dot_name(segment: str) -> bool:
+    return segment.startswith(".") and segment.strip(".") != ""
+
+
 def unshipped(segment: str, landing: Optional[Path] = None) -> bool:
     """A name the wheel does not ship: a dot name (builds skip dot paths), logs, *_json, or one git ignores there."""
-    dot_name = segment.startswith(".") and segment.strip(".") != ""
-    if dot_name or segment in _IGNORED or segment.endswith("_json"):
+    if _dot_name(segment) or segment in _IGNORED or segment.endswith("_json"):
         return True
     if landing is None:
         return False
@@ -314,7 +318,9 @@ def scan(source: str, file_depth: int, path: Optional[Path] = None) -> Optional[
         headroom = reader.climb(joined[0])
         # shortcut: the landing is read along THIS file's path; a root imported from a deeper file may land elsewhere
         landing = packages.joinpath(*path.relative_to(packages).parts[:headroom]) if packages and path else None
-        if headroom is not None and headroom >= 0 and unshipped(joined[1], landing):
+        # A branch's own dot folders (.trinity, .sentry, ...) are part of the branch folder and stay there installed.
+        own_dot_folder = headroom == 1 and _dot_name(joined[1])
+        if headroom is not None and headroom >= 0 and not own_dot_folder and unshipped(joined[1], landing):
             note = reader.root_named(joined[0])
             found.append((line, f"joins a fixed-depth climb to {joined[1]!r}{note}", joined[1]))
     return sorted(set(found))

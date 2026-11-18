@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: fixed_depth_path_content.py
 # Description: Fixed Depth Path Standards Content Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-11-17
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """Fixed Depth Path Standards Content Handler"""
@@ -36,6 +36,7 @@ def get_fixed_depth_path_standards() -> str:
         "  - a climb that stays inside src/aipass and names shipped files (templates, data)",
         "  - a climb from a parameter (Path(file).parents[3]) or through '..': not read",
         "  - a file outside src/aipass: not in the wheel",
+        "  - a dot folder at the branch's own root (.trinity, .sentry): part of the branch folder",
         "",
         "[bold cyan]HOW TO FIX:[/bold cyan]",
         "  [green]Good -- the home from a resolver (env, registry walk):[/green]",

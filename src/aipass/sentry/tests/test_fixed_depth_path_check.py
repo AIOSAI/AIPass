@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_fixed_depth_path_check.py
 # Description: fixed_depth_path_check - a path climbed a fixed depth off __file__ that is wrong on a wheel install
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-11-17
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/fixed_depth_path_check.py."""
@@ -28,6 +28,8 @@ REBOUND = "from pathlib import Path\nC = Path(__file__).parent\nC = C.parent\nL 
 TWO_SITES = (
     "from pathlib import Path\nA = Path(__file__).parents[5]\n\n\ndef f():\n    return Path(__file__).parents[6]\n"
 )
+#: A branch's own dot folder reached through os.path: four dirnames from REL land on the branch root.
+DOT_BY_OS_PATH = "import os\nT = os.path.join(" + "os.path.dirname(" * 4 + "__file__))))" + ", '.ai_mail.local')\n"
 
 
 def _write(tmp_path, source, rel=REL):
@@ -50,7 +52,10 @@ ROWS = [
     ("sibling_kept", "from pathlib import Path\nDATA = Path(__file__).parent / 'data.json'\n", []),
     ("logs_inside", "from pathlib import Path\nLOGS = Path(__file__).resolve().parents[3] / 'logs'\n", [2]),
     ("json_dir_inside", "from pathlib import Path\nJ = Path(__file__).parents[3] / 'demo_json'\n", [2]),
-    ("dot_dir_inside", "from pathlib import Path\nT = Path(__file__).parents[3] / '.trinity' / 'x.json'\n", [2]),
+    ("dot_dir_at_branch_root", "from pathlib import Path\nT = Path(__file__).parents[3] / '.trinity' / 'x.json'\n", []),
+    ("dot_dir_at_branch_root_os", DOT_BY_OS_PATH, []),
+    ("dot_dir_above_the_branch", "from pathlib import Path\nC = Path(__file__).parents[4] / '.ai_central'\n", [2]),
+    ("dot_dir_below_the_branch_root", "from pathlib import Path\nC = Path(__file__).parents[2] / '.cache'\n", [2]),
     ("bound_then_climbed", "from pathlib import Path\nHERE = Path(__file__).parent\nROOT = HERE.parents[4]\n", [3]),
     ("bound_then_logs", BOUND_THEN_LOGS, [6]),
     ("spec_origin_escape", "import importlib.util\nfrom pathlib import Path\n" + SPEC + ".parent.parent.parent\n", [3]),
@@ -76,7 +81,7 @@ class TestTheRow:
         assert "'logs' is not shipped in the wheel" in state["message"]
 
     def test_each_site_carries_its_function(self, tmp_path):
-        assert checker.check_module(_write(tmp_path, ROWS[10][1]))["checks"][0]["function"] == "f"
+        assert checker.check_module(_write(tmp_path, BOUND_THEN_LOGS))["checks"][0]["function"] == "f"
 
     def test_a_file_outside_src_aipass_is_not_in_the_wheel_and_passes_saying_so(self, tmp_path):
         outcome = checker.check_module(_write(tmp_path, ROWS[0][1], "tools/script.py"))
@@ -95,6 +100,7 @@ ROOT_BOUND = "from pathlib import Path\n\nROOT = Path(__file__).resolve().parent
 JOINS = [
     ("imported_root_to_logs", "from aipass.demo.apps.config import ROOT\n\nLOG = ROOT / 'logs' / 'x.jsonl'\n", [3]),
     ("imported_root_aliased", "from aipass.demo.apps.config import ROOT as R\n\nJ = R / 'demo_json'\n", [3]),
+    ("imported_root_to_dot_dir", "from aipass.demo.apps.config import ROOT\n\nS = ROOT / '.sentry'\n", []),
     ("imported_root_to_templates", "from aipass.demo.apps.config import ROOT\n\nT = ROOT / 'templates'\n", []),
     ("imported_root_to_runtime_file", "from aipass.demo.apps.config import ROOT\n\nD = ROOT / 'demo_data.json'\n", [3]),
     ("imported_root_to_shipped_file", "from aipass.demo.apps.config import ROOT\n\nD = ROOT / 'README.md'\n", []),

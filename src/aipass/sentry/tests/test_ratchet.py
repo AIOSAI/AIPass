@@ -3,7 +3,7 @@
 # Description: Template v1 — the ratchet verb, its pick and its series
 # Version: 1.4.0
 # Created: 2026-10-12
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/ratchet.py and the handlers it drives."""

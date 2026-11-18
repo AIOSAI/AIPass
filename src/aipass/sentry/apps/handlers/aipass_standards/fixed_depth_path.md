@@ -19,8 +19,8 @@ is wrong there.
   `src/aipass/<branch>/apps/handlers/x/y.py` is the repo root in a checkout and the
   interpreter's `lib/` directory on a wheel.
 - **State is not shipped.** The wheel is built from `src/aipass` and skips what git ignores:
-  dot paths, `logs/`, `system_logs/`, `*_json/`. A climb to a branch root joined to one of
-  them writes logs and JSON state into the installed package.
+  `logs/`, `system_logs/`, `*_json/`. A climb to a branch root joined to one of them writes
+  logs and JSON state into the installed package. A branch's own dot folders are not that state.
 
 ---
 
@@ -48,6 +48,11 @@ A site is convicted when:
    `p.joinpath("x_json")`, where the first segment is a dot name, `logs`, `system_logs`, ends `_json`, or is
    named by the repo `.gitignore` at the place the climb lands (`trigger/trigger_data.json`, `artifacts/`).
    A climb that already left the package is reported once, as (1).
+
+A dot folder at the branch's own root (`.trinity`, `.sentry`, `.ai_mail.local`, `.daemon`) passes. It is part of
+the branch folder and stays there on an install: the gitignored ones are the citizen's own stored files, the
+tracked ones ship with the code, and neither is runtime output. A dot folder reached above the branch
+(`parents[4] / ".ai_central"`) or below its root is still convicted.
 
 ### What It Cannot See
 
