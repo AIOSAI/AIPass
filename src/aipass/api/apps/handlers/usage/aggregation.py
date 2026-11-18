@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: aggregation.py
 # Description: Usage Aggregation Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2025-11-15
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """Usage Aggregation Handler"""
@@ -11,16 +11,15 @@
 from typing import Dict, Any
 
 import json
-from pathlib import Path
 
-from aipass.prax import logger
+from aipass.prax import branch_state_root, logger
 
 from aipass.api.apps.handlers.json import json_handler
 
 
 MODULE_NAME = "aggregation"
 DATA_FILE = "usage_tracker_data.json"  # Standard 3-file pattern
-API_JSON_DIR = Path(__file__).resolve().parent.parent.parent.parent / "api_json"
+API_JSON_DIR = branch_state_root("api") / "api_json"
 
 
 def get_overall_stats() -> Dict[str, Any]:

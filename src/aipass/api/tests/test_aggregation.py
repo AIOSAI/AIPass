@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_aggregation.py
 # Description: Tests for usage aggregation handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-05-12
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/usage/aggregation.py, the usage aggregation handler."""
@@ -13,11 +13,13 @@
 # sentry: no-test-needed(constant) — MODULE_NAME and DATA_FILE's text; the tests read the file by that name
 # sentry: no-test-needed(json_handler) — API_JSON_DIR's real location; every test redirects it into the sandbox
 
+import importlib.util
 import json
 from pathlib import Path
 
 import pytest
 
+from aipass.api.apps.handlers.usage import aggregation
 from aipass.api.apps.handlers.usage.aggregation import (  # sentry test_coverage detection
     get_overall_stats,
     get_caller_usage,
@@ -25,6 +27,16 @@ from aipass.api.apps.handlers.usage.aggregation import (  # sentry test_coverage
 )
 
 _AGG_MOD = "aipass.api.apps.handlers.usage.aggregation"
+
+
+def test_api_json_dir_is_under_the_state_root(monkeypatch, tmp_path):
+    """API_JSON_DIR is <state root>/api/api_json; set at import, so a private copy is executed under a test root."""
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+    spec = importlib.util.spec_from_file_location("_aggregation_probe", aggregation.__file__)
+    assert spec and spec.loader
+    probe = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(probe)
+    assert probe.API_JSON_DIR == tmp_path / "api" / "api_json"
 
 
 def _write_usage_file(directory: Path, data: dict) -> Path:

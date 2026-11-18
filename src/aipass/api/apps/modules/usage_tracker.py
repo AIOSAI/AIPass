@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: usage_tracker.py
 # Description: Usage Tracking Module
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2025-11-15
-# Modified: 2026-10-24
+# Modified: 2026-11-17
 # =============================================
 
 """Usage Tracking Module"""
@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from typing import List, Optional
-from aipass.prax import logger
+from aipass.prax import branch_state_root, logger
 from aipass.cli import console, header, success, error, warning
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.usage import tracking, aggregation, cleanup
@@ -220,8 +220,7 @@ def cleanup_data(args: List[str], data_path: Optional[Path] = None):
     console.print()
 
     if data_path is None:
-        API_JSON_DIR = Path(__file__).resolve().parent.parent.parent / "api_json"
-        data_path = API_JSON_DIR / "usage_tracker_data.json"
+        data_path = branch_state_root("api") / "api_json" / "usage_tracker_data.json"
 
     if not data_path.exists():
         warning("No usage data file found — nothing to clean")

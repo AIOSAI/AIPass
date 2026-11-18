@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_usage_tracker.py
 # Description: Tests for usage tracker module
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-24
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/usage_tracker.py, API usage monitoring orchestration."""
@@ -326,6 +326,21 @@ def test_cleanup_without_a_store_warns_and_writes_nothing(mock_header, mock_succ
     mock_warning.assert_called_once_with("No usage data file found — nothing to clean")
     mock_success.assert_not_called()
     assert not store.exists()
+
+
+@patch(f"{PATCH_ROOT}.success")
+@patch(f"{PATCH_ROOT}.header")
+def test_cleanup_default_store_is_under_the_state_root(mock_header, mock_success, monkeypatch, tmp_path):
+    """No data_path: the store is <state root>/api/api_json, not a folder counted up from the module file."""
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+    store = tmp_path / "api" / "api_json" / "usage_tracker_data.json"
+    store.parent.mkdir(parents=True)
+    store.write_text("{}", encoding="utf-8")
+
+    with patch.object(cleanup_handler, "cleanup_old_data", return_value=0) as mock_old:
+        usage_tracker.cleanup_data(["45"])
+
+    mock_old.assert_called_once_with(store, 45)
 
 
 @patch(f"{PATCH_ROOT}.error")
