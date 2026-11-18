@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: machine_route.py
 # Description: Host API Machine Process Route — GET /v1/machine/processes, hung on the app
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-16
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 # pyright: reportMissingImports=false, reportInvalidTypeForm=false, reportOptionalCall=false
 # The suppressions cover the optional-dependency placeholders, as in server.py:
@@ -65,7 +65,7 @@ def register(
         try:
             return host_machine.read_processes(limit)
         except host_machine.MachineRefused as e:
-            raise logged_denial(e, 503, "machine_refused", reason=e.reason) from e
+            raise logged_denial(e, 503, "machine_refused", e.denial_level, reason=e.reason) from e
         except host_machine.MachineDoorFailed as e:
             # machine.py logged the particulars; the handset gets the fixed sentence.
             raise deny(503, "machine_door_failed", host_machine.PROCESSES_DOOR_FAILED) from e

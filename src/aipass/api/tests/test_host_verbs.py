@@ -547,6 +547,17 @@ class TestTheLockVerbLogsByTheOwnersTable:
         log.error.assert_not_called()
         log.warning.assert_not_called()
 
+    def test_a_lock_that_ran_while_reported_off_logs_an_error_and_answers_the_same(self) -> None:
+        """Off and still worked is the switch failing: error, never info, and the answer is untouched."""
+        answer = {"locked": True, "method": "loginctl", "session": "3", "reason": SCREEN_LOCK_REASON_SWITCHED_OFF}
+        with patch(PATCH_VERBS_JSON), patch(PATCH_VERBS_LOGGER) as log, patch(PATCH_SKILL_LOCK, return_value=answer):
+            result = host_verbs.lock_screen()
+
+        assert result == {"ok": True, "detail": "Screen locked via loginctl", "method": "loginctl", "session": "3"}
+        assert log.error.call_args.args[-1] == "loginctl"
+        log.info.assert_not_called()
+        log.warning.assert_not_called()
+
     def test_a_lock_with_no_error_text_still_says_something(self, quiet: Any) -> None:
         """A falsy 'locked' with an empty error must not render as a blank chip."""
         with patch.object(host_verbs, "skills") as skill:

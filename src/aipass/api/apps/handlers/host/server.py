@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: server.py
 # Description: Host API Server Handler — FastAPI app factory, auth dependency
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-08-14
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 # pyright: reportMissingImports=false, reportInvalidTypeForm=false, reportOptionalCall=false
 # pyright: reportArgumentType=false
@@ -112,9 +112,9 @@ def _deny(status: int, code: str, message: str, **extra: Any) -> Any:
     return HTTPException(status_code=status, detail={"error": error})
 
 
-def _logged_denial(error: Exception, status: int, code: str, **extra: Any) -> Any:
+def _logged_denial(error: Exception, status: int, code: str, level: str = "warning", **extra: Any) -> Any:
     """`_deny` for a caught exception: its words go to the host log under `ref`, the client gets the code's sentence."""
-    ref = host_denials.logged(error, status, code)
+    ref = host_denials.logged(error, status, code, level)
     return _deny(status, code, host_denials.SENTENCES[code], ref=ref, **extra)
 
 
@@ -622,7 +622,7 @@ def create_app() -> Any:
         try:
             return host_machine.read_machine()
         except host_machine.MachineRefused as e:
-            raise _logged_denial(e, 503, "machine_refused", reason=e.reason) from e
+            raise _logged_denial(e, 503, "machine_refused", e.denial_level, reason=e.reason) from e
         except host_machine.MachineDoorFailed as e:
             raise _deny(503, "machine_door_failed", str(e)) from e
 

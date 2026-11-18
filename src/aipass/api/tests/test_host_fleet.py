@@ -43,6 +43,8 @@ from aipass.skills import (
     SCREEN_LOCK_REASON_NO_SESSION,
     SCREEN_LOCK_REASON_READ_FAILED,
     SYSTEM_STATUS_PSUTIL_RECIPE,
+    SYSTEM_STATUS_REASON_SWITCH_UNREADABLE,
+    SYSTEM_STATUS_REASON_SWITCHED_OFF,
     SYSTEM_STATUS_REASONS,
     SYSTEM_STATUS_SECTIONS,
 )
@@ -1014,6 +1016,14 @@ PATCH_CACHE_JSON = "aipass.api.apps.handlers.host.read_cache.json_handler"
 PATCH_VITALS_DOOR = "aipass.skills.machine_vitals"
 
 
+PATCH_DENIALS_LOGGER = "aipass.api.apps.handlers.host.denials.logger"
+
+
+def _levels_called(log: Any) -> set:
+    """Which of a patched logger's level methods were called."""
+    return {level for level in ("debug", "info", "warning", "error") if getattr(log, level).called}
+
+
 def _present(**values: Any) -> dict:
     """A section that answered, in the skill's published shape."""
     return {"available": True, "reason": None, "sentence": None, "detail": None, **values}
@@ -1090,7 +1100,8 @@ class TestTheMachineRoute:
         ("reason", "detail"),
         [
             ("psutil_missing", SYSTEM_STATUS_PSUTIL_RECIPE),
-            ("switched_off", "Skill 'system_status' is switched OFF and takes no readings."),
+            (SYSTEM_STATUS_REASON_SWITCHED_OFF, "Skill 'system_status' is switched OFF and takes no readings."),
+            (SYSTEM_STATUS_REASON_SWITCH_UNREADABLE, "The switch state could not be read, so the skill is OFF."),
             ("a_code_from_the_future", "a refusal this server has never seen"),
         ],
     )
@@ -1120,6 +1131,26 @@ class TestTheMachineRoute:
         }
         assert re.fullmatch("[0-9a-f]{12}", error["ref"])
         assert detail not in response.text
+
+    @pytest.mark.parametrize(
+        ("reason", "handler_level", "denial_level"),
+        [
+            (SYSTEM_STATUS_REASON_SWITCHED_OFF, "info", "info"),
+            (SYSTEM_STATUS_REASON_SWITCH_UNREADABLE, "error", "warning"),
+            ("psutil_missing", "warning", "warning"),
+        ],
+    )
+    def test_a_refusal_logs_by_the_owners_table_on_both_sites(
+        self, client, auth: dict, machine_door, reason: str, handler_level: str, denial_level: str
+    ) -> None:
+        """A deliberate off is the switch working: info on both lines, no warning, no error."""
+        machine_door.return_value = {"ok": False, "reason": reason, "detail": "words"}
+
+        with patch(PATCH_MACHINE_LOGGER) as handler_log, patch(PATCH_DENIALS_LOGGER) as denial_log:
+            assert client.get("/v1/machine", headers=auth).status_code == 503
+
+        assert _levels_called(handler_log) == {handler_level}
+        assert _levels_called(denial_log) == {denial_level}
 
     def test_a_door_that_raises_is_a_503_naming_it_not_a_500(self, client, auth: dict, machine_door) -> None:
         """

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: verbs.py
 # Description: Host API Verb Handler — wake, kill, lock and new-project, each a proxy
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-14
 # Modified: 2026-11-17
 # =============================================
@@ -150,8 +150,11 @@ def lock_screen() -> Dict[str, Any]:
     json_handler.log_operation("host_api_verb_lock", {"locked": locked, "method": method})
 
     if locked:
-        logger.info("[host_api] screen locked via %s", method)
         detail = f"Screen locked via {method}" if method else "Screen locked"
+        if result.get("reason") == skills.SCREEN_LOCK_REASON_SWITCHED_OFF:
+            logger.error("[host_api] screen locked via %s although @skills reports screen_lock switched off", method)
+        else:
+            logger.info("[host_api] screen locked via %s", method)
     elif result.get("reason") == skills.SCREEN_LOCK_REASON_SWITCHED_OFF:
         detail = _sentence(result.get("error")) or "The skill reported no detail"
         logger.info("[host_api] screen lock refused, the skill is switched off: %s", detail)

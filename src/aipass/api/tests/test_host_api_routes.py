@@ -38,6 +38,7 @@ from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import settings as host_settings
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.tests.support_host_api import FakeBaud, agent_row
+from aipass.skills import SYSTEM_STATUS_REASON_SWITCH_UNREADABLE, SYSTEM_STATUS_REASON_SWITCHED_OFF
 
 # The patch target stays this file's own constant: sentry's discarded_patch
 # rule reads a target imported from this branch's package as one it judges,
@@ -793,18 +794,26 @@ class TestTheMachineProcessesRoute:
         door.assert_not_called()
 
     @pytest.mark.parametrize(
-        ("reason", "detail"),
+        ("reason", "detail", "levels"),
         [
-            ("psutil_missing", "pip install psutil, the recipe"),
-            ("switched_off", "Skill 'system_status' is switched OFF and takes no readings."),
+            ("psutil_missing", "pip install psutil, the recipe", ({"warning"}, {"warning"})),
+            (SYSTEM_STATUS_REASON_SWITCHED_OFF, "Skill 'system_status' is switched OFF.", ({"info"}, {"info"})),
+            (SYSTEM_STATUS_REASON_SWITCH_UNREADABLE, "The switch state could not be read.", ({"error"}, {"warning"})),
         ],
     )
-    def test_a_refusal_maps_the_way_the_vitals_refusal_does(self, processes: Any, reason: str, detail: str) -> None:
-        """ok False: 503 machine_refused, the code in `reason`, the fixed sentence, the detail off the wire."""
-        api, read, door, _ = processes
+    def test_a_refusal_maps_the_way_the_vitals_refusal_does(
+        self, processes: Any, reason: str, detail: str, levels: tuple
+    ) -> None:
+        """503 machine_refused with the code, sentence and ref; logged by the owner's table on both sites."""
+        api, read, door, handler_log = processes
         door.return_value = {"ok": False, "reason": reason, "detail": detail}
 
-        response = api.get("/v1/machine/processes", headers=read)
+        with patch(PATCH_DENIALS_LOGGER) as denial_log:
+            response = api.get("/v1/machine/processes", headers=read)
+
+        called = ("debug", "info", "warning", "error")
+        assert {name for name in called if getattr(handler_log, name).called} == levels[0]
+        assert {name for name in called if getattr(denial_log, name).called} == levels[1]
 
         assert response.status_code == 503
         error = response.json()["error"]

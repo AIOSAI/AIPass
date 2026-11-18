@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: denials.py
 # Description: Host API Denials — the fixed sentence a client gets, the words the log keeps
-# Version: 1.0.4
+# Version: 1.1.0
 # Created: 2026-10-10
-# Modified: 2026-11-05
+# Modified: 2026-11-17
 # =============================================
 
 """Host API Denials
@@ -56,9 +56,11 @@ class UnavailableHTTPException(Exception):
         self.detail = detail
 
 
-def logged(error: BaseException, status: int, code: str) -> str:
-    """Keep a caught exception's words in this host's log, under a fresh ref."""
+def logged(error: BaseException, status: int, code: str, level: str = "warning") -> str:
+    """Keep a caught exception's words in this host's log at *level* ("info" or "warning"), under a fresh ref."""
+    if level not in ("info", "warning"):
+        raise ValueError(f"denials.logged takes level 'info' or 'warning', not {level!r}")
     ref = uuid.uuid4().hex[:12]
-    logger.warning("[host_api] %s %s refused (ref %s): %s", status, code, ref, error, exc_info=error)
+    getattr(logger, level)("[host_api] %s %s refused (ref %s): %s", status, code, ref, error, exc_info=error)
     json_handler.log_operation("host_api_denied", {"status": status, "code": code, "ref": ref})
     return ref

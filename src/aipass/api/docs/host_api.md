@@ -79,8 +79,8 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `GET /v1/rooms?project=` | read | A filter over that same snapshot — never a room judgment of its own |
 | `GET /v1/projects` | read | @baud's project census — the switcher menu's rows, unchanged |
 | `GET /v1/roster` | read | Every working agent in **every** project, rows with live state as /v1/fleet's. Takes no parameters — any is a 400, never a silent drop |
-| `GET /v1/machine` | read | @skills' `machine_vitals()`, **verbatim**: `ok`, `schema`, `sampled_at` and nine sections (cpu, load, memory, swap, temp, fan, network, processes, battery), each carrying `available`/`reason`/`sentence`/`detail`. 1 s single-flight cache; a fresh server's first read shows cpu and network `warming`. An absent reading is a **200** with its section, never a zero; **503** only when the skill refused (`psutil_missing`, `switched_off`: code in `error.reason`, detail in the host log) or its door failed (`machine_door_failed`). No parameters; any is a 400 |
-| `GET /v1/machine/processes?limit=20` | read | @skills' `machine_processes(limit)`, **verbatim**. A real ~0.5 s CPU sample, uncached: ask on open, never poll. `limit` as sent (the skill clamps); not a number is a 400. Refusals as `/v1/machine` |
+| `GET /v1/machine` | read | @skills' `machine_vitals()`, **verbatim**: `ok`, `schema`, `sampled_at` and nine sections (cpu, load, memory, swap, temp, fan, network, processes, battery), each carrying `available`/`reason`/`sentence`/`detail`. 1 s single-flight cache; a new server's first read: cpu, network `warming`. An absent reading is a **200** with its section, never a zero; **503** only when the skill refused (code in `error.reason`; logged `switched_off` info, `switch_unreadable` error, else warning) or its door failed (`machine_door_failed`). No parameters; any is a 400 |
+| `GET /v1/machine/processes?limit=20` | read | @skills' `machine_processes(limit)`, **verbatim**. A ~0.5 s CPU sample, uncached: ask on open, never poll. `limit` as sent (the skill clamps); not a number is a 400. Refusals as `/v1/machine` |
 | `GET /v1/lock` | read | @skills' `lock_state()`, **verbatim**: `ok`, `locked`, `method`, `session`, `reason`, `detail`. 1 s single-flight cache. Cannot tell (`ok: false`, `locked: null`) is a **200**, drawn unknown, never unlocked; **503** `lock_door_failed` only when the door raised or broke its shape. No parameters; any is a 400 |
 | `GET /v1/memory-config?branch=` | read | @memory's limits. No branch = the fleet view; a branch = that one |
 | `POST /v1/memory-config/set` | operate | `{branch, type, count}` — one branch's override. 1–100 |
@@ -88,7 +88,7 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `POST /v1/memory-config/push` | operate | Empty body. What actually delivers a default everywhere |
 | `POST /v1/verbs/wake` | operate | `{branch, project, message?, fresh?}` → `@ai_mail dispatch wake` |
 | `POST /v1/verbs/kill` | operate | `{branch, project}` → `baud --end-room`. Returns `room` and `ended` |
-| `POST /v1/verbs/lock` | operate | Empty body. Proxied to `@skills`' screen_lock; refused while it is off |
+| `POST /v1/verbs/lock` | operate | Empty body. Proxied to `@skills`' screen_lock; refused while off (logged info); locked anyway: error |
 | `POST /v1/verbs/new-project` | operate | `{name, template?}` → `aipass new` + its agent. 200 `{ok, name, project, target, template, agent, agent_home, detail}`; 400 `project_name_refused`/`template_refused`/`project_refused`, 409 `project_exists`, 503 `project_door_failed` |
 | `POST /v1/backup/run` | operate | `{project, lane}` → **202** the running job. Lanes `snapshot`, `all`, `drive_sync`. Same lane running: **400**. See [host_backup.md](host_backup.md) |
 | `POST /v1/backup/cancel` | operate | `{project, lane}` → **200** `{project, lane, stopped, message}`. Nothing running: **404** `not_running` |

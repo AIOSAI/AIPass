@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: machine.py
 # Description: Host API Machine Handler — the phone's vitals and process list, proxied from @skills
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-09-13
 # Modified: 2026-11-17
 # =============================================
@@ -36,10 +36,16 @@ _vitals = ReadCache("machine_vitals", MACHINE_TTL_SECONDS)
 class MachineRefused(Exception):
     """The skill refused the whole read."""
 
-    def __init__(self, reason: Any, detail: str) -> None:
+    def __init__(self, reason: Any, detail: str, deliberate_off: bool = False) -> None:
         super().__init__(detail)
         self.reason = reason
         self.detail = detail
+        self.deliberate_off = deliberate_off
+
+    @property
+    def denial_level(self) -> str:
+        """The level a route logs its denial at: a deliberate off is the switch working, so info."""
+        return "info" if self.deliberate_off else "warning"
 
 
 class MachineDoorFailed(Exception):
@@ -71,10 +77,8 @@ def read_processes(limit: int) -> Dict[str, Any]:
     # A success carries no `ok`; only an explicit False is a refusal.
     if answer.get("ok") is False:
         reason = answer.get("reason")
-        detail = answer.get("detail")
-        logger.warning("[host_api] @skills refused the process read: %s", reason)
         json_handler.log_operation("host_api_processes_refused", {"reason": reason})
-        raise MachineRefused(reason, detail if isinstance(detail, str) and detail else NO_DETAIL)
+        raise _refused("process", reason, answer.get("detail"))
 
     return answer
 
@@ -107,9 +111,21 @@ def _ask_the_skill() -> Dict[str, Any]:
 
     if not ok:
         reason = vitals.get("reason")
-        detail = vitals.get("detail")
-        logger.warning("[host_api] @skills refused the machine read: %s", reason)
         json_handler.log_operation("host_api_machine_refused", {"reason": reason})
-        raise MachineRefused(reason, detail if isinstance(detail, str) and detail else NO_DETAIL)
+        raise _refused("machine", reason, vitals.get("detail"))
 
     return vitals
+
+
+def _refused(read: str, reason: Any, detail: Any) -> MachineRefused:
+    """Log a refusal by the owner's table, then the exception to raise: a deliberate off is info, never a fault."""
+    from aipass.skills import SYSTEM_STATUS_REASON_SWITCH_UNREADABLE, SYSTEM_STATUS_REASON_SWITCHED_OFF
+
+    deliberate_off = reason == SYSTEM_STATUS_REASON_SWITCHED_OFF
+    if deliberate_off:
+        logger.info("[host_api] @skills refused the %s read: system_status is switched off", read)
+    elif reason == SYSTEM_STATUS_REASON_SWITCH_UNREADABLE:
+        logger.error("[host_api] @skills refused the %s read: system_status' switch state is unreadable", read)
+    else:
+        logger.warning("[host_api] @skills refused the %s read: %s", read, reason)
+    return MachineRefused(reason, detail if isinstance(detail, str) and detail else NO_DETAIL, deliberate_off)
