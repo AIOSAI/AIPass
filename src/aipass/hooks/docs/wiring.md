@@ -35,17 +35,23 @@ Provider settings are protected files (`modules/protected_paths.py`, enforced by
 | Event | Hooks | Description |
 |---|---|---|
 | UserPromptSubmit | presence_gate, persistent_alert, identity, email, branch_loader, tier0_kernel, navmap, compass_recall, feedback_pulse, context_gauge, temporal, auto_process | Presence gate + alerts + prompt injection + inbox + governance recall + feedback + context gauge + temporal + auto-process |
-| PreToolUse | tool_sound, edit_gate, git_gate, rm_gate, testwrite_gate, registry_gate | Security gates + guardrails + sound. `edit_gate` reads Bash too (the scripted cross-project lane — see [bash_writes.md](bash_writes.md)) |
-| PostToolUse | auto_fix, post_compact_regrounding | Diagnostics + post-compaction re-ground backstop |
+| PreToolUse | tool_sound, edit_gate, git_gate, rm_gate, testwrite_gate, registry_gate, trinity_tripwire_snapshot, settings_gate, settings_backup | Security gates + guardrails + settings accept and backup + sound. `edit_gate` reads Bash too (the scripted cross-project lane — see [bash_writes.md](bash_writes.md)) |
+| PostToolUse | trinity_tripwire, auto_fix, navmap_cap, comment_budget, test_template_pointer, post_compact_regrounding | .trinity tripwire + diagnostics + navmap cap + comment budget + test template pointer + post-compaction re-ground backstop |
+| PostCompact | post_compact_regrounding | Re-ground after a compact |
 | SubagentStop | subagent_gate | Sentry validation |
-| Stop | stop_sound, presence_release | Bell + presence release |
+| Stop | grounding_receipt, stop_sound, presence_release, watchdog_wire_gate | Grounding receipt + stop sound + presence release + watchdog wire gate |
 | Notification | announce | Announcement tone |
-| SessionStart | cadence_reset | Cadence reset on new chat / clear |
+| SessionStart | cadence_reset, release_notice, culture, session_pointer | Cadence reset + release notice + culture + resume pointer |
 | PreCompact | compact, rollover, pre_compact_prep, auto_process | Memory archival + rollover + mechanical snapshot stamp + inbox/task processing |
 
-That table mixes handler filenames with `hooks.json` entry names, because two of the names are not
-handler files in this branch. `presence_release` is a hooks.json entry name pointing at `security/presence_gate.py:handle_stop`.
+That table mixes handler filenames with `hooks.json` entry names, because several of the names are
+not handler files in this branch. `presence_release` is a hooks.json entry name pointing at `security/presence_gate.py:handle_stop`.
 `cadence_reset` is likewise an entry name — the handler file is `lifecycle/session_start.py`.
+So are `trinity_tripwire` and `trinity_tripwire_snapshot` (`security/edit_gate.py:tripwire`,
+`:tripwire_snapshot`), `test_template_pointer` (`security/testwrite_gate.py:template_pointer`),
+`grounding_receipt` (`prompt/context_gauge.py:handle_stop`), `culture` and `session_pointer`
+(`lifecycle/session_start.py:handle_culture`, `:handle_session_pointer`). `watchdog_wire_gate` is
+@devpulse's handler (`aipass.devpulse.apps.modules.watchdog.hook_stop`), dispatched by this engine.
 `feedback_pulse` is wired but `enabled: false` in this repo, so it is listed and does not fire.
 
 Entry name and filename diverge for others too (`pre_edit_gate` → `security/edit_gate.py`,

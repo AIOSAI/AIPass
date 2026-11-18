@@ -122,9 +122,11 @@ It reaches the model as PostToolUse `additionalContext` — plain stdout would o
 event. A defect in the pointer costs the line and nothing else: it runs after the write, so it is a
 courtesy, never a wall.
 
-**Wiring:** it needs its own PostToolUse entry in the project's `.aipass/hooks.json`, a project-level
-file and therefore @devpulse's to apply. That file carries no such entry, so the handler is built,
-tested and not wired.
+**Wiring:** the AIPass `.aipass/hooks.json` runs it as the PostToolUse entry `test_template_pointer`
+(matcher `Edit|MultiEdit|Write|NotebookEdit|Bash`, timeout 10), beside `comment_budget`. PostToolUse
+is a fan-out event, so that entry alone makes it live; no provider-settings entry is needed. It runs on
+every matching tool call and says nothing unless the call touched a `tests/` tree with a page. The
+project template does not carry it (framework-only, see [project_config.md](project_config.md)).
 
 ---
 
