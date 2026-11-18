@@ -1,13 +1,14 @@
 # =================== AIPass ====================
 # Name: repo_root.py
 # Description: Repo-Root Resolution That Never Reads The Process CWD
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-31
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Repo-root walk that never reads the process cwd: it runs at import time inside logger construction, so trail only."""
 
+import os
 from pathlib import Path, PurePath
 from typing import Optional
 
@@ -40,12 +41,25 @@ def _walk_to_source_root(anchor: PurePath) -> PurePath:
     return anchor.parents[-1]
 
 
+def _disk_has(path: Path) -> bool:
+    """The disk's own answer, which a case-blind disk (WSL /mnt/c) gives for any case of the name."""
+    return path.exists()
+
+
+def _holds_marker(directory: Path) -> bool:
+    """The marker by its exact name: exists() says yes to aipass_registry.json on a case-blind disk."""
+    if not _disk_has(directory / REGISTRY_MARKER):
+        return False
+    with os.scandir(directory) as entries:
+        return any(entry.name == REGISTRY_MARKER for entry in entries)
+
+
 def find_repo_root(start: Optional[Path] = None) -> Path:
     """Find the repo root by marker, falling back to the source root — never cwd."""
     anchor = start if (start is not None and start.is_absolute()) else _THIS_FILE
     for parent in [anchor] + list(anchor.parents):
         try:
-            if (parent / REGISTRY_MARKER).exists():
+            if _holds_marker(parent):
                 return parent
         except OSError as exc:
             # Unreadable is not "no repo here": keep walking.

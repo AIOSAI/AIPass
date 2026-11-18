@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: load.py
 # Description: Load Logging Configuration Handler
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2025-11-07
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -19,15 +19,16 @@ from typing import Dict, Any, Optional, Union
 
 from aipass.prax.apps.handlers.logging.trail import PraxTrail
 from aipass.prax.apps.handlers.repo_root import find_repo_root
+from aipass.prax.apps.handlers.state_root import branch_root, is_installed, state_home
 
 # The trail, never door one: this module resolves the paths door one is built on.
 logger = PraxTrail("load")
 
 MODULE_NAME = "load"
 
-PRAX_ROOT = Path(__file__).resolve().parents[3]  # config/load.py → handlers/ → apps/ → prax/
-ECOSYSTEM_ROOT = PRAX_ROOT.parent  # prax/ → aipass/ (contains all sibling modules)
-PRAX_JSON_DIR = PRAX_ROOT / "prax_json"
+PRAX_ROOT = branch_root("prax").resolve()
+ECOSYSTEM_ROOT = PRAX_ROOT.parent
+PRAX_JSON_DIR = state_home(PRAX_ROOT) / "prax_json"
 
 
 def _find_repo_root() -> Path:
@@ -46,18 +47,14 @@ USER_SYSTEM_LOGS = Path(".aipass") / "system_logs"
 
 
 def system_logs_home(repo_root: Path) -> Path:
-    """The system_logs/ directory for a resolved repo root — never the filesystem root.
-
-    An installed package has no repo above it, so the walk ends at the filesystem
-    root (unwritable); its logs go to ``~/.aipass/system_logs`` instead.
-    """
+    """The system_logs/ for a resolved repo root; a walk that ended at the filesystem root goes to the home folder."""
     if repo_root == Path(repo_root.anchor):
         return Path.home() / USER_SYSTEM_LOGS
     return repo_root / "system_logs"
 
 
 def get_system_logs_dir() -> Path:
-    """Lazily resolve and create system_logs directory (see system_logs_home())."""
+    """Lazily resolve and create system_logs; installed by the install directories, so a venv under src/ counts."""
     test_log_dir = os.environ.get("AIPASS_TEST_LOG_DIR")
     if test_log_dir:
         p = Path(test_log_dir) / "system"
@@ -69,7 +66,7 @@ def get_system_logs_dir() -> Path:
         return p
     global _system_logs_dir_cache
     if _system_logs_dir_cache is None:
-        logs_dir = system_logs_home(_find_repo_root())
+        logs_dir = Path.home() / USER_SYSTEM_LOGS if is_installed(PRAX_ROOT) else system_logs_home(_find_repo_root())
         logs_dir.mkdir(parents=True, exist_ok=True)
         # Cache only after mkdir succeeds, or later callers get a directory never made.
         _system_logs_dir_cache = logs_dir
@@ -135,13 +132,12 @@ def get_module_logs_dir(module_name: Optional[str] = None, branch_dir: Optional[
 
     named_dir = ECOSYSTEM_ROOT / module_name
     if named_dir.exists():
-        logs_dir = named_dir / "logs"
+        logs_dir = state_home(named_dir) / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
         return logs_dir
 
-    src_root = ECOSYSTEM_ROOT.parent
-    alt_branch_dir = src_root / module_name
-    if alt_branch_dir.exists():
+    alt_branch_dir = ECOSYSTEM_ROOT.parent / module_name
+    if not is_installed(ECOSYSTEM_ROOT) and alt_branch_dir.exists():
         logs_dir = alt_branch_dir / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
         return logs_dir

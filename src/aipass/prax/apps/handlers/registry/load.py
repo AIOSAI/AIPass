@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: load.py
 # Description: Load Module Registry Handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2025-11-07
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Load Module Registry Handler"""
@@ -11,14 +11,13 @@
 import json
 from typing import Any, Dict, Optional
 
-from aipass.prax.apps.handlers.config.load import PRAX_ROOT
+from aipass.prax.apps.handlers.config.load import PRAX_JSON_DIR
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.logging.trail import PraxTrail
 
 logger = PraxTrail("registry_load")
 
 MODULE_NAME = "load"
-PRAX_JSON_DIR = PRAX_ROOT / "prax_json"
 REGISTRY_FILE = PRAX_JSON_DIR / "prax_registry.json"
 
 

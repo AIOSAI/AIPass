@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: trail.py
 # Description: JSONL trail logger for code that cannot log through prax
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-11-15
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
-"""PRAX trail, door two: a JSONL logger for code on the watched event path; stdlib plus the writer, every failure raises."""
+"""PRAX trail, door two: a JSONL logger for code on the watched event path; stdlib plus the writer, failures raise."""
 
 import os
 from datetime import datetime
@@ -14,10 +14,11 @@ from pathlib import Path
 from typing import Any, Union
 
 from aipass.prax.apps.handlers.logging.jsonl_writer import append_jsonl
+from aipass.prax.apps.handlers.state_root import branch_root, state_home
 
 _RESERVED = ("ts", "level", "msg")
 
-PRAX_LOGS = Path(__file__).resolve().parents[3] / "logs"  # logging/ -> handlers/ -> apps/ -> prax/
+PRAX_LOGS = state_home(branch_root("prax")) / "logs"
 
 
 class TrailLogger:

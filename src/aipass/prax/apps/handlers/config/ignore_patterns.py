@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ignore_patterns.py
 # Description: Load Ignore Patterns Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2025-11-07
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -13,11 +13,10 @@ Load Ignore Patterns Handler
 import json
 from typing import Set
 
-from aipass.prax.apps.handlers.config.load import PRAX_ROOT
+from aipass.prax.apps.handlers.config.load import PRAX_JSON_DIR
 from aipass.prax.apps.handlers.json import json_handler
 
 MODULE_NAME = "ignore_patterns"
-PRAX_JSON_DIR = PRAX_ROOT / "prax_json"
 PRAX_LOGGER_CONFIG_FILE = PRAX_JSON_DIR / "prax_logger_config.json"
 
 DEFAULT_IGNORE_FOLDERS = {

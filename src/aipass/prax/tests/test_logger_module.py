@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_logger_module.py
 # Description: Unit tests for PRAX logger module (public API)
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-04-03
 # Modified: 2026-11-17
 # =============================================
@@ -558,15 +558,18 @@ EXPECTED_COLD_FOOTPRINT = {
     "aipass.prax.apps.handlers.logging",
     "aipass.prax.apps.handlers.logging.jsonl_writer",
     "aipass.prax.apps.handlers.logging.trail",
+    "aipass.prax.apps.handlers.state_root",
 }
 
 # Neither stdlib nor ours: _distutils_hack comes from setuptools' .pth wherever setuptools is installed.
 _INTERPRETER_NOISE = {"__main__", "sitecustomize", "_distutils_hack"}
 
+# sysconfig's own data module is stdlib under a per-platform name that stdlib_module_names does not list.
 _FOOTPRINT_PROBE = """
 import json, sys
 from aipass.prax import json_handler  # noqa: F401
-print(json.dumps(sorted(n for n in sys.modules if n.split(".")[0] not in sys.stdlib_module_names)))
+ours = [n for n in sys.modules if n.split(".")[0] not in sys.stdlib_module_names]
+print(json.dumps(sorted(n for n in ours if not n.startswith("_sysconfigdata"))))
 """
 
 
@@ -662,11 +665,12 @@ class TestStandaloneDoors:
         assert warm == _WRITER_DOOR
 
     def test_trail_resolves_without_the_logger_module(self):
-        """Door two: trail loads its own module and the writer, nothing of the logger graph."""
+        """Door two: trail loads its own module, the writer and the state root, nothing of the logger graph."""
         cold, warm = _aipass_modules_through_the_door("trail")
 
         assert cold == {"aipass", "aipass.prax"}
-        assert warm == _WRITER_DOOR | {"aipass.prax.apps.handlers.logging.trail"}
+        trail_and_state = {"aipass.prax.apps.handlers.logging.trail", "aipass.prax.apps.handlers.state_root"}
+        assert warm == _WRITER_DOOR | trail_and_state
 
 
 _OPS = "aipass.prax.apps.handlers.dashboard.operations"
@@ -688,6 +692,7 @@ _DOOR_HOMES = {
     "get_branch_paths": ("aipass.prax.apps.handlers.dashboard.status", "get_branch_paths"),
     "refresh_single_dashboard": (_REFRESH, "refresh_single_dashboard"),
     "refresh_all_dashboards": (_REFRESH, "refresh_all_dashboards"),
+    "branch_state_root": ("aipass.prax.apps.handlers.state_root", "branch_state_root"),
 }
 
 

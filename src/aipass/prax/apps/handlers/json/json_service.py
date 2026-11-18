@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: json_service.py
 # Description: The fleet's one JSON handler service (prax-owned)
-# Version: 2.3.0
+# Version: 2.4.0
 # Created: 2026-09-03
 # Modified: 2026-11-17
 # =============================================
@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from aipass.prax.apps.handlers.logging.trail import PraxTrail
+from aipass.prax.apps.handlers.state_root import StateRootUnwritable, state_root_of, writable_dir
 
 # The trail, never door one: every branch's logger build reaches this service.
 logger = PraxTrail("json_service")
@@ -30,8 +31,7 @@ logger = PraxTrail("json_service")
 JSON_TYPES = ("config", "data", "log")
 DEFAULT_MAX_LOG_ENTRIES = 100
 
-# What open(path, "w") asks for; the umask narrows it, so a new document gets this process's usual mode.
-_NEW_DOCUMENT_MODE = 0o666
+_NEW_DOCUMENT_MODE = 0o666  # what open(path, "w") asks for: the umask narrows it to this process's usual mode
 
 _STAGE_NAME_ATTEMPTS = 8
 _ORPHAN_AGE_SECONDS = 3600
@@ -159,7 +159,7 @@ def _acquire(lock_path: Path, deadline: float) -> int:
 
     The kernel drops a dead holder's lock, so the file on disk is never stale and never inspected.
     """
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    writable_dir(lock_path.parent)
     fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, _NEW_DOCUMENT_MODE)
 
     # The kernel's blocking flock is the queue; it runs on a helper thread so the wait can have a deadline.
@@ -253,12 +253,8 @@ class JsonHandle:
 
     @property
     def json_dir(self) -> Path:
-        """The branch's json directory, computed per access so AIPASS_TEST_LOG_DIR redirects; empty is absence."""
-        name = self.branch_root.name
-        test_dir = os.environ.get("AIPASS_TEST_LOG_DIR")
-        if test_dir:
-            return Path(test_dir) / name / f"{name}_json"
-        return self.branch_root / f"{name}_json"
+        """The branch's json directory in its state folder, per access so AIPASS_TEST_LOG_DIR redirects."""
+        return state_root_of(self.branch_root) / f"{self.branch_root.name}_json"
 
     def read_json(self, file_path: Path) -> Optional[Any]:
         """Read any json document by path; None when missing or unreadable, never raises."""
@@ -452,7 +448,8 @@ class JsonHandle:
         """Append a timestamped entry to a module's operations log, then bump its data document.
 
         One exclusive lock per module holds the whole read-modify-write: writers queue and none is lost.
-        Telemetry on watchdog and display threads: a failure answers False, never raises. A misshaped
+        Telemetry on watchdog and display threads: a failure answers False, never raises, save one case:
+        a state folder that cannot be written raises StateRootUnwritable, naming it and the errno. A misshaped
         document on disk, or a lock not acquired (a live holder past the deadline, or this thread
         already holding it), is logged at ERROR.
         """
@@ -482,6 +479,8 @@ class JsonHandle:
                 self._bump_data(module_name, operation)
             finally:
                 _give(lock_path, lock_fd)
+        except StateRootUnwritable:
+            raise
         except LockTimeout as exc:
             logger.error(
                 "json_service: log_operation lock not acquired",

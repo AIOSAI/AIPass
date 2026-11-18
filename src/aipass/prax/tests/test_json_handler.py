@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_json_handler.py
 # Description: Tests for the fleet json service through prax's own shim
-# Version: 2.4.0
+# Version: 2.5.0
 # Created: 2026-03-28
 # Modified: 2026-11-17
 # =============================================
@@ -16,12 +16,17 @@
 import json
 import os
 import stat
+import subprocess
+import sys
+import sysconfig
 import time
 from datetime import date
+from pathlib import Path
 
 import pytest
 
 import aipass.prax
+from aipass.prax.apps.handlers import state_root
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.json import json_service
 from aipass.prax.apps.handlers.monitoring import rate_tracker
@@ -78,6 +83,23 @@ class TestForModule:
         assert resolved.branch_root == link
         assert resolved.branch_root.name == "linked_branch"
 
+    @pytest.mark.parametrize(
+        ("caller", "root"),
+        [
+            pytest.param("hooks/.live-20261118T002411Z/handlers/json/json_handler.py", "hooks", id="hooks-snapshot"),
+            pytest.param(
+                "spawn/templates/citizen/apps/handlers/json/json_handler.py", "spawn/templates/citizen", id="template"
+            ),
+            pytest.param("prax/apps/handlers/monitoring/rate_tracker.py", "prax", id="rate-tracker"),
+            pytest.param("flow/apps/handlers/json/json_handler.py", "flow", id="branch-shim"),
+        ],
+    )
+    def test_every_caller_layout_in_the_fleet_gets_its_branch_root(self, tmp_path, caller, root):
+        """The hook engine runs its shim from a snapshot with no apps/: a root it cannot get refuses every tool."""
+        resolved = json_service.for_module(tmp_path / caller)
+
+        assert resolved.branch_root == tmp_path / root
+
 
 class TestTheJsonDirectoryIsResolvedPerCall:
     """AIPASS_TEST_LOG_DIR, in trigger's form, honoured on every access."""
@@ -125,6 +147,116 @@ class TestTheJsonDirectoryIsResolvedPerCall:
         built = resolved.get_json_path("probe", "config")
 
         assert built == tmp_path / "prax" / "prax_json" / "probe_config.json"
+
+
+_STATE_PROBE = """
+import json, sys, sysconfig
+from pathlib import Path
+if sys.argv[1]:
+    real = sysconfig.get_paths
+    sysconfig.get_paths = lambda *a, **k: {**real(*a, **k), "purelib": sys.argv[1], "platlib": sys.argv[1]}
+from aipass.prax import branch_state_root
+from aipass.prax.apps.handlers.config import load
+from aipass.prax.apps.handlers.json import json_handler, json_service
+from aipass.prax.apps.handlers.logging import trail
+from aipass.prax.apps.handlers.monitoring import instance_lock
+print(json.dumps({
+    "trail": str(trail.PRAX_LOGS),
+    "prax_json": str(load.PRAX_JSON_DIR),
+    "lock": str(instance_lock.get_lock_path()),
+    "json_dir": str(json_service.for_module(json_handler.__file__).json_dir),
+    "door": str(branch_state_root("prax")),
+    "flow_logs": str(load.get_module_logs_dir("flow")),
+    "system_logs": str(load.get_system_logs_dir()),
+}))
+"""
+
+
+def _state_paths(home: Path, install_dir: str = "") -> dict:
+    """Every prax state path a fresh interpreter answers, with install_dir posing as purelib and platlib."""
+    env = {k: v for k, v in os.environ.items() if k not in ("AIPASS_TEST_LOG_DIR", "PYTEST_CURRENT_TEST")}
+    result = subprocess.run(
+        [sys.executable, "-c", _STATE_PROBE, install_dir],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={**env, "HOME": str(home)},
+        timeout=120,
+    )
+    assert result.returncode == 0, f"probe failed: {result.stderr}"
+    return {key: Path(value) for key, value in json.loads(result.stdout.strip().splitlines()[-1]).items()}
+
+
+_PRAX = Path(aipass.prax.__path__[0]).resolve()
+
+
+class TestTheStateRoot:
+    """Where a branch keeps logs/ and <branch>_json/: beside its code, or ~/.aipass/state when installed."""
+
+    def test_a_checkout_keeps_every_path_it_had(self, tmp_path):
+        """Not one byte moves for a checkout or an editable install, whatever HOME says."""
+        paths = _state_paths(tmp_path)
+
+        assert paths["trail"] == _PRAX / "logs"
+        assert paths["prax_json"] == _PRAX / "prax_json"
+        assert paths["lock"] == _PRAX / "prax_json" / "monitor.lock"
+        assert paths["json_dir"] == _PRAX / "prax_json"
+        assert paths["door"] == _PRAX
+        assert paths["flow_logs"] == _PRAX.parent / "flow" / "logs"
+        assert paths["system_logs"] == _PRAX.parents[2] / "system_logs"
+
+    def test_an_install_under_src_keeps_state_under_the_home_folder(self, tmp_path):
+        """A venv at ~/src/proj/.venv: the src/ in its path must not pass it off as a checkout."""
+        state = tmp_path / ".aipass" / "state"
+
+        paths = _state_paths(tmp_path, install_dir=str(_PRAX.parents[1]))
+
+        assert paths["trail"] == state / "prax" / "logs"
+        assert paths["prax_json"] == state / "prax" / "prax_json"
+        assert paths["lock"] == state / "prax" / "prax_json" / "monitor.lock"
+        assert paths["json_dir"] == state / "prax" / "prax_json"
+        assert paths["door"] == state / "prax"
+        assert paths["flow_logs"] == state / "flow" / "logs"
+        assert paths["system_logs"] == tmp_path / ".aipass" / "system_logs"
+
+    def test_site_packages_is_installed_and_a_checkout_is_not(self, monkeypatch, tmp_path):
+        """The install directories decide, not a folder name: the branch's name carries over to the home folder."""
+        site = tmp_path / "lib" / "site-packages"
+        installed = site / "aipass" / "flow"
+        installed.mkdir(parents=True)
+        checkout = tmp_path / "checkout" / "src" / "aipass" / "flow"
+        checkout.mkdir(parents=True)
+        monkeypatch.setattr(sysconfig, "get_paths", lambda *a, **k: {"purelib": str(site), "platlib": str(site)})
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+        assert state_root.state_home(installed) == tmp_path / "home" / ".aipass" / "state" / "flow"
+        assert state_root.state_home(checkout) == checkout
+
+    def test_the_test_folder_wins_over_an_install(self, monkeypatch, tmp_path):
+        """AIPASS_TEST_LOG_DIR first, read per call, through the door other branches take."""
+        prax_parent = str(_PRAX.parent)
+        monkeypatch.setattr(sysconfig, "get_paths", lambda *a, **k: {"purelib": prax_parent, "platlib": prax_parent})
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+
+        assert aipass.prax.branch_state_root("flow") == tmp_path / "flow"
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root writes through a read-only mode")
+    def test_an_unwritable_state_folder_raises_naming_it_and_the_errno(self, monkeypatch, tmp_path):
+        """The one raise in log_operation: with no state folder there is nowhere left to report a False."""
+        locked = tmp_path / "locked"
+        locked.mkdir()
+        locked.chmod(0o500)
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(locked))
+        handle = json_service.for_module(json_handler.__file__)
+
+        try:
+            with pytest.raises(state_root.StateRootUnwritable) as raised:
+                handle.log_operation("doomed", module_name="ops")
+        finally:
+            locked.chmod(0o700)
+
+        assert str(locked / "prax" / "prax_json") in str(raised.value)
+        assert "EACCES" in str(raised.value)
 
 
 class TestReadJson:

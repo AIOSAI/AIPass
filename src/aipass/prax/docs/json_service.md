@@ -104,7 +104,10 @@ rather than `False` (a caller bug is not a disk failure). `write_json` answers
 `bool`. `log_operation` is telemetry and answers `False` on a write failure or a
 refused document (logged at ERROR, the file untouched) — it runs on the
 monitor's display and watchdog threads, where a raising writer is silent
-half-death.
+half-death. One case raises: a state folder that cannot be created or written
+raises `StateRootUnwritable` (an `OSError`), its message naming the folder and
+the errno (`EACCES`, `EROFS`). With no folder there is nowhere left to report a
+`False` through.
 
 ## Write rules
 
@@ -143,12 +146,30 @@ itself:
 ```python
 @property
 def json_dir(self) -> Path:                      # json_service.py
-    name = self.branch_root.name
+    return state_root_of(self.branch_root) / f"{self.branch_root.name}_json"
+
+def state_root_of(branch_root: Path) -> Path:    # apps/handlers/state_root.py
     test_dir = os.environ.get("AIPASS_TEST_LOG_DIR")
     if test_dir:
-        return Path(test_dir) / name / f"{name}_json"
-    return self.branch_root / f"{name}_json"
+        return Path(test_dir) / branch_root.name
+    return state_home(branch_root)
 ```
+
+**Where state lives.** `state_home` answers the branch folder itself for a
+checkout or an editable install, and `~/.aipass/state/<branch>/` for a branch
+under this interpreter's install directories (`sysconfig` purelib or platlib; a
+venv under `~/src/` counts as installed). Under either root the names are the
+same: `logs/` and `<branch>_json/`. `system_logs/` of an install is
+`~/.aipass/system_logs`. Other branches ask the same question through the door:
+
+```python
+from aipass.prax import branch_state_root
+branch_state_root("flow") / "flow_json"
+```
+
+`for_module(__file__)` takes the branch root as `parents[3]` of the shim's
+path, which also holds for the hook engine's snapshot
+(`hooks/.live-<stamp>/handlers/json/json_handler.py` gives `hooks/`).
 
 **Resolved per call, never captured at import**, and that is the whole reason it
 works. A module-level constant cannot be redirected by a conftest that runs after

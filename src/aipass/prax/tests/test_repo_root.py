@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_repo_root.py
 # Description: Repo-Root Resolution Pins
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-08-31
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # Category: prax/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -151,6 +151,21 @@ class TestFindRepoRoot:
         (root / "src" / "aipass" / "prax").mkdir(parents=True)
         (root / repo_root_mod.REGISTRY_MARKER).write_text("{}", encoding="utf-8")
         assert repo_root_mod.find_repo_root(root / "src" / "aipass" / "prax" / "a.py") == root
+
+    def test_the_marker_is_matched_by_its_exact_name_on_a_case_blind_disk(self, tmp_path, monkeypatch):
+        """WSL's /mnt/c answers exists() for aipass_registry.json: that folder is not the repo, the real one is."""
+        outer = tmp_path / "outer"
+        inner = outer / "inner"
+        (inner / "src" / "aipass" / "prax").mkdir(parents=True)
+        (outer / repo_root_mod.REGISTRY_MARKER).write_text("{}", encoding="utf-8")
+        (inner / repo_root_mod.REGISTRY_MARKER.lower()).write_text("{}", encoding="utf-8")
+
+        def case_blind(path):
+            return any((path.parent / name).exists() for name in (path.name, path.name.lower()))
+
+        monkeypatch.setattr(repo_root_mod, "_disk_has", case_blind)
+
+        assert repo_root_mod.find_repo_root(inner / "src" / "aipass" / "prax" / "a.py") == outer
 
     def test_a_registry_less_checkout_resolves_to_the_checkout(self, tmp_path):
         """Every clean CI clone: the marker is gitignored, so it is never there."""

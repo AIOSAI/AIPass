@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_jsonl_writer.py
 # Description: Tests for PRAX JSONL writer with rotation, and the trail logger on it
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-07-10
 # Modified: 2026-11-17
 # =============================================
@@ -255,9 +255,10 @@ class TestStandalone:
         """Shipped defect: the writer imported rotation_lock from setup.py, pulling 14 prax modules."""
         assert _aipass_modules_after_importing("aipass.prax.apps.handlers.logging.jsonl_writer") == _WRITER_PACKAGES
 
-    def test_importing_trail_loads_only_the_writer_beside_it(self):
+    def test_importing_trail_loads_only_the_writer_beside_it_and_the_state_root(self):
         assert _aipass_modules_after_importing("aipass.prax.apps.handlers.logging.trail") == _WRITER_PACKAGES | {
-            "aipass.prax.apps.handlers.logging.trail"
+            "aipass.prax.apps.handlers.logging.trail",
+            "aipass.prax.apps.handlers.state_root",
         }
 
 

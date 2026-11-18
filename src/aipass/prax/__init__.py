@@ -22,6 +22,7 @@ if TYPE_CHECKING:  # each name typed from its home
     from aipass.prax.apps.handlers.json import json_service as json_handler
     from aipass.prax.apps.handlers.logging.jsonl_writer import append_jsonl as append_jsonl
     from aipass.prax.apps.handlers.logging.trail import trail as trail
+    from aipass.prax.apps.handlers.state_root import branch_state_root as branch_state_root
     from aipass.prax.apps.modules.logger import get_system_logger as get_system_logger
     from aipass.prax.apps.modules.logger import log_backup_count as log_backup_count
     from aipass.prax.apps.modules.logger import system_logger as logger
@@ -33,9 +34,11 @@ _TRAIL_MODULE = "aipass.prax.apps.handlers.logging.trail"
 _OPS_MODULE = "aipass.prax.apps.handlers.dashboard.operations"
 _REFRESH_MODULE = "aipass.prax.apps.handlers.dashboard.refresh"
 _STATUS_MODULE = "aipass.prax.apps.handlers.dashboard.status"
+_STATE_MODULE = "aipass.prax.apps.handlers.state_root"
 
 # Door name -> (home module, attribute there); None hands out the home module itself.
 _HOMES = {
+    "branch_state_root": (_STATE_MODULE, "branch_state_root"),
     "logger": (_LOGGER_MODULE, "system_logger"),
     "get_system_logger": (_LOGGER_MODULE, "get_system_logger"),
     "log_backup_count": (_LOGGER_MODULE, "log_backup_count"),
