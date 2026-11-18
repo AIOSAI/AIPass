@@ -31,8 +31,8 @@ An in-process read for callers that want data, not text - the host API's
 `/v1/machine` route proxies it verbatim and BAUD's phone draws it (FPLAN-0561).
 
 ```python
-from aipass.skills.lib.system_status import handler
-vitals = handler.machine_vitals()
+from aipass.skills import machine_vitals
+vitals = machine_vitals()
 ```
 
 - `{"ok": True, "schema": 2, "sampled_at": ...}` plus nine sections: `cpu`,
@@ -79,8 +79,8 @@ The busiest processes on the host, for "the fan is loud and no agent is
 running - what is?" (contract C-B, DPLAN-0414 theme 3).
 
 ```python
-from aipass.skills.lib.system_status import handler
-top = handler.machine_processes(20)
+from aipass.skills import machine_processes
+top = machine_processes(20)
 ```
 
 - `{"sampled_at", "window_ms", "total", "sort": "cpu", "processes": [...]}`;

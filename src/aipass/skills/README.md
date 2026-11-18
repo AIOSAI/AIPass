@@ -106,10 +106,13 @@ The same index, with the pages beside each other, is in [docs/](docs/).
 - **Agents** — discoverable capability units, through `drone`.
 - **Projects** — local skill scaffolding, written into the project's own
   `.aipass/skills/`.
-- **@api** — `machine_vitals()` from the system_status skill, relayed on the
-  host API's machine route and drawn by the phone monitor; and `lock_state()`
-  from the screen_lock skill, beside the lock verb. Both are imported
-  in-process, so both consult the off-switch themselves.
+- **@api** — `machine_vitals()` and `machine_processes()` from the
+  system_status skill, relayed on the host API's machine route and drawn by
+  the phone monitor; and `lock_state()` and `lock_screen()` from the
+  screen_lock skill, beside the lock verb. Each is imported in-process
+  through the package door, `from aipass.skills import machine_vitals`, so the
+  runner's off-switch gate never sees it: the two system_status functions
+  consult the switch themselves, the two screen_lock functions do not.
 
 ---
 

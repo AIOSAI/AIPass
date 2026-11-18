@@ -82,12 +82,12 @@ drone @skills run screen_lock state
 In-process (what the host API verb lane uses):
 
 ```python
-from aipass.skills.lib.screen_lock import handler as screen_lock
+from aipass.skills import lock_screen, lock_state
 
-result = screen_lock.lock_screen()
+result = lock_screen()
 # {"locked": True, "method": "loginctl", "session": "3", "error": None}
 
-state = screen_lock.lock_state()
+state = lock_state()
 # {"ok": True, "locked": False, "method": "loginctl", "session": "3",
 #  "reason": None, "detail": "The screen is unlocked, per logind session 3."}
 ```

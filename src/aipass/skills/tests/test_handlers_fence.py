@@ -3,27 +3,40 @@
 # Description: The handlers fence: a foreign importer is refused, kin and the modules door pass (DPLAN-0404)
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
-"""Tests for apps/handlers/__init__.py, the fence, in a fresh interpreter per case."""
+"""Tests for apps/handlers/__init__.py, the fence, in a fresh interpreter per case, and the package door __init__.py."""
 
 # The refusal banner's prose beyond the caller line is not asserted.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that apps/handlers/__init__.py parses and imports
 
+import importlib
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
+import aipass.skills as door
 from aipass.skills.tests import support_fence
 
 KIN_PROBE = Path(support_fence.__file__)
 FOREIGN_SHAPES = ["pkg", "deep", "dyn", "chain", "mock", "sibling"]
+
+# Written out by hand, not read from the door: the door's own table must agree with an independent list.
+_SCREEN_LOCK = "aipass.skills.lib.screen_lock.handler"
+_SYSTEM_STATUS = "aipass.skills.lib.system_status.handler"
+DOOR_NAMES = [
+    (_SCREEN_LOCK, "lock_state"),
+    (_SCREEN_LOCK, "lock_screen"),
+    (_SYSTEM_STATUS, "machine_processes"),
+    (_SYSTEM_STATUS, "machine_vitals"),
+]
 
 
 def _probe(seat: Path, shape: str, cwd: Path) -> str:
@@ -102,3 +115,27 @@ class TestKinAndTheDoorPass:
         apps_init = KIN_PROBE.parents[1] / "apps" / "__init__.py"
         source = apps_init.read_text(encoding="utf-8")
         assert "import handlers" not in source, source
+
+
+class TestTheFrontDoor:
+    """src/aipass/skills/__init__.py serves the four names another branch imports, each from its home on access."""
+
+    @pytest.mark.parametrize(("home", "name"), DOOR_NAMES)
+    def test_every_name_is_the_same_object_as_its_home_s(self, home, name):
+        assert getattr(door, name) is getattr(importlib.import_module(home), name)
+
+    def test_the_door_serves_exactly_the_imported_names(self):
+        assert sorted(door.__all__) == sorted(name for _, name in DOOR_NAMES)
+
+    @pytest.mark.parametrize("name", ["run", "get_actions", "resolve_graphical_session", "machine_vital"])
+    def test_an_unknown_name_raises_attribute_error_with_no_fallback(self, name):
+        with pytest.raises(AttributeError, match=name):
+            getattr(door, name)
+
+    @pytest.mark.parametrize(("home", "name"), DOOR_NAMES)
+    def test_a_patch_on_the_home_reaches_a_caller_that_read_the_door_before(self, home, name):
+        """A door that caches the first answer hands later callers the unpatched name."""
+        getattr(door, name)
+        sentinel = object()
+        with patch.object(importlib.import_module(home), name, sentinel):
+            assert getattr(door, name) is sentinel

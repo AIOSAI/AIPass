@@ -29,8 +29,8 @@ host API proxies it verbatim on `/v1/machine` and BAUD's phone draws it. The mea
 sensor is the CPU, which rows are nonsense, what an absence is called.
 
 ```python
-from aipass.skills.lib.system_status import handler
-vitals = handler.machine_vitals()
+from aipass.skills import machine_vitals
+vitals = machine_vitals()
 ```
 
 - **Shape.** `{"ok": True, "schema": 2, "sampled_at": <ISO-8601 UTC>}` plus
