@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: json_service.py
 # Description: The fleet's one JSON handler service (prax-owned)
-# Version: 2.2.0
+# Version: 2.3.0
 # Created: 2026-09-03
 # Modified: 2026-11-17
 # =============================================
@@ -20,7 +20,7 @@ import sys
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from aipass.prax.apps.handlers.logging.trail import PraxTrail
 
@@ -213,6 +213,30 @@ def _get_caller_module_name() -> str:
     return "unknown"
 
 
+# flock is per open file: a thread taking a lock it already holds would wait on itself until the deadline.
+_held_locks = threading.local()
+
+
+class LockReentry(LockTimeout):
+    """The calling thread already holds this module's lock: refused at once, never a wait on itself."""
+
+
+def _take(lock_path: Path) -> int:
+    """An fd holding a module's lock; LockReentry when this thread already holds it, LockTimeout past the deadline."""
+    held = _held_locks.__dict__.setdefault("paths", set())
+    if lock_path in held:
+        raise LockReentry(f"{lock_path.name} is already held by this thread: re-entry refused")
+    fd = _acquire(lock_path, LOCK_DEADLINE_SECONDS)
+    held.add(lock_path)
+    return fd
+
+
+def _give(lock_path: Path, fd: int) -> None:
+    """Release a lock _take handed out."""
+    _held_locks.paths.discard(lock_path)
+    os.close(fd)
+
+
 def for_module(file: "str | os.PathLike") -> "JsonHandle":
     """Build the handle for the branch that owns ``file``.
 
@@ -367,6 +391,58 @@ class JsonHandle:
 
         return True
 
+    def update_json(self, module_name: str, json_type: str, fn: Callable[[Any], Any]) -> bool:
+        """Read-modify-write a module's typed document under log_operation's lock: True or raises.
+
+        fn takes the document and returns the one to write; if fn raises, nothing is written. A missing
+        document starts from the in-code default. A corrupt or misshaped one is moved aside to
+        <name>.corrupt-<stamp>, logged at ERROR and refused, so the next call starts from the default.
+        A lock not acquired (LockTimeout, or LockReentry when fn asks for this module's lock again) is
+        logged at ERROR and raised, nothing written.
+        """
+        lock_path = self.json_dir / f"{module_name}.lock"
+        try:
+            lock_fd = _take(lock_path)
+        except LockTimeout as exc:
+            logger.error(
+                "json_service: update_json lock not acquired",
+                module=module_name,
+                path=str(lock_path),
+                error=str(exc),
+            )
+            raise
+        try:
+            document = self._load_or_set_aside(module_name, json_type)
+            return self.save_json(module_name, json_type, fn(document))
+        finally:
+            _give(lock_path, lock_fd)
+
+    def _load_or_set_aside(self, module_name: str, json_type: str) -> Any:
+        """load_json, except that a corrupt or misshaped document is set aside, logged at ERROR and refused."""
+        try:
+            return self.load_json(module_name, json_type)
+        except InvalidDocument as exc:
+            json_path = self.get_json_path(module_name, json_type)
+            logger.error(
+                "json_service: update_json refused a corrupt document",
+                module=module_name,
+                path=str(json_path),
+                kept=self._set_aside(json_path),
+                error=str(exc),
+            )
+            raise
+
+    def _set_aside(self, json_path: Path) -> str:
+        """Move a refused document to <name>.corrupt-<stamp> beside it; one that cannot be read may be whole, so stays."""
+        try:
+            json_path.read_bytes()
+            kept = json_path.with_name(f"{json_path.name}.corrupt-{datetime.now():%Y%m%dT%H%M%S%f}")
+            os.replace(json_path, kept)
+        except OSError as exc:
+            logger.warning("json_service: a refused document stays where it is", path=str(json_path), error=str(exc))
+            return f"left in place: {exc}"
+        return str(kept)
+
     def log_operation(
         self,
         operation: str,
@@ -377,14 +453,15 @@ class JsonHandle:
 
         One exclusive lock per module holds the whole read-modify-write: writers queue and none is lost.
         Telemetry on watchdog and display threads: a failure answers False, never raises. A misshaped
-        document on disk, or a lock a live holder keeps past the deadline, is logged at ERROR.
+        document on disk, or a lock not acquired (a live holder past the deadline, or this thread
+        already holding it), is logged at ERROR.
         """
         if module_name is None:
             module_name = _get_caller_module_name()
 
         lock_path = self.json_dir / f"{module_name}.lock"
         try:
-            lock_fd = _acquire(lock_path, LOCK_DEADLINE_SECONDS)
+            lock_fd = _take(lock_path)
             try:
                 self.ensure_module_jsons(module_name)
 
@@ -404,7 +481,7 @@ class JsonHandle:
                 logged = self.save_json(module_name, "log", log)
                 self._bump_data(module_name, operation)
             finally:
-                os.close(lock_fd)
+                _give(lock_path, lock_fd)
         except LockTimeout as exc:
             logger.error(
                 "json_service: log_operation lock not acquired",

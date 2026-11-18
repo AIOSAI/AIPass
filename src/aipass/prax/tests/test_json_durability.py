@@ -2,12 +2,13 @@
 # META DATA HEADER
 # Name: test_json_durability.py - JSON Handler Durability Tests
 # Description: Durability tests for the json service, as prax reaches it (the AIPASS_TEST_LOG_DIR seam)
-# Version: 2.2.0
+# Version: 2.3.0
 # Created: 2026-08-18
 # Modified: 2026-11-17
 # Category: prax/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v2.3.0 (2026-11-17): update_json shares log_operation's lock: two processes, and a frozen holder
 #   - v2.2.0 (2026-11-17): log_operation's per-module lock: the hundred, the killed and the frozen holder
 #   - v2.0.0 (2026-09-03): Re-pointed at the fleet json service (DPLAN-0325);
 #     the PRAX_JSON_DIR two-fixed-point tests retired with the constant
@@ -140,6 +141,24 @@ def _log_one(args: tuple) -> bool:
     return service.JsonHandle(Path(root)).log_operation(f"op{n}", module_name="hundred")
 
 
+def _bump_rounds(root: str, rounds: int) -> list:
+    """One process logging to the shared module: each call bumps operations_total in its data document."""
+    handle = service.JsonHandle(Path(root))
+    return [handle.log_operation("bump", module_name="shared") for _ in range(rounds)]
+
+
+def _count_one_round(document: dict) -> dict:
+    """The other writer's own key in the same data document."""
+    document["rounds"] = document.get("rounds", 0) + 1
+    return document
+
+
+def _update_rounds(root: str, rounds: int) -> list:
+    """The other process: update_json on the same data document."""
+    handle = service.JsonHandle(Path(root))
+    return [handle.update_json("shared", "data", _count_one_round) for _ in range(rounds)]
+
+
 def _hold_lock(lock_path: str, ready, release) -> None:
     """Another agent taking the module's lock and keeping it until released or killed."""
     fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o666)
@@ -187,6 +206,24 @@ class TestWritersQueue:
         log = _doc(handle, "hundred", "log")
         assert sorted(entry["operation"] for entry in log) == sorted(f"op{n}" for n in range(100))
         assert _doc(handle, "hundred", "data")["operations_total"] == 100
+
+
+class TestUpdatesAndBumpsShareOneLock:
+    """update_json and log_operation on one module queue on the same lock: neither loses the other's write."""
+
+    @pytest.mark.timeout(60)
+    def test_two_processes_a_hundred_rounds_each_lose_no_count(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+        handle = _seat(tmp_path)
+
+        with _FORK.Pool(2) as pool:
+            bumps = pool.apply_async(_bump_rounds, (str(handle.branch_root), 100))
+            updates = pool.apply_async(_update_rounds, (str(handle.branch_root), 100))
+            assert bumps.get(50) == [True] * 100
+            assert updates.get(50) == [True] * 100
+
+        document = _doc(handle, "shared", "data")
+        assert (document["operations_total"], document["rounds"]) == (100, 100)
 
 
 class TestADeadHolder:
@@ -242,3 +279,20 @@ class TestAFrozenHolder:
 
         assert handle.log_operation("after the thaw", module_name="frozen") is True
         assert [entry["operation"] for entry in _doc(handle, "frozen", "log")] == ["after the thaw"]
+
+    @pytest.mark.timeout(30)
+    def test_update_json_past_the_deadline_raises_writes_nothing_and_logs_one_error(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+        monkeypatch.setattr(service, "LOCK_DEADLINE_SECONDS", 0.5)
+        handle = _seat(tmp_path)
+        child, release = _holder(handle, "frozen")
+        try:
+            with pytest.raises(service.LockTimeout, match="within 0.5 seconds"):
+                handle.update_json("frozen", "data", _count_one_round)
+        finally:
+            release.set()
+            child.join(10)
+
+        assert not handle.get_json_path("frozen", "data").exists()
+        errors = _trail_errors(tmp_path)
+        assert [(e["msg"], e["module"]) for e in errors] == [("json_service: update_json lock not acquired", "frozen")]

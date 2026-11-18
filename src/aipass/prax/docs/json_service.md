@@ -57,9 +57,25 @@ means nothing and is never inspected. A live holder kept past
 the waiter give up once: `log_operation` answers `False` and logs one ERROR on
 prax's trail naming the module, the lock file and the reason. Nothing is written
 without the lock. A caller's own `load_json`/`save_json` round trip on a data
-document takes no lock and can still race the bump. `rate_tracker` keeps its `files` in that same
-`rate_tracker_data.json`, and its save sets only `files` (and `module_name` when
-absent) on the document it loaded, so `created` and the counters survive a scan.
+document takes no lock and can still race the bump.
+
+**`update_json(module, json_type, fn)` is the locked round trip.** It takes the
+same `<module>.lock` `log_operation` takes, so an update and a bump queue on one
+lock and neither loses the other's write; a second lock keyed by the document's
+path would let them race. It loads the document, calls `fn(document)` and saves
+what `fn` returns: `True`, or it raises. If `fn` raises, nothing is written. A
+missing document starts from the in-code default. A corrupt or misshaped one is
+moved to `<name>.corrupt-<stamp>` beside itself, logged at ERROR and refused with
+`InvalidDocument`, so the next call starts from the default; one that cannot be
+read at all stays where it is, since unreadable is not proof of damage. `flock`
+belongs to an open file, so a thread asking again for a lock it holds would wait
+on itself: `fn` calling `update_json` or `log_operation` on the same module is
+refused at once (`LockReentry`, a `LockTimeout`), one ERROR, never a wait. A lock
+not acquired is logged at ERROR and raised. `update_json` is on the service's
+handle, not the shim: the shim is byte-identical fleet-wide. `rate_tracker` keeps
+its `files` in `rate_tracker_data.json` and saves them through `update_json`,
+setting only `files` (and `module_name` when absent), so `created` and the
+counters survive every scan.
 
 **A missing document is created; a bad one is refused, never overwritten.**
 `ensure_json_exists` writes the default for exactly one document

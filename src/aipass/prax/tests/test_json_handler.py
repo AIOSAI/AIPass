@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_json_handler.py
 # Description: Tests for the fleet json service through prax's own shim
-# Version: 2.3.0
+# Version: 2.4.0
 # Created: 2026-03-28
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/json/json_handler.py and apps/handlers/json/json_service.py."""
@@ -16,6 +16,7 @@
 import json
 import os
 import stat
+import time
 from datetime import date
 
 import pytest
@@ -506,6 +507,129 @@ class TestLogOperation:
         assert entries[-1]["operation"] == "auto"
 
 
+def _trail_errors(tmp_path):
+    """ERROR lines on the json service's trail under the seam."""
+    trail_file = tmp_path / "prax" / "logs" / "json_service.jsonl"
+    if not trail_file.exists():
+        return []
+    lines = [json.loads(line) for line in trail_file.read_text(encoding="utf-8").splitlines()]
+    return [line for line in lines if line["level"] == "ERROR"]
+
+
+def _one_more(document):
+    """An update that counts its own rounds."""
+    document["rounds"] = document.get("rounds", 0) + 1
+    return document
+
+
+class TestUpdateJson:
+    """One read-modify-write under the module's lock: lands whole, or not at all and loudly."""
+
+    def test_a_missing_document_starts_from_the_default_and_takes_the_change(self, handle, sandbox):
+        assert handle.update_json("fresh", "data", _one_more) is True
+
+        saved = _read_data(sandbox, "fresh")
+        assert saved["rounds"] == 1
+        assert saved["created"] == saved["last_updated"] == date.today().isoformat()
+
+    def test_a_raising_fn_leaves_the_document_byte_for_byte_and_the_lock_free(self, handle, sandbox):
+        handle.update_json("held", "data", _one_more)
+        before = (sandbox / "held_data.json").read_bytes()
+
+        def half_done(document):
+            document["rounds"] = 99
+            raise RuntimeError("fn failed")
+
+        with pytest.raises(RuntimeError, match="fn failed"):
+            handle.update_json("held", "data", half_done)
+
+        assert (sandbox / "held_data.json").read_bytes() == before
+        assert handle.update_json("held", "data", _one_more) is True
+        assert _read_data(sandbox, "held")["rounds"] == 2
+
+    def test_asking_again_for_the_held_lock_is_refused_at_once_with_one_error(
+        self, handle, sandbox, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(json_service, "LOCK_DEADLINE_SECONDS", 0.5)
+        handle.update_json("nested", "data", _one_more)
+        before = (sandbox / "nested_data.json").read_bytes()
+
+        started = time.monotonic()
+        with pytest.raises(json_service.LockReentry):
+            handle.update_json("nested", "data", lambda document: handle.update_json("nested", "data", _one_more))
+        waited = time.monotonic() - started
+
+        assert waited < 0.25
+        assert (sandbox / "nested_data.json").read_bytes() == before
+        assert [(e["msg"], e["module"]) for e in _trail_errors(tmp_path)] == [
+            ("json_service: update_json lock not acquired", "nested")
+        ]
+
+    def test_log_operation_inside_fn_answers_false_and_the_update_still_lands(
+        self, handle, sandbox, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(json_service, "LOCK_DEADLINE_SECONDS", 0.5)
+        answers = []
+
+        def logs_inside(document):
+            answers.append(handle.log_operation("inside", module_name="nested"))
+            return _one_more(document)
+
+        started = time.monotonic()
+        assert handle.update_json("nested", "data", logs_inside) is True
+
+        assert time.monotonic() - started < 0.25
+        assert answers == [False]
+        assert _read_data(sandbox, "nested")["rounds"] == 1
+        assert not (sandbox / "nested_log.json").exists()
+        assert [e["msg"] for e in _trail_errors(tmp_path)] == ["json_service: log_operation lock not acquired"]
+
+    @pytest.mark.parametrize("bad", ["{not json", "[1, 2]"], ids=["corrupt", "misshaped"])
+    def test_a_bad_document_is_set_aside_refused_once_and_rebuilt_on_the_next_call(
+        self, handle, sandbox, tmp_path, bad
+    ):
+        sandbox.mkdir(parents=True)
+        (sandbox / "broken_data.json").write_text(bad, encoding="utf-8")
+
+        with pytest.raises(json_service.InvalidDocument):
+            handle.update_json("broken", "data", _one_more)
+
+        kept = list(sandbox.glob("broken_data.json.corrupt-*"))
+        assert [path.read_text(encoding="utf-8") for path in kept] == [bad]
+        errors = _trail_errors(tmp_path)
+        assert [(e["msg"], e["kept"]) for e in errors] == [
+            ("json_service: update_json refused a corrupt document", str(kept[0]))
+        ]
+
+        assert handle.update_json("broken", "data", _one_more) is True
+        assert _read_data(sandbox, "broken")["rounds"] == 1
+
+    def test_a_misshaped_result_from_fn_is_refused_and_the_good_document_stays(self, handle, sandbox):
+        handle.update_json("kept", "data", _one_more)
+        before = (sandbox / "kept_data.json").read_bytes()
+
+        with pytest.raises(json_service.InvalidDocument):
+            handle.update_json("kept", "data", lambda document: None)
+
+        assert (sandbox / "kept_data.json").read_bytes() == before
+        assert not list(sandbox.glob("kept_data.json.corrupt-*"))
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root reads a 000 file: the unreadable route needs a non-root user")
+    def test_an_unreadable_document_is_left_in_place_not_set_aside(self, handle, sandbox, tmp_path):
+        handle.update_json("locked", "data", _one_more)
+        target = sandbox / "locked_data.json"
+        target.chmod(0)
+        try:
+            with pytest.raises(json_service.InvalidDocument):
+                handle.update_json("locked", "data", _one_more)
+        finally:
+            target.chmod(0o644)
+
+        assert _read_data(sandbox, "locked")["rounds"] == 1
+        assert not list(sandbox.glob("locked_data.json.corrupt-*"))
+        assert _trail_errors(tmp_path)[0]["kept"].startswith("left in place: ")
+
+
 def _seed_data(sandbox, module_name, document):
     """Put a data document on disk exactly as given, bypassing the service."""
     sandbox.mkdir(parents=True, exist_ok=True)
@@ -664,41 +788,38 @@ class TestEveryLogWriteBumpsTheDataLeg:
         assert [(r["level"], r["module"], r["error"]) for r in warned] == [("WARNING", "fragile", str(failure))]
 
 
+def _real_tracker(monkeypatch, tmp_path):
+    """The real tracker on the real shim with a fresh process's state; returns the one log file it scans."""
+    logs = tmp_path / "scanned_logs"
+    logs.mkdir()
+    log_file = logs / "a.log"
+    log_file.write_bytes(b"x" * 4096)
+    monkeypatch.setattr(rate_tracker, "json_handler", json_handler)
+    monkeypatch.setattr(rate_tracker, "_tracked", {})
+    monkeypatch.setattr(rate_tracker, "_state_loaded", False)
+    monkeypatch.setattr(rate_tracker, "_logs_dir", None)
+    monkeypatch.setattr(rate_tracker, "_suppressed_files", set())
+    rate_tracker.configure(logs_dir=logs)
+    return log_file
+
+
 class TestRateTrackerKeepsKeysItDoesNotOwn:
     """rate_tracker_data.json is both the tracker's state and its data leg."""
 
     def test_the_counters_and_the_trackers_files_survive_each_others_writes(self, sandbox, monkeypatch, tmp_path):
-        """The real tracker against the real shim, both writing one document.
-
-        Each writer sets only its own keys; the clock is frozen a day after the seed, so a re-stamp shows.
-        """
-
-        class _FrozenDate(date):
-            @classmethod
-            def today(cls):
-                return cls(2030, 6, 15)
-
-        monkeypatch.setattr(rate_tracker, "date", _FrozenDate)
-        logs = tmp_path / "scanned_logs"
-        logs.mkdir()
-        log_file = logs / "a.log"
-        log_file.write_bytes(b"x" * 4096)
-        monkeypatch.setattr(rate_tracker, "json_handler", json_handler)
-        monkeypatch.setattr(rate_tracker, "_tracked", {})
-        monkeypatch.setattr(rate_tracker, "_state_loaded", False)
-        monkeypatch.setattr(rate_tracker, "_logs_dir", None)
-        monkeypatch.setattr(rate_tracker, "_suppressed_files", set())
-        _seed_data(sandbox, "rate_tracker", {"created": "2020-01-01", "last_updated": "2020-01-01"})
+        """The real tracker against the real shim, both writing one document; each sets only its own keys."""
+        log_file = _real_tracker(monkeypatch, tmp_path)
+        seed = {"created": "2020-01-01", "last_updated": "2020-01-01"}
+        _seed_data(sandbox, "rate_tracker", seed)
 
         json_handler.log_operation("runaway_detected", module_name="rate_tracker")
         json_handler.log_operation("runaway_detected", module_name="rate_tracker")
-        rate_tracker.configure(logs_dir=logs)
         rate_tracker.scan_rates()
 
         saved = _read_data(sandbox, "rate_tracker")
         assert saved["operations_total"] == 2
         assert saved["last_operation"] == "runaway_detected"
-        assert saved["created"] == "2020-01-01"
+        assert saved["created"] == seed["created"]
         assert saved["module_name"] == "rate_tracker"
         assert list(saved["files"]) == [str(log_file)]
         assert saved["files"][str(log_file)]["last_offset"] == 4096
@@ -708,6 +829,22 @@ class TestRateTrackerKeepsKeysItDoesNotOwn:
         bumped = _read_data(sandbox, "rate_tracker")
         assert bumped["operations_total"] == 3
         assert bumped["files"] == saved["files"]
+
+    def test_a_corrupt_document_is_set_aside_by_one_scan_and_rebuilt_by_the_next(self, sandbox, monkeypatch, tmp_path):
+        log_file = _real_tracker(monkeypatch, tmp_path)
+        sandbox.mkdir(parents=True)
+        (sandbox / "rate_tracker_data.json").write_text("{torn", encoding="utf-8")
+
+        rate_tracker.scan_rates()
+
+        assert [path.read_text(encoding="utf-8") for path in sandbox.glob("rate_tracker_data.json.corrupt-*")] == [
+            "{torn"
+        ]
+        assert [e["msg"] for e in _trail_errors(tmp_path)] == ["json_service: update_json refused a corrupt document"]
+
+        rate_tracker.scan_rates()
+
+        assert list(_read_data(sandbox, "rate_tracker")["files"]) == [str(log_file)]
 
 
 class TestTheShimBindsAndNeverWraps:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rate_tracker.py
 # Description: Log file rate tracking for runaway detection
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-07-14
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -14,15 +14,17 @@ Orthogonal to medic's content-based detection: catches rate regardless of level.
 
 import time
 from collections import deque
-from datetime import date
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from aipass.prax.apps.handlers.logging.direct import get_direct_logger
-from aipass.prax.apps.handlers.json import json_handler
+from aipass.prax.apps.handlers.json import json_handler, json_service
 from aipass.prax.apps.handlers.monitoring.branch_detector import detect_branch_from_log
 
 logger = get_direct_logger()
+
+# update_json is the service's, not the shim's: the shim is byte-identical fleet-wide and binds no new name.
+_documents = json_service.for_module(__file__)
 
 SCAN_INTERVAL = 10.0
 AVG_LINE_BYTES = 120
@@ -145,7 +147,12 @@ def _load_state() -> None:
         return
     _state_loaded = True
 
-    data = json_handler.load_json(_DATA_FILE, "data")
+    try:
+        data = json_handler.load_json(_DATA_FILE, "data")
+    except json_service.InvalidDocument as exc:
+        # The next save sets the bad document aside and rebuilds it: start empty rather than stop scanning.
+        logger.warning("[rate_tracker] starting with no saved file states: %s", exc)
+        return
     if data is None:
         return
 
@@ -163,28 +170,21 @@ def _load_state() -> None:
 def _save_state() -> None:
     """Persist current tracking state to disk.
 
-    Read-modify-write: the tracker owns only ``files``; the json service owns the
-    counters and ``created`` in the same document.
+    The tracker owns only ``files``; the json service bumps the counters in the same
+    document under the module's lock, and update_json holds that same lock.
     """
-    files = {}
-    for file_key, state in _tracked.items():
-        files[file_key] = state.to_dict()
+    files = {file_key: state.to_dict() for file_key, state in _tracked.items()}
 
-    data = json_handler.load_json(_DATA_FILE, "data")
-    if not isinstance(data, dict):
-        data = {}
-    # Only for when the service's heal could not land; never overwrite a value.
-    today = date.today().isoformat()
-    data.setdefault("created", today)
-    data.setdefault("last_updated", today)
-    data.setdefault("module_name", _DATA_FILE)
-    data["files"] = files
+    def with_files(data: Dict[str, Any]) -> Dict[str, Any]:
+        """The document as loaded, with this scan's files."""
+        data.setdefault("module_name", _DATA_FILE)
+        data["files"] = files
+        return data
 
-    # save_json raises; caught here because scan_rates() runs on the monitor's
-    # threads, and killing the thread is worse than a missed save.
+    # Caught: scan_rates() runs on the monitor's threads, and killing the thread is worse than a missed save.
     try:
-        json_handler.save_json(_DATA_FILE, "data", data)
-    except (json_handler.WriteFailed, json_handler.InvalidDocument) as exc:
+        _documents.update_json(_DATA_FILE, "data", with_files)
+    except (json_service.LockTimeout, json_service.WriteFailed, json_service.InvalidDocument) as exc:
         logger.warning("[rate_tracker] could not persist file states: %s", exc)
 
 

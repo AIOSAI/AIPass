@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rate_tracker.py
 # Description: Tests for the rate tracker runaway-log detector
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-07-14
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/monitoring/rate_tracker.py"""
@@ -21,12 +21,13 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(through_the_command) — _save_state keeping the counters, covered by tests/test_json_handler.py
-# sentry: no-test-needed(error_handling) — _save_state catching WriteFailed and InvalidDocument, covered by that row
+# sentry: no-test-needed(error_handling) — _save_state catching a lock, write or document failure, covered by that row
 # sentry: no-test-needed(error_handling) — _file_size answering 0 when the stat fails, covered by that row
 # sentry: no-test-needed(json_structure) — _fire_event's runaway_detected log_operation record, covered by that row
 # sentry: no-test-needed(log_level) — _fire_event's warning line naming a runaway, covered by that row
 
 import time
+from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
 
@@ -43,6 +44,7 @@ def _reset_tracker(monkeypatch, logs_dir=None):
     """
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     monkeypatch.setattr(mod, "json_handler", MagicMock())
+    monkeypatch.setattr(mod, "_documents", MagicMock())
     monkeypatch.setattr(mod, "logger", MagicMock())
     event_mock = MagicMock()
     # A fresh tracked map, restored at teardown; no suppressions, handed through
@@ -618,24 +620,25 @@ class TestNoTrigger:
 class TestPersistence:
     """State persists to disk so CLI invocations and restarts work."""
 
-    def test_scan_saves_state_to_disk(self, tmp_path, monkeypatch):
-        """scan_rates() calls save_json after scanning."""
+    def test_scan_saves_its_files_through_update_json_keeping_other_keys(self, tmp_path, monkeypatch):
         logs_dir = tmp_path / "system"
         logs_dir.mkdir(parents=True)
         (logs_dir / "test_module.log").write_text("x" * 100, encoding="utf-8")
 
         _reset_tracker(monkeypatch, logs_dir=logs_dir)
+        documents = MagicMock()
+        monkeypatch.setattr(mod, "_documents", documents)
 
-        json_handler_mock = _jh()
         mod.scan_rates()
 
-        json_handler_mock.save_json.assert_called()
-        call_args = json_handler_mock.save_json.call_args
-        assert call_args[0][0] == "rate_tracker"
-        assert call_args[0][1] == "data"
-        saved_data = call_args[0][2]
-        assert "files" in saved_data
-        assert any("test_module.log" in k for k in saved_data["files"])
+        (module, json_type, with_files), _ = documents.update_json.call_args
+        assert (module, json_type) == ("rate_tracker", "data")
+        loaded = {"created": "2020-01-01", "last_updated": "2020-01-01", "operations_total": 7}
+        saved = with_files(dict(loaded))
+        assert saved["operations_total"] == loaded["operations_total"]
+        assert saved["created"] == loaded["created"]
+        assert [Path(key).name for key in saved["files"]] == ["test_module.log"]
+        _jh().save_json.assert_not_called()
 
     def test_load_restores_offsets_from_disk(self, tmp_path, monkeypatch):
         """Loading persisted state restores file offsets so second scan can compute rates."""
