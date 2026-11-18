@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: startup.py
 # Description: Startup event handler with error catch-up scanning
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2025-12-04
 # Modified: 2026-11-18
 # =============================================
@@ -17,17 +17,17 @@ import time
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set
-from aipass.prax import append_jsonl, logger
+from aipass.prax import append_jsonl, get_system_logs_dir, logger
 from aipass.trigger.apps.config import (
     TRIGGER_JSON_DIR,
     TRIGGER_LOGS_DIR,
-    TRIGGER_ROOT,
     atomic_write_json,
     migrate_json_file,
 )
 from aipass.trigger.apps.handlers.json import json_handler
 
-SYSTEM_LOGS_DIR = TRIGGER_ROOT.parent.parent.parent / "system_logs"
+# Bound once: prax caches per process, and tests redirect by patching this name.
+SYSTEM_LOGS_DIR = get_system_logs_dir()
 CATCHUP_STATE_FILE = TRIGGER_JSON_DIR / "error_catchup.json"
 LEGACY_CATCHUP_STATE_FILE = TRIGGER_JSON_DIR / "trigger_data.json"
 SUPPRESSED_LOG = TRIGGER_LOGS_DIR / "medic_suppressed.jsonl"

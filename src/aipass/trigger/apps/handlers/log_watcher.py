@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Branch log watcher event producer for error detection
-# Version: 2.14.0
+# Version: 2.15.0
 # Created: 2026-02-02
 # Modified: 2026-11-18
 # =============================================
@@ -25,7 +25,7 @@ from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers.error_registry import report as registry_report
 
 from aipass.prax import logger
-from aipass.prax import log_backup_count
+from aipass.prax import get_system_logs_dir, log_backup_count
 from aipass.trigger.apps.handlers import failure_report
 
 
@@ -54,7 +54,8 @@ _flush_lock = threading.Lock()
 # For system_logs files outside the <branch>_<module>.log convention.
 SYSTEM_LOGS_BRANCH_MAP: Dict[str, str] = {}
 
-SYSTEM_LOGS_DIR = AIPASS_PKG_ROOT.parent.parent / "system_logs"
+# Bound once: prax caches per process, creates the folder so the observer can schedule it, and tests patch this name.
+SYSTEM_LOGS_DIR = get_system_logs_dir()
 
 # A FLOOR for when the tree cannot be read; real names come from _known_branch_names,
 # since a hardcoded roster silently attributes every newer branch as UNKNOWN.

@@ -3,7 +3,7 @@
 # Description: Unit tests for centralized system_logs log watcher
 # Version: 1.3.0
 # Created: 2026-04-03
-# Modified: 2026-11-16
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for the centralized system_logs watcher (apps/handlers/watchers/log_watcher.py)."""
@@ -21,6 +21,11 @@ import pytest
 import aipass.trigger.apps.handlers.error_registry as error_registry
 import aipass.trigger.apps.handlers.watchers.log_watcher as wlw
 import aipass.trigger.apps.modules.core as trigger_core
+from aipass.prax import get_system_logs_dir
+
+# Fixtures swap SYSTEM_LOGS_DIR and AIPASS_TEST_LOG_DIR per test; both sides are read at import, as the watcher's was.
+_SYSTEM_LOGS_AT_IMPORT = wlw.SYSTEM_LOGS_DIR
+_PRAX_SYSTEM_LOGS_AT_IMPORT = get_system_logs_dir()
 
 
 @pytest.fixture(autouse=True)
@@ -36,7 +41,7 @@ def _mock_infrastructure(monkeypatch, tmp_path):
     mock_json_handler.log_operation = MagicMock(return_value=True)
     monkeypatch.setattr(wlw, "json_handler", mock_json_handler)
 
-    # SYSTEM_LOGS_DIR is built from TRIGGER_ROOT at import: the LIVE system_logs.
+    # SYSTEM_LOGS_DIR is prax's answer at import: the LIVE system_logs outside pytest.
     monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", tmp_path / "system_logs")
 
     # The lazy `from ... import report` reads the attribute at call time; left real,
@@ -47,6 +52,13 @@ def _mock_infrastructure(monkeypatch, tmp_path):
     monkeypatch.setattr(trigger_core, "trigger", MagicMock())
 
     monkeypatch.setattr(wlw, "_log_observer", None)
+
+
+class TestSystemLogsFolder:
+    """The watcher reads the folder prax serves, never one counted up from this file."""
+
+    def test_the_watcher_reads_prax_system_logs_folder_not_a_climb(self):
+        assert _SYSTEM_LOGS_AT_IMPORT == _PRAX_SYSTEM_LOGS_AT_IMPORT
 
 
 class TestGenerateErrorHash:

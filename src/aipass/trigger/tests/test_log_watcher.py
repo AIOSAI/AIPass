@@ -29,12 +29,24 @@ import aipass.trigger.apps.handlers.log_watcher as lw
 from aipass.trigger.apps.handlers import medic_state
 from aipass.trigger.tests.support_log_watcher import _BRANCH_LOG_PATH, _SYNTHETIC_HOME
 from aipass.memory import fleet_branches as door_fleet_branches
+from aipass.prax import get_system_logs_dir
 
 pytestmark = pytest.mark.usefixtures("log_watcher_infrastructure")
+
+# Fixtures swap SYSTEM_LOGS_DIR and AIPASS_TEST_LOG_DIR per test; both sides are read at import, as the watcher's was.
+_SYSTEM_LOGS_AT_IMPORT = lw.SYSTEM_LOGS_DIR
+_PRAX_SYSTEM_LOGS_AT_IMPORT = get_system_logs_dir()
 
 
 # Outside every known tree: an input under test, not a location.
 _SYNTHETIC_ELSEWHERE = PurePosixPath("/synthetic/elsewhere")
+
+
+class TestSystemLogsFolder:
+    """The branch watcher schedules the folder prax serves, never one counted up from this file."""
+
+    def test_the_watcher_schedules_prax_system_logs_folder_not_a_climb(self):
+        assert _SYSTEM_LOGS_AT_IMPORT == _PRAX_SYSTEM_LOGS_AT_IMPORT
 
 
 class TestGenerateErrorHash:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Centralized log file watcher for system_logs directory
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-01-31
-# Modified: 2026-11-16
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -19,11 +19,11 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from aipass.prax import logger
-from aipass.prax import log_backup_count
-from aipass.trigger.apps.config import TRIGGER_ROOT
+from aipass.prax import get_system_logs_dir, log_backup_count
 from aipass.trigger.apps.handlers.json import json_handler
 
-SYSTEM_LOGS_DIR = TRIGGER_ROOT.parent.parent.parent / "system_logs"
+# Bound once: prax caches per process, and tests redirect by patching this name.
+SYSTEM_LOGS_DIR = get_system_logs_dir()
 
 # Sole owner of system_logs; see start_log_watcher() for why this module does not watch it.
 SYSTEM_LOGS_OWNER = "branch_log_events"

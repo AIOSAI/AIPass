@@ -3,7 +3,7 @@
 # Description: Tests for startup event handler
 # Version: 1.2.2
 # Created: 2026-04-25
-# Modified: 2026-11-16
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/events/startup.py and the error catch-up it runs."""
@@ -21,6 +21,11 @@ import pytest
 import aipass.trigger.apps.handlers.error_registry as error_registry
 import aipass.trigger.apps.handlers.events.startup as startup
 import aipass.trigger.apps.handlers.log_watcher as lw
+from aipass.prax import get_system_logs_dir
+
+# Fixtures swap SYSTEM_LOGS_DIR and AIPASS_TEST_LOG_DIR per test; both sides are read at import, as startup's was.
+_SYSTEM_LOGS_AT_IMPORT = startup.SYSTEM_LOGS_DIR
+_PRAX_SYSTEM_LOGS_AT_IMPORT = get_system_logs_dir()
 
 
 @pytest.fixture(autouse=True)
@@ -50,6 +55,13 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
 def _import_startup():
     """Return the startup module; the autouse fixture has already patched its edges."""
     return startup
+
+
+class TestSystemLogsFolder:
+    """The catch-up scans the folder prax serves, never one counted up from this file."""
+
+    def test_the_catch_up_scans_prax_system_logs_folder_not_a_climb(self):
+        assert _SYSTEM_LOGS_AT_IMPORT == _PRAX_SYSTEM_LOGS_AT_IMPORT
 
 
 class TestHandleStartup:
