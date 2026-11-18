@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for memory tests — write fence, infrastructure stand-ins, live-fleet guards
-# Version: 1.5.1
+# Version: 1.5.2
 # Created: 2026-03-07
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # Category: memory/tests
 # =============================================
 
@@ -95,15 +95,18 @@ def bus(monkeypatch):
 def live_fleet():
     """The real installation's repo root, or SKIP if this machine has no fleet.
 
-    An empty registry is the absence of a measurement, not a pass. BOTH lanes' roots are checked.
+    An empty registry is the absence of a measurement, not a pass. BOTH lanes are checked, the push by its scope.
     """
-    for root in (registry_scope.REPO_ROOT, trinity_push._REPO_ROOT):
-        registry = root / registry_scope.CORE_REGISTRY
-        if not registry.is_file():
-            pytest.skip(f"no {registry_scope.CORE_REGISTRY} at {root} -- live-state guard skipped")
-        if not _registry_branch_rows(registry):
-            pytest.skip(f"{registry_scope.CORE_REGISTRY} at {root} has no branch rows -- live-state guard skipped")
-    return registry_scope.REPO_ROOT
+    root = registry_scope.REPO_ROOT
+    registry = root / registry_scope.CORE_REGISTRY
+    if not registry.is_file():
+        pytest.skip(f"no {registry_scope.CORE_REGISTRY} at {root} -- live-state guard skipped")
+    if not _registry_branch_rows(registry):
+        pytest.skip(f"{registry_scope.CORE_REGISTRY} at {root} has no branch rows -- live-state guard skipped")
+    push_scope = trinity_push.resolve_scope()
+    if push_scope["error"] or not push_scope["branches"]:
+        pytest.skip(f"the push lane resolves no fleet ({push_scope['error']}) -- live-state guard skipped")
+    return root
 
 
 @pytest.fixture
@@ -216,7 +219,7 @@ def case_insensitive_filesystem(monkeypatch):
 
 @pytest.fixture
 def case_insensitive_exists(monkeypatch):
-    """Make ``Path.exists`` case-fold as a case-insensitive filesystem does; it only ever ADDS a True, so a global patch is safe."""
+    """``Path.exists`` case-folded as on a case-insensitive filesystem; it only ADDS a True: a global patch is safe."""
     import os as _os
 
     real_exists = Path.exists

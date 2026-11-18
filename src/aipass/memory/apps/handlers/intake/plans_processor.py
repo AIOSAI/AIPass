@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: plans_processor.py
 # Description: Plan Archival Vectorization Handler
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-03-12
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -166,20 +166,16 @@ def _is_stale(plan_file: Path, entry: Any, text: str) -> bool:
     """Does this file need processing, given what the manifest remembers?
 
     Keyed on CONTENT: a restored plan keeps its manifest row, so a name key misses its final close.
+    Raises ValueError (an unparsable stamp) or OSError (an unreadable mtime): the caller decides.
     """
     stamp, digest = _recorded(entry)
     if digest is not None:
         return digest != _content_hash(text)
 
     # Legacy row, no hash: mtime is the only evidence, and a restore writes the file.
-    if stamp:
-        try:
-            if datetime.fromtimestamp(plan_file.stat().st_mtime) > datetime.fromisoformat(stamp):
-                logger.info(f"[plans] {plan_file.name} is newer than its manifest row — re-processing")
-                return True
-        except (ValueError, OSError) as exc:
-            logger.warning(f"[plans] Cannot compare {plan_file.name} to its manifest row ({exc}) — re-processing")
-            return True
+    if stamp and datetime.fromtimestamp(plan_file.stat().st_mtime) > datetime.fromisoformat(stamp):
+        logger.info(f"[plans] {plan_file.name} is newer than its manifest row — re-processing")
+        return True
     return False
 
 
@@ -264,11 +260,12 @@ def process_plans() -> Dict[str, Any]:
             continue
         try:
             text = plan_file.read_text(encoding="utf-8")
-        except OSError as exc:
-            logger.warning(f"[plans] Cannot read {plan_file.name} to check freshness ({exc}) — re-processing")
+            stale = _is_stale(plan_file, manifest[key], text)
+        except (OSError, ValueError) as exc:
+            logger.warning(f"[plans] Cannot check {plan_file.name} against its manifest row ({exc}) — re-processing")
             unprocessed.append((project, plan_file, key))
             continue
-        if _is_stale(plan_file, manifest[key], text):
+        if stale:
             unprocessed.append((project, plan_file, key))
         elif _recorded(manifest[key])[1] is None:
             # Current content, legacy row: backfill the hash rather than re-embed.

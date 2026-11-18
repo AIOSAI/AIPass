@@ -146,12 +146,6 @@
       "reason": "_reclaim_stale_lock answers 'is the lane free now'. False after a failed unlink means the lane is NOT free, which is true; the caller's decision (do not run) is the same as for a live lock, and the failure is logged at error. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
-      "file": "apps/handlers/intake/plans_processor.py",
-      "standard": "logged_fallback",
-      "lines": [183],
-      "reason": "_is_stale answers 'process this plan again?'. True when the mtime cannot be compared is the decision, not a failure value: re-vectorizing is the safe answer when the manifest cannot vouch for the file. Logged at warning. Leg 8 of DPLAN-0354, @memory's decision."
-    },
-    {
       "file": "apps/handlers/monitor/memory_watcher.py",
       "standard": "logged_fallback",
       "lines": [62],

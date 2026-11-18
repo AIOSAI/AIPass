@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_marker7_memory_lane.py
 # Description: Red-first pins for marker 7 — self-healing triggers and the aftercare rulings
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-08-27
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/rollover.py, apps/modules/templates.py and the handlers they drive."""
@@ -35,6 +35,7 @@ from aipass.memory.apps.handlers.json import entry_limits
 from aipass.memory.apps.handlers.json import memory_files
 from aipass.memory.apps.handlers import write_fence
 from aipass.memory.apps.handlers.templates import spawn_pusher
+from aipass.memory.apps.handlers.tracking import tab_renderer
 from aipass.memory.apps.modules import rollover
 from aipass.memory.apps.modules import templates
 
@@ -58,6 +59,26 @@ def test_the_walk_skips_dropbox_archive_and_caches_below_its_root_only(tmp_path:
 
 _MEMORY_ROOT = Path(__file__).resolve().parents[1]
 _REPO_ROOT = _MEMORY_ROOT.parents[2]
+
+
+def _run_rollover_that_rolled(monkeypatch, names: list) -> bool:
+    """The rollover verb's public run, its vector leg stubbed to report *names* as rolled; pads and tabs untouched."""
+    rolled = [
+        dict(branch=name, memories_count=1, global_collection=name, old_lines=2, new_lines=1, global_total=1)
+        for name in names
+    ]
+    monkeypatch.setattr(rollover.todo_report, "roll_pad", lambda branch: {"text": "pad untouched"})
+    monkeypatch.setattr(
+        rollover,
+        "_handler_execute_rollover",
+        lambda: {"success": True, "triggers_count": len(rolled), "success_count": len(rolled), "results": rolled},
+    )
+    monkeypatch.setattr(tab_renderer, "refresh_all_tabs", lambda branches: None)
+    recorder = MagicMock()
+    monkeypatch.setattr(rollover, "json_handler", recorder)
+    ran = rollover.run_rollover()
+    assert recorder.log_operation.call_args.args[0] == "rollover_execute"
+    return ran
 
 
 # =============================================================================
@@ -131,7 +152,7 @@ class TestOneFleetOneDefinition:
         fleet = registry_scope.fleet_branches()
         every_name = [item["name"] for item in fleet]
         in_repo = {item["name"] for item in fleet if item.get("residency") != registry_scope.RESIDENCY_EXTERNAL}
-        rollover._normalize_rolled(every_name)
+        _run_rollover_that_rolled(monkeypatch, every_name)
 
         assert {name for name, _ in seen} == in_repo, "every in-repo citizen that rolled heals, and nobody else"
         home = registry_scope.REPO_ROOT.resolve()
@@ -152,7 +173,7 @@ class TestOneFleetOneDefinition:
         said = []
         monkeypatch.setattr(rollover.logger, "warning", lambda msg, *a, **k: said.append(str(msg)))
 
-        rollover._normalize_rolled(["memory"])
+        _run_rollover_that_rolled(monkeypatch, ["memory"])
 
         joined = " ".join(said)
         assert "memory" in joined, joined
@@ -266,9 +287,18 @@ class TestOneFleetOneDefinition:
         """The one .trinity writer that is not a branch: spawn's seed templates."""
         _home, foreign = self._fenced_world(tmp_path, monkeypatch)
         before = foreign.read_bytes()
+        # foreign is <templates>/x/.trinity/local.json, so set "x" is the one the push finds.
+        monkeypatch.setattr(spawn_pusher, "_find_spawn_templates_dir", lambda: foreign.parents[2])
+        recorder = MagicMock()
+        monkeypatch.setattr(spawn_pusher, "json_handler", recorder)
 
-        assert spawn_pusher._write_json(foreign, {"sessions": []}) is False
+        result = spawn_pusher.push_to_spawn_templates(dry_run=False)
+
+        assert recorder.log_operation.call_args.args[0] == "spawn_template_push"
+        assert result["template_sets_found"] == ["x"]
+        assert "x: Failed to write local.json" in result["errors"]
         assert foreign.read_bytes() == before
+        assert not (foreign.parent / "observations.json").exists()
 
     def test_the_push_and_the_scope_module_resolve_the_same_fleet(self, live_fleet):
         """The two LANES answer the same fleet; the external tier is subtracted here, in the expectation."""
@@ -704,17 +734,25 @@ class TestTemplateBumpFiresThePush:
         assert template_bump.BUMP_EVENT == "trinity_template_bumped"
         assert "aipass.trigger" not in source
 
-    def test_the_bump_announces_itself_on_the_bus(self, bus):
-        """Trigger-driven, never a poller: the bump ANNOUNCES what it did.
+    def test_the_bump_announces_itself_on_the_bus(self, bus, monkeypatch, capsys):
+        """Trigger-driven, never a poller: the bump verb ANNOUNCES what it did.
 
         The real call path: the payload is built inside a best-effort try, so a broken one is swallowed.
         """
-        templates._announce_bump({"pending": True, "dry_run": True, "stamped": False, "now": {"local": "3.0.0"}})
+        monkeypatch.setattr(template_bump, "_ledger_path", lambda: _MEMORY_ROOT / "no-such-ledger.json")
+        monkeypatch.setattr(
+            template_bump,
+            "_run_push",
+            lambda dry_run: {"success": True, "dry_run": dry_run, "scope": 0, "branches": [], "errors": []},
+        )
+
+        templates.handle_command("templates", ["bump"])
+        capsys.readouterr()
 
         assert [c.args[0] for c in bus.call_args_list] == [template_bump.BUMP_EVENT]
         payload = bus.call_args.kwargs
         assert payload["pending"] is True and payload["dry_run"] is True and payload["stamped"] is False
-        assert json.loads(payload["versions"]) == {"local": "3.0.0"}
+        assert json.loads(payload["versions"]) == template_bump.gold_versions()
 
     def test_a_dead_bus_never_blocks_the_heal(self, monkeypatch):
         """Best effort means best effort — a listener's absence cannot gate a push."""
@@ -864,7 +902,8 @@ class TestTheLiveGuardRefusesAHalfPresentWorld:
         monkeypatch.setattr(registry_scope, "REPO_ROOT", root)
         monkeypatch.setattr(trinity_push, "_REPO_ROOT", root)
 
-    _CORE_ROWS = [{"name": "memory", "path": "src/aipass/memory"}]
+    # Active: the push lane resolves only active rows, and live_fleet asks it.
+    _CORE_ROWS = [{"name": "memory", "path": "src/aipass/memory", "status": "active"}]
 
     def test_a_registry_that_exists_but_holds_no_rows_is_not_a_fleet(self, request, monkeypatch, tmp_path):
         """The minted-empty case. `push_names <= registry_names` is true of nothing."""
@@ -936,10 +975,13 @@ class TestTheLiveGuardRefusesAHalfPresentWorld:
         assert "external" in str(skipped.value).lower()
 
     def test_a_dict_shaped_registry_is_read_not_called_empty(self, request, monkeypatch, tmp_path):
-        """Both registry shapes ship. A reader that knows one calls half the fleet empty."""
+        """Both registry shapes ship. A reader that knows one calls half the fleet empty.
+
+        The sibling's registry is dict-shaped; the core keeps its shipped list, the only shape the push lane reads.
+        """
         root = self._world(
             tmp_path,
-            rows={"memory": {"name": "memory", "path": "src/aipass/memory"}},
+            rows=self._CORE_ROWS,
             residents=True,
             roots=True,
             external_citizen=True,

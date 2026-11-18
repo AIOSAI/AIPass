@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: Memory's front door: the names other branches take, each loaded from its home
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-11-16
-# Modified: 2026-11-16
+# Modified: 2026-11-18
 # =============================================
 
 """Memory - the fleet's long-term memory: rollover, search, the .trinity caps and shape.
@@ -16,12 +16,11 @@ from typing import Any
 
 _HANDLERS = "aipass.memory.apps.handlers"
 _SCOPE = f"{_HANDLERS}.monitor.registry_scope"
-_GOVERNANCE = f"{_HANDLERS}.governance.engine"
 _LIMITS = f"{_HANDLERS}.json.entry_limits"
 _CONFIG = f"{_HANDLERS}.json.config_loader"
 _TABS = f"{_HANDLERS}.tracking.tab_renderer"
 
-# Each name's real home: the door loads that one module on access, nothing more.
+# Each name's home, loaded on access; a home named only here is inline (dead_code reads strings, not names).
 _HOMES = {
     "fleet_branches": _SCOPE,
     "external_branches": _SCOPE,
@@ -31,9 +30,9 @@ _HOMES = {
     "RESIDENCY_CORE": _SCOPE,
     "RESIDENCY_RESIDENT": _SCOPE,
     "RESIDENCY_EXTERNAL": _SCOPE,
-    "should_surface": _GOVERNANCE,
-    "record_message": _GOVERNANCE,
-    "new_state": _GOVERNANCE,
+    "should_surface": f"{_HANDLERS}.governance.engine",
+    "record_message": f"{_HANDLERS}.governance.engine",
+    "new_state": f"{_HANDLERS}.governance.engine",
     "load_entry_limits": _LIMITS,
     "check_file_budget": _LIMITS,
     "changed_entries": _LIMITS,
