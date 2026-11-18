@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dead_code_check.py
 # Description: Dead Code Standards Checker Handler
-# Version: 1.8.0
+# Version: 1.8.1
 # Created: 2026-03-22
 # Modified: 2026-11-18
 # =============================================
@@ -143,18 +143,18 @@ def door_served(branch_root: Path) -> frozenset[str]:
     served: set[str] = set()
     for node in tree.body if tree is not None else []:
         if isinstance(node, ast.Assign) and len(node.targets) == 1:
-            target = node.targets[0]
+            target, value = node.targets[0], node.value
         elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            target = node.target
+            target, value = node.target, node.value
         else:
             continue
         if not isinstance(target, ast.Name):
             continue
-        text = _string_value(node.value, constants)
+        text = _string_value(value, constants)
         if text is not None:
             constants[target.id] = text
-        elif isinstance(node.value, ast.Dict):
-            served.update(v for v in (_string_value(value, constants) for value in node.value.values) if v)
+        elif isinstance(value, ast.Dict):
+            served.update(v for v in (_string_value(item, constants) for item in value.values) if v)
     return frozenset(served)
 
 
