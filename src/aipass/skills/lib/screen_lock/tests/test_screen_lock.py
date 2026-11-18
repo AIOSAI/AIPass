@@ -1,18 +1,18 @@
 # =================== AIPass ====================
 # Name: test_screen_lock.py
 # Description: Tests for the screen_lock skill — lock paths, the lock-state read, honest failure, doctrine
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-08-14
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
-"""
-screen_lock skill tests.
+"""Tests for lib/screen_lock/handler.py: lock_screen, lock_state, the off switch and the run envelope."""
 
-Every test that reaches lock_screen() MUST patch subprocess.run — an unpatched
-call locks the real machine mid-suite. Every test that reaches lock_state()
-patches it too: a real loginctl answer is this laptop's, not the contract's.
-"""
+# Every test that reaches lock_screen() MUST patch subprocess.run: an unpatched call locks the real
+# machine mid-suite. lock_state() tests patch it too: a real loginctl answer is this laptop's, not the contract's.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# sentry: no-test-needed(stdlib) — how subprocess.run launches loginctl and gdbus; every call here is patched
 
 import os
 import subprocess
@@ -22,6 +22,8 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+from aipass.skills.apps.handlers import switch_handler
+from aipass.skills.apps.modules.runner import run_skill
 from aipass.skills.lib.screen_lock import handler as screen_lock
 
 # The resolver matches sessions against our own uid, so build the fixtures from it
@@ -539,19 +541,6 @@ class TestLockStateIsAReadOnly:
             call(_GET_ACTIVE, **_READ_KWARGS),
         ]
 
-    def test_the_read_is_not_gated_on_the_skill_switch(self):
-        """The lock is never gated, so its read is not either (api verbs.py doctrine)."""
-        from aipass.skills.apps.handlers import switch_handler
-
-        with (
-            patch.object(switch_handler, "is_enabled", autospec=True, return_value=False) as gate,
-            patch("subprocess.run", side_effect=_state_stub()),
-        ):
-            result = screen_lock.lock_state()
-
-        assert (result["ok"], result["locked"], result["method"]) == (True, False, "loginctl")
-        gate.assert_not_called()
-
     def test_fires_with_no_desktop_environment_at_all(self, monkeypatch):
         """Called from a headless service context — no DISPLAY, no session env, still locks."""
         for var in ("DISPLAY", "WAYLAND_DISPLAY", "XDG_SESSION_ID", "XDG_SESSION_TYPE"):
@@ -570,6 +559,76 @@ class TestLockStateIsAReadOnly:
 
         assert result["locked"] is True
         assert call(["loginctl", "lock-session"], check=True, capture_output=True) in mock_run.call_args_list
+
+
+# =============================================
+# The off switch: both published functions are imported in-process, past the
+# runner's gate, so each asks the switch itself. Off means off.
+# =============================================
+
+_OFF = "Skill 'screen_lock' is switched OFF. Turn it back on with: drone @skills on screen_lock"
+_UNREADABLE = (
+    "The switch state switch_state.json could not be read (SwitchStateUnreadable), "
+    "so this skill counts as switched OFF; the error is in the host log."
+)
+
+
+@pytest.fixture
+def switch(tmp_path, monkeypatch):
+    """The real switch, its state document under tmp_path through the json service's seam."""
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
+    switch_handler.get_state_path().parent.mkdir(parents=True, exist_ok=True)
+    return switch_handler
+
+
+class TestTheOffSwitch:
+    def test_off_makes_lock_state_refuse_and_read_nothing(self, switch):
+        switch.set_enabled("screen_lock", False)
+
+        with patch("subprocess.run") as mock_run:
+            result = screen_lock.lock_state()
+
+        assert result == {
+            "ok": False,
+            "locked": None,
+            "method": None,
+            "session": None,
+            "reason": "switched_off",
+            "detail": _OFF,
+        }
+        mock_run.assert_not_called()
+
+    def test_off_makes_lock_screen_refuse_and_lock_nothing(self, switch):
+        switch.set_enabled("screen_lock", False)
+
+        with patch("subprocess.run") as mock_run:
+            result = screen_lock.lock_screen()
+
+        assert result == {"locked": False, "method": None, "session": None, "error": _OFF}
+        mock_run.assert_not_called()
+
+    def test_on_lets_both_answer(self, switch):
+        switch.set_enabled("screen_lock", True)
+
+        with patch("subprocess.run", side_effect=_state_stub()):
+            state = screen_lock.lock_state()
+        with patch("subprocess.run", side_effect=_loginctl_stub()):
+            locked = screen_lock.lock_screen()
+
+        assert (state["ok"], state["locked"]) == (True, False)
+        assert locked["locked"] is True
+
+    def test_an_unreadable_switch_state_refuses_both_and_logs_an_error(self, switch):
+        switch.get_state_path().write_text("{not json", encoding="utf-8")
+
+        with patch("subprocess.run") as mock_run, patch.object(screen_lock.logger, "error") as logged:
+            state = screen_lock.lock_state()
+            locked = screen_lock.lock_screen()
+
+        assert (state["ok"], state["reason"], state["detail"]) == (False, "switched_off", _UNREADABLE)
+        assert (locked["locked"], locked["error"]) == (False, _UNREADABLE)
+        assert logged.call_count == 2
+        mock_run.assert_not_called()
 
 
 # =============================================
@@ -669,8 +728,6 @@ class TestSelfContained:
 
     def test_discoverable_through_the_skills_framework(self):
         """Listing actions goes through discovery + load and fires no lock."""
-        from aipass.skills.apps.modules.runner import run_skill
-
         with patch("subprocess.run") as mock_run:
             result = run_skill("screen_lock")
 

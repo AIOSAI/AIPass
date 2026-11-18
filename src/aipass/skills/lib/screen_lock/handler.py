@@ -1,16 +1,16 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: handler.py - Screen Lock skill handler
-# Date: 2026-08-14
-# Version: 1.2.0
-# Modified: 2026-10-17
-# Category: skills/lib/screen_lock
+# =================== AIPass ====================
+# Name: handler.py
+# Description: Screen Lock skill handler - lock, the lock-state read, the off-switch gate
+# Version: 1.3.0
+# Created: 2026-08-14
+# Modified: 2026-11-17
 # =============================================
 
 """
 Screen Lock skill handler.
 Never gated on screen state or session: lock must work from anywhere (see SKILL.md).
-Stdlib + the Prax logger only; that isolation is a test.
+Gated on the skill's off switch: lock_screen() and lock_state() refuse while it is off.
+A bare import loads stdlib + the Prax logger only (a test); the switch loads when a gate asks.
 """
 
 import os
@@ -18,6 +18,8 @@ import subprocess
 from typing import Optional, Tuple
 
 from aipass.prax import logger
+
+SKILL_NAME = "screen_lock"
 
 METHOD_LOGINCTL = "loginctl"
 METHOD_DBUS = "dbus"
@@ -28,6 +30,7 @@ LOCK_FAILED_MESSAGE = "Could not lock the screen — loginctl and the D-Bus fall
 REASON_NO_SESSION = "no_session"
 REASON_NO_READER = "no_reader"
 REASON_READ_FAILED = "read_failed"
+REASON_SWITCHED_OFF = "switched_off"
 
 _GNOME_SCREENSAVER = [
     "gdbus",
@@ -79,6 +82,10 @@ def get_actions():
 
 def lock_screen() -> dict:
     """Password-lock the screen, leaving every process running: {locked, method, session, error}."""
+    refusal = _gate()
+    if refusal is not None:
+        return {"locked": False, "method": None, "session": None, "error": refusal}
+
     session_id = resolve_graphical_session()
     target = ["loginctl", "lock-session"] + ([session_id] if session_id else [])
 
@@ -102,6 +109,10 @@ def lock_screen() -> dict:
 
 def lock_state() -> dict:
     """Read whether the screen is locked. Changes nothing, never raises."""
+    refusal = _gate()
+    if refusal is not None:
+        return _state(False, None, None, None, REASON_SWITCHED_OFF, refusal)
+
     # Reads through the same pair, in the same order, lock_screen() writes through.
     # Unknown is never unlocked: a read that cannot tell answers locked None.
     session_id, logind_reason, logind_why = _resolve_session()
@@ -235,6 +246,25 @@ def _cannot_tell_reason(logind_reason: Optional[str], dbus_reason: Optional[str]
     if REASON_READ_FAILED in (logind_reason, dbus_reason):
         return REASON_READ_FAILED
     return REASON_NO_READER
+
+
+def _gate() -> Optional[str]:
+    """The sentence a published function refuses with while the skill is off, or None to proceed."""
+    # Imported here, not at the top: a bare import of this handler stays stdlib + prax.
+    from aipass.skills.apps.handlers.switch_handler import STATE_FILENAME, SwitchStateUnreadable, is_enabled
+
+    try:
+        enabled = is_enabled(SKILL_NAME)
+    except SwitchStateUnreadable as exc:
+        # Cannot tell whether it is off, so it is off - the runner's answer.
+        logger.error("Refusing screen_lock - switch state unreadable: %s", exc, exc_info=True)
+        return (
+            f"The switch state {STATE_FILENAME} could not be read ({_describe(exc)}), "
+            f"so this skill counts as switched OFF; the error is in the host log."
+        )
+    if not enabled:
+        return f"Skill '{SKILL_NAME}' is switched OFF. Turn it back on with: drone @skills on {SKILL_NAME}"
+    return None
 
 
 def _state(ok, locked, method, session, reason, detail) -> dict:

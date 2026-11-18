@@ -40,9 +40,10 @@ the file as it is for repair, and name the fix on stderr — repair the file, or
 `drone rm` it to reset every skill to on. A missing file is a clean start: every
 skill on.
 
-A door that is imported in-process never passes the runner's gate, so it asks
-the switch itself — `machine_vitals()` and `machine_processes()` in the
-system_status skill. See [system_status.md](system_status.md).
+A function that is imported in-process never passes the runner's gate, so it
+asks the switch itself — `machine_vitals()` and `machine_processes()` in the
+system_status skill (see [system_status.md](system_status.md)), `lock_screen()`
+and `lock_state()` in the screen_lock skill.
 
 ---
 

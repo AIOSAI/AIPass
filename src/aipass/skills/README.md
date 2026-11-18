@@ -111,8 +111,10 @@ The same index, with the pages beside each other, is in [docs/](docs/).
   the phone monitor; and `lock_state()` and `lock_screen()` from the
   screen_lock skill, beside the lock verb. Each is imported in-process
   through the package door, `from aipass.skills import machine_vitals`, so the
-  runner's off-switch gate never sees it: the two system_status functions
-  consult the switch themselves, the two screen_lock functions do not.
+  runner's off-switch gate never sees it: all four consult the switch
+  themselves, and off means off. The door also serves the two skills'
+  contract constants under skill-prefixed names (`SYSTEM_STATUS_REASONS`,
+  `SCREEN_LOCK_REASON_NO_SESSION` and the rest).
 
 ---
 

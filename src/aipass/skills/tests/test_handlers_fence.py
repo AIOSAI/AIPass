@@ -31,11 +31,20 @@ FOREIGN_SHAPES = ["pkg", "deep", "dyn", "chain", "mock", "sibling"]
 # Written out by hand, not read from the door: the door's own table must agree with an independent list.
 _SCREEN_LOCK = "aipass.skills.lib.screen_lock.handler"
 _SYSTEM_STATUS = "aipass.skills.lib.system_status.handler"
+# (served name, home module, home name): a contract constant carries its skill's prefix so two skills never collide.
 DOOR_NAMES = [
-    (_SCREEN_LOCK, "lock_state"),
-    (_SCREEN_LOCK, "lock_screen"),
-    (_SYSTEM_STATUS, "machine_processes"),
-    (_SYSTEM_STATUS, "machine_vitals"),
+    ("lock_state", _SCREEN_LOCK, "lock_state"),
+    ("lock_screen", _SCREEN_LOCK, "lock_screen"),
+    ("machine_processes", _SYSTEM_STATUS, "machine_processes"),
+    ("machine_vitals", _SYSTEM_STATUS, "machine_vitals"),
+    ("SYSTEM_STATUS_REASONS", _SYSTEM_STATUS, "REASONS"),
+    ("SYSTEM_STATUS_SECTIONS", _SYSTEM_STATUS, "SECTIONS"),
+    ("SYSTEM_STATUS_PSUTIL_RECIPE", _SYSTEM_STATUS, "PSUTIL_RECIPE"),
+    ("SCREEN_LOCK_METHOD_LOGINCTL", _SCREEN_LOCK, "METHOD_LOGINCTL"),
+    ("SCREEN_LOCK_METHOD_DBUS", _SCREEN_LOCK, "METHOD_DBUS"),
+    ("SCREEN_LOCK_REASON_NO_SESSION", _SCREEN_LOCK, "REASON_NO_SESSION"),
+    ("SCREEN_LOCK_REASON_NO_READER", _SCREEN_LOCK, "REASON_NO_READER"),
+    ("SCREEN_LOCK_REASON_READ_FAILED", _SCREEN_LOCK, "REASON_READ_FAILED"),
 ]
 
 
@@ -118,24 +127,24 @@ class TestKinAndTheDoorPass:
 
 
 class TestTheFrontDoor:
-    """src/aipass/skills/__init__.py serves the four names another branch imports, each from its home on access."""
+    """src/aipass/skills/__init__.py serves the names another branch imports, each from its home on access."""
 
-    @pytest.mark.parametrize(("home", "name"), DOOR_NAMES)
-    def test_every_name_is_the_same_object_as_its_home_s(self, home, name):
-        assert getattr(door, name) is getattr(importlib.import_module(home), name)
+    @pytest.mark.parametrize(("served", "home", "name"), DOOR_NAMES)
+    def test_every_name_is_the_same_object_as_its_home_s(self, served, home, name):
+        assert getattr(door, served) is getattr(importlib.import_module(home), name)
 
     def test_the_door_serves_exactly_the_imported_names(self):
-        assert sorted(door.__all__) == sorted(name for _, name in DOOR_NAMES)
+        assert sorted(door.__all__) == sorted(served for served, _, _ in DOOR_NAMES)
 
-    @pytest.mark.parametrize("name", ["run", "get_actions", "resolve_graphical_session", "machine_vital"])
+    @pytest.mark.parametrize("name", ["run", "get_actions", "resolve_graphical_session", "machine_vital", "REASONS"])
     def test_an_unknown_name_raises_attribute_error_with_no_fallback(self, name):
         with pytest.raises(AttributeError, match=name):
             getattr(door, name)
 
-    @pytest.mark.parametrize(("home", "name"), DOOR_NAMES)
-    def test_a_patch_on_the_home_reaches_a_caller_that_read_the_door_before(self, home, name):
+    @pytest.mark.parametrize(("served", "home", "name"), DOOR_NAMES)
+    def test_a_patch_on_the_home_reaches_a_caller_that_read_the_door_before(self, served, home, name):
         """A door that caches the first answer hands later callers the unpatched name."""
-        getattr(door, name)
+        getattr(door, served)
         sentinel = object()
         with patch.object(importlib.import_module(home), name, sentinel):
-            assert getattr(door, name) is sentinel
+            assert getattr(door, served) is sentinel
