@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.13.0
+# Version: 2.14.0
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-08
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Turn counter for prompt injection cadence — fires loaders every Nth turn.
@@ -23,6 +23,7 @@ from typing import Any
 
 from aipass.cli import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 from aipass.hooks.apps.modules.grounding_content import find_branch_root
 
@@ -447,7 +448,7 @@ def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
         session_short,
         branch,
     )
-
+    json_handler.log_operation("should_fire", {"loader": loader_name, "turn": turn, "fired": fired})
     return fired
 
 

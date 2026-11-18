@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: engine.py
-# Version: 2.7.0
+# Version: 2.8.0
 # Description: Hook engine — unified dispatcher; gates fail closed, injectors skip on error
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-18
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Hook engine — dispatches hook events to handlers, logs via prax + JSONL.
@@ -32,8 +32,9 @@ from aipass.prax import logger
 from aipass.cli import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config import gates
-from aipass.hooks.apps.handlers.config.diagnostics import log_entry as _log, tail_log
+from aipass.hooks.apps.handlers.config.diagnostics import log_entry as _log, tail_log, trail_event
 from aipass.hooks.apps.handlers.config.output_merge import combine_outputs
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.modules import cadence
 
 CONSOLE = err_console
@@ -634,7 +635,10 @@ def run_event(arg: str, stdin_data: str) -> tuple[str, int]:
             config = {**settings, event_type: own_hooks(group, config.get("_handler_namespace", ""))}
         else:
             config = {**settings, event_type: {hook_filter: group.get(hook_filter, {})}}
-    return dispatch(event_type, stdin_data, config)
+    stdout, exit_code = dispatch(event_type, stdin_data, config)
+    trail_event(arg)
+    json_handler.log_operation("run_event", {"event": arg, "exit_code": exit_code})
+    return stdout, exit_code
 
 
 def own_hooks(group: dict, namespace: str) -> dict:

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: protected_paths.py
-# Version: 2.3.3
+# Version: 2.4.0
 # Description: The files that switch the gates themselves — written by the admin seat alone (git_gate)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-30
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Which files decide whether the gates run, and so must never be an agent's to write (DPLAN-0356 item 1).
@@ -19,6 +19,7 @@ from pathlib import Path
 
 from aipass.cli import err_console
 from aipass.hooks.apps.handlers.config.loader import aipass_home
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 CONSOLE = err_console
@@ -150,9 +151,11 @@ def _by_identity(target: Path) -> str | None:
 
 
 def protected(path: str | Path, cwd: str = "") -> str | None:
-    """What *path* governs when it is a protected file, by name or by file identity, else None."""
+    """What *path* governs when it is a protected file, by name or by file identity, else None. One trail entry."""
     target = _absolute(path, cwd)
-    return _by_name(_spelled(target)) or _by_identity(target)
+    governs = _by_name(_spelled(target)) or _by_identity(target)
+    json_handler.log_operation("protected", {"seat": cwd, "governs": governs})
+    return governs
 
 
 def protected_within(path: str | Path, cwd: str = "") -> str | None:

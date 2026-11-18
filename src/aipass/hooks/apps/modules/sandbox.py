@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: sandbox.py
-# Version: 1.0.5
+# Version: 1.1.0
 # Description: Sandbox wrapper — launches commands inside srt (kernel FS boundary)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-09
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Sandbox wrapper — launches commands inside srt kernel filesystem boundary.
@@ -22,6 +22,7 @@ from pathlib import Path
 
 from aipass.cli import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 CONSOLE = err_console
@@ -149,6 +150,7 @@ def build_policy(branch_path: str | Path) -> dict:
         allow_write.append(str(claude_proj))
 
     broker_secret = repo_root / ".ai_central" / "broker_secret"
+    json_handler.log_operation("build_policy", {"branch": branch_name, "allow_write": len(allow_write)})
     return {
         "allow_write": allow_write,
         "deny_write": [str(broker_secret)],

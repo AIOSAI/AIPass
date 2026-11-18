@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cc_transcripts.py
-# Version: 1.1.2
+# Version: 1.2.0
 # Description: CC-native transcript reader — the chats, not the processes
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-18
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """CC-native transcript reader — what conversations exist in a branch.
@@ -16,6 +16,7 @@ Transcripts survive Ctrl+C (session files do not); liveness comes from cc_sessio
 import json
 from pathlib import Path
 
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 from aipass.cli import err_console
@@ -139,11 +140,7 @@ def recent_chats(cwd: str | Path, limit: int = 5) -> list[dict]:
         return []
 
     try:
-        candidates = sorted(
-            directory.glob("*.jsonl"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )[: max(0, limit)]
+        candidates = sorted(directory.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)[: max(0, limit)]
     except OSError as exc:
         logger.info("[CC_TRANSCRIPTS] cannot list %s: %s", directory, exc)
         return []
@@ -167,6 +164,7 @@ def recent_chats(cwd: str | Path, limit: int = 5) -> list[dict]:
                 "path": str(path),
             }
         )
+    json_handler.log_operation("recent_chats", {"seat": str(cwd), "chats": len(chats)})
     return chats
 
 

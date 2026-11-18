@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: shell_programs.py
-# Version: 1.7.0
+# Version: 1.8.0
 # Description: Which programs only read, and which only take data — the default-deny tables (DPLAN-0356 phase 4)
 # Branch: hooks
 # Layer: apps/modules
@@ -19,6 +19,7 @@ import re
 from pathlib import Path
 
 from aipass.cli import err_console
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 CONSOLE = err_console
@@ -482,6 +483,7 @@ def named_operands(invocations: list, places=None) -> list[tuple[str, Path]]:
     """(program, path) for every operand of a program that does not only read (P2), resolved from its cwd.
 
     A nonexistent operand is kept only when places(its first existing ancestor) is true; None keeps every one.
+    Each call leaves one json trail entry.
     """
     carried = _carriers(invocations)
     found = []
@@ -498,6 +500,7 @@ def named_operands(invocations: list, places=None) -> list[tuple[str, Path]]:
             # A provider flag's value is a value by name (codex -o new.py): kept even where no file is yet.
             if places is None or inv.program in PROVIDER_CLIS or _names_a_place(path, places):
                 found.append((inv.program, path))
+    json_handler.log_operation("named_operands", {"programs": len(invocations), "operands": len(found)})
     return found
 
 

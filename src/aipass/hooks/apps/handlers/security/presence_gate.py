@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: presence_gate.py
-# Version: 3.4.0
+# Version: 3.5.0
 # Description: Single-session gate — blocks duplicate Claude runtimes per branch
 # Branch: hooks
 # Layer: apps/handlers/security
@@ -206,5 +206,8 @@ def _decide(hook_data: dict) -> dict:
 
 
 def handle_stop(hook_data: dict) -> dict:
-    """No-op on Stop. CC-native session files handle cleanup on exit."""
+    """No-op on Stop: CC-native session files handle cleanup on exit. Each call leaves one json trail entry."""
+    payload = hook_data if isinstance(hook_data, dict) else {}
+    tool = payload.get("tool_name") or payload.get("hook_event_name", "")
+    json_handler.log_operation("handle_stop", {"tool": tool, "verdict": "allow", "seat": payload.get("cwd", "")})
     return _ALLOW

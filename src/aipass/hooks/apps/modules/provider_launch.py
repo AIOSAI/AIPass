@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: provider_launch.py
-# Version: 1.1.1
+# Version: 1.2.0
 # Description: Where a provider CLI started from the Bash tool would run, judged against the caller's own branch
 # Branch: hooks
 # Layer: apps/modules
@@ -23,6 +23,7 @@ import shlex
 from pathlib import Path
 
 from aipass.cli import err_console
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.modules import admin_seat, shell_reader
 from aipass.hooks.apps.modules.shell_programs import PROVIDER_CLIS
 from aipass.hooks.apps.modules.shell_programs import PROVIDER_DIR_FLAGS as _DIR_FLAGS
@@ -68,8 +69,12 @@ _GLOB = frozenset("*?[")
 
 
 def foreign_launch(invocations: list, command: str, cwd: str) -> tuple[str, str] | None:
-    """(where, why) for the first provider launch outside the caller's own branch; None when every one is inside."""
-    return _first_outside(invocations, command, admin_seat.branch_root(cwd))
+    """(where, why) for the first provider launch outside the caller's own branch; None when every one is inside.
+
+    Each call leaves one json trail entry; never the command."""
+    found = _first_outside(invocations, command, admin_seat.branch_root(cwd))
+    json_handler.log_operation("foreign_launch", {"seat": cwd, "foreign": found is not None})
+    return found
 
 
 def _first_outside(invocations: list, command: str, root: Path | None) -> tuple[str, str] | None:

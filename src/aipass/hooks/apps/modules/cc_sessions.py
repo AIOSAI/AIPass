@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cc_sessions.py
-# Version: 3.7.0
+# Version: 3.8.0
 # Description: CC-native session discovery, listing, and reclaim
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-30
-# Modified: 2026-11-09
+# Modified: 2026-11-17
 # =============================================
 
 """Read Claude Code native session files (~/.claude/sessions/<pid>.json).
@@ -21,6 +21,7 @@ from pathlib import Path
 from aipass.cli import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config.loader import aipass_home, fleet_rows
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 CONSOLE = err_console
@@ -295,14 +296,14 @@ def _occupant_rank(session: dict) -> tuple[int, float]:
 def find_occupant(cwd: str, exclude_pid: int | None = None) -> dict | None:
     """Find the live CC session occupying the given cwd, excluding our own PID.
 
-    A caller skipping jobs must never be handed a job while a seat sits behind it.
+    A caller skipping jobs must never be handed a job while a seat sits behind it. One json trail entry per call.
     """
     candidates = [
         session for session in find_live_for_cwd(cwd) if exclude_pid is None or session.get("pid") != exclude_pid
     ]
-    if not candidates:
-        return None
-    return min(candidates, key=_occupant_rank)
+    occupant = min(candidates, key=_occupant_rank) if candidates else None
+    json_handler.log_operation("find_occupant", {"seat": cwd, "found": occupant is not None})
+    return occupant
 
 
 def _stop_session(session: dict) -> str:

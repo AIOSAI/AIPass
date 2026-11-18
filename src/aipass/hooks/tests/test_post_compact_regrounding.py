@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_post_compact_regrounding.py
-# Version: 1.3.0
+# Version: 1.3.1
 # Description: Tests for post_compact_regrounding lifecycle handler (DPLAN-0276)
 # Branch: hooks
 # Created: 2026-08-01
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/lifecycle/post_compact_regrounding.py."""
@@ -534,11 +534,12 @@ class TestReleaseNoticeModule:
 
     def test_it_writes_nothing(self, tmp_path):
         """The notice reads two files and creates none — no manifest, no stamp,
-        no state file. Proven by a full tree snapshot, paths and mtimes."""
+        no state file. Proven by a full tree snapshot, paths and mtimes, all but the json trail's own dir."""
         cwd = _make_project(tmp_path / "proj", stamped="2.8.1")
+        trail = tmp_path / "hooks"
 
         def snapshot():
-            return sorted((str(p), p.stat().st_mtime_ns) for p in tmp_path.rglob("*"))
+            return sorted((str(p), p.stat().st_mtime_ns) for p in tmp_path.rglob("*") if trail not in (p, *p.parents))
 
         before = snapshot()
         assert _notice(cwd) != ""

@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_rm_gate.py
-# Version: 3.8.0
+# Version: 3.8.1
 # Description: Tests for rm_gate security handler, the DPLAN-0356 lockdown since 2.0.0
 # Branch: hooks
 # Created: 2026-06-02
@@ -214,7 +214,7 @@ class TestEveryCallLeavesATrailEntry:
         with patch.object(rm_gate.json_handler, "log_operation", return_value=False) as logged:
             assert self._bash("ls")["exit_code"] == 0
             assert self._bash("rm file.txt")["exit_code"] == 2
-        assert logged.call_count == 2
+        assert [c.args[0] for c in logged.call_args_list].count("check") == 2
         assert not trail.exists()
 
 

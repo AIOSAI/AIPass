@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: write_ownership.py
-# Version: 2.7.1
+# Version: 2.8.0
 # Description: Who may write whose files: project roots and branch owners read from the registries
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-18
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Answers, for the edit gate's two lanes, whose file a write lands in and whether this seat may make it.
@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from aipass.cli import err_console
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.modules import admin_seat
 from aipass.hooks.apps.modules.bash_writes import HELD_BY_INTERPRETER
 from aipass.prax import logger
@@ -257,7 +258,15 @@ def ownership_refusal(
 
     Crossings are the caller's to refuse. The admin grant is asked last: the rail does file I/O.
     Interpreter-held paths pass: a read cannot be told from a write, and reading is allowed.
+    Each call leaves one json trail entry.
     """
+    refusal = _ownership_refusal(caller, landing, cwd, target, how)
+    json_handler.log_operation("ownership_refusal", {"seat": cwd, "refused": refusal is not None})
+    return refusal
+
+
+def _ownership_refusal(caller: Project | None, landing: Project | None, cwd: str, target: Path, how: str) -> str | None:
+    """ownership_refusal's ruling, untrailed."""
     if HELD_BY_INTERPRETER in how:
         return None
     if caller is not None and (landing is None or landing.root != caller.root):

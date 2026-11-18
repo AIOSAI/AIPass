@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_trinity_tripwire.py
 # Description: edit_gate's memory tripwire: a .trinity write a shell made is reported at PostToolUse, project-wide
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-10-08
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py: tripwire_snapshot and tripwire."""
@@ -281,6 +281,42 @@ class TestShellMemoryTripwire:
                 edit_gate.tripwire_snapshot(self._data(seat, "ls", tool_use_id=f"toolu_{index}"))
         pending = json.loads((tmp_path / "aipass-trinity-tripwire-session-1.json").read_text(encoding="utf-8"))
         assert list(pending) == [f"toolu_{index}" for index in range(12, 20)]
+
+
+class TestEveryTripwireCallLeavesATrailEntry:
+    """tripwire_snapshot and tripwire each append one entry to edit_gate's json trail, a refusal as well."""
+
+    WIRE = TestShellMemoryTripwire()
+
+    @pytest.fixture
+    def trail(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "logs"))
+        return tmp_path / "logs" / "hooks" / "hooks_json" / "edit_gate_log.json"
+
+    def _dark(self, tmp_path, monkeypatch, seat):
+        blocker = tmp_path / "not_a_dir"
+        blocker.write_text("", encoding="utf-8")
+        monkeypatch.setattr(edit_gate, "_TRIPWIRE_DIR", blocker)
+        return edit_gate.tripwire_snapshot(self.WIRE._data(seat, "ls"))["exit_code"]
+
+    def test_an_allow_and_a_refusal_each_write_their_verdict(self, trail, tmp_path, monkeypatch):
+        seat = self.WIRE._seat(tmp_path, monkeypatch)
+        self.WIRE._around(seat, "ls")
+        assert self._dark(tmp_path, monkeypatch, seat) == 2
+        entries = [(e["operation"], e["data"]) for e in json.loads(trail.read_text(encoding="utf-8"))]
+        assert entries == [
+            ("tripwire_snapshot", {"tool": "Bash", "verdict": "allow", "seat": str(seat)}),
+            ("tripwire", {"tool": "Bash", "verdict": "allow", "seat": str(seat)}),
+            ("tripwire_snapshot", {"tool": "Bash", "verdict": "refuse", "seat": str(seat)}),
+        ]
+
+    def test_a_trail_that_cannot_be_written_changes_no_verdict(self, trail, tmp_path, monkeypatch):
+        seat = self.WIRE._seat(tmp_path, monkeypatch)
+        with patch.object(edit_gate.json_handler, "log_operation", return_value=False) as logged:
+            assert self.WIRE._around(seat, "ls") == self.WIRE.SILENT
+            assert self._dark(tmp_path, monkeypatch, seat) == 2
+        assert [c.args[0] for c in logged.call_args_list] == ["tripwire_snapshot", "tripwire", "tripwire_snapshot"]
+        assert not trail.exists()
 
 
 class TestTripwireWatchesEveryTrinityInTheProject:

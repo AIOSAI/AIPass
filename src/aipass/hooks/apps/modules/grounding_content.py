@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: grounding_content.py
-# Version: 1.4.2
+# Version: 1.5.0
 # Description: Shared content loaders for grounding prompt injections (DPLAN-0276), each rendered under its cap
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-01
-# Modified: 2026-11-01
+# Modified: 2026-11-17
 # =============================================
 
 """Loads raw grounding content — kernel, navmap, branch, identity — with no cadence gating."""
@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 
 from aipass.cli import err_console
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 CONSOLE = err_console
@@ -358,6 +359,7 @@ def grounding_report(hook_data: dict) -> tuple[list[tuple[str, str]], list[str]]
         reason = _FAILURE_OF[label](hook_data)
         if reason:
             failures.append(_unhomed(reason))
+    json_handler.log_operation("grounding_report", {"loaded": [name for name, _ in sections], "failed": len(failures)})
     return sections, failures
 
 

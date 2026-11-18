@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.28.0
+# Version: 1.29.0
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
@@ -1130,6 +1130,21 @@ def _decide(hook_data: dict) -> dict:
 
 
 def tripwire_snapshot(hook_data: dict) -> dict:
+    """PreToolUse (Bash) memory snapshot, FAIL_CLOSED; each call leaves one json trail entry."""
+    result = _tripwire_snapshot(hook_data)
+    _trail("tripwire_snapshot", hook_data, result)
+    return result
+
+
+def _trail(operation: str, hook_data: dict, result: dict) -> None:
+    """One json trail entry for a tripwire call: tool, verdict and seat, never the command."""
+    payload = hook_data if isinstance(hook_data, dict) else {}
+    tool = payload.get("tool_name") or payload.get("hook_event_name", "")
+    verdict = "refuse" if result.get("exit_code") == 2 else "allow"
+    json_handler.log_operation(operation, {"tool": tool, "verdict": verdict, "seat": payload.get("cwd", "")})
+
+
+def _tripwire_snapshot(hook_data: dict) -> dict:
     """PreToolUse (Bash): record the seat's memory-file stats under this call's tool_use_id.
 
     A snapshot that cannot be taken refuses the call: an unwatched shell call is not let through, except
@@ -1209,6 +1224,13 @@ def _report_change(path: Path, seat: Path) -> tuple[list[str], bool]:
 
 
 def tripwire(hook_data: dict) -> dict:
+    """PostToolUse (Bash) memory tripwire, never blocks; each call leaves one json trail entry."""
+    result = _tripwire(hook_data)
+    _trail("tripwire", hook_data, result)
+    return result
+
+
+def _tripwire(hook_data: dict) -> dict:
     """PostToolUse (Bash): if the seat's memory changed during the call, measure it on disk and say so loudly.
 
     Compared against the same tool_use_id's snapshot, so a memory Edit just before the call is never blamed.

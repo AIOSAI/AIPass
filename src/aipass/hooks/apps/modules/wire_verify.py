@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: wire_verify.py
-# Version: 1.10.0
+# Version: 1.11.0
 # Description: Wire verification — cross-checks provider settings vs project hook config
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-09
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Wire verification — catches silent hook-wiring breaks.
@@ -37,6 +37,7 @@ from aipass.hooks.apps.handlers.config import codex_trust
 from aipass.hooks.apps.modules.context_window import codex_hooks_path
 from aipass.hooks.apps.modules.engine import PROJECT_ROW, own_hooks
 from aipass.hooks.apps.handlers.json import files as json_files
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 CONSOLE = err_console
@@ -484,6 +485,7 @@ def handle_command(command, args) -> bool:
         for name, there in (("Codex", codex), ("OpenCode", opencode)):
             if not there:
                 results["info"].append(f"{name}: not installed, no seat to gate: its wiring is not checked")
+        json_handler.log_operation("verify", {"ok": results["ok"], "errors": len(results["errors"])})
         _render_results(results)
         if not results["ok"]:
             # Returning True would become exit 0: a wiring break must fail anything reading the exit code.

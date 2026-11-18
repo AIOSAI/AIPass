@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: context_window.py
-# Version: 1.13.1
+# Version: 1.14.0
 # Description: Context fill per CLI (Claude transcript, Codex rollout, OpenCode store) and the compact window
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-20
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Live context fill from a session transcript, and the window each CLI runs, read from a live source only.
@@ -37,6 +37,7 @@ from aipass.cli import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config.opencode_paths import opencode_db_path, opencode_store
 from aipass.hooks.apps.handlers.json import files as json_files
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 CONSOLE = err_console
@@ -135,7 +136,15 @@ def _codex_token_info(entry: dict, field: str) -> object:
 def read_latest_usage(transcript_path: str, tail_bytes: int = _TAIL_BYTES, provider: str = "") -> dict | None:
     """The newest usage dict: Claude's assistant message.usage, or Codex's token_count last_token_usage.
 
-    *provider* is the caller's transcript_provider() reading or the payload's; empty reads it here."""
+    *provider* is the caller's transcript_provider() reading or the payload's; empty reads it here.
+    Each call leaves one json trail entry."""
+    usage = _read_latest_usage(transcript_path, tail_bytes, provider)
+    json_handler.log_operation("read_latest_usage", {"provider": provider, "usage": usage is not None})
+    return usage
+
+
+def _read_latest_usage(transcript_path: str, tail_bytes: int, provider: str) -> dict | None:
+    """read_latest_usage's reading, untrailed."""
     if not transcript_path or provider == SEED:
         return None
     try:

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_presence_gate.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Tests for the presence gate handler
 # Branch: hooks
 # Layer: tests
 # Created: 2026-06-29
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/security/presence_gate.py."""
@@ -334,6 +334,18 @@ class TestHandleStop:
         mock.release.assert_not_called()
         mock.claim.assert_not_called()
         mock.find_occupant.assert_not_called()
+
+    def test_each_stop_leaves_one_trail_entry(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+        presence_gate.handle_stop({"hook_event_name": "Stop", "cwd": str(tmp_path)})
+        trail = tmp_path / "hooks" / "hooks_json" / "presence_gate_log.json"
+        entries = [(e["operation"], e["data"]) for e in json.loads(trail.read_text(encoding="utf-8"))]
+        assert entries == [("handle_stop", {"tool": "Stop", "verdict": "allow", "seat": str(tmp_path)})]
+
+    def test_a_trail_that_cannot_be_written_changes_no_answer(self):
+        with patch.object(presence_gate.json_handler, "log_operation", return_value=False) as logged:
+            assert presence_gate.handle_stop({}) == {"stdout": "", "exit_code": 0}
+        logged.assert_called_once()
 
 
 @pytest.fixture

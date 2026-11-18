@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_engine.py
-# Version: 2.5.0
+# Version: 2.6.0
 # Description: Tests for hook engine dispatch logic: the dispatcher core; contracts and safeguards in two siblings
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/engine.py: the dispatcher core and the hook dispatch it drives."""
@@ -20,11 +20,13 @@
 
 import json
 import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from aipass.hooks.apps.hooks import handle_command, main, print_introspection
+from aipass.hooks.apps.modules import engine as engine_module
 from aipass.hooks.apps.modules.engine import (
     dispatch,
     run_event,
@@ -845,6 +847,49 @@ class TestRunEvent:
         config = {"hooks_enabled": True, "UserPromptSubmit": {"temporal": self._HOUSE}}
         with patch("aipass.hooks.apps.handlers.config.loader.resolve_config", return_value=config):
             assert run_event("UserPromptSubmit:project", "{}") == ("", 0)
+
+
+class TestEveryEventLeavesOneTrailEntry:
+    """run_event leaves one engine entry with its exit code, and diagnostics one entry per event, not per row."""
+
+    CWD = str(Path(__file__).resolve().parents[1])
+
+    @pytest.fixture
+    def trail(self, tmp_path, monkeypatch) -> Path:
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+        return tmp_path / "hooks" / "hooks_json"
+
+    def _bash(self, command: str) -> tuple[str, int]:
+        payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": self.CWD, "session_id": "t"}
+        with patch("aipass.hooks.apps.handlers.config.loader.resolve_config", return_value=_one(_GATE)):
+            return run_event("PreToolUse", json.dumps(payload))
+
+    def _entries(self, path: Path) -> list[tuple[str, dict]]:
+        return [(e["operation"], e["data"]) for e in json.loads(path.read_text(encoding="utf-8"))]
+
+    def test_an_allow_and_a_refusal_each_write_their_exit_code(self, trail: Path, mock_logger):
+        assert self._bash("ls")[1] == 0
+        assert self._bash("rm file.txt")[1] == 2
+        assert self._entries(trail / "engine_log.json") == [
+            ("run_event", {"event": "PreToolUse", "exit_code": 0}),
+            ("run_event", {"event": "PreToolUse", "exit_code": 2}),
+        ]
+        assert "rm file.txt" not in (trail / "engine_log.json").read_text(encoding="utf-8")
+
+    def test_one_event_is_one_diagnostics_entry_however_many_rows_it_logs(self, trail: Path, mock_logger):
+        with patch("aipass.hooks.apps.modules.engine._log", side_effect=_log) as rows:
+            self._bash("ls")
+        assert rows.call_count > 1
+        assert [op for op, _ in self._entries(trail / "diagnostics_log.json")] == ["trail_event"]
+
+    def test_a_trail_that_cannot_be_written_changes_no_exit_code(self, trail: Path, mock_logger):
+        with patch.object(engine_module.json_handler, "log_operation", return_value=False) as logged:
+            assert self._bash("ls")[1] == 0
+            assert self._bash("rm file.txt")[1] == 2
+        assert ("run_event", {"event": "PreToolUse", "exit_code": 2}) in [
+            (c.args[0], c.args[1]) for c in logged.call_args_list
+        ]
+        assert not (trail / "engine_log.json").exists()
 
 
 _FAULT_HANDLER = "aipass.hooks.apps.handlers.fake.handle"

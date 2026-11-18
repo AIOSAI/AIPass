@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: shell_reader.py
-# Version: 1.4.4
+# Version: 1.5.0
 # Description: The one shell-word reader: every program a Bash command runs, as the shell runs it (rm_gate, git_gate)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-01
-# Modified: 2026-10-31
+# Modified: 2026-11-17
 # =============================================
 
 """What a Bash command RUNS, read the way bash reads it (DPLAN-0356 phase 3, R3 to R6).
@@ -40,6 +40,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from aipass.cli import err_console
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.modules.bash_writes import _SOURCE_DELETE_SHAPES, _resolve, verb_name, write_targets
 from aipass.hooks.apps.modules.shell_programs import (
     DELETE_PROGRAMS,
@@ -1268,21 +1269,21 @@ class _Walker:
 def invocations(command: str, cwd: str = "") -> list[Invocation]:
     """Every program *command* runs, as the shell will run it (DPLAN-0356 phase 3, R3 and R4).
 
-    The one reader rm_gate and git_gate share. Quotes are removed, escapes and
-    $'...' decoded, braces expanded and a glob in a command word resolved against
-    the working directory and PATH. Launchers are stepped past; ``bash -c``, ``eval``,
-    ``find -exec``, ``trap``, aliases and substitutions are read as programs; a script
-    file a shell or interpreter is handed is read from disk.
+    The one reader rm_gate and git_gate share. Quotes are removed, escapes and $'...' decoded, braces
+    expanded and a glob in a command word resolved against the working directory and PATH. Launchers are
+    stepped past; ``bash -c``, ``eval``, ``find -exec``, ``trap``, aliases and substitutions are read as
+    programs; a script file a shell or interpreter is handed is read from disk. One json trail entry per call.
 
     Args:
         command: The raw Bash command string from the tool input.
         cwd: The session working directory; relative script paths are read from it.
 
     Returns:
-        One :class:`Invocation` per program, in the order the reader met them. An
-        entry whose ``unread`` is set names something the reader could not see.
+        One :class:`Invocation` per program in reading order; one with ``unread`` names what went unseen.
     """
-    return _read(command, cwd).invocations
+    found = _read(command, cwd).invocations
+    json_handler.log_operation("invocations", {"programs": len(found), "unread": sum(1 for i in found if i.unread)})
+    return found
 
 
 def _read(command: str, cwd: str) -> _Reading:

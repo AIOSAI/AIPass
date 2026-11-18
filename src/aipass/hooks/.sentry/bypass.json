@@ -39,12 +39,6 @@
     },
     {
       "file": "apps/modules/grounding_content.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Shared loader for kernel/navmap/branch/identity content (DPLAN-0276) — uses stdlib json.loads to read passport.json and reads markdown files. No JSON file ops needing json_handler, same profile as identity.py/tier0_kernel.py/navmap.py/branch_loader.py which it consolidates."
-    },
-    {
-      "file": "apps/modules/grounding_content.py",
       "standard": "modules",
       "functions": ["<file>", "load_branch", "load_identity", "load_kernel", "load_navmap"],
       "reason": "Shared content-loading service consumed by 4 UserPromptSubmit handlers (identity, tier0_kernel, navmap, branch_loader) and the PostToolUse post_compact_regrounding backstop — module IS the loader service, same pattern as cadence.py."
@@ -56,34 +50,10 @@
       "reason": "Stdlib only by contract (FPLAN-0645): the receipt line in ~/.claude/.backup/settings/receipts.jsonl is a shape shared with @aipass's Python doors, not branch operational JSON, and a gate that cannot import blocks every edit on the machine."
     },
     {
-      "file": "apps/modules/cadence.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Uses stdlib json for /tmp state file (turn counter) and hooks_json/custom_config/cadence_config.json config loading — lightweight ephemeral state, not branch data storage."
-    },
-    {
-      "file": "apps/modules/engine.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Engine uses JSONL diagnostic logging, not branch json_handler — different purpose."
-    },
-    {
       "file": "apps/modules/engine.py",
       "standard": "modules",
       "functions": ["<file>", "_load_budget_state", "_save_budget_state", "dispatch"],
       "reason": "dispatch() is the engine's core purpose: it IS the module's primary function, not a handler that belongs elsewhere. Its stdlib json is the stdin payload, handler stdouts and the per-seat budget state, never branch data. Moving dispatch to handlers/ would leave an empty module."
-    },
-    {
-      "file": "apps/modules/hook_test.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Uses stdlib json.dumps to serialize mock event data for engine dispatch — no JSON file ops needing json_handler."
-    },
-    {
-      "file": "apps/modules/hooksound.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Sound toggle: touches the ~/.aipass sound flag file only, no JSON operations or json_handler storage."
     },
     {
       "file": "apps/sound.py",
@@ -94,18 +64,6 @@
       "file": "apps/modules/feedback.py",
       "standard": "trigger",
       "reason": "sentinel.unlink() removes a .aipass/feedback_off toggle file — not a tracked resource. Deliberate user action via 'drone @hooks feedback on'."
-    },
-    {
-      "file": "apps/modules/hookstatus.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Read-only config viewer — delegates JSON loading to config/loader.py, no direct JSON file ops."
-    },
-    {
-      "file": "apps/modules/wire_verify.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Reads ~/.claude/settings.json (external provider settings) through handlers/json/files; stdlib json only names the decode error — not branch data storage needing json_handler."
     },
     {
       "file": "apps/modules/cadence.py",
@@ -120,12 +78,6 @@
     },
     {
       "file": "apps/modules/sandbox.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Uses stdlib json.dump to write ephemeral srt config to a NamedTemporaryFile — not a tracked JSON resource needing json_handler."
-    },
-    {
-      "file": "apps/modules/sandbox.py",
       "standard": "trigger",
       "reason": "Path.unlink() removes an ephemeral NamedTemporaryFile (srt config) created seconds earlier in the same function — not a tracked resource or production data deletion."
     },
@@ -134,12 +86,6 @@
       "standard": "modules",
       "functions": ["_is_devpulse", "build_policy", "resolve_bwrap_command"],
       "reason": "Read-only passport.json check in _is_devpulse() to detect branch role for policy generation — not a file-write operation, not a handler-level concern. Module reads sibling passports to determine writable/RO map."
-    },
-    {
-      "file": "apps/modules/cc_sessions.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Reads CC-native ~/.claude/sessions/*.json (external files, not branch data) with stdlib json — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/modules/cc_sessions.py",
@@ -172,27 +118,9 @@
       "reason": "Reads Codex's ~/.codex/config.toml (two int keys) with stdlib tomllib: an external CLI's TOML file, not branch JSON, so json_handler cannot read it. The module IS the transcript/window reader service; the read is one call in _codex_config_int."
     },
     {
-      "file": "apps/modules/context_window.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Reads external state (session transcript JSONL via tail with stdlib json, branch .claude/settings.local.json through handlers/json/files) — not branch data storage needing json_handler. The module IS the transcript/window reader service (DPLAN-0253), same pattern as cc_sessions.py."
-    },
-    {
-      "file": "apps/modules/diagnostics_state.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Reads/writes the per-seat diagnostics cache files under STATE_DIR with stdlib json, the same profile already bypassed on its writer, apps/handlers/lifecycle/auto_fix.py. Routing one end through json_handler and not the other is the writer/reader drift this module exists to prevent."
-    },
-    {
       "file": "apps/modules/diagnostics_state.py",
       "standard": "trigger",
       "reason": "clear_seat() unlinks one seat's transient diagnostics cache file under STATE_DIR: not a tracked resource or production data; auto_fix regenerates it on the next edit."
-    },
-    {
-      "file": "apps/modules/cc_transcripts.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Reads CC-native ~/.claude/projects/*.jsonl (external files, not branch data) with stdlib json — no JSON file ops needing json_handler. Same species as cc_sessions.py, same already-ruled reason."
     },
     {
       "file": "apps/modules/cc_transcripts.py",
@@ -202,21 +130,9 @@
     },
     {
       "file": "apps/modules/bash_writes.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Pure string parser for edit_gate's scripted lane — reads a Bash command and returns resolved paths. Touches no JSON file at all, so there is nothing for json_handler to open and nothing to log_operation about. Same profile as grounding_content.py, which is bypassed here for the same reason."
-    },
-    {
-      "file": "apps/modules/bash_writes.py",
       "standard": "modules",
       "functions": ["<file>", "write_targets_by_segment"],
       "reason": "Not a drone command surface: it is the write-target reader consumed by handlers/security/edit_gate.py inside a PreToolUse hook, where there is no CLI caller to route. Same pattern as grounding_content.py (consumed by 5 handlers) and cadence.py. print_introspection() IS provided, so the module still answers for itself."
-    },
-    {
-      "file": "apps/modules/testwrite_targets.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Pure path classifier for testwrite_gate — answers 'is this a new test file' from a Path's shape and one exists() call. Touches no JSON at all. Same profile as bash_writes.py."
     },
     {
       "file": "apps/modules/testwrite_targets.py",
@@ -226,27 +142,9 @@
     },
     {
       "file": "apps/modules/admin_seat.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Asks @ai_mail's verified-caller rail one boolean question and stamps/unstamps one env var. Touches no JSON at all, so there is nothing for json_handler to log."
-    },
-    {
-      "file": "apps/modules/admin_seat.py",
       "standard": "modules",
       "functions": ["<file>", "caller_name"],
       "reason": "Not a drone command surface: a CLI that answered 'are you the admin seat' would stamp a caller cwd from whatever directory the operator stood in, which is exactly the name-check this module exists to refuse. Consumed by edit_gate and testwrite_gate inside PreToolUse hooks. print_introspection() reports the contract. Same profile as bash_writes.py."
-    },
-    {
-      "file": "apps/modules/testgate_policy.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Reads the operator-owned .aipass/test_write_policy.json through handlers/json/files, stdlib json naming the decode error — same profile as handlers/config/loader.py reading .aipass/hooks.json. This is a project config file outside hooks_json/, not branch operational state, and it is read-only here: the flip is deliberately a human edit."
-    },
-    {
-      "file": "apps/modules/release_notice.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Reads .trinity/passport.json and .aipass/scaffold_manifest.json with stdlib json.loads and writes nothing (DPLAN-0335 leg 2) — no JSON file ops needing json_handler, identical profile to grounding_content.py and identity.py, which read the same passport the same way."
     },
     {
       "file": "apps/modules/release_notice.py",
@@ -256,21 +154,9 @@
     },
     {
       "file": "apps/modules/shell_programs.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "The default-deny program tables (DPLAN-0356 phase 4) and two pure functions over shell_reader's invocations. Reads and writes no JSON, logs no operation; same profile as shell_reader.py."
-    },
-    {
-      "file": "apps/modules/shell_programs.py",
       "standard": "modules",
       "functions": ["<file>"],
       "reason": "Not a drone command surface: tables consumed by shell_reader, git_gate and edit_gate inside PreToolUse hooks. print_introspection() IS provided. Same profile as shell_reader.py."
-    },
-    {
-      "file": "apps/modules/shell_reader.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Pure shell-word reader (DPLAN-0356 phase 3): reads a Bash command, and the script files it names, as text and returns the programs it runs. Reads and writes no JSON, logs no operation; same profile as bash_writes.py."
     },
     {
       "file": "apps/modules/shell_reader.py",
@@ -280,21 +166,9 @@
     },
     {
       "file": "apps/modules/comment_scan.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "The comment budget's pure counter (devpulse 1858ba47): reads a file or text and returns line counts. Reads and writes no JSON, logs no operation; same profile as shell_reader.py."
-    },
-    {
-      "file": "apps/modules/comment_scan.py",
       "standard": "modules",
       "functions": ["<file>", "scan"],
       "reason": "Not a drone command surface: the counter consumed by handlers/lifecycle/comment_budget.py and modules/comments.py, kept free of CLI and hook types so @sentry can import it. The verb is comments.py. print_introspection() IS provided."
-    },
-    {
-      "file": "apps/modules/protected_paths.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Answers whether one path is a gate-switching file (DPLAN-0356 item 1) by pattern and path arithmetic. Reads and writes no JSON, logs no operation; same profile as admin_seat.py."
     },
     {
       "file": "apps/handlers/config/ledger_store.py",
@@ -304,21 +178,9 @@
     },
     {
       "file": "apps/modules/write_ownership.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Reads project registries (*_REGISTRY.json, any project's) read-only with stdlib json to learn branch rows and the owner flag for edit_gate. Writes nothing, logs no operation; same profile as admin_seat/bash_writes (devpulse 1d041cfc)."
-    },
-    {
-      "file": "apps/modules/write_ownership.py",
       "standard": "modules",
       "functions": ["<file>", "_read"],
       "reason": "Not a drone command surface: the who-may-write-whose-files reader consumed by handlers/security/edit_gate.py inside a PreToolUse hook. print_introspection states the rule; a CLI verdict would read the operator's cwd as a seat."
-    },
-    {
-      "file": "apps/modules/write_grant.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Asks @ai_mail's dispatch-grant door one question per crossing write and stamps/unstamps one env var. Opens no JSON itself (the door reads the register and logs its own grant_decision); same profile as admin_seat.py."
     },
     {
       "file": "apps/modules/write_grant.py",
@@ -347,8 +209,8 @@
       "file": "apps/modules/testgate_policy.py",
       "standard": "logged_fallback",
       "lines": [
-        64,
-        73
+        65,
+        74
       ],
       "reason": "Fleet green leg 5: find_policy_file's None is answered by load_policy with _missing(), a fail-closed Policy that refuses every new test file. Nothing is allowed on doubt."
     },
@@ -356,10 +218,10 @@
       "file": "apps/modules/diagnostics_state.py",
       "standard": "logged_fallback",
       "lines": [
-        293,
-        296,
-        299,
-        302
+        295,
+        298,
+        301,
+        304
       ],
       "reason": "Fleet green leg 5: revalidate's None is 'unknown' (pyright missing, timed out, unparseable, failed) and its docstring says it must never be read as clean; the success path returns a list. edit_gate keeps the recorded errors on None, so the fence stays as it was: fail-closed."
     },
@@ -367,25 +229,25 @@
       "file": "apps/modules/cc_sessions.py",
       "standard": "logged_fallback",
       "lines": [
-        178,
-        181,
-        184,
-        207,
-        282
+        179,
+        182,
+        185,
+        208,
+        283
       ],
-      "reason": "Fleet green leg 5, read for presence_gate (its one gate caller). _is_pid_alive: 178 is the real answer (ESRCH = dead); 181 answers 'alive' on EPERM, so the gate keeps refusing the newer seat; 184: os.kill(pid, 0) raises only ESRCH and EPERM on POSIX, any other errno is read as dead so a stale record cannot hold a branch shut with an unsatisfiable block. 207 _format_age '?': display text. 282 session_start: None is 'cannot rank', never younger."
+      "reason": "Fleet green leg 5, read for presence_gate (its one gate caller). _is_pid_alive: 179 is the real answer (ESRCH = dead); 182 answers 'alive' on EPERM, so the gate keeps refusing the newer seat; 185: os.kill(pid, 0) raises only ESRCH and EPERM on POSIX, any other errno is read as dead so a stale record cannot hold a branch shut with an unsatisfiable block. 208 _format_age '?': display text. 283 session_start: None is 'cannot rank', never younger."
     },
     {
       "file": "apps/modules/cadence.py",
       "standard": "logged_fallback",
       "lines": [
-        475,
-        480,
-        568,
-        752,
-        834,
-        887,
-        971
+        476,
+        481,
+        569,
+        753,
+        835,
+        888,
+        972
       ],
       "reason": "Fleet green leg 5: cadence decides which turn an injector fires on and guards no write. On doubt each answers its documented empty value ('never fired', not grounded, nothing pending), logged: the worst case is a grounding block early, late or twice, never a write let through."
     },
@@ -393,21 +255,21 @@
       "file": "apps/modules/context_window.py",
       "standard": "logged_fallback",
       "lines": [
-        148,
-        151,
-        188,
-        286,
-        349,
-        371
+        157,
+        160,
+        197,
+        295,
+        358,
+        380
       ],
-      "reason": "Fleet green leg 5: the context gauge's reading; None shows no gauge. Display only, guards no write. 148-151: an unreadable transcript (Claude's or a Codex rollout) reads as no usage. 188: an unreadable status-line window file reads as window unknown, logged at INFO. 286: an unreadable OpenCode store reads as no usage, logged at INFO. 349: an unreadable OpenCode catalog reads as no limit, so the window is unknown, logged at INFO. 368: an unreadable limit cache reads as empty, so the catalog is read, logged at INFO."
+      "reason": "Fleet green leg 5: the context gauge's reading; None shows no gauge. Display only, guards no write. 157-160: an unreadable transcript (Claude's or a Codex rollout) reads as no usage. 197: an unreadable status-line window file reads as window unknown, logged at INFO. 295: an unreadable OpenCode store reads as no usage, logged at INFO. 358: an unreadable OpenCode catalog reads as no limit, so the window is unknown, logged at INFO. 380: an unreadable limit cache reads as empty, so the catalog is read, logged at INFO."
     },
     {
       "file": "apps/modules/cc_transcripts.py",
       "standard": "logged_fallback",
       "lines": [
-        149,
-        188
+        146,
+        186
       ],
       "reason": "Fleet green leg 5: the recent-chats listing a session boot displays. An unlistable or unstattable transcript shows as no chat; guards no write."
     },
@@ -424,9 +286,9 @@
       "file": "apps/modules/release_notice.py",
       "standard": "logged_fallback",
       "lines": [
-        45,
-        62,
-        80
+        46,
+        63,
+        81
       ],
       "reason": "Fleet green leg 5: the manager-only release notice (advisory). No root, no passport or an unreadable passport means no notice; guards no write. 76 gained its log line in leg 5 (it was silent)."
     },
@@ -516,12 +378,6 @@
       "reason": "Fleet green leg 5: of_the_tree reads the errored Python source to see whether an error's line holds a {{ placeholder. Source code is not JSON; the seat state itself is written atomically by save_seat (temp + os.replace). handle_command and print_introspection are present."
     },
     {
-      "file": "apps/modules/engine_closure.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Reads the root .aipass/hooks.json read-only with stdlib json to learn which handlers are wired, and ruff's JSON report. Writes nothing, logs no operation; same profile as write_ownership/admin_seat."
-    },
-    {
       "file": "tests/test_tier0_kernel.py",
       "standard": "through_the_command",
       "lines": [
@@ -551,7 +407,7 @@
       "file": "tests/test_engine.py",
       "standard": "through_the_command",
       "lines": [
-        28
+        30
       ],
       "reason": "Fleet green leg 9, hooks' decision. _run_hook, ruling (c): dispatch() runs a command hook as a shell subprocess (a spawn); contract: exit code, stdout, stderr and elapsed_ms answered, TIMEOUT and OSError answered as exit -1, never raised. _run_handler, ruling (c): on a timeout dispatch()'s far side speaks the timeout through the sound player (a spawn); contract: a handler outside aipass.* is refused before import, a hung handler answers TIMEOUT at its timeout, a raising one answers exit -1. _log, ruling (b): the JSONL diagnostics writer, one JSON object appended per line, a failed write never raises; dispatch writes the same file, and line 1614's hasattr pin is the json-handler shape the module keeps. _matches is read through dispatch() (_fires), _cc_len through a test-own UTF-16 count."
     },
@@ -704,8 +560,8 @@
       "file": "apps/modules/admin_seat.py",
       "standard": "fallback",
       "lines": [
-        73,
-        83
+        76,
+        86
       ],
       "reason": "Fail-closed admin check: an unimportable or raising verified-caller rail returns False, so every gate refuses the admin exemption; the refusal is the answer, and the WARNING line in the prax system log tells a dark rail from a plain no."
     },
@@ -753,7 +609,7 @@
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "fallback",
       "lines": [
-        1152
+        1167
       ],
       "reason": "tripwire_snapshot: the hook's own per-session snapshot store of in-flight Bash calls; a damaged copy holds only stale stats. Raising would refuse every Bash call for the rest of the session, as nothing else rewrites the store, so it starts fresh, stamped with FRESH_START_KEY. Once the fresh write lands, STORE_RESET_LOG reaches medic at ERROR (cause at INFO); a store the write cannot replace refuses the call. Calls in flight whose snapshots were lost are told their check did not run, at ERROR, while the stamp is younger than FRESH_START_WINDOW_S."
     },
@@ -809,7 +665,7 @@
       "file": "apps/modules/diagnostics_state.py",
       "standard": "fallback",
       "lines": [
-        251
+        253
       ],
       "reason": "Fails toward the block: an errored file that cannot be read keeps every recorded error as found, so no error is dropped as a placeholder line. INFO, not WARNING: a just-deleted file is the usual cause, and the block it keeps is itself the signal."
     },
@@ -817,10 +673,10 @@
       "file": "apps/modules/diagnostics_state.py",
       "standard": "fallback",
       "lines": [
-        291,
-        294,
-        297,
-        300
+        293,
+        296,
+        299,
+        302
       ],
       "reason": "None means \"unknown\", never clean: edit_gate keeps the recorded errors and the block stands when pyright is missing, times out or answers garbage. Each case logs at WARNING, which @trigger escalates."
     },
@@ -1126,7 +982,7 @@
       "file": "apps/modules/protected_paths.py",
       "standard": "fallback",
       "lines": [
-        62
+        63
       ],
       "reason": "resolve() fails only on a symlink loop or an unreadable cwd; the path as spelled still names the file, and the name lane judges that spelling. A protected name is refused either way, so nothing opens on it."
     },
@@ -1134,9 +990,9 @@
       "file": "apps/modules/release_notice.py",
       "standard": "fallback",
       "lines": [
-        43,
-        50,
-        60
+        44,
+        51,
+        61
       ],
       "reason": "A cwd that cannot be resolved or scanned (deleted under the session, or unreadable) has no project or passport to read, so the seat reads as no manager and the notice is not built. Only an advisory notice is lost; no gate rests on it."
     },
@@ -1144,7 +1000,7 @@
       "file": "apps/modules/release_notice.py",
       "standard": "fallback",
       "lines": [
-        141
+        142
       ],
       "reason": "Read-only: a corrupt scaffold manifest is never written here; it only means no release notice is built. WARNING, which @trigger escalates, names the file; aipass init and aipass doctor own it."
     },
@@ -1152,7 +1008,7 @@
       "file": "apps/modules/write_ownership.py",
       "standard": "fallback",
       "lines": [
-        96
+        97
       ],
       "reason": "HELD from a raise: an unreadable registry still marks the project boundary and branches are still told by the src/<pkg>/<branch> shape, but project-level files lose their fence. Raising would refuse every write in the project, the repair included. WARNING on each gated call, escalated by @trigger."
     },
@@ -1160,7 +1016,7 @@
       "file": "apps/modules/write_ownership.py",
       "standard": "fallback",
       "lines": [
-        176
+        177
       ],
       "reason": "A host that publishes no PATH_MAX answers 0 and the length check falls to the real probe of the path, which still refuses an over-long one. Nothing is passed unjudged."
     },
@@ -1168,7 +1024,7 @@
       "file": "apps/modules/comment_scan.py",
       "standard": "fallback",
       "lines": [
-        123
+        124
       ],
       "reason": "An edit's fragment is often not tokenizable on its own; the scan then counts the # lines directly, a second real measure, not a stand-in for an answer. Only docstring lines go uncounted, and only advisory comment budgets read the count."
     },
@@ -1176,8 +1032,8 @@
       "file": "apps/modules/testgate_policy.py",
       "standard": "fallback",
       "lines": [
-        62,
-        71
+        63,
+        72
       ],
       "reason": "Fails closed: None reads as no policy found, and load_policy turns that into the refusing Policy (_missing), so testwrite_gate refuses new test files. The refusal is the answer; its text names the search start."
     },
@@ -1185,7 +1041,7 @@
       "file": "apps/modules/engine_closure.py",
       "standard": "fallback",
       "lines": [
-        73
+        74
       ],
       "reason": "An unreadable hooks.json narrows the crash pre-check to the engine's own root modules; it never widens what an edit may do. Raising would refuse every .py edit in the fleet. One fixed ERROR line (CONFIG_HOLE_LOG) reaches medic, the path and cause follow at INFO, and the engine itself answers a broken config with its loud banner."
     },
@@ -1193,7 +1049,7 @@
       "file": "apps/modules/engine_closure.py",
       "standard": "fallback",
       "lines": [
-        116
+        117
       ],
       "reason": "A closure file that cannot be parsed has its own imports left unfollowed; the file itself is still in the closure and still pre-checked by ruff when edited. One fixed ERROR line (PARSE_HOLE_LOG) reaches medic, the path and cause follow at INFO."
     },
@@ -1209,7 +1065,7 @@
       "file": "apps/modules/shell_reader.py",
       "standard": "fallback",
       "lines": [
-        792
+        793
       ],
       "reason": "The reader mirrors the shell: a PATH entry the gate cannot list is one the shell's own glob cannot list either, so it offers no candidate to either. The loop reads the remaining entries, and the watched verbs are matched by name regardless."
     },
@@ -1217,7 +1073,7 @@
       "file": "apps/modules/bash_writes.py",
       "standard": "fallback",
       "lines": [
-        293
+        294
       ],
       "reason": "A second real reading, not an empty one: an unbalanced quote (which bash itself refuses to run) is split on whitespace so its write targets are still read and judged; returning no tokens would read as no writes."
     },
@@ -1225,11 +1081,11 @@
       "file": "apps/modules/cc_transcripts.py",
       "standard": "fallback",
       "lines": [
-        91,
-        125,
-        147,
-        158,
-        186
+        92,
+        126,
+        144,
+        155,
+        184
       ],
       "reason": "Read-only listing of Claude Code's own transcripts for the boot menu: a torn line (a transcript mid-write) or a transcript that vanished or cannot be read drops that chat from the menu, and --continue still reaches it. The files are never written here."
     },
@@ -1237,10 +1093,10 @@
       "file": "apps/modules/cc_sessions.py",
       "standard": "fallback",
       "lines": [
-        66,
-        83,
-        148,
-        179
+        67,
+        84,
+        149,
+        180
       ],
       "reason": "Process probes of /proc and ps for a PID that can exit at any moment: None is handed on as \"cannot be told\" (the ancestor walk stops, the start check falls to liveness alone), and a PID that refuses a signal reads as alive, the side that keeps a seat. Nothing is written on these answers."
     },
@@ -1248,7 +1104,7 @@
       "file": "apps/modules/cc_sessions.py",
       "standard": "fallback",
       "lines": [
-        232
+        233
       ],
       "reason": "Read-only: Claude Code owns and rewrites its session PID files, never this module. One caught mid-write is skipped for this read; the sessions verb and the presence gate (fail-OPEN by the owner's decision) read it again on the next call."
     },
@@ -1256,7 +1112,7 @@
       "file": "apps/modules/cc_sessions.py",
       "standard": "fallback",
       "lines": [
-        280
+        281
       ],
       "reason": "None is handed on as \"cannot be told\", documented in the signature: callers rank no one on it (presence_gate refuses the newer seat rather than guess) and the boot menu shows no age."
     },
@@ -1264,7 +1120,7 @@
       "file": "apps/modules/engine.py",
       "standard": "fallback",
       "lines": [
-        242
+        243
       ],
       "reason": "HELD from a raise: the per-session /tmp budget counts are read in dispatch, so a raise would crash every event, gates included. A corrupt copy is reset and later overwritten; the cost is budgeted injectors firing again. WARNING, escalated by @trigger, names it."
     },
@@ -1272,7 +1128,7 @@
       "file": "apps/modules/engine.py",
       "standard": "fallback",
       "lines": [
-        307
+        308
       ],
       "reason": "Fails closed: a fail-closed gate's exit 2 whose stdout does not parse reads as \"exited 2 without a decision\", which _refuse_broken_gate turns into a BLOCK logged at ERROR with a gate_broken row in engine.jsonl."
     },
@@ -1280,8 +1136,8 @@
       "file": "apps/modules/engine.py",
       "standard": "fallback",
       "lines": [
-        504,
-        540
+        505,
+        541
       ],
       "reason": "Sound is cosmetic: a timeout voice or hook chime that cannot play costs only the sound. The event itself is already recorded in engine.jsonl (the timeout row, or the hook's own row), and its output is delivered."
     },
@@ -1289,7 +1145,7 @@
       "file": "apps/modules/engine.py",
       "standard": "fallback",
       "lines": [
-        549
+        550
       ],
       "reason": "Not a default: a hook's exit 2 whose stdout does not parse is treated as a crash, never a block or an allow, and is logged at ERROR \"CRASHED exit=2\" with a crashed row in engine.jsonl. Fail-closed gates were already refused upstream."
     },
@@ -1297,7 +1153,7 @@
       "file": "apps/modules/context_window.py",
       "standard": "fallback",
       "lines": [
-        114
+        115
       ],
       "reason": "A provider transcript still being written ends mid-line as a matter of course: the torn line is skipped and the scan reads the next newest. The transcript is the provider's, only read here."
     },
@@ -1305,7 +1161,7 @@
       "file": "apps/modules/context_window.py",
       "standard": "fallback",
       "lines": [
-        146
+        155
       ],
       "reason": "Absence, not failure: on turn 0 the provider has not written the transcript yet, so there is no usage to read and the gauge stays quiet. Any other read error is logged at WARNING by the handler below it."
     },
@@ -1313,14 +1169,14 @@
       "file": "apps/modules/context_window.py",
       "standard": "fallback",
       "lines": [
-        186,
-        226,
-        284,
-        347,
-        387,
-        398,
-        410,
-        427
+        195,
+        235,
+        293,
+        356,
+        396,
+        407,
+        419,
+        436
       ],
       "reason": "Read-only inputs of the advisory context gauge (status-line window file, provider settings, OpenCode store and config, Codex config and rollout), each owned by its provider and never written here: an unreadable one costs a reading, and the window falls to the next source or the gauge stays quiet."
     },
@@ -1328,7 +1184,7 @@
       "file": "apps/modules/context_window.py",
       "standard": "fallback",
       "lines": [
-        369
+        378
       ],
       "reason": "A rebuildable cache of catalog limits: an unreadable one is left as found (None stops the write-back) and the limit is read from the OpenCode catalog itself, so the answer is still right. WARNING, escalated by @trigger, names it."
     },
@@ -1336,9 +1192,9 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        473,
-        478,
-        607
+        474,
+        479,
+        608
       ],
       "reason": "Fails toward showing: unreadable mail or advisory throttle state reads as never fired, so the banner or advisory fires rather than hides. The file holds one turn number, wholly rewritten by the next fire, so nothing else is lost. WARNING, escalated by @trigger."
     },
@@ -1346,7 +1202,7 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        566
+        567
       ],
       "reason": "None is handed on as \"cannot be read\", documented in the signature: tier0_kernel raises its DEGRADED line to WARNING on it and the advisory throttle falls to elapsed seconds. Nothing reads None as a turn."
     },
@@ -1354,7 +1210,7 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        662
+        663
       ],
       "reason": "reset_counter rewrites the counter whole by purpose (a compaction or new session): unreadable old state only costs the prior turn in its log line and the debounce of a second reset on one boundary. The reset itself is the repair of a corrupt counter."
     },
@@ -1362,7 +1218,7 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        710
+        711
       ],
       "reason": "A reset that cannot open or write the counter file leaves the counter as it was, and the post-compact re-ground is not armed. Raising would fail the compaction hook; WARNING, escalated by @trigger, names the caller and session."
     },
@@ -1370,7 +1226,7 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        750
+        751
       ],
       "reason": "None reads as \"never stamped\": consumers then keep their counts for the current window instead of opening a new one. The stamp is rewritten whole at the next reset. WARNING, escalated by @trigger, names it."
     },
@@ -1378,8 +1234,8 @@
       "file": "apps/modules/cadence.py",
       "standard": "fallback",
       "lines": [
-        930,
-        967
+        931,
+        968
       ],
       "reason": "A corrupt counter is never overwritten here: the parse fails before the truncate, so the queue is left as found and only the queued re-ground parts are skipped. WARNING on each, escalated by @trigger, names the session."
     },
@@ -1387,7 +1243,7 @@
       "file": "apps/modules/engine.py",
       "standard": "silent_catch",
       "lines": [
-        353
+        354
       ],
       "reason": "The decode error is handed on as the value; the next lines refuse a PreToolUse payload at ERROR with an engine.jsonl row, and log any other event's at WARNING."
     },
@@ -1395,7 +1251,7 @@
       "file": "apps/modules/cadence.py",
       "standard": "silent_catch",
       "lines": [
-        106
+        107
       ],
       "reason": "The read error is handed on as the value; the next lines log it at ERROR and keep the built-in cadence (a raise would refuse every memory write through edit_gate)."
     },
@@ -1438,12 +1294,6 @@
         141
       ],
       "reason": "The refusal path takes no logger (prax can be what broke). An exception whose own message raises still denies: the deny text names its type and says the message could not be read, and the same line lands in logs/bridge.log at ERROR, which medic reads."
-    },
-    {
-      "file": "apps/modules/provider_launch.py",
-      "standard": "json_structure",
-      "functions": ["<file>"],
-      "reason": "Path arithmetic over the shell reader's invocations: where a provider CLI would run. Opens and writes no JSON, so json_handler has nothing to log; same profile as admin_seat.py."
     },
     {
       "file": "apps/modules/provider_launch.py",

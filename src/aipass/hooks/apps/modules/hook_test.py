@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: hook_test.py
-# Version: 1.5.2
+# Version: 1.6.0
 # Description: Portable hook test runner — every hook with mock data; provider parity and smoke with real sessions
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-10
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Portable hook test runner.
@@ -32,6 +32,7 @@ from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config.loader import aipass_home, config_unavailable_reason, find_project_config
 from aipass.hooks.apps.handlers.config.trust_registry import read_registry
 from aipass.hooks.apps.handlers.json import files as json_files
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.handlers.parity import runner, smoke
 from aipass.hooks.apps.modules.write_ownership import project_of
 from aipass.prax import logger
@@ -236,7 +237,7 @@ def run_test(verbose: bool = False) -> dict:
         _restore_env("AIPASS_HOME", prior_home)
         _restore_env(PROBE_ENV_VAR, prior_probe)
         shutil.rmtree(workspace, ignore_errors=True)
-
+    json_handler.log_operation("run_test", {"events": len(results), "hooks": sum(map(len, results.values()))})
     return results
 
 

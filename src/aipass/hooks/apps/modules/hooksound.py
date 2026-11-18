@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: hooksound.py
-# Version: 1.3.1
+# Version: 1.4.0
 # Description: Hook sound control — mute/unmute all hook audio
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-22
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Hook sound control — mute and unmute all hook audio via drone @hooks hooksound."""
@@ -14,6 +14,7 @@ import json
 
 from aipass.cli import console, err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.sound import is_muted, mute, unmute
 from aipass.prax import logger
 
@@ -34,8 +35,9 @@ def print_introspection():
 
 
 def handle_command(command: str, args: list) -> bool:
-    """Route hooksound commands from drone @hooks."""
+    """Route hooksound commands from drone @hooks; each hooksound call leaves one json trail entry."""
     if command == "hooksound":
+        json_handler.log_operation("hooksound", {"sub": args[0] if args else ""})
         if not args:
             print_introspection()
             return True

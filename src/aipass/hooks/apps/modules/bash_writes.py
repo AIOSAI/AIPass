@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: bash_writes.py
-# Version: 2.5.0
+# Version: 2.6.0
 # Description: Write targets a shell command can be seen to name (edit_gate's scripted lane)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-30
-# Modified: 2026-11-07
+# Modified: 2026-11-17
 # =============================================
 
 """Reads a Bash command and reports which paths it can be seen to WRITE.
@@ -20,6 +20,7 @@ import shlex
 from pathlib import Path
 
 from aipass.cli import err_console
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.modules.shell_programs import named_operands, sed_actions, sed_scripts
 from aipass.prax import logger
 
@@ -571,10 +572,11 @@ def write_targets(command: str, cwd: str) -> list[tuple[Path, str]]:
 
 def changed_paths(command: str, cwd: str) -> list[str]:
     """Every path *command* can be seen to change: shell_reader.mutated_paths plus each operand of a program
-    that does not only read (``crudini --set <file>``, ``ed <file>``). Imported late: shell_reader imports this module."""
+    that does not only read (``crudini --set``, ``ed``); one json trail entry. Late import: shell_reader imports us."""
     from aipass.hooks.apps.modules import shell_reader
 
     paths = [str(path) for path, _role, _how in shell_reader.mutated_paths(command, cwd)]
     invocations = shell_reader.invocations(command, cwd)
     paths.extend(str(path) for _program, path in named_operands(invocations))
+    json_handler.log_operation("changed_paths", {"seat": cwd, "paths": len(paths)})
     return paths

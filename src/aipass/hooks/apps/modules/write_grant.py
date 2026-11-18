@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: write_grant.py
-# Version: 1.2.1
+# Version: 1.3.0
 # Description: Whether a dispatch's write grant covers one cross-project write, read through @ai_mail's door
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-11-03
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Whether this session's dispatch grant covers one crossing write: @ai_mail's door decides, any doubt refuses."""
@@ -17,6 +17,7 @@ from pathlib import Path
 from types import ModuleType
 
 from aipass.cli import err_console
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.hooks.apps.modules.write_ownership import AIPASS_REGISTRY, Project
 from aipass.prax import logger
 
@@ -37,7 +38,16 @@ class Grant:
 
 
 def granted(cwd: str, caller_root: Path | None, landing: Project, target: Path) -> Grant:
-    """Whether this session's dispatch grants *target* in foreign *landing*; no AIPASS_DISPATCH_ID is a plain no."""
+    """Whether this session's dispatch grants *target* in foreign *landing*; no AIPASS_DISPATCH_ID is a plain no.
+
+    Each call leaves one json trail entry."""
+    grant = _granted(cwd, caller_root, landing, target)
+    json_handler.log_operation("granted", {"seat": cwd, "allowed": grant.allowed})
+    return grant
+
+
+def _granted(cwd: str, caller_root: Path | None, landing: Project, target: Path) -> Grant:
+    """granted's ruling, untrailed."""
     dispatch_id = os.environ.get(DISPATCH_ENV, "")
     if not dispatch_id:
         return Grant(False)
