@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatches.py
 # Description: Watchdog seat attribution — which completions are THIS seat's, and what is still out
-# Version: 2.2.0
+# Version: 2.2.1
 # Created: 2026-08-22
-# Modified: 2026-10-26
+# Modified: 2026-11-18
 # =============================================
 
 """Watchdog seat attribution — whose dispatch was that, and what is still out."""
@@ -17,7 +17,7 @@ from typing import Any
 from aipass.prax import logger
 
 from aipass.devpulse.apps.handlers.json import json_handler
-from aipass.devpulse.apps.handlers.owner.guard import owner_address as _owner_address
+from aipass.devpulse.apps.handlers.owner.guard import owner_address
 from aipass import ai_mail as _ai_mail
 from aipass.ai_mail import CODEX, read_pointer
 
@@ -30,7 +30,7 @@ def seat_email(repo_root: Path | None = None) -> str:
     """The seat's address: the sealed owner of the caller's directory (``AIPASS_CALLER_CWD``, which drone
     sets while running every handler in devpulse's directory), else of ``repo_root``."""
     caller_cwd = os.environ.get("AIPASS_CALLER_CWD")
-    address: Any = _owner_address(start_path=Path(caller_cwd) if caller_cwd else repo_root)
+    address: Any = owner_address(start_path=Path(caller_cwd) if caller_cwd else repo_root)
     # owner_address() is soft for its refusal message; arming must not guess, so None turns hard.
     if not address:
         raise RegisterUnavailable(

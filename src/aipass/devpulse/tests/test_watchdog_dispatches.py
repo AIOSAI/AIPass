@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_dispatches.py
 # Description: Tests for watchdog seat attribution (FPLAN-0452 P2 — only MY dispatches reach me)
-# Version: 2.0.2
+# Version: 2.0.3
 # Created: 2026-08-22
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/watchdog/dispatches.py: whose completion was that, and what is still out."""
@@ -15,6 +15,7 @@
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -71,10 +72,12 @@ def test_seat_email_is_portable_across_projects(monkeypatch):
 
 def test_seat_email_refuses_when_no_owner_is_sealed(monkeypatch):
     """Without an identity there is no 'mine', and it is never guessed."""
-    monkeypatch.setattr(guard, "get_owner", lambda start_path=None: None)
+    lookup = MagicMock(return_value=None)
+    monkeypatch.setattr(guard, "get_owner", lookup)
     with pytest.raises(dispatches.RegisterUnavailable) as exc:
         dispatches.seat_email()
     assert "no sealed owner" in str(exc.value)
+    lookup.assert_called_once()
 
 
 def test_seat_email_refuses_an_owner_entry_with_no_email(monkeypatch):
@@ -87,7 +90,7 @@ def test_seat_email_refuses_an_owner_entry_with_no_email(monkeypatch):
 
 def test_the_owner_lookup_has_exactly_one_implementation():
     """seat_email delegates to the guard handler: two answers to one question drift."""
-    assert dispatches._owner_address is guard.owner_address
+    assert dispatches.owner_address is guard.owner_address
 
 
 def test_register_unavailable_catches_as_a_runtime_error():

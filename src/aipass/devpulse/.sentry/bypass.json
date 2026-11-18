@@ -20,7 +20,7 @@
     {
       "standard": "logged_fallback",
       "file": "apps/handlers/owner/admin_grant.py",
-      "lines": [52, 131],
+      "lines": [52, 139],
       "reason": "Fail closed. 53: a key file that exists but is not hex reads as no key, so nothing is signed or verified (logged as an error). 132: an unreadable caller passport answers '', which matches no seat, so the ceremony refuses. Neither can grant anything."
     },
     {
