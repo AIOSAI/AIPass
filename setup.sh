@@ -25,6 +25,7 @@ for arg in "$@"; do
         --no-finish)     RUN_FINISH="no" ;;
         --no-symlink)    SKIP_SYMLINK="yes" ;;
         --force-symlink) FORCE_SYMLINK="yes" ;;
+        --yes)           export AIPASS_YES=1 ;;
         *) echo "WARN: unknown argument '$arg' (ignored)" ;;
     esac
 done
