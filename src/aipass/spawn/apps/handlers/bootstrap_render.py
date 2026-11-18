@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: bootstrap_render.py
 # Description: The install script's .trinity render for a core branch: seed first, then the template
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-11-17
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """Render a core branch's missing .trinity files at install time, before drone exists.
@@ -16,6 +16,7 @@ from pathlib import Path
 
 from aipass.memory import render_all_meta_tabs
 from aipass.prax import logger
+from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.class_registry import get_template_dir, resolve_template_class
 from aipass.spawn.apps.handlers.json import json_handler
 from aipass.spawn.apps.handlers.placeholders import build_replacements_dict, replace_placeholders
@@ -69,7 +70,7 @@ def render_bootstrap_trinity(
             continue
         source = (template_dir / ".trinity" / filename).read_text(encoding="utf-8")
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(replace_placeholders(source, replacements), encoding="utf-8")
+        atomic_write_text(dest, replace_placeholders(source, replacements))
         written.append(filename)
 
     json_handler.log_operation("bootstrap_rendered", data={"branch": branch_name, "written": written})

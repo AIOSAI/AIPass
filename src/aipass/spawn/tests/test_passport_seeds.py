@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_passport_seeds.py
 # Description: TDPLAN-0017 — passport seeds: export, validation, mint-from-seed
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-28
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/seed_ops.py and apps/modules/core.py's mint-from-seed path."""
@@ -14,6 +14,7 @@
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -402,6 +403,16 @@ class TestBootstrapRender:
         assert STAMP_KEY in passport["citizenship"]
         local = (target / ".trinity" / "local.json").read_text(encoding="utf-8")
         assert "{{" not in local
+
+    def test_a_rendered_file_gets_a_plain_writes_mode(self, seeded_home):
+        """An install's files read as a plain open() made them. Mutant: the writer keeps mkstemp's 0600 -> red."""
+        root, target = seeded_home
+        umask = os.umask(0)
+        os.umask(umask)
+
+        self._render(root, target)
+
+        assert (target / ".trinity" / "local.json").stat().st_mode & 0o777 == 0o666 & ~umask
 
     def test_an_existing_file_is_never_overwritten(self, seeded_home):
         """Mutant: the exists() skip is dropped -> the hand-kept local.json is replaced -> red."""
