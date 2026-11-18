@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watcher.py
 # Description: memory watcher handler — lifecycle, status, on_modified callback, branch-path walk
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-04-25
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # Category: memory/tests
 # =============================================
 
@@ -670,7 +670,7 @@ class TestAnUnreadableRegistryIsAnsweredByEveryEntry:
         def _raise():
             raise detector.RegistryUnreadable(f"Unreadable registry {registry}: x")
 
-        monkeypatch.setattr(detector, "_read_registry", _raise)
+        monkeypatch.setattr(detector, "write_scope", _raise)
         return registry
 
     def test_the_startup_check_fails_and_names_it(self, monkeypatch, tmp_path):

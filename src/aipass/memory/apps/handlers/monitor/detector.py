@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: detector.py
 # Description: Rollover Trigger Detection Handler
-# Version: 0.7.0
+# Version: 0.8.0
 # Created: 2025-11-16
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -134,13 +134,14 @@ def _rows_or_skip(registry_path: Path) -> List[Dict[str, Any]]:
     return []
 
 
-def _read_registry() -> List[Dict[str, Any]]:
-    """
-    Read every registry this fleet covers: core, residents, then callers.
+def write_scope() -> List[Dict[str, Any]]:
+    """The rollover WRITE scope: the registry rows of every branch rollover may trim, core, residents, then callers.
 
-    Residents are named, not discovered: the glob is generous and ``accepted_resident_paths()``
-    (the passport's residency) is what makes it safe. Callers are fenced to the AIPass root and
-    nothing they found outlives the call. An unreadable core registry raises ``RegistryUnreadable``.
+    Externals are not in it: rollover writes, and a declared external project is another repository's
+    memory, which only ``read_scope()`` reports. Residents are named, not discovered: the glob is generous
+    and ``accepted_resident_paths()`` (the passport's residency) is what makes it safe. Callers are fenced
+    to the AIPass root and nothing they found outlives the call. An unreadable core registry raises
+    ``RegistryUnreadable``.
     """
     from aipass.memory.apps.handlers.monitor import registry_scope
 
@@ -173,12 +174,12 @@ def _read_registry() -> List[Dict[str, Any]]:
 def read_scope() -> List[Dict[str, Any]]:
     """Every branch a READ-ONLY lane may name: the write scope plus declared externals.
 
-    ``_read_registry()`` is the WRITE scope and stops at the repo edge. Externals come only from
+    ``write_scope()`` is the WRITE scope and stops at the repo edge. Externals come only from
     roots declared in ``AIPASS_ROOTS.json``, never a caller's cwd. Nothing resolved here may be written.
     """
     from aipass.memory.apps.handlers.monitor import registry_scope
 
-    branches = _read_registry()
+    branches = write_scope()
     seen_paths = {str(Path(branch["path"]).resolve()) for branch in branches if branch.get("path")}
 
     # name_from="path": the directory is the address; a registry may spell the name differently.
@@ -351,7 +352,7 @@ def check_all_branches() -> Dict[str, Any]:
     undrainable: List[UndrainableFile] = []
 
     try:
-        branches = _read_registry()
+        branches = write_scope()
     except RegistryUnreadable as e:
         logger.error(f"[detector] {e}")
         return {"success": False, "error": str(e), "triggers": [], "count": 0, "undrainable": []}
@@ -489,7 +490,7 @@ def get_rollover_stats() -> Dict[str, Any]:
     }
 
     try:
-        branches = _read_registry()
+        branches = write_scope()
     except RegistryUnreadable as e:
         logger.error(f"[detector] {e}")
         return {"success": False, "error": str(e)}

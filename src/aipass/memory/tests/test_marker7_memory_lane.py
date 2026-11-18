@@ -111,7 +111,7 @@ class TestOneFleetOneDefinition:
     def test_the_push_and_the_registry_lane_agree_on_the_fleet(self, live_fleet):
         """The push and the registry lane must agree on the fleet; guarded, as two empty sets agree on nothing."""
         push_names = {item["name"].lower() for item in trinity_push.resolve_scope()["branches"]}
-        registry_names = {Path(item["path"]).name.lower() for item in detector._read_registry()}
+        registry_names = {Path(item["path"]).name.lower() for item in detector.write_scope()}
         assert push_names <= registry_names, f"invisible to rollover/lint/health: {push_names - registry_names}"
 
     def test_the_push_never_reaches_into_another_repository(self, live_fleet):
@@ -184,7 +184,7 @@ class TestOneFleetOneDefinition:
 
         Trap: repointing the detector at `fleet_branches` would pull the external tier into a write scope.
         """
-        rolled = {Path(item["path"]).resolve() for item in detector._read_registry()}
+        rolled = {Path(item["path"]).resolve() for item in detector.write_scope()}
         assert _MEMORY_ROOT.resolve() in rolled, "a scope without this branch proves nothing about what it excludes"
         home = registry_scope.REPO_ROOT.resolve()
         outside = [p for p in rolled if home not in p.parents and p != home]

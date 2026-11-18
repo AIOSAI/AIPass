@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: health.py
 # Description: Branch health module — public API (entry-count + entry-size)
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-16
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -20,7 +20,7 @@ from aipass.memory.apps.handlers.cli.help_flags import wants_help
 
 from aipass.memory.apps.handlers.json.lint_handler import run_lint
 
-# read_scope, not _read_registry: health never writes, so it reads the declared fleet incl. externals.
+# read_scope, not write_scope: health never writes, so it reads the declared fleet incl. externals.
 from aipass.memory.apps.handlers.monitor.detector import (
     RegistryUnreadable,
     _get_memory_file_path,

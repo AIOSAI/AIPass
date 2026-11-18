@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_residency_scope.py
 # Description: Red-first pins for passport-declared residency as the fleet classifier (DPLAN-0319)
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-28
-# Modified: 2026-11-15
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/monitor/registry_scope.py and the callers that classify through it."""
@@ -298,7 +298,7 @@ class TestEveryLaneReadsTheOneDefinition:
         monkeypatch.setattr(detector, "_REPO_ROOT", fleet)
         monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
 
-        write_names = {Path(branch["path"]).name for branch in detector._read_registry()}
+        write_names = {Path(branch["path"]).name for branch in detector.write_scope()}
         read_names = {Path(branch["path"]).name for branch in detector.read_scope()}
 
         assert "ext" not in write_names, "the write scope reached a branch outside the repo"

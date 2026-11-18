@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lint.py
 # Description: Lint module — CLI routing for entry limit auditing
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-06-13
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -19,7 +19,7 @@ from aipass.memory.apps.handlers.cli.help_flags import wants_help
 
 from aipass.memory.apps.handlers.json.lint_handler import PASSPORT_FILE, run_lint, run_lint_fields
 
-# read_scope, not _read_registry: lint never writes, so externals are in scope.
+# read_scope, not write_scope: lint never writes, so externals are in scope.
 from aipass.memory.apps.handlers.monitor.detector import read_scope
 
 FIELDS_MODE = "fields"

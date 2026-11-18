@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: orchestrator.py
 # Description: Rollover Orchestration Handler
-# Version: 1.4.1
+# Version: 1.4.2
 # Created: 2026-03-08
-# Modified: 2026-10-26
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -78,7 +78,7 @@ def local_store_lookup(branch_name: str) -> tuple[Path | None, str | None]:
         return None, LOCAL_STORE_ABSENT
 
     try:
-        registry = detector._read_registry()
+        registry = detector.write_scope()
     except RegistryUnreadable as e:
         logger.error(f"[rollover] No local store for {branch_name}: {e}")
         return None, LOCAL_STORE_REGISTRY_UNREADABLE

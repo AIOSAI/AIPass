@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_config_verbs.py
 # Description: Tests for the `config` verbs (rollover limit get/set/set-default): writes, display, help, isolation
-# Version: 1.9.0
+# Version: 1.9.1
 # Created: 2026-08-16
-# Modified: 2026-11-16
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/rollover_config.py — config verbs' writes, display and help, via apps/modules/rollover.py."""
@@ -486,7 +486,7 @@ class TestOperatorConfigIsolation:
 
     def test_no_registry_of_this_machine_is_reachable(self, verbs, tmp_path) -> None:
         """The second registry door (_find_caller_registries walks up from CWD) is closed too."""
-        names = {b["name"] for b in verbs.detector._read_registry()}
+        names = {b["name"] for b in verbs.detector.write_scope()}
         assert names == {"memory", "DEVPULSE", "DAEMON"}
 
 

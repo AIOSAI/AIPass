@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tab_renderer.py
 # Description: Config-generated state-tabs for .trinity memory files
-# Version: 1.7.0
+# Version: 1.7.1
 # Created: 2026-06-25
-# Modified: 2026-10-17
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -244,7 +244,7 @@ def refresh_all_tabs(branches: list[str] | None = None) -> dict:
         load as load_config,
     )
     from aipass.memory.apps.handlers.monitor.detector import (
-        _read_registry,
+        write_scope,
         _get_memory_file_path,
     )
 
@@ -252,7 +252,7 @@ def refresh_all_tabs(branches: list[str] | None = None) -> dict:
     rollover_cfg = config.get("rollover", {})
     entry_limits_cfg = config.get("entry_limits", {})
 
-    registry = _read_registry()
+    registry = write_scope()
     if not registry:
         return {
             "success": True,
@@ -313,10 +313,10 @@ def refresh_moved_limits(entry_type: str, before: dict, after: dict) -> dict[str
 
     Returns None, never a dict, when the registry is unreadable.
     """
-    from aipass.memory.apps.handlers.monitor.detector import RegistryUnreadable, _read_registry
+    from aipass.memory.apps.handlers.monitor.detector import RegistryUnreadable, write_scope
 
     try:
-        registry = _read_registry()
+        registry = write_scope()
     except RegistryUnreadable as exc:
         logger.error(f"[tab_renderer] meta lines not re-rendered after a {entry_type} limit write: {exc}")
         return None

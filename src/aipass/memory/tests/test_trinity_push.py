@@ -857,7 +857,7 @@ class TestRefreshIsScopable:
         tmp = Path(tempfile.gettempdir())
         registry = [{"name": "alpha", "path": str(tmp / "alpha")}, {"name": "beta", "path": str(tmp / "beta")}]
         monkeypatch.setattr(tab_renderer, "_refresh_one_file", lambda *a, **k: (visited.append(a[1]), (0, 1, []))[1])
-        monkeypatch.setattr(detector, "_read_registry", lambda: registry, raising=False)
+        monkeypatch.setattr(detector, "write_scope", lambda: registry, raising=False)
 
         tab_renderer.refresh_all_tabs(branches=["alpha"])
 
@@ -869,7 +869,7 @@ class TestRefreshIsScopable:
         tmp = Path(tempfile.gettempdir())
         registry = [{"name": "alpha", "path": str(tmp / "alpha")}, {"name": "beta", "path": str(tmp / "beta")}]
         monkeypatch.setattr(tab_renderer, "_refresh_one_file", lambda *a, **k: (visited.append(a[1]), (0, 1, []))[1])
-        monkeypatch.setattr(detector, "_read_registry", lambda: registry, raising=False)
+        monkeypatch.setattr(detector, "write_scope", lambda: registry, raising=False)
 
         tab_renderer.refresh_all_tabs()
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests/test_orchestrator_exec.py
 # Description: Tests for the orchestrator execute_rollover pipeline
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-26
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # Category: memory/tests
 # =============================================
 
@@ -66,7 +66,7 @@ class TestNoMemoryTestFiresTheRealBus:
 def _import_orchestrator(monkeypatch):
     """Patch orchestrator's handler dependencies at the edge; return it and the mocks."""
     mock_detector = MagicMock()
-    mock_detector._read_registry = MagicMock(return_value=[])
+    mock_detector.write_scope = MagicMock(return_value=[])
     mock_detector.check_all_branches = MagicMock(return_value={"success": True, "triggers": []})
 
     mock_extractor = MagicMock()
@@ -420,7 +420,7 @@ class TestExecuteRolloverFullPipeline:
         self._setup_full_success(monkeypatch, tmp_path, orch, mocks)
         monkeypatch.setattr(orch, "get_branch_local_chroma_path", _REAL_LOCAL_CHROMA_PATH)
         registry = tmp_path / "AIPASS_REGISTRY.json"
-        mocks["detector"]._read_registry.side_effect = detector.RegistryUnreadable(f"Unreadable registry {registry}: x")
+        mocks["detector"].write_scope.side_effect = detector.RegistryUnreadable(f"Unreadable registry {registry}: x")
         stored = []
         monkeypatch.setattr(orch, "store_vectors_subprocess", lambda **kw: stored.append(kw) or {"success": True})
 

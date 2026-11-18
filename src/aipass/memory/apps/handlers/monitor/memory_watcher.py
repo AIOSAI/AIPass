@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: memory_watcher.py
 # Description: Memory File System Watcher
-# Version: 1.2.4
+# Version: 1.2.5
 # Created: 2025-11-26
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -238,12 +238,12 @@ def _find_repo_root() -> Path:
 
 
 def _get_branch_paths() -> list[Path]:
-    """Branch paths the watcher may roll over: ``detector._read_registry()``, one fleet, nothing else."""
+    """Branch paths the watcher may roll over: ``detector.write_scope()``, one fleet, nothing else."""
     from aipass.memory.apps.handlers.monitor import detector
 
     paths: list[Path] = []
     seen: set[Path] = set()
-    for branch in detector._read_registry():
+    for branch in detector.write_scope():
         branch_path = Path(branch.get("path", ""))
         if branch.get("path") and branch_path.exists() and branch_path.resolve() not in seen:
             paths.append(branch_path)
