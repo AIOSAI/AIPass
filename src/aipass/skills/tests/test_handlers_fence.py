@@ -46,6 +46,8 @@ DOOR_NAMES = [
     ("SCREEN_LOCK_REASON_NO_SESSION", _SCREEN_LOCK, "REASON_NO_SESSION"),
     ("SCREEN_LOCK_REASON_NO_READER", _SCREEN_LOCK, "REASON_NO_READER"),
     ("SCREEN_LOCK_REASON_READ_FAILED", _SCREEN_LOCK, "REASON_READ_FAILED"),
+    ("SCREEN_LOCK_REASON_SWITCHED_OFF", _SCREEN_LOCK, "REASON_SWITCHED_OFF"),
+    ("SCREEN_LOCK_REASON_SWITCH_UNREADABLE", _SCREEN_LOCK, "REASON_SWITCH_UNREADABLE"),
 ]
 
 
@@ -169,8 +171,19 @@ class TestOffMeansOffForEveryServedFunction:
         skill = function.__module__.split(".")[3]
         switch_handler.set_enabled(skill, False)
 
-        with patch("subprocess.run", side_effect=AssertionError(f"{served} ran a command while off")) as run:
+        home_logger = sys.modules[function.__module__].logger
+        with (
+            patch("subprocess.run", side_effect=AssertionError(f"{served} ran a command while off")) as run,
+            patch.object(home_logger, "info") as info,
+            patch.object(home_logger, "warning") as warned,
+            patch.object(home_logger, "error") as logged,
+        ):
             answer = function()
 
         assert any(f"Skill '{skill}' is switched OFF" in str(value) for value in answer.values()), answer
+        assert answer["reason"] == "switched_off"
         run.assert_not_called()
+        # A deliberate off is the switch working: INFO, never a warning or an error.
+        assert any("switched off" in str(logged_call) for logged_call in info.call_args_list), info.call_args_list
+        warned.assert_not_called()
+        logged.assert_not_called()

@@ -46,12 +46,17 @@ gate *other* verbs on screen state must leave this one ungated.
 The one gate it has is the skill's own off-switch. Off means off: while
 `drone @skills off screen_lock` holds, or the switch state is unreadable,
 `lock_screen()` and `lock_state()` refuse before running anything, whether
-reached through `drone @skills run` or imported in-process.
+reached through `drone @skills run` or imported in-process. Each refusal
+carries a reason code a caller can branch on: `switched_off` when the skill is
+off on purpose (logged as INFO, the switch working), `switch_unreadable` when
+the switch state cannot be read (logged as ERROR, a fault to repair). The
+package door serves both as `SCREEN_LOCK_REASON_SWITCHED_OFF` and
+`SCREEN_LOCK_REASON_SWITCH_UNREADABLE`.
 
 ## The read beside the lock
 
 `lock_state()` answers whether the screen **is** locked — the question "did I
-lock the laptop?" asked from away (FPLAN-0585). It reads through the same pair
+lock the laptop?" asked from away. It reads through the same pair
 the lock writes through, in the same order, and changes nothing:
 
 1. `loginctl show-session <id> -p LockedHint` on the resolved graphical session
@@ -66,7 +71,8 @@ Like the lock, it is gated on the off-switch alone, and it never raises.
 
 | `reason`      | Meaning                                                          |
 |---------------|------------------------------------------------------------------|
-| `switched_off` | the skill is switched off, or the switch state is unreadable; nothing was read |
+| `switched_off` | the skill is switched off; nothing was read                     |
+| `switch_unreadable` | the switch state is unreadable, so the skill counts as off; nothing was read |
 | `no_session`  | logind lists no active graphical session of ours, and D-Bus did not answer |
 | `no_reader`   | neither `loginctl` nor `gdbus` is installed                      |
 | `read_failed` | a reader ran and failed, or answered something other than yes/no |
@@ -123,7 +129,8 @@ Do NOT use this skill when:
 {"locked": bool, "method": "loginctl" | "dbus" | None, "session": str | None, "error": str | None}
 ```
 
-Switched off, it answers `{"locked": False, "method": None, "session": None, "error": <the refusal sentence>}`.
+Switched off, it answers `{"locked": False, "method": None, "session": None, "reason": "switched_off", "error": <the refusal sentence>}`;
+over an unreadable switch state the reason is `switch_unreadable`. Only the refusal carries `reason`.
 
 `lock_state()` returns the read, six keys every time:
 
@@ -133,7 +140,7 @@ Switched off, it answers `{"locked": False, "method": None, "session": None, "er
     "locked": bool | None,                        # None whenever ok is False
     "method": "loginctl" | "dbus" | None,
     "session": str | None,                        # the resolved logind session
-    "reason": "no_session" | "no_reader" | "read_failed" | "switched_off" | None,
+    "reason": "no_session" | "no_reader" | "read_failed" | "switched_off" | "switch_unreadable" | None,
     "detail": str,                                # the skill's own sentence
 }
 ```

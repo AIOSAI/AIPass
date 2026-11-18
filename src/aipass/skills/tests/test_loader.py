@@ -14,6 +14,7 @@
 # sentry: no-test-needed(constant) — the "skill_loaded" log-operation name json_handler records
 
 import sys
+from unittest.mock import patch
 
 from aipass.skills.apps.handlers import switch_handler
 from aipass.skills.apps.modules import loader, runner
@@ -116,6 +117,15 @@ class TestInfoOnAnOffSkill:
         assert _OFF in err
         assert "Handler: not imported while the skill is OFF" in out
 
+    def test_a_deliberate_off_logs_info_never_an_error(self, marked_probe):
+        switch_handler.set_enabled("marked_probe", False)
+
+        with patch.object(loader.logger, "info") as info, patch.object(loader.logger, "error") as logged:
+            loader.load_skill("marked_probe")
+
+        assert any("switched off" in str(logged_call) for logged_call in info.call_args_list), info.call_args_list
+        logged.assert_not_called()
+
     def test_on_info_imports_the_handler_as_before(self, marked_probe, capsys):
         assert loader.handle_command("info", ["marked_probe"]) is True
 
@@ -150,3 +160,13 @@ class TestTheRunnerOnAnOffLoad:
         assert asked == ["marked_probe"]
         assert (result["success"], result["output"], result["error"]) == (False, "", _OFF)
         assert not (marked_probe / "IMPORTED").exists()
+
+    def test_the_runner_refusing_a_deliberate_off_logs_info_never_an_error(self, marked_probe):
+        switch_handler.set_enabled("marked_probe", False)
+
+        with patch.object(runner.logger, "info") as info, patch.object(runner.logger, "error") as logged:
+            result = runner.run_skill("marked_probe", "go")
+
+        assert result["success"] is False
+        assert any("switched off" in str(logged_call) for logged_call in info.call_args_list), info.call_args_list
+        logged.assert_not_called()

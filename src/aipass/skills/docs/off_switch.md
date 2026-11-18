@@ -28,6 +28,10 @@ drone @skills on screen_lock                      # reconnect
 An unreadable switch state counts as OFF for all of these, with the error shown;
 `info` then exits 1. `list` still shows an OFF skill, marked OFF.
 
+A refusal because a skill is off on purpose is logged as INFO: the switch did
+its job, and that is not a fault. An unreadable switch state is logged as ERROR:
+it is a fault, and someone has to repair the file.
+
 What OFF cannot stop: reading a SKILL.md straight off disk. For a markdown-only
 skill the text is the skill.
 

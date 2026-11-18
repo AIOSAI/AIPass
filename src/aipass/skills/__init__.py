@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: Skills' front door: the skill functions and contract constants other branches import
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-03-07
 # Modified: 2026-11-17
 # =============================================
@@ -17,6 +17,8 @@ if TYPE_CHECKING:
     from aipass.skills.lib.screen_lock.handler import REASON_NO_READER as SCREEN_LOCK_REASON_NO_READER
     from aipass.skills.lib.screen_lock.handler import REASON_NO_SESSION as SCREEN_LOCK_REASON_NO_SESSION
     from aipass.skills.lib.screen_lock.handler import REASON_READ_FAILED as SCREEN_LOCK_REASON_READ_FAILED
+    from aipass.skills.lib.screen_lock.handler import REASON_SWITCH_UNREADABLE as SCREEN_LOCK_REASON_SWITCH_UNREADABLE
+    from aipass.skills.lib.screen_lock.handler import REASON_SWITCHED_OFF as SCREEN_LOCK_REASON_SWITCHED_OFF
     from aipass.skills.lib.screen_lock.handler import lock_screen, lock_state
     from aipass.skills.lib.system_status.handler import PSUTIL_RECIPE as SYSTEM_STATUS_PSUTIL_RECIPE
     from aipass.skills.lib.system_status.handler import REASONS as SYSTEM_STATUS_REASONS
@@ -39,6 +41,8 @@ _HOMES = {
     "SCREEN_LOCK_REASON_NO_SESSION": (_SCREEN_LOCK, "REASON_NO_SESSION"),
     "SCREEN_LOCK_REASON_NO_READER": (_SCREEN_LOCK, "REASON_NO_READER"),
     "SCREEN_LOCK_REASON_READ_FAILED": (_SCREEN_LOCK, "REASON_READ_FAILED"),
+    "SCREEN_LOCK_REASON_SWITCHED_OFF": (_SCREEN_LOCK, "REASON_SWITCHED_OFF"),
+    "SCREEN_LOCK_REASON_SWITCH_UNREADABLE": (_SCREEN_LOCK, "REASON_SWITCH_UNREADABLE"),
 }
 
 __all__ = list(_HOMES)

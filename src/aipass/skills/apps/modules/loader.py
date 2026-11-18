@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: loader.py
 # Description: Load SKILL.md and handlers; the info command
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-07
 # Modified: 2026-11-17
 # =============================================
@@ -108,6 +108,7 @@ def _switch_notice(name):
     except SwitchStateUnreadable as exc:
         logger.error("Treating '%s' as OFF - switch state unreadable: %s", name, exc)
         return {"notice": str(exc), "unreadable": True}
+    logger.info("Not importing '%s' - the skill is switched off", name)
     return {
         "notice": f"Skill '{name}' is switched OFF. Turn it back on with: drone @skills on {name}",
         "unreadable": False,

@@ -604,8 +604,23 @@ class TestTheOffSwitch:
         with patch("subprocess.run") as mock_run:
             result = screen_lock.lock_screen()
 
-        assert result == {"locked": False, "method": None, "session": None, "error": _OFF}
+        assert result == {"locked": False, "method": None, "session": None, "reason": "switched_off", "error": _OFF}
         mock_run.assert_not_called()
+
+    def test_a_deliberate_off_logs_info_never_an_error_or_warning(self, switch):
+        switch.set_enabled("screen_lock", False)
+
+        with (
+            patch.object(screen_lock.logger, "info") as info,
+            patch.object(screen_lock.logger, "warning") as warned,
+            patch.object(screen_lock.logger, "error") as logged,
+        ):
+            screen_lock.lock_state()
+            screen_lock.lock_screen()
+
+        assert info.call_count == 2
+        warned.assert_not_called()
+        logged.assert_not_called()
 
     def test_on_lets_both_answer(self, switch):
         switch.set_enabled("screen_lock", True)
@@ -625,8 +640,21 @@ class TestTheOffSwitch:
             state = screen_lock.lock_state()
             locked = screen_lock.lock_screen()
 
-        assert (state["ok"], state["reason"], state["detail"]) == (False, "switched_off", _UNREADABLE)
-        assert (locked["locked"], locked["error"]) == (False, _UNREADABLE)
+        assert state == {
+            "ok": False,
+            "locked": None,
+            "method": None,
+            "session": None,
+            "reason": "switch_unreadable",
+            "detail": _UNREADABLE,
+        }
+        assert locked == {
+            "locked": False,
+            "method": None,
+            "session": None,
+            "reason": "switch_unreadable",
+            "error": _UNREADABLE,
+        }
         assert logged.call_count == 2
         mock_run.assert_not_called()
 

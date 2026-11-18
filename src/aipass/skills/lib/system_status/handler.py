@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: handler.py
-# Description: System Status skill handler - disk, memory, uptime, processes, battery, machine_vitals(), machine_processes()
-# Version: 2.6.0
+# Description: System Status skill - disk, memory, uptime, processes, battery, machine_vitals(), machine_processes()
+# Version: 2.6.1
 # Created: 2026-03-07
-# Modified: 2026-11-14
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -420,6 +420,8 @@ def _gate(door):
         )
 
     if not enabled:
+        # Off on purpose is the switch working, not a fault: INFO.
+        logger.info(f"Refusing {door} - the skill is switched off")
         return _refusal(
             "switched_off",
             f"Skill '{SKILL_NAME}' is switched OFF and takes no readings. "

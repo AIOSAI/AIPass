@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: runner.py
 # Description: Execute skills
-# Version: 1.3.2
+# Version: 1.3.3
 # Created: 2026-03-07
 # Modified: 2026-11-17
 # =============================================
@@ -72,6 +72,7 @@ def run_skill(name, action=None, args=None, config=None):
         if not is_enabled(name):
             reason = off_reason(name)
             why = f" ({reason})" if reason else ""
+            logger.info("Refusing to run '%s' - the skill is switched off%s", name, why)
             return {
                 "success": False,
                 "output": "",
