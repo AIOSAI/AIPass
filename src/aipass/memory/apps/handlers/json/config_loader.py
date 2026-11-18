@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config_loader.py
 # Description: Unified config loader for memory.config.json
-# Version: 1.8.0
+# Version: 1.8.1
 # Created: 2026-06-13
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -21,10 +21,9 @@ from typing import Any
 
 from aipass.memory.apps.handlers.json import budget
 from aipass.memory.apps.handlers.json import json_handler
-from aipass.prax import logger
+from aipass.prax import branch_state_root, logger
 
-_MEMORY_ROOT = Path(__file__).resolve().parents[3]
-_CONFIG_PATH = _MEMORY_ROOT / "memory_json" / "custom_config" / "memory.config.json"
+_CONFIG_PATH = branch_state_root("memory") / "memory_json" / "custom_config" / "memory.config.json"
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "_meta": {

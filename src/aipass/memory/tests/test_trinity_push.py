@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trinity_push.py
 # Description: Red-first pins for the trinity push — the archive-verify-prune law above all
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-08-27
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/templates/trinity_push.py and the push lane that drives it."""
@@ -31,6 +31,7 @@ from aipass.memory.apps.handlers.json import entry_limits
 from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.rollover import orchestrator
 from aipass.memory.apps.handlers.templates import push_report
+from aipass.prax import branch_state_root
 from aipass.memory.apps.handlers.tracking import tab_renderer
 from aipass.memory.apps.modules import push as push_module
 from aipass.sentry import check_branch, expected_meta_line
@@ -1459,6 +1460,13 @@ class TestThePushReportSaysWhyThereIsNoLocalStore:
         assert [entry["local_store"] for entry in result["branches"]] == [None]
         assert not [line for line in rendered if line.startswith("   local store")]
         assert sorted(store.shelves) == sorted([str(root / ".chroma"), str(None)])
+
+    def test_the_report_is_saved_under_memorys_state_root(self):
+        """A fixed climb from the module lands inside the installed package on a wheel.
+
+        Mutant: ``REPORTS_DIR`` back on ``Path(__file__).resolve().parents[3]`` — killed.
+        """
+        assert push_report.REPORTS_DIR == branch_state_root("memory") / "artifacts" / "push_reports"
 
 
 class TestEntryRulesReadTheConfig:

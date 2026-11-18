@@ -142,7 +142,7 @@
     {
       "file": "apps/handlers/intake/auto_process.py",
       "standard": "logged_fallback",
-      "lines": [95],
+      "lines": [96],
       "reason": "_reclaim_stale_lock answers 'is the lane free now'. False after a failed unlink means the lane is NOT free, which is true; the caller's decision (do not run) is the same as for a live lock, and the failure is logged at error. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
@@ -214,7 +214,7 @@
     {
       "file": "tests/test_config_loader.py",
       "standard": "import_site",
-      "lines": [48],
+      "lines": [49],
       "reason": "The stub is the cure (ruling (a)). _get_module re-imports config_loader after the fixture evicted the json package, so it binds conftest's json_handler stand-in; with the real one bound, load/save write memory_json operation logs. Leg 11 of DPLAN-0354."
     },
     {
@@ -273,7 +273,7 @@
     {
       "file": "tests/test_trinity_push.py",
       "standard": "through_the_command",
-      "lines": [1532],
+      "lines": [1540],
       "reason": "Ruling (b): tp._RULES_CACHE.clear() empties the module's cache of the global rules file so the test reads its own tmp copy and can count re-reads; there is no public reset, and no door is added for the test. Leg 11 of DPLAN-0354."
     },
     {

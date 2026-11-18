@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests/test_auto_process_background.py
 # Description: Tests for auto_process background spawn, single-flight lock and run_once
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-14
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # Category: memory/tests
 # =============================================
 
@@ -26,6 +26,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.memory.apps.handlers.intake import auto_process as ap
+from aipass.prax import branch_state_root
 
 
 @pytest.fixture(autouse=True)
@@ -246,7 +247,7 @@ class TestCompletionIsAnnounced:
 
 # Read at import, before the autouse fixture patches it: the path the child ships with.
 _SHIPPED_CHILD_OUT = ap.CHILD_OUT
-_MEMORY_LOGS = Path(ap.__file__).resolve().parents[3] / "logs"
+_MEMORY_LOGS = branch_state_root("memory") / "logs"
 
 
 class TestScriptContract:

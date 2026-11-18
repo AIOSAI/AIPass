@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_config_loader.py
 # Description: Tests for config_loader handler (FPLAN-0271 Phase 1)
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-06-13
-# Modified: 2026-11-15
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/json/config_loader.py and the budget arithmetic it seeds."""
@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from aipass.memory.apps.handlers.json import budget
+from aipass.prax import branch_state_root
 
 
 @pytest.fixture(autouse=True)
@@ -1102,3 +1103,12 @@ class TestTheSourceAndTheOverrideTellOneTruth:
         count, source, is_override = self._row(mod, rollover)
         assert count < 99
         assert (source, is_override) == ("defaults", False)
+
+
+class TestTheConfigLivesUnderTheStateRoot:
+    """On a wheel, a fixed climb from the module would read and regenerate the config inside the installed package."""
+
+    def test_the_shipped_path_is_under_memorys_state_root(self) -> None:
+        """Mutant: ``_CONFIG_PATH`` back on ``Path(__file__).resolve().parents[3]`` — killed."""
+        expected = branch_state_root("memory") / "memory_json" / "custom_config" / "memory.config.json"
+        assert _get_module()._CONFIG_PATH == expected

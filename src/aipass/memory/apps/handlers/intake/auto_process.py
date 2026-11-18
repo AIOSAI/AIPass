@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auto_process.py
 # Description: Automated pool + rollover entry point
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-06-06
-# Modified: 2026-11-15
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict
 
-from aipass.prax import append_jsonl, logger
+from aipass.prax import append_jsonl, branch_state_root, logger
 from aipass.memory.apps.handlers.json import json_handler, config_loader
 
 _MEMORY_ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -33,7 +33,8 @@ _MEMORY_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 # Staleness is time-based, so a crashed child frees the lane.
 _LOCK_PATH = Path(tempfile.gettempdir()) / "aipass-memory-auto-process.lock"
 _LOCK_STALE_SECONDS = 900
-CHILD_OUT = _MEMORY_ROOT / "logs" / "auto_process_child.out"  # crash output only; trigger reads every *.log
+# Crash output only; trigger reads every *.log.
+CHILD_OUT = branch_state_root("memory") / "logs" / "auto_process_child.out"
 
 
 def _lock_is_stale(data: Dict[str, Any] | None) -> bool:
@@ -339,7 +340,7 @@ def run_locked() -> Dict[str, Any]:
         _release_lock()
 
 
-RUNS_LOG = _MEMORY_ROOT / "logs" / "auto_process_runs.jsonl"
+RUNS_LOG = branch_state_root("memory") / "logs" / "auto_process_runs.jsonl"
 
 
 def run_child() -> None:
