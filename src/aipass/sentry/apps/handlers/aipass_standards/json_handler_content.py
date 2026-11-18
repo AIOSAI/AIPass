@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_handler_content.py
 # Description: JSON Handler Integrity Standards Content
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-06-14
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -77,6 +77,9 @@ def get_json_handler_standards() -> str:
         "  [dim]log_operation = _h.log_operation[/dim]",
         "  [dim]ensure_module_jsons = _h.ensure_module_jsons[/dim]",
         "  [dim]# ... bind the remaining public names ...[/dim]",
+        "",
+        "  A claimed branch (BY_NAME_CLAIMS: hooks) changes only the binding line:",
+        '  [dim]_h = json_handler.for_branch("<its own name>")[/dim]',
         "",
         "  It BINDS, never wraps. A [dim]def[/dim] wrapper adds one frame, and the",
         "  service reads the calling module at that depth to name the document",

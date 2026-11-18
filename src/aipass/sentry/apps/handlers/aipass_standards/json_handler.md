@@ -17,12 +17,16 @@ state beside its recent operations.
 
 ## What Is Checked
 
-### 1. Handler Capability (one accept path, and only one)
+### 1. Handler Capability (the canonical shim, or a claimed by-name form)
 
 - **The canonical shim, by hash:** `sha256(file)` equals the bytes pinned in
-  DPLAN-0325 section 3. This is the endpoint of the migration and the only path
-  that proves anything: identical bytes are checked by identity, so a shim
+  DPLAN-0325 section 3. Identical bytes are checked by identity, so a shim
   cannot drift by one character without saying so.
+- **A claimed branch binds by name.** A branch in `BY_NAME_CLAIMS` (hooks: its shim also runs from a `.live-<stamp>`
+  snapshot beside `apps/`) holds the canonical shim with only `_h = json_handler.for_module(__file__)` replaced by
+  `_h = json_handler.for_branch("<its own name>")`; swapping that line back must give the canonical hash.
+- A claimed branch binding by file, an unclaimed branch binding by name, or a by-name line naming another branch
+  fails, each saying why. `json_structure` asks the same `is_shim_for(content, branch)`.
 
 Three transitional shapes were accepted while the fleet sweep ran — the service
 import with no branch tokens, the shared `aipass.aipass.shared.json_handler`
@@ -78,14 +82,8 @@ Pass threshold: 75%. With four checks the ladder is 100 / 75 / 50 / 25 / 0.
 
 ## Known Exemptions
 
-- **@hooks** — bypassed. The reason recorded here said "no json_handler.py"; measured
-  2026-09-03, hooks ships one at the canonical path (245 lines) and 24 documents in
-  `hooks_json/`. The bypass is live and the branch is still exempt by its owner's
-  ruling — only the stated reason was wrong, and a bypass whose reason no longer
-  matches the tree is unreadable from the outside.
-- **@backup** — log-only fork, and the only branch the capability check still fails.
-  Bypassed pending migration decision; `backup_json/` holds 2 documents, not the
-  0/0/0 recorded here.
+None. No branch holds a `json_handler` bypass row; @hooks' different line is a claim the
+check proves, not an exemption.
 
 ## Fix
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_json_handler_contract_identity.py
 # Description: json_handler contract, identity clause: a migrated shim IS the one service (split 2026-10-08)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for every branch's apps/handlers/json/json_handler.py shim against aipass.prax.json_handler."""
@@ -11,7 +11,6 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # sentry: no-test-needed(ruff) — that handlers/aipass_standards/json_handler_check.py parses and imports
 
-import hashlib
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,7 +19,7 @@ from typing import Any
 import pytest
 
 import aipass.prax
-from aipass.sentry.apps.handlers.aipass_standards.json_handler_check import CANONICAL_SHIM_SHA256
+from aipass.sentry.apps.handlers.aipass_standards.json_handler_check import CANONICAL_SHIM_SHA256, is_shim_for
 from aipass.sentry.tests.support_json_handler_contract import (
     SERVICE_IMPORT_MARKER,
     SERVICE_REDIRECT_ENV,
@@ -130,15 +129,17 @@ def test_a_migrated_shim_reads_the_redirect_seam_after_import_not_at_import(
 
 @pytest.mark.parametrize("branch", parametrized())
 def test_every_shipped_shim_is_byte_identical_to_the_pinned_canonical(branch: str):
-    """One file, one hash, eighteen copies — asserted here, not only by the audit."""
+    """One file, one hash, eighteen copies — asserted here, not only by the audit.
+
+    A branch holding a by-name claim (hooks) differs in its one binding line; the standard's own test proves it.
+    """
     content = handler_path(branch).read_text(encoding="utf-8")
     if SERVICE_IMPORT_MARKER not in content:
         pytest.skip(f"{branch} has not migrated to the one service yet — its handler does not import it")
 
-    measured = hashlib.sha256(content.encode("utf-8")).hexdigest()
-    assert measured == CANONICAL_SHIM_SHA256, (
-        f"{branch}'s shim hashes {measured}, not the pinned canonical "
-        f"{CANONICAL_SHIM_SHA256} — it is no longer the fleet's one file"
+    assert is_shim_for(content, branch), (
+        f"{branch}'s shim is not the file the json_handler standard says it must hold "
+        f"(canonical {CANONICAL_SHIM_SHA256}, or the by-name form for a claimed branch)"
     )
 
 

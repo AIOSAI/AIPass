@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_aipass_standards.py
 # Description: Unit tests for handlers/aipass_standards/
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-03-24
-# Modified: 2026-11-16
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/naming_check.py and its json, host and calendar siblings."""
@@ -638,6 +638,35 @@ def test_the_citizen_template_is_judged_by_the_same_rule(tmp_path):
     assert result["passed"] is True
 
 
+def _by_name_shim(name):
+    """The canonical shim with only its binding line naming *name*: built from the canonical text, never retyped."""
+    canonical = _canonical_shim_bytes_on_disk()
+    assert canonical.count(json_handler_check.BY_FILE_LINE) == 1
+    return canonical.replace(json_handler_check.BY_FILE_LINE, json_handler_check.by_name_line(name))
+
+
+def test_a_claimed_branch_passes_with_the_shim_binding_its_own_name(tmp_path):
+    passed, message = _capability(tmp_path, _by_name_shim("hooks"), "hooks")
+    assert passed is True
+    assert "by-name" in message
+
+
+@pytest.mark.parametrize(
+    ("content_for", "branch", "reason"),
+    [
+        (lambda: _canonical_shim_bytes_on_disk(), "hooks", "holds a by-name claim but binds by file"),
+        (lambda: _by_name_shim("canary"), "canary", "claimed only by hooks"),
+        (lambda: _by_name_shim("canary"), "hooks", "binds the branch named 'canary', not itself"),
+        (lambda: _by_name_shim("hooks").replace("adds nothing", "adds  nothing"), "hooks", "Not the canonical"),
+    ],
+    ids=["claimed_binds_by_file", "unclaimed_binds_by_name", "names_another_branch", "one_more_byte"],
+)
+def test_the_by_name_form_fails_off_its_claim_and_says_why(tmp_path, content_for, branch, reason):
+    passed, message = _capability(tmp_path, content_for(), branch)
+    assert passed is False
+    assert reason in message
+
+
 def test_a_bound_alias_is_not_a_lowercase_constant():
     """`save_json = _h.save_json` names a callable; PEP 8 spells it lowercase."""
 
@@ -693,7 +722,22 @@ def test_a_handler_that_neither_binds_nor_resolves_still_fails(tmp_path):
 
 def test_the_two_standards_share_the_shim_test_not_a_copy_of_a_string():
     """Both standards must agree on what a shim IS, by running the same function."""
-    assert json_structure_check._is_canonical_shim is json_handler_check._is_canonical_shim
+    assert json_structure_check.is_shim_for is json_handler_check.is_shim_for
+
+
+@pytest.mark.parametrize(("branch", "delegates"), [("hooks", True), ("canary", False)])
+def test_the_by_name_shim_delegates_resolution_only_in_its_claimed_branch(tmp_path, branch, delegates):
+    package = tmp_path / "src" / "aipass"
+    # json_structure places a file in the fleet by finding prax beside its branch.
+    (package / "prax").mkdir(parents=True)
+    handler = package / branch / "apps" / "handlers" / "json" / "json_handler.py"
+    handler.parent.mkdir(parents=True)
+    handler.write_text(_by_name_shim(branch), encoding="utf-8")
+
+    checks = json_structure_check.check_module(str(handler), bypass_rules=None)["checks"]
+    resolution = next(c for c in checks if c["name"] == "Relative path resolution")
+    assert resolution["passed"] is delegates
+    assert ("Delegates path resolution" in resolution["message"]) is delegates
 
 
 def _seam_branch(tmp_path, seam_body: str | None = None):

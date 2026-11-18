@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_structure_check.py
 # Description: JSON Structure Standards Checker Handler
-# Version: 3.7.0
+# Version: 3.8.0
 # Created: 2026-03-05
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -22,7 +22,7 @@ from typing import Dict, List
 from aipass.prax import logger
 from aipass.sentry.apps.handlers.aipass_standards import stdlib_only_check
 from aipass.sentry.apps.handlers.aipass_standards.check_support import parse
-from aipass.sentry.apps.handlers.aipass_standards.json_handler_check import _is_canonical_shim
+from aipass.sentry.apps.handlers.aipass_standards.json_handler_check import is_shim_for
 from aipass.sentry.apps.handlers.bypass.utils import FILE_SCOPE, is_bypassed
 from aipass.sentry.apps.handlers.json import json_handler
 
@@ -502,7 +502,7 @@ def _check_code_wiring(_path: Path, content: str) -> List[Dict]:
     return checks
 
 
-def _check_json_handler_config(_handler_path: Path, content: str) -> List[Dict]:
+def _check_json_handler_config(handler_path: Path, content: str) -> List[Dict]:
     """Check json_handler.py: no Path.home(), relative resolution, no json_templates, no load_template()."""
     checks: List[Dict] = []
 
@@ -540,8 +540,10 @@ def _check_json_handler_config(_handler_path: Path, content: str) -> List[Dict]:
         )
 
     # A shim that binds the fleet json service resolves nothing itself: the service derives the branch root
-    # from the shim's own __file__ (deliberately WITHOUT resolve()), so the canonical shim passes by hash.
-    binds_the_json_service = _is_canonical_shim(content)
+    # from the shim's own __file__ (deliberately WITHOUT resolve()) or a claimed branch's name, so the shim passes
+    # by hash.
+    branch = _branch_root(handler_path)
+    binds_the_json_service = is_shim_for(content, branch.name if branch else "")
     resolves_here = bool(
         re.search(r"Path\(__file__\)", content)
         or re.search(r"\.resolve\(\)", content)
