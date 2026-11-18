@@ -80,7 +80,7 @@
       "file": "apps/handlers/json/json_service.py",
       "standard": "logged_fallback",
       "lines": [
-        157
+        202
       ],
       "reason": "prax, leg 7: 'unknown' means one thing on both paths, as the docstring says: there is no module behind frame 2. sys._getframe raises ValueError exactly when the stack is too shallow to have that frame; it is the same answer, not a failure dressed as one."
     },

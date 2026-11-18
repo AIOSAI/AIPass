@@ -47,9 +47,17 @@ base keys (`created`/`last_updated`) is healed, not refused. The config
 `log_operation` still answers the log's own `True`. There is no success/failure
 counter, because the call carries no success signal; older
 `operations_successful`/`operations_failed` keys are left exactly as they are.
-The bump is a read-modify-write like the log itself, so under racing writers
-`operations_total` is a lower bound, not an exact count, and it costs one more
-staged write per call. `rate_tracker` keeps its `files` in that same
+The log append and the bump are one read-modify-write under one exclusive
+`flock` per module (`<module>.lock` beside the documents), so `operations_total`
+is exact for `log_operation`'s writers, and the bump costs one more staged write
+per call. Writers to one module queue in the kernel; different modules never
+wait on each other. A killed holder's lock dies with it: the file left on disk
+means nothing and is never inspected. A live holder kept past
+`LOCK_DEADLINE_SECONDS` (2 s, about 1,500 uncontended writes at ~1.3 ms) makes
+the waiter give up once: `log_operation` answers `False` and logs one ERROR on
+prax's trail naming the module, the lock file and the reason. Nothing is written
+without the lock. A caller's own `load_json`/`save_json` round trip on a data
+document takes no lock and can still race the bump. `rate_tracker` keeps its `files` in that same
 `rate_tracker_data.json`, and its save sets only `files` (and `module_name` when
 absent) on the document it loaded, so `created` and the counters survive a scan.
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_service.py
 # Description: The fleet's one JSON handler service (prax-owned)
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-09-03
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """The fleet's one JSON handler implementation (DPLAN-0325).
@@ -11,11 +11,13 @@
 Reference: docs/json_service.md
 """
 
+import fcntl
 import itertools
 import json
 import os
 import stat
 import sys
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -37,6 +39,9 @@ _ORPHAN_AGE_SECONDS = 3600
 # pid + counter, never the clock: callers stub this module's `time` to skip the retry sleep.
 _stage_serial = itertools.count()
 
+# An uncontended log_operation costs ~1.3 ms: 2 s is some 1500 queued writers; only a frozen holder outlasts it.
+LOCK_DEADLINE_SECONDS = 2.0
+
 
 class InvalidDocument(ValueError):
     """A document that does not match the structure its json_type declares."""
@@ -44,6 +49,10 @@ class InvalidDocument(ValueError):
 
 class WriteFailed(OSError):
     """The write could not land: retry exhausted, or an OSError on the way."""
+
+
+class LockTimeout(TimeoutError):
+    """A live holder kept a module's trail lock past the deadline."""
 
 
 def _default_document(json_type: str, module_name: str) -> Any:
@@ -143,6 +152,42 @@ def _discard(temp_path: str) -> None:
         os.unlink(temp_path)
     except OSError as exc:
         logger.warning("json_service: temp cleanup failed", path=temp_path, error=str(exc))
+
+
+def _acquire(lock_path: Path, deadline: float) -> int:
+    """An fd holding the exclusive flock on lock_path; LockTimeout when a live holder keeps it past the deadline.
+
+    The kernel drops a dead holder's lock, so the file on disk is never stale and never inspected.
+    """
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, _NEW_DOCUMENT_MODE)
+
+    # The kernel's blocking flock is the queue; it runs on a helper thread so the wait can have a deadline.
+    outcome = {"won": False, "abandoned": False}
+    guard = threading.Lock()
+    settled = threading.Event()
+
+    def wait_turn() -> None:
+        """Take the lock in turn, then hand it to the waiter, or let it go if the waiter gave up."""
+        acquired = False
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            acquired = True
+        finally:
+            with guard:
+                outcome["won"] = acquired and not outcome["abandoned"]
+                if not outcome["won"]:
+                    os.close(fd)
+            settled.set()
+
+    # shortcut: a timed-out waiter's thread stays parked in flock until the frozen holder lets go or dies.
+    threading.Thread(target=wait_turn, name="json_service-lock-wait", daemon=True).start()
+    settled.wait(deadline)
+    with guard:
+        if outcome["won"]:
+            return fd
+        outcome["abandoned"] = True
+    raise LockTimeout(f"lock not acquired within {deadline} seconds")
 
 
 def _get_caller_module_name() -> str:
@@ -330,29 +375,45 @@ class JsonHandle:
     ) -> bool:
         """Append a timestamped entry to a module's operations log, then bump its data document.
 
+        One exclusive lock per module holds the whole read-modify-write: writers queue and none is lost.
         Telemetry on watchdog and display threads: a failure answers False, never raises. A misshaped
-        document on disk is logged at ERROR and left as it is.
+        document on disk, or a lock a live holder keeps past the deadline, is logged at ERROR.
         """
         if module_name is None:
             module_name = _get_caller_module_name()
 
+        lock_path = self.json_dir / f"{module_name}.lock"
         try:
-            self.ensure_module_jsons(module_name)
+            lock_fd = _acquire(lock_path, LOCK_DEADLINE_SECONDS)
+            try:
+                self.ensure_module_jsons(module_name)
 
-            log = self.load_json(module_name, "log")
-            if not isinstance(log, list):
-                log = []
+                log = self.load_json(module_name, "log")
+                if not isinstance(log, list):
+                    log = []
 
-            entry: Dict[str, Any] = {"timestamp": datetime.now().isoformat(), "operation": operation}
-            if data:
-                entry["data"] = data
-            log.append(entry)
+                entry: Dict[str, Any] = {"timestamp": datetime.now().isoformat(), "operation": operation}
+                if data:
+                    entry["data"] = data
+                log.append(entry)
 
-            max_entries = self._max_log_entries(module_name)
-            if len(log) > max_entries:
-                log = log[-max_entries:]
+                max_entries = self._max_log_entries(module_name)
+                if len(log) > max_entries:
+                    log = log[-max_entries:]
 
-            logged = self.save_json(module_name, "log", log)
+                logged = self.save_json(module_name, "log", log)
+                self._bump_data(module_name, operation)
+            finally:
+                os.close(lock_fd)
+        except LockTimeout as exc:
+            logger.error(
+                "json_service: log_operation lock not acquired",
+                operation=operation,
+                module=module_name,
+                path=str(lock_path),
+                error=str(exc),
+            )
+            return False
         except InvalidDocument as exc:
             logger.error("json_service: log_operation refused", operation=operation, module=module_name, error=str(exc))
             return False
@@ -362,13 +423,12 @@ class JsonHandle:
             )
             return False
 
-        self._bump_data(module_name, operation)
         return logged
 
     def _bump_data(self, module_name: str, operation: str) -> None:
         """Count one more operation in the module's lifetime data document; never raises.
 
-        Read-modify-write keeping every other key; under racing writers the total is a lower bound.
+        Read-modify-write keeping every other key, under log_operation's lock: exact for its writers.
         """
         try:
             document = self.load_json(module_name, "data")
