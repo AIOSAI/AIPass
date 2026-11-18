@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_logging_handlers.py
 # Description: Tests for prax logging handler modules
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-04-25
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/logging/direct.py and its sibling modules under apps/handlers/logging/."""
@@ -106,8 +106,23 @@ class TestDirectLog:
                 d.chmod(0o700)
 
         lines = [json.loads(line) for line in (trail_dir / "direct.jsonl").read_text(encoding="utf-8").splitlines()]
-        assert [(r["level"], r["msg"]) for r in lines] == [("ERROR", "Log handler failed")] * 2  # both tiers
+        # Both tiers, then the telemetry write: its state folder cannot be made either, and the log call returned.
+        assert [(r["level"], r["msg"]) for r in lines] == [("ERROR", "Log handler failed")] * 3
+        assert str(home / "prax" / "prax_json") in lines[2]["error"] and "EACCES" in lines[2]["error"]
         assert list((home / "system").iterdir()) == []
+
+    def test_only_an_unwritable_state_folder_is_held_back_from_the_caller(self, monkeypatch, tmp_path):
+        """The catch is that one class: any other telemetry failure is a bug and still reaches the caller."""
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+        monkeypatch.setattr(direct, "_direct_loggers", {})
+
+        def broken(*_args, **_kwargs):
+            raise PermissionError(13, "not the state folder")
+
+        monkeypatch.setattr(direct.json_handler, "log_operation", broken)
+
+        with pytest.raises(PermissionError, match="not the state folder"):
+            direct.get_direct_logger().info("a line")
 
 
 class TestSafeRotatingFileHandlerDoRollover:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: direct.py
 # Description: Direct Logger (Event Pipeline Bypass)
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-02-27
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """PRAX Direct Logger
@@ -30,6 +30,7 @@ from aipass.prax.apps.handlers.logging.introspection import detect_branch_from_p
 from aipass.prax.apps.handlers.logging.setup import SafeRotatingFileHandler
 from aipass.prax.apps.handlers.logging.trail import PraxTrail
 from aipass.prax.apps.handlers.json import json_handler
+from aipass.prax.apps.handlers.state_root import StateRootUnwritable
 
 # stdlib builds door one here; this file's own diagnostics ride prax's trail.
 logger = PraxTrail("direct")
@@ -122,7 +123,11 @@ def _get_or_create_logger(module_name: str, branch_path: Optional[str]) -> loggi
             return _direct_loggers[key]
         _direct_loggers[key] = _create_direct_logger(module_name, branch_name, branch_path)
     # Recorded when the file opens, never in get_direct_logger(), which runs at import.
-    json_handler.log_operation("direct_log_created", {"module": module_name, "branch_path": branch_path})
+    try:
+        json_handler.log_operation("direct_log_created", {"module": module_name, "branch_path": branch_path})
+    except StateRootUnwritable as e:
+        # A log call never takes its caller down; the failure is a line on this trail, folder and errno named.
+        logger.error("Log handler failed", file=f"{branch_name}_{module_name} telemetry", error=str(e))
     return _direct_loggers[key]
 
 
