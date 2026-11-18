@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config.py
 # Description: Trigger package paths and atomic JSON writes
-# Version: 1.9.0
+# Version: 1.10.0
 # Created: 2026-03-09
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -17,14 +17,15 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 
-from aipass.prax import logger
+from aipass.prax import branch_state_root, logger
 
 TRIGGER_ROOT = Path(__file__).resolve().parents[1]
 
 AIPASS_PKG_ROOT = TRIGGER_ROOT.parent
 
 # json_handler creates any absent `<module>_<config|data|log>.json` here; a misshaped one raises, never overwritten.
-TRIGGER_JSON_DIR = TRIGGER_ROOT / "trigger_json"
+# Prax's state root: the branch folder on a checkout, the home folder on an install, never inside a wheel.
+TRIGGER_JSON_DIR = branch_state_root("trigger") / "trigger_json"
 
 ARCHIVE_DIR_NAME = ".archive"
 

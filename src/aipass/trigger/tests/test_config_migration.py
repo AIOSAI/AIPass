@@ -3,20 +3,20 @@
 # Description: Tests for migrate_json_file - moving live state off trio-owned paths
 # Version: 1.0.0
 # Created: 2026-08-07
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
-"""Tests for apps/config.py: migrate_json_file and _archive_legacy_file."""
+"""Tests for apps/config.py: migrate_json_file, _archive_legacy_file and where trigger_json lives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(behaviour) — the trio regeneration in apps/handlers/json/json_handler.py; the json handler owns it
+# sentry: no-test-needed(behaviour) — the trio regeneration in apps/handlers/json/json_handler.py; that handler owns it
 
 import json
 from pathlib import Path
 
 import pytest
 
-from aipass.trigger.apps.config import ARCHIVE_DIR_NAME, migrate_json_file
+from aipass.trigger.apps.config import ARCHIVE_DIR_NAME, TRIGGER_JSON_DIR, TRIGGER_ROOT, migrate_json_file
 
 LIVE_STATE = {
     "config": {"medic_enabled": True, "muted_branches": [{"name": "flow", "expires_at": None}]},
@@ -119,3 +119,13 @@ class TestMigrateJsonFile:
         archived = sorted(p.name for p in archive_dir.glob("trigger_config*.json"))
         assert len(archived) == 2
         assert json.loads((archive_dir / "trigger_config.json").read_text(encoding="utf-8")) == {"older": True}
+
+
+class TestStateFolder:
+    """trigger_json comes from prax's state root, never from counting folders up from config.py."""
+
+    def test_trigger_json_follows_the_state_root_redirect_not_the_code_folder(self) -> None:
+        # conftest set AIPASS_TEST_LOG_DIR before import, so prax's root sits outside the code folder.
+        assert TRIGGER_JSON_DIR.name == "trigger_json"
+        assert TRIGGER_JSON_DIR.parent.name == "trigger"
+        assert not TRIGGER_JSON_DIR.is_relative_to(TRIGGER_ROOT)
