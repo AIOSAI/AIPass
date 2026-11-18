@@ -13,25 +13,25 @@
     {
       "file": "apps/handlers/schedule/runstate.py",
       "standard": "logged_fallback",
-      "lines": [95, 172, 198, 218, 277],
+      "lines": [93, 170, 196, 216, 275],
       "reason": "Due checks of the live tick (daemon, fleet green leg 5). Each answer IS the scheduler's decision for an unreadable field, written in each function's docstring: an unreadable last_run reads not-yet-run or due (the fire writes a fresh stamp, so one bad row costs one fire); an unreadable time or due_date reads not due (no fire can repair the owner's schedule, so due would fire every tick or fire a one-shot early). The caller, is_job_due, needs exactly that bool; a raise would stop the tick for every job in the fleet, which the tick's contract forbids (one bad job costs that one job)."
     },
     {
       "file": "apps/handlers/schedule/runstate.py",
       "standard": "logged_fallback",
-      "lines": [453, 476],
+      "lines": [451, 474],
       "reason": "Holds of the live tick (daemon, fleet green leg 5): an unreadable last_failure_at or last_blocked_at answers no hold, because a hold that cannot be measured could never expire and would stall the job for good, while releasing it costs at most one early attempt whose own outcome writes a fresh stamp. False is the decision, not a stand-in; a raise would stop the tick for every job."
     },
     {
       "file": "apps/handlers/schedule/runstate.py",
       "standard": "logged_fallback",
-      "lines": [364],
+      "lines": [362],
       "reason": "_slot_anchor (daemon, fleet green legs 3 and 5): None is 'no anchor to seed', the documented answer for an unreadable slot and for an interval that is not a positive number; the one caller, seed_interval_slot, warns and leaves the job unseeded. A raise here stopped the whole tick (leg 3, item 2), which this answer cured."
     },
     {
       "file": "apps/handlers/schedule/runstate.py",
       "standard": "logged_fallback",
-      "lines": [550, 555, 572, 577, 591],
+      "lines": [548, 553, 570, 575, 589],
       "reason": "_calc_next_run is display (daemon, fleet green leg 5): None means 'no next run to advertise', which is the true answer when the schedule or last_run cannot be read; the queue shows it blank and nothing fires from next_run (is_job_due reads the schedule and last_run itself). A raise would land in update_job_runstate after a fire and lose that fire's record."
     },
     {

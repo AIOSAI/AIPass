@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rotation.py
 # Description: Tests for the steward rotation handler and module
-# Version: 1.6.1
+# Version: 1.7.0
 # Created:2026-08-12
-# Modified: 2026-11-16
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/rotation.py and handlers/schedule/rotation.py — the nightly rounds (DPLAN-0287)."""
@@ -601,10 +601,11 @@ BUDGET_RULES = (
 class TestShippedRoundsJob:
     """The owner's ruling of 2026-09-10, read off the same file the tick reads."""
 
-    def test_the_job_is_rounds_and_it_is_on(self):
+    def test_the_job_is_rounds_at_five_with_an_on_off_switch(self):
+        """On or off is the owner's switch, so only its shape is pinned."""
         job = shipped_rounds_job()
         assert job["id"] == "rounds"
-        assert job["enabled"] is True
+        assert isinstance(job["enabled"], bool)
         assert job["schedule"] == {"type": "rotation", "time": "05:00"}
 
     def test_opus_fresh_and_no_managers(self):
@@ -645,7 +646,8 @@ class TestShippedRoundsJob:
 class TestRoundsNight:
     """One night end to end through the real tick, nobody woken.
 
-    The shipped stanza, the clock moved to 05:01, and the wake caught at ai_mail's wake_branch seam,
+    The shipped stanza with its switch set by the test (on unless a test turns it off: the shipped
+    flag is the owner's), the clock moved to 05:01, and the wake caught at ai_mail's wake_branch seam,
     so the kwargs pinned are the ones a real fire hands ai_mail. Nights are dated from tomorrow:
     last_run is stamped by the real clock, and a fixed date would go red once the wall clock passed it.
     """
@@ -676,10 +678,10 @@ class TestRoundsNight:
     def night(offset_days: int) -> datetime:
         return datetime.combine(date.today() + timedelta(days=offset_days), time(5, 1))
 
-    def _tick(self, runstate: dict, at: datetime, wake_error: Exception | None = None):
+    def _tick(self, runstate: dict, at: datetime, wake_error: Exception | None = None, enabled: bool = True):
         real_is_due = runstate_mod.is_job_due
         with (
-            patch(f"{RUN}.discover_jobs", return_value=[shipped_rounds_job()]),
+            patch(f"{RUN}.discover_jobs", return_value=[{**shipped_rounds_job(), "enabled": enabled}]),
             patch(f"{RUN}.load_runstate", return_value=runstate),
             patch(f"{RUN}.save_runstate", return_value=True) as mock_save,
             patch(f"{RUN}.is_job_due", side_effect=lambda j, rs: real_is_due(j, rs, now=at)),
@@ -749,6 +751,14 @@ class TestRoundsNight:
         results, mock_wake, _save = self._tick({}, at)
         assert results["fired"] == 0
         mock_wake.assert_not_called()
+
+    def test_a_switched_off_job_in_its_window_wakes_no_one_and_writes_no_rounds_row(self):
+        runstate = {}
+        results, mock_wake, _save = self._tick(runstate, self.night(1), enabled=False)
+        assert results["fired"] == 0
+        mock_wake.assert_not_called()
+        assert get_rotation_state(runstate, "@daemon/rounds") == {}
+        assert "@daemon/rounds" not in runstate.get("jobs", {})
 
 
 class TestRoundsScope:
