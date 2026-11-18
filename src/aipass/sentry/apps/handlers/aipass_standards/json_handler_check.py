@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: json_handler_check.py
 # Description: JSON Handler Integrity Standards Checker
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-06-14
 # Modified: 2026-11-18
 # =============================================
@@ -47,14 +47,15 @@ _TEMPLATE_HANDLER_PARTS = ("templates", "citizen", "apps", "handlers", "json", "
 
 
 def _read_handler(branch_path: Path) -> str | None:
+    """The handler's text, or None when the branch has none.
+
+    Raises:
+        OSError, UnicodeDecodeError: the handler exists but cannot be read; never reported as missing.
+    """
     handler = branch_path / "apps" / "handlers" / "json" / "json_handler.py"
     if not handler.exists():
         return None
-    try:
-        return handler.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        logger.warning("json_handler_check: cannot read handler: %s", exc)
-        return None
+    return handler.read_text(encoding="utf-8")
 
 
 def _is_canonical_shim(content: str) -> bool:

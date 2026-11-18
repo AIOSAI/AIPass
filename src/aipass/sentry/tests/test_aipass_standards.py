@@ -609,6 +609,14 @@ def test_the_refusal_message_names_the_branch_and_the_line_to_write(tmp_path):
     assert json_handler_check.SERVICE_IMPORT_MARKER in message
 
 
+def test_an_unreadable_handler_raises_rather_than_reading_as_missing(tmp_path):
+    handler = tmp_path / "canary" / "apps" / "handlers" / "json" / "json_handler.py"
+    handler.parent.mkdir(parents=True)
+    handler.write_bytes(b"\xff\xfe not utf-8")
+    with pytest.raises(UnicodeDecodeError):
+        json_handler_check.check_branch(str(tmp_path / "canary"))
+
+
 def test_a_branch_without_a_citizen_template_grows_no_template_check(tmp_path):
     """Seventeen branches ship no template, so the check does not appear for them."""
 

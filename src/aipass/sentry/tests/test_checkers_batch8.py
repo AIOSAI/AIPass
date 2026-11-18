@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch8.py
 # Description: Unit tests for handlers, log_handler, log_level, log_structure, meta, naming, permission_flags
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-04-25
-# Modified: 2026-11-16
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/handlers_check.py and six sibling checkers (batch 8)."""
@@ -19,7 +19,6 @@ import pytest
 
 from aipass.sentry.apps.handlers.aipass_standards import architecture_check, imports_check
 from aipass.sentry.apps.handlers.aipass_standards.handlers_check import (
-    _branch_before,
     check_auto_detection,
     check_handler_independence,
     check_no_orchestration,
@@ -296,13 +295,14 @@ def test_no_orchestration_module_import():
     assert "orchestration" in result["message"]
 
 
-def test_branch_before_says_none_rather_than_guessing():
-    """A missing marker returns None, never the whole string."""
-
-    assert _branch_before("aipass.spawn.apps.modules", ".apps.handlers") is None
-    assert _branch_before("aipass.spawn.apps.modules", ".apps.modules") == "spawn"
-    assert _branch_before("aipass.sentry.apps.handlers.json", ".apps.handlers") == "sentry"
-    assert _branch_before(".apps.handlers.x", ".apps.handlers") is None
+def test_an_import_whose_branch_cannot_be_read_is_never_taken_for_the_own_branch(tmp_path):
+    """No branch before the marker is "cannot tell", never the last segment of the whole string."""
+    module = "apps.handlers.json"
+    content = f'"""Handler."""\nfrom {module} import x\n'
+    handler = tmp_path / "src" / "aipass" / "json" / "apps" / "handlers" / "h.py"
+    result = check_handler_independence(content, _lines(content), str(handler))
+    assert result["passed"] is False
+    assert f"from {module} import x" in result["message"]
 
 
 def test_no_orchestration_leaves_another_branchs_long_path_to_front_door(tmp_path):

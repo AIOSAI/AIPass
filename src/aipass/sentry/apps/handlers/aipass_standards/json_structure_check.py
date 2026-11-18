@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: json_structure_check.py
 # Description: JSON Structure Standards Checker Handler
-# Version: 3.8.0
+# Version: 3.8.1
 # Created: 2026-03-05
 # Modified: 2026-11-18
 # =============================================
@@ -338,11 +338,8 @@ def _is_prelogging_bootstrap(path: Path, content: str) -> bool:
     substrate's own imports reach it. Either alone exempts too much; the pair names modules where wiring
     log_operation() would put a file write on every branch's import path, firing during pytest COLLECTION.
     """
-    try:
-        ast.parse(content)
-    except (SyntaxError, ValueError) as exc:
-        # An unreadable file is not a bootstrap module: [] from _aipass_imports() would buy the exemption.
-        logger.info("json_structure: unparseable, so not eligible for the bootstrap exemption: %s", exc)
+    # An unparseable file is not a bootstrap module: [] from _aipass_imports() would buy the exemption.
+    if parse(content, tag="json_structure") is None:
         return False
     imports = _aipass_imports(content)
     allowed = {_TRAIL_DOOR, _TRAIL_MODULE} | ({"aipass.prax"} if _TRAIL_DOOR in imports else set())
@@ -360,10 +357,8 @@ def _branch_root(path: Path) -> Path | None:
     source_root = _aipass_source_root(path)
     if source_root is None:
         return None
-    try:
-        relative = path.resolve().relative_to(source_root)
-    except ValueError:
-        return None
+    # The source root is one of the resolved path's own parents, so the path is always below it.
+    relative = path.resolve().relative_to(source_root)
     return source_root / relative.parts[0] if relative.parts else None
 
 

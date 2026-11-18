@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli_check.py
 # Description: CLI Standards Checker Handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-05
-# Modified: 2026-11-16
+# Modified: 2026-11-18
 # =============================================
 
 """CLI Standards Checker Handler"""
@@ -206,12 +206,12 @@ def _console_print_in_string(line: str, stripped: str) -> bool:
     return False
 
 
-def _stderr_directed_print_lines(content: str) -> set:
-    r"""Lines holding a ``print(..., file=sys.stderr)`` call."""
+def _stderr_directed_print_lines(content: str) -> Optional[set]:
+    r"""Lines holding a ``print(..., file=sys.stderr)`` call, or None when the source does not parse."""
     try:
         tree = ast.parse(content)
     except (SyntaxError, ValueError):
-        return set()
+        return None
 
     lines = set()
     for node in ast.walk(tree):
@@ -249,7 +249,8 @@ def _is_print_line(i: int, line: str, calls: Optional[set]) -> bool:
 def check_handler_separation(content: str) -> Dict:
     """Check that handlers don't have console output"""
     lines = content.split("\n")
-    stderr_prints = _stderr_directed_print_lines(content)
+    # Unparseable: no print is proven stderr-directed, so none is spared.
+    stderr_prints = _stderr_directed_print_lines(content) or set()
     print_calls = _print_call_lines(content)
     cli_imports = _cli_imports(content)
 
