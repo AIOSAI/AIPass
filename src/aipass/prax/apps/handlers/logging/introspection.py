@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: introspection.py
 # Description: Stack Introspection
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2025-11-10
 # Modified: 2026-11-18
 # =============================================
@@ -14,6 +14,8 @@ from typing import Optional
 
 import aipass
 from aipass.prax.apps.handlers.logging.trail import PraxTrail
+from aipass.prax.apps.handlers.repo_root import SOURCE_DIR_NAME, source_root
+from aipass.prax.apps.handlers.state_root import is_installed
 
 logger = PraxTrail("introspection")
 
@@ -80,8 +82,11 @@ def get_caller_info() -> tuple:
 
 
 _AIPASS_PKG_ROOT = Path(aipass.__file__).resolve().parent
-_SRC_ROOT = _AIPASS_PKG_ROOT.parent  # aipass/ → src/ (contains branches outside aipass namespace)
-_REPO_ROOT = _SRC_ROOT.parent  # src/ → AIPass repo root
+_CHECKOUT = source_root(_AIPASS_PKG_ROOT)
+# Installed, or with no src/ above it (a --user install), there is no checkout: no src/ arm, no repo to exclude.
+_NO_CHECKOUT = is_installed(_AIPASS_PKG_ROOT) or _CHECKOUT == Path(_CHECKOUT.anchor)
+_REPO_ROOT: Optional[Path] = None if _NO_CHECKOUT else _CHECKOUT
+_SRC_ROOT: Optional[Path] = None if _REPO_ROOT is None else _REPO_ROOT / SOURCE_DIR_NAME
 
 
 def _resolve_caller_path(module_path: str) -> Optional[Path]:
@@ -114,7 +119,7 @@ def detect_branch_from_path(module_path: str) -> Optional[str]:
         if len(relative.parts) >= 2:
             return str(_AIPASS_PKG_ROOT / relative.parts[0])
 
-    if path.is_relative_to(_SRC_ROOT):
+    if _SRC_ROOT is not None and path.is_relative_to(_SRC_ROOT):
         relative = path.relative_to(_SRC_ROOT)
         if len(relative.parts) >= 2 and relative.parts[0] != "aipass":
             return str(_SRC_ROOT / relative.parts[0])
@@ -130,7 +135,7 @@ def detect_external_project(module_path: str) -> Optional[tuple]:
     if path is None:
         return None
 
-    if path.is_relative_to(_REPO_ROOT):
+    if _REPO_ROOT is not None and path.is_relative_to(_REPO_ROOT):
         return None
 
     import os

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_repo_root.py
 # Description: Repo-Root Resolution Pins
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-08-31
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # Category: prax/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -28,6 +28,7 @@
 
 import ast
 import json
+import os
 import subprocess
 import sys
 import textwrap
@@ -514,8 +515,13 @@ class TestEveryLaneUsesTheSharedResolver:
     def test_the_lanes_agree_with_the_shared_answer(self):
         """Behavioural, not just structural: same question, one answer."""
         expected = repo_root_mod.find_repo_root()
-        # load is asked by name: its one public reader mkdirs in the live system_logs outside pytest.
-        assert load_mod._find_repo_root() == expected
+        # load answers from its walk only outside pytest: a fresh interpreter, asked through the door.
+        env = {k: v for k, v in os.environ.items() if k not in ("AIPASS_TEST_LOG_DIR", "PYTEST_CURRENT_TEST")}
+        probe = "from aipass.prax import get_system_logs_dir\nprint(get_system_logs_dir())"
+        result = subprocess.run(
+            [sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8", env=env, timeout=120
+        )
+        assert Path(_answer(result)) == load_mod.system_logs_home(expected), result.stderr
         assert refresh_mod.AIPASS_REGISTRY == expected / "AIPASS_REGISTRY.json"
         assert status_mod.AIPASS_REGISTRY == expected / "AIPASS_REGISTRY.json"
 

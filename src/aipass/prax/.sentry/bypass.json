@@ -88,7 +88,7 @@
       "file": "apps/handlers/logging/introspection.py",
       "standard": "logged_fallback",
       "lines": [
-        100
+        105
       ],
       "reason": "prax, leg 7: the docstring names None as the answer 'the caller cannot be located — an answer, not a failure'. A path that will not resolve is a caller that cannot be located; branch detection is a routing hint and must never raise into the caller's import."
     },

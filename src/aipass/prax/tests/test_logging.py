@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_logging.py
 # Description: Tests for prax logging subsystem
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-03-29
 # Modified: 2026-11-18
 # =============================================
@@ -18,6 +18,8 @@ import importlib.util
 import json
 import logging
 import os
+import subprocess
+import sys
 import threading
 import types
 from logging.handlers import RotatingFileHandler
@@ -121,6 +123,10 @@ class TestDetectBranchFromPath:
         """Drone branch is detected from aipass/drone/apps/branch.py."""
         drone_path = str(_aipass_package_root() / "drone" / "apps" / "branch.py")
         assert detect_branch_from_path(drone_path) == str(_aipass_package_root() / "drone")
+
+    def test_a_checkout_names_a_src_sibling_by_its_folder(self, mock_prax_infrastructure):
+        sibling = _aipass_package_root().parent / "sibling"
+        assert detect_branch_from_path(str(sibling / "apps" / "mod.py")) == str(sibling)
 
     def test_random_path_returns_none(self, mock_prax_infrastructure, tmp_path):
         """Random path outside the project returns None."""
@@ -278,6 +284,74 @@ class TestDetectExternalProject:
         assert marked == [], f"tmp_path sits inside a project root ({marked}) — the None below is not testable here"
 
         assert detect_external_project(str(module_file)) is None
+
+
+_INSTALLED_PROBE = """
+import json, sys, sysconfig
+site, purelib, *files = sys.argv[1:]
+real = sysconfig.get_paths
+sysconfig.get_paths = lambda *a, **k: {**real(*a, **k), "purelib": purelib, "platlib": purelib}
+sys.path.insert(0, site)
+from aipass.prax.apps.handlers.logging import introspection as i
+print(json.dumps([[i.detect_branch_from_path(f), i.detect_external_project(f)] for f in files], default=str))
+"""
+
+
+def _answers_installed(site: Path, purelib: Path, *files: Path) -> list:
+    """[branch, external] per file, from a fresh interpreter whose aipass package sits in ``site``."""
+    (site / "aipass").mkdir(parents=True, exist_ok=True)
+    # The package's own modules still load from the checkout; only where aipass sits moves.
+    path_line = f"__path__.append({str(_aipass_package_root())!r})\n"
+    (site / "aipass" / "__init__.py").write_text(path_line, encoding="utf-8")
+    for module in files:
+        module.parent.mkdir(parents=True, exist_ok=True)
+        module.touch()
+    dropped = ("AIPASS_TEST_LOG_DIR", "PYTEST_CURRENT_TEST", "AIPASS_CALLER_CWD", "AIPASS_BRANCH_NAME")
+    env = {k: v for k, v in os.environ.items() if k not in dropped}
+    argv = [sys.executable, "-c", _INSTALLED_PROBE, str(site), str(purelib), *map(str, files)]
+    result = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", env=env, timeout=120)
+    assert result.returncode == 0, f"probe failed: {result.stderr}"
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+def _site_packages(venv: Path) -> Path:
+    return venv.resolve() / "lib" / "python3.12" / "site-packages"
+
+
+class TestAnInstalledPackageHasNoCheckout:
+    """Installed, there is no src/ and no repo root around aipass: the interpreter's folders are neither."""
+
+    def test_a_third_party_module_beside_aipass_is_no_branch_and_no_project(self, tmp_path):
+        """A src/ above the venv must not pass it off as a checkout: the install directories decide."""
+        site = _site_packages(tmp_path / "src" / "venv")
+        third, flow = site / "thirdparty_pkg" / "work.py", site / "aipass" / "flow" / "apps" / "flow.py"
+
+        answers = _answers_installed(site, site, third, flow)
+
+        assert answers == [[None, None], [str(site / "aipass" / "flow"), None]]
+
+    def test_a_third_party_module_in_a_project_venv_logs_as_that_project(self, tmp_path):
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "pyproject.toml").write_text("[project]\nname = 'proj'\n", encoding="utf-8")
+        site = _site_packages(project / ".venv")
+
+        answers = _answers_installed(site, site, site / "thirdparty_pkg" / "work.py")
+
+        assert answers == [[None, ["proj", str(project.resolve())]]]
+
+    def test_a_user_install_with_no_src_above_it_still_finds_an_external_project(self, tmp_path):
+        """--user lands outside purelib, so the install check says no; no src/ above it says no checkout too."""
+        site = _site_packages(tmp_path / "home" / ".local")
+        project = tmp_path / "extproj"
+        project.mkdir()
+        (project / "pyproject.toml").write_text("[project]\nname = 'extproj'\n", encoding="utf-8")
+
+        third, main = site / "thirdparty_pkg" / "work.py", project / "main.py"
+
+        answers = _answers_installed(site, tmp_path / "system_site", third, main)
+
+        assert answers == [[None, None], [None, ["extproj", str(project.resolve())]]]
 
 
 class TestSetupExternalRouting:
