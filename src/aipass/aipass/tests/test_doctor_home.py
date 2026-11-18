@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor_home.py
 # Description: Tests for doctor's home, owner-seating, preflight, citizen-count, shared-skills, shadow and smoke rows
-# Version: 1.9.0
+# Version: 1.10.0
 # Created: 2026-10-08
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/doctor.py and _doctor_smoke.py: home, seating, preflight, drone, skills, shadows, smoke."""
@@ -320,6 +320,31 @@ class TestFixOwnerSeating:
             results = self._fix_rows()
         assert len(results) == 1
         assert results[0].glyph == GLYPH_WARN
+
+    def test_a_clean_seat_is_not_repaired_and_keeps_its_check_row(self):
+        """A fresh install's seatless --fix hit spawn's seat gate on a seat nobody needed to repair."""
+        clean = CheckResult("owner", GLYPH_PASS, "@owner OK (seated, uid 12345678)", "")
+        with (
+            patch("aipass.aipass.apps.modules.doctor.check_identity", return_value=[clean]),
+            patch("aipass.aipass.apps.modules.doctor.subprocess.run") as run,
+        ):
+            results = self._fix_rows()
+        assert run.call_count == 0
+        assert results == [clean]
+
+    def test_a_defective_seat_is_repaired_and_spawns_refusal_stays_an_error_row(self):
+        unseated = CheckResult("owner/unseated", GLYPH_FAIL, "no owner seated", "Run 'aipass doctor --fix'")
+        refusal = "sync-registry --fix runs for real from @spawn or the verified admin seat only (caller unknown)"
+        with (
+            patch("aipass.aipass.apps.modules.doctor.check_identity", return_value=[unseated]),
+            patch(
+                "aipass.aipass.apps.modules.doctor.subprocess.run",
+                return_value=MagicMock(returncode=1, stdout="", stderr=refusal),
+            ) as run,
+        ):
+            results = self._fix_rows()
+        assert run.call_args.args[0] == ["drone", "@spawn", "sync-registry", "--fix"]
+        assert [(r.label, r.glyph, r.detail) for r in results] == [("owner fix", GLYPH_FAIL, refusal[:120])]
 
 
 class TestRunDoctorPreflight:

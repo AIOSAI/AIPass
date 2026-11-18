@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.18.0
+# Version: 1.18.1
 # Created: 2026-04-16
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """aipass doctor — system health aggregation."""
@@ -1242,11 +1242,14 @@ def _compute_doctor_groups(
         services = groups.get("Services", [])
         groups["Services"] = [r for r in services if r.label != "wire verify"] + wire_recheck
 
-        owner_fix = _fix_owner_seating()
-        if any(r.glyph == GLYPH_PASS for r in owner_fix):
-            owner_fix = _check_owner_seating()  # exit 0 is not proof the seat is clean
         identity = groups.get("Identity", [])
-        groups["Identity"] = [r for r in identity if not r.label.startswith("owner")] + owner_fix
+        owner_rows = [r for r in identity if r.label.startswith("owner")]
+        # A clean seat is not repaired: spawn's gate refuses a seatless caller such as the installer.
+        if not owner_rows or any(r.glyph != GLYPH_PASS for r in owner_rows):
+            owner_fix = _fix_owner_seating()
+            if any(r.glyph == GLYPH_PASS for r in owner_fix):
+                owner_fix = _check_owner_seating()  # exit 0 is not proof the seat is clean
+            groups["Identity"] = [r for r in identity if not r.label.startswith("owner")] + owner_fix
 
         skills_fix = _fix_shared_skills()
         if skills_fix:
