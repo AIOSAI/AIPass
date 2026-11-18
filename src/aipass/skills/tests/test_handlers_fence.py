@@ -23,6 +23,7 @@ from unittest.mock import patch
 import pytest
 
 import aipass.skills as door
+from aipass.skills.apps.handlers import switch_handler
 from aipass.skills.tests import support_fence
 
 KIN_PROBE = Path(support_fence.__file__)
@@ -148,3 +149,28 @@ class TestTheFrontDoor:
         sentinel = object()
         with patch.object(importlib.import_module(home), name, sentinel):
             assert getattr(door, served) is sentinel
+
+
+# Read off the door, not written out: a function served tomorrow without a switch check joins this list and goes red.
+# Constants are exempt and told apart by callable(); a function's skill is the lib/<skill>/ segment of its __module__.
+SERVED_FUNCTIONS = sorted(name for name in door.__all__ if callable(getattr(door, name)))
+
+
+class TestOffMeansOffForEveryServedFunction:
+    """Every function the door serves refuses while its skill is switched off, running nothing."""
+
+    def test_the_door_serves_at_least_the_four_known_functions(self):
+        # The floor: an empty list would make the parametrized test below a silent pass.
+        assert {"lock_screen", "lock_state", "machine_processes", "machine_vitals"} <= set(SERVED_FUNCTIONS)
+
+    @pytest.mark.parametrize("served", SERVED_FUNCTIONS)
+    def test_a_switched_off_skill_s_function_refuses_and_runs_nothing(self, served):
+        function = getattr(door, served)
+        skill = function.__module__.split(".")[3]
+        switch_handler.set_enabled(skill, False)
+
+        with patch("subprocess.run", side_effect=AssertionError(f"{served} ran a command while off")) as run:
+            answer = function()
+
+        assert any(f"Skill '{skill}' is switched OFF" in str(value) for value in answer.values()), answer
+        run.assert_not_called()
