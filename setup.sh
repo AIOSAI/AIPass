@@ -71,6 +71,8 @@ echo "Repo root: $SCRIPT_DIR"
 echo ""
 
 # --- Find working Python ---
+# This checkout's venv is deleted below: one active in the calling shell must not be the python picked here.
+PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -vxF "$SCRIPT_DIR/.venv/bin" | paste -sd:)
 PYTHON=""
 # Probe versioned binaries first: stock python3 may be older than 3.10.
 for v in 3.13 3.12 3.11 3.10; do
