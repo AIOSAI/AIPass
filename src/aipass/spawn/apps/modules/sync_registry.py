@@ -138,7 +138,8 @@ def _handle_check(registry_path, json_output=False) -> int:
         return 1
 
     if json_output:
-        console.print(_json.dumps(result, indent=2, ensure_ascii=False))
+        text = _json.dumps(result, indent=2, ensure_ascii=False)
+        console.print(text, markup=False, highlight=False, soft_wrap=True)
         return 0 if result["clean"] else 1
 
     issues = result["issues"]

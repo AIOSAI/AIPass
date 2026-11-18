@@ -870,6 +870,17 @@ class TestLostOwnerPassport:
         assert issue["branch"] == "DEVPULSE"
         assert str(passport) in issue["detail"]
 
+    def test_check_json_is_one_document_when_a_detail_outruns_the_terminal(self, tmp_path, capsys):
+        """Doctor parses this output; a path wrapped at the console width puts a raw newline in a string.
+
+        Mutant: the JSON printed without soft_wrap -> json.loads raises -> red."""
+        _lost_owner_project(tmp_path)
+
+        handle_sync_registry([str(tmp_path), "--check", "--json"])
+        document = json.loads(capsys.readouterr().out)
+
+        assert any(len(issue["detail"]) > 80 for issue in document["issues"])
+
     def test_check_flags_an_unreadable_owner_passport(self, tmp_path):
         """Mutant: only a missing file is flagged, a corrupt one is not -> red."""
         reg, passport = _lost_owner_project(tmp_path)
