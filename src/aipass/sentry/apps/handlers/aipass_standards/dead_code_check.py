@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dead_code_check.py
 # Description: Dead Code Standards Checker Handler
-# Version: 1.8.1
+# Version: 1.8.2
 # Created: 2026-03-22
 # Modified: 2026-11-18
 # =============================================
@@ -117,9 +117,11 @@ def _named_in_config(import_path: str, config_text: str) -> bool:
 
 
 def _string_value(node: ast.AST, constants: dict[str, str]) -> str | None:
-    """A string literal or an f-string over the module's own string constants, else None."""
+    """A string literal, one of the module's own string constants, or an f-string over them, else None."""
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
+    if isinstance(node, ast.Name):
+        return constants.get(node.id)
     if not isinstance(node, ast.JoinedStr):
         return None
     pieces = []

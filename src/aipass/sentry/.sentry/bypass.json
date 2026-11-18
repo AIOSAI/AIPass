@@ -405,12 +405,6 @@
       "reason": "The checker is wrong on this line (fleet green leg 15): the failure answer is the strict one. The caller sees the passport still exists and fails Template baseline ('No citizen_class in ...passport.json'); only an absent passport skips, and that path never reaches this except."
     },
     {
-      "file": "apps/handlers/aipass_standards/json_handler_check.py",
-      "standard": "logged_fallback",
-      "lines": [50],
-      "reason": "The checker is wrong on this line (fleet green leg 15): the failure answer is the strict one. check_branch reads None as 'Handler exists' failed, so an unreadable handler fails the row; the read error is logged as a warning."
-    },
-    {
       "file": "apps/handlers/audit/discovery.py",
       "standard": "logged_fallback",
       "lines": [237],

@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_checkers_batch8.py
 # Description: Unit tests for handlers, log_handler, log_level, log_structure, meta, naming, permission_flags
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-04-25
 # Modified: 2026-11-18
 # =============================================
@@ -13,6 +13,7 @@
 # sentry: no-test-needed(shared) — is_bypassed's own matching rules; tests/test_bypass.py
 # sentry: no-test-needed(stdlib) — ast.parse's parsing; the checkers only walk the tree it returns
 
+from pathlib import Path
 from typing import List
 
 import pytest
@@ -51,6 +52,14 @@ from aipass.sentry.apps.handlers.aipass_standards.permission_flags_check import 
 def _lines(text: str) -> List[str]:
     """Split text into lines, widening LiteralString to str for pyright."""
     return text.split("\n")
+
+
+PERMISSION_SAMPLES = Path(__file__).parent / "fixtures" / "permission_flags"
+
+
+def _permission_sample(name: str) -> str:
+    """Read a permission_flags sample; the flag lives in data so this file never carries it."""
+    return (PERMISSION_SAMPLES / f"{name}.txt").read_text(encoding="utf-8")
 
 
 def test_handler_independence_clean(tmp_path):
@@ -1067,11 +1076,7 @@ def test_no_dangerous_flags_clean(tmp_path):
 
 def test_no_dangerous_flags_violation(tmp_path):
     """File with prohibited permission bypass flag fails."""
-    lines: List[str] = [
-        '"""Module."""',
-        'cmd = "--dangerously-skip-permissions"',
-        "",
-    ]
+    lines = _lines(_permission_sample("module_with_flag"))
 
     result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is False
@@ -1080,13 +1085,7 @@ def test_no_dangerous_flags_violation(tmp_path):
 
 def test_no_dangerous_flags_in_docstring(tmp_path):
     """Prohibited flag inside docstring is ignored."""
-    lines: List[str] = [
-        '"""',
-        "Use --dangerously-skip-permissions for testing",
-        '"""',
-        "pass",
-        "",
-    ]
+    lines = _lines(_permission_sample("flag_in_docstring"))
 
     result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is True
@@ -1094,11 +1093,7 @@ def test_no_dangerous_flags_in_docstring(tmp_path):
 
 def test_no_dangerous_flags_skip_permissions(tmp_path):
     """File with --skip-permissions fails."""
-    lines: List[str] = [
-        '"""Module."""',
-        'cmd = "--skip-permissions"',
-        "",
-    ]
+    lines = _lines(_permission_sample("module_with_skip_permissions"))
 
     result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is False
@@ -1106,11 +1101,7 @@ def test_no_dangerous_flags_skip_permissions(tmp_path):
 
 def test_no_dangerous_flags_bypass_rule(tmp_path):
     """Prohibited flag bypassed by rule passes."""
-    lines: List[str] = [
-        '"""Module."""',
-        'cmd = "--dangerously-skip-permissions"',
-        "",
-    ]
+    lines = _lines(_permission_sample("module_with_flag"))
     bypass_rules = [{"standard": "permission_flags", "file": str(tmp_path / "fake/path.py")}]
 
     result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"), bypass_rules=bypass_rules)
@@ -1121,19 +1112,19 @@ def test_no_dangerous_flags_bypass_rule(tmp_path):
 
 
 def test_no_dangerous_flags_reads_code_after_a_docstring_quoting_the_other_delimiter(tmp_path):
-    lines = _lines('"""Quotes \'\'\' in prose."""\ncmd = "--dangerously-skip-permissions"\n')
+    lines = _lines(_permission_sample("flag_after_docstring_quoting_other_delimiter"))
     result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"))
     assert result["message"].startswith("Dangerous permission bypass flags on lines [2]")
 
 
 def test_no_dangerous_flags_reads_a_triple_quoted_literal_in_code(tmp_path):
-    lines = _lines('cmd = """--dangerously-skip-permissions"""\n')
+    lines = _lines(_permission_sample("flag_in_triple_quoted_literal"))
     result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"))
     assert result["message"].startswith("Dangerous permission bypass flags on lines [1]")
 
 
 def test_no_dangerous_flags_ignores_flag_words_in_a_docstring_holding_the_other_delimiter(tmp_path):
-    lines = _lines('"""\n\'\'\'\nUse --dangerously-skip-permissions never.\n"""\nx = 1\n')
+    lines = _lines(_permission_sample("flag_in_docstring_holding_other_delimiter"))
     result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is True
 

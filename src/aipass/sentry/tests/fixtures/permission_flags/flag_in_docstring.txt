@@ -1,0 +1,4 @@
+"""
+Use --dangerously-skip-permissions for testing
+"""
+pass

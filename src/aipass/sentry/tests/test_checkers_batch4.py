@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_checkers_batch4.py
 # Description: Unit tests for 5 sentry checker handlers (batch 4)
-# Version: 1.8.0
+# Version: 1.8.1
 # Created: 2026-03-29
 # Modified: 2026-11-18
 # =============================================
@@ -55,12 +55,12 @@ def _make_branch(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _door_branch(tmp_path: Path, entries: str) -> Path:
+def _door_branch(tmp_path: Path, entries: str, constants: str = "") -> Path:
     """A branch whose only handler, handlers/served.py, nothing imports; its top __init__.py holds a door table."""
     branch = _make_branch(tmp_path)
     _write_file(branch / "apps" / (branch.name + ".py"), "def main():\n    return 0\n")
     _write_file(branch / "apps" / "handlers" / "served.py", "def render():\n    return 1\n")
-    door = f'_HANDLERS = "{branch.name}.apps.handlers"\n_HOMES = {{{entries}}}\n'
+    door = f'_HANDLERS = "{branch.name}.apps.handlers"\n{constants}_HOMES = {{{entries}}}\n'
     _write_file(branch / "__init__.py", door)
     return branch
 
@@ -397,10 +397,26 @@ class TestDeadCodeCheck:
         branch = _door_branch(tmp_path, f'"render": "{tmp_path.name}.apps.handlers.served"')
         assert dead_code_check_branch(str(branch))["score"] == 100
 
+    def test_a_table_entry_naming_a_door_constant_serves(self, mock_json, tmp_path: Path) -> None:
+        branch = _door_branch(tmp_path, '"render": _SERVED', constants='_SERVED = f"{_HANDLERS}.served"\n')
+        assert dead_code_check_branch(str(branch))["score"] == 100
+
     @pytest.mark.parametrize(
         "table",
-        ['"render": f"{_HANDLERS}.other"', '"render": f"{_HANDLERS}.deeper.served"', ""],
-        ids=["served_by_nobody", "entry_names_a_missing_module", "no_table"],
+        [
+            '"render": f"{_HANDLERS}.other"',
+            '"render": f"{_HANDLERS}.deeper.served"',
+            "",
+            '"render": _UNSET',
+            '"render": _HANDLERS',
+        ],
+        ids=[
+            "served_by_nobody",
+            "entry_names_a_missing_module",
+            "no_table",
+            "name_never_assigned",
+            "constant_names_the_package",
+        ],
     )
     def test_a_file_the_table_does_not_resolve_to_is_still_dead(self, mock_json, tmp_path: Path, table) -> None:
         branch = _door_branch(tmp_path, table)

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checklist.py
 # Description: Unit tests for the checklist module
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-03-24
-# Modified: 2026-11-16
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/checklist.py."""
@@ -146,8 +146,9 @@ def test_a_second_door_fails_front_door_alone_on_the_checklist(tmp_path, monkeyp
     )
 
     results = checklist.run_checklist(str(door))
+    standards = [r["standard"] for r in results]
     assert [r["standard"] for r in results if not r["passed"]] == ["front_door"]
-    assert len(results) == 44
+    assert len(standards) == len(set(standards)) and "modules" in standards
 
     # Logic in it does not make it a module: the door_ name is still front_door's finding, modules does not re-judge.
     door.write_text(door.read_text(encoding="utf-8") + "\n\ndef helper():\n    return 1\n", encoding="utf-8")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch3.py
 # Description: Batch 3 tests for 8 sentry checker handlers
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-29
-# Modified: 2026-11-16
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/log_structure_check.py and seven batch-3 sibling checkers."""
@@ -365,6 +365,14 @@ class TestModulesCheck:
         assert result["passed"] is True
 
 
+PERMISSION_SAMPLES = Path(__file__).parent / "fixtures" / "permission_flags"
+
+
+def _permission_sample(name: str) -> str:
+    """Read a permission_flags sample; the flag lives in data so this file never carries it."""
+    return (PERMISSION_SAMPLES / f"{name}.txt").read_text(encoding="utf-8")
+
+
 class TestPermissionFlagsCheck:
     """Tests for permission_flags_check.check_module."""
 
@@ -388,10 +396,7 @@ class TestPermissionFlagsCheck:
 
     def test_permission_flags_violation_caught(self, tmp_path):
         """File using dangerously-skip-permissions is caught."""
-        content = textwrap.dedent("""\
-            CMD = "--dangerously-skip-permissions"
-            run(CMD)
-        """)
+        content = _permission_sample("flag_in_code_then_run")
         filepath = _write_temp_py(tmp_path, "bad_perm.py", content)
 
         checker = self._import()
@@ -404,9 +409,7 @@ class TestPermissionFlagsCheck:
 
     def test_permission_flags_bypass_respected(self, tmp_path):
         """Bypass rule for permission_flags yields score 100."""
-        content = textwrap.dedent("""\
-            CMD = "--dangerously-skip-permissions"
-        """)
+        content = _permission_sample("flag_in_code")
         filepath = _write_temp_py(tmp_path, "bypass_perm.py", content)
 
         checker = self._import()
