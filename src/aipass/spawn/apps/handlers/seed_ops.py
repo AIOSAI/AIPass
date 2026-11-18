@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: seed_ops.py
 # Description: Passport seeds — tracked identity, untracked live file (TDPLAN-0017)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-28
 # Modified: 2026-11-18
 # =============================================
@@ -85,6 +85,9 @@ OPTIONAL_KEYS = {
 # and that project's own export (run at its registry) seeds it there.
 SEED_RESIDENCY = "core"
 TREE_REGISTRY_NAME = "AIPASS_REGISTRY.json"
+
+# A passport declaring one of these is its project's own shape: no core schema is forced on it.
+PROJECT_RESIDENCIES = ("resident", "external")
 
 # Deliberately small, not a second schema engine. Unlisted fields must be strings.
 _FIELD_TYPES = {
@@ -239,13 +242,40 @@ def _validate_document(document, *, kind: str) -> list[str]:
     return problems
 
 
+def _declares_project(document) -> bool:
+    """True when the document says it is a resident or external citizen; anything else is held to 2.0."""
+    citizenship = document.get("citizenship") if isinstance(document, dict) else None
+    return isinstance(citizenship, dict) and citizenship.get("residency") in PROJECT_RESIDENCIES
+
+
+def _validate_project_document(document, *, kind: str) -> list[str]:
+    """A project passport is kept as its user wrote it; only what restore keys on and privacy are checked."""
+    problems: list[str] = []
+    for section, key in (("branch_info", "branch_name"), ("identity", "citizen_class")):
+        block = document.get(section)
+        value = block.get(key) if isinstance(block, dict) else None
+        if not isinstance(value, str) or not value.strip():
+            problems.append(f"{section}.{key} is missing or empty (restore reads it)")
+    if kind == "seed":
+        leaked = set(MACHINE_LOCAL_CITIZENSHIP) & set(document.get("citizenship") or {})
+        problems += [
+            f"citizenship.{key} is machine-local and must never appear in a seed (it is minted fresh per install)"
+            for key in sorted(leaked)
+        ]
+    return problems
+
+
 def validate_seed(document) -> list[str]:
     """Problems with a seed document — machine-local fields are FORBIDDEN."""
+    if _declares_project(document):
+        return _validate_project_document(document, kind="seed")
     return _validate_document(document, kind="seed")
 
 
 def validate_passport(document) -> list[str]:
-    """Problems with a live passport document — machine-local fields REQUIRED."""
+    """Problems with a live passport document — a core one's machine-local fields REQUIRED."""
+    if _declares_project(document):
+        return _validate_project_document(document, kind="passport")
     return _validate_document(document, kind="passport")
 
 
@@ -395,10 +425,18 @@ def export_seed(target, *, confirm: bool = False) -> dict:
         logger.error("[export-seeds] %s: %s", target.path, exc)
         return record
 
-    problems = validate_passport(document)
+    # A core branch is held to 2.0 by where it lives, whatever residency its passport declares.
+    core = target.residency == SEED_RESIDENCY
+    problems = _validate_document(document, kind="passport") if core else validate_passport(document)
     if problems:
         # A bad seed shipped to every clone is worse than a missing one.
-        record["error"] = f"live passport is not a valid {SCHEMA_VERSION} passport: " + "; ".join(problems)
+        if core or not _declares_project(document):
+            cure = "run `drone @spawn migrate-passports --confirm`, then re-run export-seeds"
+            record["error"] = f"live passport is not a valid {SCHEMA_VERSION} passport: "
+        else:
+            cure = "fix the named field in the passport, then re-run export-seeds"
+            record["error"] = "live passport cannot be restored from a seed: "
+        record["error"] += "; ".join(problems) + f" - {cure}"
         logger.error("[export-seeds] %s skipped: %s", record["branch"], record["error"])
         return record
 
@@ -409,7 +447,7 @@ def export_seed(target, *, confirm: bool = False) -> dict:
         logger.error("[export-seeds] %s skipped: %s", record["branch"], exc)
         return record
 
-    seed_problems = validate_seed(seed)
+    seed_problems = _validate_document(seed, kind="seed") if core else validate_seed(seed)
     if seed_problems:
         record["error"] = "built seed did not validate: " + "; ".join(seed_problems)
         logger.error("[export-seeds] %s skipped: %s", record["branch"], record["error"])

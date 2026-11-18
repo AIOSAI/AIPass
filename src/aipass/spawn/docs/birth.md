@@ -145,6 +145,14 @@ Every citizen carries a tracked `.aipass/passport.seed.json`: core, resident and
 alike. It is the identity that ships with the repository, the passport with its machine-local
 values stripped (registered, registry_id, citizen_id).
 
+ - **A core seed is strict 2.0.** A core passport off the 2.0 schema is refused, and the
+   refusal names `migrate-passports --confirm` as the cure.
+ - **A project seed is the passport as it stands.** A passport declaring residency `resident`
+   or `external` is seeded with every field its user wrote, including fields and blocks 2.0
+   has no place for. No field is added, defaulted or dropped. The check is what restore reads:
+   `branch_info.branch_name` and `identity.citizen_class` present, and no machine-local field
+   in the seed. A refusal names the field to fix.
+
  - **Written at birth.** A mint writes the newborn's seed from its own passport before the
    registry row. A seed that cannot be written refuses the birth, and nothing is registered.
    A bare `--template` that renders no passport has nothing to seed; the result reports it.

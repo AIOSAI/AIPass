@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_passport_seeds.py
 # Description: TDPLAN-0017 — passport seeds: export, validation, mint-from-seed
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-08-28
 # Modified: 2026-11-18
 # =============================================
@@ -12,6 +12,7 @@
 # sentry: no-test-needed(ruff) — that every file in apps/handlers/ and apps/modules/ parses and imports
 # sentry: no-test-needed(documentation) — that seed_ops' public functions carry docstrings
 
+import copy
 import hashlib
 import json
 import os
@@ -597,6 +598,95 @@ class TestEveryCitizenCarriesASeed:
 
         with pytest.raises(FileNotFoundError, match="export-seeds --confirm"):
             restore_citizen("finch", registry)
+
+
+def off_schema_citizen(tmp_path, branch: str = "wren"):
+    """A project citizen shaped like real external passports: 2.0 gaps and fields 2.0 has no place for."""
+    project, registry, target, passport = project_citizen(tmp_path, branch)
+    passport["citizenship"]["residency"] = "external"
+    del passport["citizenship"]["citizen_id"], passport["citizenship"]["registry_path"]
+    passport["branch_info"]["project"] = "Studio"
+    passport["identity"]["home"] = {"room": "north"}
+    passport["identity"]["personality"] = {"tone": "dry"}
+    passport["identity"]["anti_traits"] = ["hurry"]
+    passport["doctrine"] = ["read before you write"]
+    passport["pipeline"] = {"upstream": "research", "downstream": "verify"}
+    (target / ".trinity" / "passport.json").write_text(canonical_text(passport), encoding="utf-8")
+    return project, registry, target, passport
+
+
+def without_machine_ids(passport: dict) -> dict:
+    """The passport as a user owns it: the per-install citizenship facts removed."""
+    kept = copy.deepcopy(passport)
+    for key in MACHINE_LOCAL_CITIZENSHIP:
+        kept["citizenship"].pop(key, None)
+    return kept
+
+
+class TestAProjectPassportIsSeededAsItStands:
+    """A project citizen's seed is its own passport minus the machine ids; a core seed keeps strict 2.0."""
+
+    def test_an_off_schema_project_passport_is_seeded_with_everything_kept(self, tmp_path):
+        """Mutant: the project lane validates against the core schema -> refused -> red."""
+        project, _, target, passport = off_schema_citizen(tmp_path)
+
+        receipt = export_seeds(project, confirm=True)
+
+        assert (receipt["written"], receipt["errors"]) == (1, [])
+        assert load_seed(seed_path_for(target)) == without_machine_ids(passport)
+
+    def test_an_off_schema_project_citizen_is_restored_with_everything_the_user_wrote(self, tmp_path):
+        """Mutant: the rendered passport is checked against the core schema -> restore raises -> red."""
+        project, registry, target, passport = off_schema_citizen(tmp_path)
+        export_seeds(project, confirm=True)
+        (target / ".trinity" / "passport.json").unlink()
+        home = SimpleNamespace(path=tmp_path, source="test", tried=())
+
+        with patch("aipass.spawn.apps.handlers.registry.resolve_aipass_home", return_value=home):
+            restore_citizen("wren", registry)
+
+        restored = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+        assert without_machine_ids(restored) == without_machine_ids(passport)
+        assert restored["citizenship"]["citizen_id"]
+
+    def test_a_core_seed_keeps_the_strict_check(self):
+        """Mutant: every seed takes the project check -> the core seed's stray block passes -> red."""
+        seed = build_seed(make_passport("drone"))
+        seed["doctrine"] = ["stray"]
+
+        assert any("'doctrine' is not a block" in problem for problem in validate_seed(seed))
+
+    def test_a_project_seed_still_never_carries_a_machine_id(self, tmp_path):
+        """Mutant: the project check drops the machine-local guard -> a citizen_id ships -> red."""
+        _, _, _, passport = off_schema_citizen(tmp_path)
+        leaked = without_machine_ids(passport)
+        leaked["citizenship"]["registry_id"] = "this-machine"
+
+        assert any("machine-local" in problem for problem in validate_seed(leaked))
+
+    def test_a_nameless_project_passport_is_refused_naming_the_cure(self, tmp_path):
+        """Mutant: the project check stops asking for the name restore keys on -> exported -> red."""
+        project, _, target, passport = off_schema_citizen(tmp_path)
+        del passport["branch_info"]["branch_name"]
+        (target / ".trinity" / "passport.json").write_text(canonical_text(passport), encoding="utf-8")
+
+        receipt = export_seeds(project, confirm=True)
+
+        assert receipt["written"] == 0
+        assert "branch_info.branch_name" in receipt["errors"][0]["error"]
+        assert "re-run export-seeds" in receipt["errors"][0]["error"]
+
+    def test_a_core_passport_off_2_0_is_refused_naming_the_migration(self, tmp_path):
+        """Mutant: the core refusal drops its cure -> red."""
+        root = write_repo(tmp_path)
+        passport_file = branch_dir(root) / ".trinity" / "passport.json"
+        passport = json.loads(passport_file.read_text(encoding="utf-8"))
+        passport["doctrine"] = ["stray"]
+        passport_file.write_text(canonical_text(passport), encoding="utf-8")
+
+        receipt = export_seeds(root, confirm=True)
+
+        assert "migrate-passports" in receipt["errors"][0]["error"]
 
 
 class TestExportSeeds:
