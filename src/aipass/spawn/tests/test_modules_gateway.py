@@ -1,16 +1,16 @@
 # =================== META ====================
 # Name: test_modules_gateway.py
 # Description: Tests for spawn's front door (__init__.py); the apps.modules package hands out nothing
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-08-28
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for __init__.py, the package door, and for apps/modules/__init__.py holding no re-exports."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(documentation) — docstrings on get_template_dir, refuse_legacy_class and docs_page_template
-# sentry: no-test-needed(ruff) — that apps/handlers/class_registry.py and apps/handlers/docs_page.py parse and import
+# sentry: no-test-needed(documentation) — docstrings on get_template_dir and refuse_legacy_class
+# sentry: no-test-needed(ruff) — that apps/handlers/class_registry.py parses and imports
 
 import inspect
 import subprocess
@@ -24,8 +24,6 @@ from aipass.spawn import get_template_dir, refuse_legacy_class
 from aipass.spawn.apps import modules
 from aipass.spawn.apps.handlers import bootstrap_render, class_registry, registry
 from aipass.spawn.apps.modules import core
-from aipass.spawn.apps.handlers import docs_page
-from aipass.spawn.apps.handlers.docs_page import docs_page_template
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -35,32 +33,9 @@ SPAWN_BRANCH = Path(__file__).resolve().parents[1]
 class TestModulesPackageIsNoDoor:
     """The second door is retired: apps/modules/__init__.py re-exports no handler name."""
 
-    @pytest.mark.parametrize("name", ["__all__", "get_template_dir", "refuse_legacy_class", "docs_page_template"])
+    @pytest.mark.parametrize("name", ["__all__", "get_template_dir", "refuse_legacy_class"])
     def test_the_modules_package_hands_out_no_handler_name(self, name):
         assert not hasattr(modules, name)
-
-
-class TestDocsPageSkeleton:
-    """apps/handlers/docs_page.py: the skeleton read, uncached and unforgiving."""
-
-    def test_docs_page_template_reads_the_file_on_every_call(self, tmp_path, monkeypatch):
-        """No cached copy: an edit to the skeleton reaches the next render unchanged."""
-
-        skeleton = tmp_path / "docs_page.md"
-        monkeypatch.setattr(docs_page, "DOCS_PAGE_TEMPLATE", skeleton)
-
-        skeleton.write_text("# First\n", encoding="utf-8")
-        assert docs_page_template() == "# First\n"
-        skeleton.write_text("# Second\n", encoding="utf-8")
-        assert docs_page_template() == "# Second\n"
-
-    def test_docs_page_template_raises_when_the_skeleton_is_gone(self, tmp_path, monkeypatch):
-        """Unreachable is said, never papered over with a fallback shape."""
-
-        monkeypatch.setattr(docs_page, "DOCS_PAGE_TEMPLATE", tmp_path / "absent.md")
-
-        with pytest.raises(OSError):
-            docs_page_template()
 
 
 class TestSignaturesAreStable:
@@ -85,12 +60,6 @@ class TestSignaturesAreStable:
         assert param.default is inspect.Parameter.empty
         assert param.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
         assert param.annotation == (str | None), "None must stay callable — sentry passes a missing class straight in"
-        assert sig.return_annotation is str
-
-    def test_docs_page_template_signature(self):
-
-        sig = inspect.signature(docs_page_template)
-        assert list(sig.parameters) == [], "the skeleton read takes no arguments"
         assert sig.return_annotation is str
 
 

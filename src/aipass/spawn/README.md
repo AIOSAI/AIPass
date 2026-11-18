@@ -90,7 +90,7 @@ each parsing arguments and delegating. Other branches import from the package do
 refuses a foreign importer.
 `apps/handlers/` holds the implementation, grouped by
 concern: the template lanes (`file_ops`, `placeholders`, `meta_ops`, `mint_verify`,
-`class_registry`, `docs_page`), the identity lanes (`registry`, `passport_migration`, `seed_ops`,
+`class_registry`, `bootstrap_render`), the identity lanes (`registry`, `passport_migration`, `seed_ops`,
 `receipt_ops`, `adoption_ops`), the engines (`update_ops`, `update_ignore`, `delete_ops`, `deletion_receipts`,
 `sync_registry_ops`, `regenerate_registry_ops`, `repair_ops`, `adopt_citizen_ops`), and the primitives
 (`atomic_write`, `metadata`, and the fleet json shim under `json/`).
@@ -100,8 +100,6 @@ concern: the template lanes (`file_ops`, `placeholders`, `meta_ops`, `mint_verif
 template file and regenerate that manifest in the same pass. A newborn is born fenced: the
 template's `apps/handlers/__init__.py` is the fleet's fence template (v2.1), and
 its tests ship the fence pair `test_handlers_fence.py` and `support_fence.py`.
-`templates/docs_page.md`, the docs page skeleton, sits beside it so that no mint ever stamps it.
-
 The full directory tree lives in this branch's own prompt
 (`.aipass/aipass_local_prompt.md`) — one place, so it cannot disagree with itself.
 

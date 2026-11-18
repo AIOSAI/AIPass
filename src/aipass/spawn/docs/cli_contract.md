@@ -3,7 +3,7 @@
 # The CLI contract — exit codes, introspection, the import door
 
 **Branch** spawn · **Code** `apps/spawn.py`, `apps/modules/__init__.py`,
-`apps/handlers/class_registry.py`, `apps/handlers/docs_page.py`
+`apps/handlers/class_registry.py`, `apps/handlers/bootstrap_render.py`
 
 ---
 
@@ -108,30 +108,14 @@ newborn buying a foreign seat nothing.
 
 ---
 
-## The docs page skeleton — one source, read live
+## A newborn's docs index
 
-Every branch's `docs/*.md` pages share one shape, scored by @sentry's `docs_page` standard.
-The skeleton that shows the shape is `templates/docs_page.md`, read live by
-`apps/handlers/docs_page.py`. The reader is not on the package door: no other branch imports it.
-
-```python
-from aipass.spawn.apps.handlers.docs_page import docs_page_template   # inside spawn only
-
-docs_page_template()   # -> the skeleton text, read from disk on this call
-                       # -> OSError when it cannot be read; there is no fallback shape
-```
-
-The skeleton sits beside `templates/citizen/`, never inside it. Everything in the citizen
-tree is stamped into every newborn, so a skeleton there would arrive as a placeholder page in
-every branch; beside it, no walk reaches it — not the copy, not the manifest a mint is
-verified against, not the update engine. The handler reads and returns and performs no
-operation of its own, so it logs nothing.
-
-What a newborn does carry is the index: `templates/citizen/docs/README.md` is a back-link,
-a title and one line, and it names the standard rather than the size cap, which sentry owns.
-`tests/test_modules_gateway.py` pins the reader, `tests/test_template_hygiene.py` pins the
-skeleton's shape and that no mint carries it, and `tests/test_birth_receipt.py` pins that the
-index copies no cap.
+Every branch's `docs/*.md` pages share one shape, scored by @sentry's `docs_page` standard;
+`drone @sentry standard docs_page` shows it, and spawn keeps no copy. A newborn carries no page,
+only the index: `templates/citizen/docs/README.md` is a back-link, a title and one line, and it
+names the standard rather than the size cap, which sentry owns. `tests/test_template_hygiene.py`
+pins that the index is the only file a newborn's `docs/` holds, and `tests/test_birth_receipt.py`
+pins that the index copies no cap.
 
 ---
 

@@ -1,16 +1,16 @@
 # =================== AIPass ====================
 # Name: test_template_hygiene.py
 # Description: Canaries for what the shipped templates are allowed to contain
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-08-13
-# Modified: 2026-11-02
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for the shipped templates under templates/citizen/ and apps/handlers/file_ops.py's copy engine."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# sentry: no-test-needed(ruff) — that apps/handlers/mint_verify.py and apps/handlers/docs_page.py parse and import
-# sentry: no-test-needed(documentation) — docstrings on the mint_verify and docs_page helpers
+# sentry: no-test-needed(ruff) — that apps/handlers/mint_verify.py parses and imports
+# sentry: no-test-needed(documentation) — docstrings on the mint_verify helpers
 
 from pathlib import Path
 
@@ -19,7 +19,6 @@ import pytest
 import aipass.spawn
 from aipass.spawn.apps.handlers import class_registry
 from aipass.spawn.apps.handlers.class_registry import get_available_classes, get_template_dir
-from aipass.spawn.apps.handlers.docs_page import DOCS_PAGE_TEMPLATE
 from aipass.spawn.apps.handlers.file_ops import SKIP_NAMES
 from aipass.spawn.apps.handlers.mint_verify import expected_mint_paths, verify_mint
 from aipass.spawn.apps.handlers.placeholders import build_replacements_dict
@@ -299,27 +298,13 @@ class TestExpectedMintPaths:
 
         assert verify_mint(template, target, {}, "minted") == ["artifacts/birth_certificate.json"]
 
-    def test_the_docs_page_skeleton_is_never_stamped_into_a_newborn(self, tmp_path):
-        """The skeleton @sentry renders lives beside the citizen tree, never in it.
+    def test_a_newborns_docs_holds_only_its_index(self, tmp_path):
+        """No page is born: every docs/*.md page is scored, and a stamped one would be scored in every branch."""
 
-        Inside templates/citizen/ it would be copied, claimed by the manifest, and scored as a page in every branch.
-        """
-        import json
-
-        skeleton = DOCS_PAGE_TEMPLATE
-        template_dir = get_template_dir()
-        assert skeleton.is_file(), f"the skeleton is missing: {skeleton}"
-        assert template_dir not in skeleton.parents, "the skeleton sits inside the stamped tree"
-
-        manifest = json.loads((template_dir / ".spawn" / ".template_registry.json").read_text(encoding="utf-8"))
-        claimed = [entry["path"] for entry in manifest["files"].values()]
-        assert not [rel for rel in claimed if rel.endswith(skeleton.name)], "the manifest claims the skeleton"
-
-        target = tmp_path / "skeleton_free"
+        target = tmp_path / "pageless"
         result = spawn_agent(str(target), registry_path=str(tmp_path / "AIPASS_REGISTRY.json"))
         assert result["success"] is True, result.get("error")
         assert sorted(p.name for p in (target / "docs").iterdir()) == ["README.md"]
-        assert not list(target.rglob(skeleton.name)), "a newborn carries the skeleton"
 
     def test_a_newborns_docs_index_has_the_index_shape(self, tmp_path):
         """docs/README.md is born as back-link, title, one line - and no pages yet."""
@@ -396,21 +381,3 @@ def _sentry_readme_sections() -> list:
 
 # What the standard's purpose check refuses as the first line under the H1.
 NOT_PROSE = ("#", "-", "*", "|", ">", "```", "[", "---")
-
-OPTIONAL_SECTIONS = ["## Why it is this way", "## What is not verified", "## Related"]
-
-
-def test_the_docs_page_skeleton_has_the_shape_sentry_scores():
-    """Back-link, one H1, a prose purpose line, depth <= 3, the three fixed names last and in order."""
-
-    lines = [line for line in DOCS_PAGE_TEMPLATE.read_text(encoding="utf-8").splitlines() if line.strip()]
-
-    assert lines[0] == README_BACK_LINK
-    assert [line for line in lines if line.startswith("# ")] == [lines[1]], "the skeleton needs exactly one H1, first"
-    assert not lines[2].startswith(NOT_PROSE), f"the purpose paragraph is not prose: {lines[2]!r}"
-    assert not [line for line in lines if line.startswith("####")], "the skeleton nests deeper than ###"
-    assert any(line.startswith("### ") for line in lines), "the skeleton never shows the third level"
-
-    sections = [line for line in lines if line.startswith("## ")]
-    assert [line for line in sections if line in OPTIONAL_SECTIONS] == OPTIONAL_SECTIONS
-    assert sections[-3:] == OPTIONAL_SECTIONS, "the fixed-name sections must close the page"
