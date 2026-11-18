@@ -3,7 +3,7 @@
 # Description: Decentralized .daemon/ schedule file discovery
 # Version: 2.8.0
 # Created: 2026-06-15
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from aipass.prax import logger
+from aipass.drone import resolve_aipass_home
 from aipass.daemon.apps.handlers.json import json_handler
 
 # @memory's front door: its apps/ are private and fail the cross-branch checklist.
@@ -25,8 +26,7 @@ from aipass.memory import RESIDENCY_CORE as RESIDENCY_CORE, RESIDENCY_RESIDENT a
 from aipass.daemon.apps.handlers.schedule import command_job
 from aipass.daemon.apps.handlers.schedule.runstate import WEEKDAYS
 
-_REPO_ROOT = Path(__file__).resolve().parents[6]  # up to repo root
-_REGISTRY_FILE = _REPO_ROOT / "AIPASS_REGISTRY.json"
+_REPO_ROOT: Optional[Path] = None  # test seam; None resolves the AIPass home per call (see _repo_root)
 _PROJECTS_DIR_NAME = "projects"
 
 RESIDENT_REGISTRY_GLOB = "*/*_REGISTRY.json"
@@ -74,11 +74,22 @@ def _source_label(record: dict, repo_root: Path) -> str:
     return f"{_PROJECTS_DIR_NAME}/{path.relative_to(projects_dir).parts[0]}"
 
 
+def _repo_root() -> Path:
+    """The AIPass home the fleet sits under, resolved per call; loud when none resolves."""
+    if _REPO_ROOT is not None:
+        return _REPO_ROOT
+    home = resolve_aipass_home().path
+    if home is None:
+        logger.error("[discovery] No AIPass home resolved; cannot find the fleet or the framework root")
+        raise RuntimeError("No AIPass home resolved: set AIPASS_HOME to the AIPass checkout")
+    return home
+
+
 def active_citizens(repo_root: Optional[Path] = None) -> List[dict]:
     """Return an ordered record per active citizen, in @memory's fleet order.
     Who counts is @memory's; daemon refuses (at error level) citizens with no email or a duplicate one."""
     # Not passed through as None: patching _REPO_ROOT must still redirect the lane (temp-tree tests).
-    root = Path(repo_root) if repo_root is not None else _REPO_ROOT
+    root = Path(repo_root) if repo_root is not None else _repo_root()
 
     # @memory dedupes by path; daemon is email-keyed, so a shared email would double-fire.
     records = []
@@ -124,7 +135,7 @@ def active_citizens(repo_root: Optional[Path] = None) -> List[dict]:
 def framework_root(repo_root: Optional[Path] = None) -> Path:
     """This install's src/aipass/ — the directory every framework citizen's branch lives in.
     Computed per call, so a patched _REPO_ROOT moves fleet and boundary together."""
-    root = Path(repo_root) if repo_root is not None else _REPO_ROOT
+    root = Path(repo_root) if repo_root is not None else _repo_root()
     return root / "src" / "aipass"
 
 

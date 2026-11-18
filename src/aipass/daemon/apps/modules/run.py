@@ -3,7 +3,7 @@
 # Description: Manual one-tick scheduler command (drone @daemon run)
 # Version: 1.11.0
 # Created: 2026-06-15
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import List
 
-from aipass.prax import logger
+from aipass.prax import branch_state_root, logger
 from aipass.cli import console
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.cli.arg_gate import gate
@@ -49,7 +49,7 @@ from aipass.daemon.apps.handlers.schedule import recovery
 from aipass.daemon.apps.handlers.schedule import tick_lock
 
 _DAEMON_ROOT = Path(__file__).resolve().parents[2]  # src/aipass/daemon/
-LOCK_FILE = _DAEMON_ROOT / "daemon_json" / "schedule.lock"
+LOCK_FILE = branch_state_root("daemon") / "daemon_json" / "schedule.lock"
 
 HANDLED_COMMANDS = {"run"}
 

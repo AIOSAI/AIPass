@@ -3,7 +3,7 @@
 # Description: Tests for registry-led citizen discovery and .daemon/ schedule job discovery
 # Version: 1.4.0
 # Created: 2026-06-15
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/schedule/discovery.py — citizens from the registries, jobs from their .daemon/."""
@@ -19,7 +19,7 @@ import shutil
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -368,7 +368,6 @@ class TestDiscoverJobs:
 
         with (
             patch("aipass.daemon.apps.handlers.schedule.discovery._REPO_ROOT", root),
-            patch("aipass.daemon.apps.handlers.schedule.discovery._REGISTRY_FILE", reg_file),
         ):
             jobs = discover_jobs()
 
@@ -390,7 +389,6 @@ class TestDiscoverJobs:
 
         with (
             patch("aipass.daemon.apps.handlers.schedule.discovery._REPO_ROOT", root),
-            patch("aipass.daemon.apps.handlers.schedule.discovery._REGISTRY_FILE", reg_file),
         ):
             jobs = discover_jobs()
 
@@ -408,7 +406,6 @@ class TestDiscoverJobs:
 
         with (
             patch("aipass.daemon.apps.handlers.schedule.discovery._REPO_ROOT", root),
-            patch("aipass.daemon.apps.handlers.schedule.discovery._REGISTRY_FILE", reg_file),
         ):
             jobs = discover_jobs()
 
@@ -427,7 +424,6 @@ class TestDiscoverJobs:
 
         with (
             patch("aipass.daemon.apps.handlers.schedule.discovery._REPO_ROOT", root),
-            patch("aipass.daemon.apps.handlers.schedule.discovery._REGISTRY_FILE", reg_file),
         ):
             jobs = discover_jobs()
 
@@ -455,7 +451,6 @@ class TestDiscoverJobs:
 
         with (
             patch(f"{DISCOVERY}._REPO_ROOT", root),
-            patch(f"{DISCOVERY}._REGISTRY_FILE", reg_file),
         ):
             jobs = discover_jobs()
 
@@ -482,7 +477,6 @@ class TestDiscoverJobs:
 
         with (
             patch(f"{DISCOVERY}._REPO_ROOT", root),
-            patch(f"{DISCOVERY}._REGISTRY_FILE", reg_file),
         ):
             jobs = discover_jobs()
 
@@ -515,7 +509,6 @@ class TestDiscoverJobs:
 
         with (
             patch("aipass.daemon.apps.handlers.schedule.discovery._REPO_ROOT", root),
-            patch("aipass.daemon.apps.handlers.schedule.discovery._REGISTRY_FILE", reg_file),
         ):
             jobs = discover_jobs()
 
@@ -1074,3 +1067,16 @@ class TestSkippedOwners:
         discovered_ids(one_branch)
         discover_jobs(skipped_owners=skipped)
         assert skipped == set()
+
+
+class TestFleetRootIsTheResolvedHome:
+    def test_framework_root_comes_from_the_resolver_not_a_depth(self, tmp_path):
+        """A fixed-depth climb leaves the installed package; the framework root must come from the resolver."""
+        with patch(f"{DISCOVERY}.resolve_aipass_home", return_value=MagicMock(path=tmp_path)):
+            assert discovery.framework_root() == tmp_path / "src" / "aipass"
+
+    def test_no_resolved_home_is_loud(self, caplog):
+        with patch(f"{DISCOVERY}.resolve_aipass_home", return_value=MagicMock(path=None)):
+            with pytest.raises(RuntimeError, match="No AIPass home"):
+                discovery.framework_root()
+        assert "No AIPass home resolved" in caplog.text

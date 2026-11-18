@@ -3,7 +3,7 @@
 # Description: Tests for the activity_report CLI module
 # Version: 1.2.1
 # Created: 2026-04-03
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/activity_report.py — activity, activity-report, branch-health."""
@@ -23,7 +23,7 @@ import pytest
 
 from aipass.cli import console as cli_console
 from aipass.daemon.apps.handlers.cli.arg_gate import UnknownArgument
-from aipass.daemon.apps.handlers.monitoring.activity_collector import scan_branch_activity
+from aipass.daemon.apps.handlers.monitoring.activity_collector import get_branch_paths, scan_branch_activity
 from aipass.daemon.apps.modules import activity_report
 from aipass.daemon.apps.modules.activity_report import handle_command
 import aipass.memory
@@ -128,6 +128,23 @@ class TestActivityReportAlias:
 
 
 COLLECTOR = "aipass.daemon.apps.handlers.monitoring.activity_collector"
+
+
+class TestFleetRootIsTheResolvedHome:
+    def test_branch_paths_read_the_home_the_resolver_names(self, tmp_path):
+        """A fixed-depth climb reads the registry from inside an installed package; it must ask the resolver."""
+        with (
+            patch(f"{COLLECTOR}.resolve_aipass_home", return_value=MagicMock(path=tmp_path)),
+            patch(f"{COLLECTOR}.fleet_branches", return_value=[]) as fleet,
+        ):
+            assert get_branch_paths() == []
+        fleet.assert_called_once_with(tmp_path, name_from="registry")
+
+    def test_no_resolved_home_is_loud(self, caplog):
+        with patch(f"{COLLECTOR}.resolve_aipass_home", return_value=MagicMock(path=None)):
+            with pytest.raises(RuntimeError, match="No AIPass home"):
+                get_branch_paths()
+        assert "No AIPass home resolved" in caplog.text
 
 
 @pytest.fixture

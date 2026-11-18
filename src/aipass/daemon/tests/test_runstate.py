@@ -3,7 +3,7 @@
 # Description: Tests for the scheduler runstate — load/save, due-logic, catch-up, slots
 # Version: 1.2.0
 # Created: 2026-06-15
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/schedule/runstate.py — the scheduler's runstate and its due-logic."""
@@ -12,7 +12,9 @@
 # sentry: no-test-needed(constant) — WINDOW_MINUTES' and MISSED_MARKER's values; the tests read them, never restate them
 # sentry: no-test-needed(stdlib) — json's parse of the runstate file and datetime.fromisoformat's accepted forms
 
+import importlib.util
 from datetime import datetime, timedelta
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -743,3 +745,14 @@ class TestUnreadableTimesAreLogged:
             header = recovery.scheduled_header(job, {"last_run": "not-a-time"}, now=datetime(2026, 11, 15))
         assert "Last run not-a-time." in header
         assert "[recovery] last_run 'not-a-time' unreadable" in caplog.text
+
+
+class TestRunstateFileFollowsTheStateRoot:
+    def test_runstate_file_lives_under_the_state_root_not_the_package(self, tmp_path, monkeypatch):
+        """A fixed-depth climb writes daemon_runstate.json inside an installed wheel; it must follow the state root."""
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+        spec = importlib.util.spec_from_file_location("runstate_fresh", str(runstate_mod.__file__))
+        assert spec is not None and spec.loader is not None
+        fresh = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fresh)  # a fresh copy: the shared module keeps the conftest seam
+        assert Path(fresh.RUNSTATE_FILE) == tmp_path / "daemon" / "daemon_json" / "daemon_runstate.json"

@@ -3,7 +3,7 @@
 # Description: Tests for the drone @daemon run module
 # Version: 1.4.0
 # Created:2026-06-15
-# Modified: 2026-11-16
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/modules/run.py — the decentralized scheduler tick behind drone @daemon run."""
@@ -12,6 +12,7 @@
 # sentry: no-test-needed(stdlib) — fcntl's exclusive lock under tick_lock; its use is pinned in the blocked contract
 # sentry: no-test-needed(ruff) — that run.py parses and imports; every test here imports it first
 
+import importlib.util
 import json
 import os
 import re
@@ -1263,3 +1264,14 @@ class TestHelpNamesCommandJobs:
         assert '"command": "drone rm --stale 10d .."' in out
         assert "drone must be the first token" in out
         assert '"notify": { "email": "@devpulse" }' in out
+
+
+class TestLockFileFollowsTheStateRoot:
+    def test_schedule_lock_lives_under_the_state_root_not_the_package(self, tmp_path, monkeypatch):
+        """A fixed-depth climb puts schedule.lock inside an installed wheel; it must follow the state root."""
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+        spec = importlib.util.spec_from_file_location("run_fresh", str(sys.modules[RUN].__file__))
+        assert spec is not None and spec.loader is not None
+        fresh = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fresh)  # a fresh copy: the shared module keeps the conftest seam
+        assert Path(fresh.LOCK_FILE) == tmp_path / "daemon" / "daemon_json" / "schedule.lock"

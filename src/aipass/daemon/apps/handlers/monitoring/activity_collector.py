@@ -3,7 +3,7 @@
 # Description: Branch Activity Data Collector
 # Version: 0.4.0
 # Created: 2026-01-30
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -15,19 +15,31 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 
 from aipass.prax import logger
+from aipass.drone import resolve_aipass_home
 from aipass.daemon.apps.handlers.json import json_handler
 
 # @memory's PUBLIC fleet gateway: who counts as a citizen is @memory's answer, one registry reader fleet-wide.
 from aipass.memory import fleet_branches
 
-_REPO_ROOT = Path(__file__).resolve().parents[6]  # src/aipass/daemon/apps/handlers/monitoring -> repo root
+_REPO_ROOT: Optional[Path] = None  # test seam; None resolves the AIPass home per call (see _repo_root)
 MEMORY_FILE_PATTERNS = ["local.json", "observations.json", "passport.json", "README.md", "DASHBOARD.local.json"]
 CODE_FILE_EXTENSION = ".py"
 
 
+def _repo_root() -> Path:
+    """The AIPass home the fleet registry sits under, resolved per call; loud when none resolves."""
+    if _REPO_ROOT is not None:
+        return _REPO_ROOT
+    home = resolve_aipass_home().path
+    if home is None:
+        logger.error("[activity_collector] No AIPass home resolved; cannot read the fleet registry")
+        raise RuntimeError("No AIPass home resolved: set AIPASS_HOME to the AIPass checkout")
+    return home
+
+
 def get_branch_paths() -> List[Dict[str, str]]:
     """Every citizen in @memory's fleet (core, residents, externals): registry name and absolute path."""
-    return [{"name": b["name"], "path": str(b["path"])} for b in fleet_branches(_REPO_ROOT, name_from="registry")]
+    return [{"name": b["name"], "path": str(b["path"])} for b in fleet_branches(_repo_root(), name_from="registry")]
 
 
 def _get_file_mtime(file_path: Path) -> Optional[datetime]:
