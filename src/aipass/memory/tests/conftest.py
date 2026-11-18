@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for memory tests — write fence, infrastructure stand-ins, live-fleet guards
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-03-07
 # Modified: 2026-11-17
 # Category: memory/tests
@@ -26,6 +26,7 @@ from unittest.mock import MagicMock
 # Captured before any mock: the branch json shim binds `from aipass.prax import json_handler`,
 # so the prax stand-in below must carry it or a reimport of the json package fails.
 from aipass.prax import json_handler as _prax_json_service
+from aipass.prax import branch_state_root as _prax_branch_state_root
 
 # Captured at collection so no test's sys.modules stand-in can shadow it.
 from aipass.memory.apps.handlers import write_fence as _write_fence
@@ -59,6 +60,7 @@ def _mock_infrastructure(monkeypatch):
     prax_mod.__path__ = [str(Path(__file__).resolve().parents[2] / "prax")]
     prax_mod.logger = mock_logger  # type: ignore[attr-defined]
     prax_mod.json_handler = _prax_json_service  # type: ignore[attr-defined]
+    prax_mod.branch_state_root = _prax_branch_state_root  # type: ignore[attr-defined]
     setattr(prax_mod, "get_system_logger", MagicMock(return_value=mock_logger))
     prax_modules_mod = MagicMock()
     prax_modules_mod.logger = MagicMock()

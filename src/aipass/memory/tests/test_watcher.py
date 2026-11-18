@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watcher.py
 # Description: memory watcher handler — lifecycle, status, on_modified callback, branch-path walk
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-04-25
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # Category: memory/tests
 # =============================================
 
@@ -634,6 +634,27 @@ class TestTheTrinityMatchIsAFilenameNotAPattern:
         monkeypatch.setattr(memory_watcher, "_startup_check_done", False)
 
         assert memory_watcher.check_and_rollover()["files_checked"] == 1
+
+
+class TestThePlansCountReadsTheBranchStateRoot:
+    """A plan listed in the state-root manifest is not pending; a folder counted up from the file would miss it."""
+
+    def test_a_plan_in_the_state_root_manifest_is_not_pending(self, monkeypatch, tmp_path):
+        mod, _ = _import_watcher(monkeypatch)
+        plans = tmp_path / "plans"
+        plans.mkdir()
+        (plans / "done.md").write_text("# done", encoding="utf-8")
+        state = tmp_path / "state"
+        (state / "memory" / "memory_json").mkdir(parents=True)
+        (state / "memory" / "memory_json" / ".plans_processed.json").write_text('{"done.md": "sha"}', encoding="utf-8")
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(state))
+        monkeypatch.setattr(
+            memory_watcher.config_loader,
+            "section",
+            lambda name: {"enabled": True, "path": str(plans), "supported_extensions": [".md"]},
+        )
+
+        assert mod._check_plans()["pending_files"] == 0
 
 
 class TestAnUnreadableRegistryIsAnsweredByEveryEntry:

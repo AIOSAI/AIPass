@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: plans_processor.py
 # Description: Plan Archival Vectorization Handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-12
-# Modified: 2026-10-26
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -21,7 +21,7 @@ from datetime import datetime
 from typing import Dict, Any, List
 
 from aipass.memory.apps.handlers import repo_root
-from aipass.prax import logger
+from aipass.prax import branch_state_root, logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.monitor import registry_scope
@@ -36,8 +36,7 @@ def _find_repo_root() -> Path:
     return repo_root.find_repo_root(caller="plans_processor")
 
 
-_MEMORY_ROOT = Path(__file__).resolve().parents[3]
-_PROCESSED_MANIFEST = _MEMORY_ROOT / "memory_json" / ".plans_processed.json"
+_PROCESSED_MANIFEST = branch_state_root("memory") / "memory_json" / ".plans_processed.json"
 
 MAX_CHUNK_CHARS = 1500  # ~375 tokens, fits well with all-MiniLM-L6-v2
 

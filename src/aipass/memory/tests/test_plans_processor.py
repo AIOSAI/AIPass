@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_plans_processor.py
 # Description: Tests for the plans_processor handler — chunking, manifest, memory python and process_plans
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-26
-# Modified: 2026-11-02
+# Modified: 2026-11-17
 # =============================================
 
 """Tests for apps/handlers/intake/plans_processor.py."""
@@ -18,6 +18,7 @@ import subprocess
 from unittest.mock import MagicMock, patch
 
 from aipass.memory.apps.handlers.intake import plans_processor
+from aipass.prax import branch_state_root
 
 
 def _sha(path):
@@ -196,6 +197,12 @@ class TestManifest:
         result = mod._load_manifest()
 
         assert result == {}
+
+    def test_the_manifest_sits_in_the_branch_state_root(self):
+        """A folder counted up from the file lands inside an installed wheel; this pins the state-root location."""
+        mod = plans_processor
+        expected = branch_state_root("memory") / "memory_json" / ".plans_processed.json"
+        assert mod._PROCESSED_MANIFEST == expected
 
     def test_save_manifest_creates_parent_dirs(self, monkeypatch, tmp_path):
         mod = plans_processor

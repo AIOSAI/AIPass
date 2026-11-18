@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: memory_watcher.py
 # Description: Memory File System Watcher
-# Version: 1.2.3
+# Version: 1.2.4
 # Created: 2025-11-26
-# Modified: 2026-10-17
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -25,7 +25,7 @@ from watchdog.events import FileSystemEventHandler
 from aipass.memory.apps.handlers.monitor.detector import RegistryUnreadable, check_single_file
 from aipass.memory.apps.handlers import repo_root
 from aipass.memory.apps.handlers.repo_root import exists_exactly
-from aipass.prax import get_system_logger
+from aipass.prax import branch_state_root, get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.storage.lane import memory_python
@@ -215,7 +215,7 @@ def _check_plans() -> Dict[str, Any]:
     if file_count == 0:
         return {"success": True, "pending_files": 0, "action": "count_only"}
 
-    manifest_path = _MEMORY_ROOT / "memory_json" / ".plans_processed.json"
+    manifest_path = branch_state_root("memory") / "memory_json" / ".plans_processed.json"
     manifest: Dict[str, str] = {}
     if manifest_path.exists():
         try:
