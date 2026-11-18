@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lock_handler.py
 # Description: Atomic lock management for git PR workflow
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-17
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -21,7 +21,7 @@ from pathlib import Path
 from aipass.prax import logger
 from aipass.drone.apps.handlers.exceptions import RepoRootError
 from aipass.drone.apps.handlers.json import json_handler
-from aipass.drone.apps.handlers.router_handler import caller_cwd, registries_in
+from aipass.drone.apps.handlers.router_handler import caller_cwd, registry_named_entries
 
 _LOCK_FILENAME = ".git_pr.lock"
 _STALE_THRESHOLD_SECONDS = 600
@@ -57,7 +57,7 @@ def find_repo_root() -> Path:
     cwd = caller_cwd()
     current = cwd
     while current is not None and current != current.parent:
-        if registries_in(current):
+        if registry_named_entries(current):
             return current
         current = current.parent
 
@@ -65,11 +65,11 @@ def find_repo_root() -> Path:
         aipass_home = os.environ.get("AIPASS_HOME")
         if aipass_home:
             home = Path(aipass_home)
-            if home.is_dir() and registries_in(home):
+            if home.is_dir() and registry_named_entries(home):
                 return home
         here = Path(__file__).resolve()
         for parent in here.parents:
-            if registries_in(parent):
+            if registry_named_entries(parent):
                 return parent
         # CI's case: a clean checkout has no registry (gitignored). Never the deleted cwd.
         for parent in here.parents:

@@ -27,6 +27,7 @@ _HOMES = {
     "get_system_help": _DISCOVERY,
     "HelpResult": f"{_APPS}.handlers.discovery_handler",
     "CommandResult": f"{_APPS}.handlers.executor",
+    "is_registry_filename": f"{_APPS}.handlers.registry_name",
     "get_registry_path": _REGISTRY,
     "set_registry_path": _REGISTRY,
     "reset_registry_path": _REGISTRY,

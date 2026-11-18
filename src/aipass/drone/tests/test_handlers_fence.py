@@ -37,6 +37,7 @@ DOOR_HOMES = {
     **dict.fromkeys(("discover_modules", "get_help", "get_system_help"), f"{_APPS}.modules.discovery"),
     "HelpResult": f"{_APPS}.handlers.discovery_handler",
     "CommandResult": f"{_APPS}.handlers.executor",
+    "is_registry_filename": f"{_APPS}.handlers.registry_name",
     **dict.fromkeys(
         ("get_registry_path", "set_registry_path", "reset_registry_path", "resolve_aipass_home"),
         f"{_APPS}.handlers.registry_handler",

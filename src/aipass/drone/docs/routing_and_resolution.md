@@ -114,6 +114,7 @@ the public list:
 | `discover_modules`, `get_help`, `get_system_help` | `apps/modules/discovery.py` |
 | `HelpResult` | `apps/handlers/discovery_handler.py` |
 | `CommandResult` | `apps/handlers/executor.py` |
+| `is_registry_filename` | `apps/handlers/registry_name.py` |
 | `get_registry_path`, `set_registry_path`, `reset_registry_path`, `resolve_aipass_home` | `apps/handlers/registry_handler.py` |
 | `create_identified_connection` | `apps/handlers/broker/client.py` |
 | `BrokerDaemon` | `apps/handlers/broker/daemon.py` |
@@ -156,6 +157,19 @@ Order (`get_registry_path()` → `find_registry()`): explicit `set_registry_path
 conflicts with the nearest passport's `citizenship.registry_id` → the AIPass home (below) → walk up
 from the drone package → package-relative default. The env var is `AIPASS_REGISTRY`;
 `AIPASS_REGISTRY_PATH` is read by no code.
+
+### What counts as a registry file
+
+`is_registry_filename(name)` takes a file name and answers a bool: true when the name ends exactly,
+case-sensitively, in `_REGISTRY.json`. The stem is free, since an external project names its registry
+after itself, so `vera-studio_REGISTRY.json` counts and `drone_command_registry.json` does not. Its
+module imports only the standard library. It reads no logging, env or disk, so another branch can
+import it before drone has run.
+
+The predicate checks names only. Listing a directory is each caller's policy: which entries to read,
+and whether a directory with a registry name counts. Drone's own listing, `registry_named_entries()`
+in `router_handler.py`, keeps every entry the predicate passes, directories included. A directory
+named like a registry then fails loudly when it is loaded, instead of being skipped.
 
 From the shell, `drone config set <path>` and `drone config reset` cannot persist anything: the
 override would live only in a process that exits at once. Each prints the line that does persist

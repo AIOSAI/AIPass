@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drone.py
 # Description: Drone - Command Router & Discovery
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-03-05
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -23,7 +23,7 @@ from aipass.prax import logger
 from aipass.cli import console, err_console
 from aipass.drone.apps.modules import BranchNotFoundError, CommandExecutionError, RegistryError, RepoRootError
 from aipass.drone.apps.modules.resolver import branch_exists, get_all_branches
-from aipass.drone.apps.modules.router import caller_cwd, registries_in, route_command
+from aipass.drone.apps.modules.router import caller_cwd, registry_named_entries, route_command
 from aipass.drone.apps.modules.module_registry import (
     is_module,
     list_modules,
@@ -198,10 +198,10 @@ def _cwd_has_registry(max_depth: int = 10) -> bool:
         for i, parent in enumerate([cwd] + list(cwd.parents)):
             if i >= max_depth:
                 break
-            if registries_in(parent):
+            if registry_named_entries(parent):
                 return True
     home = resolve_aipass_home().path
-    return home is not None and home.is_dir() and bool(registries_in(home))
+    return home is not None and home.is_dir() and bool(registry_named_entries(home))
 
 
 def _handle_systems() -> int:

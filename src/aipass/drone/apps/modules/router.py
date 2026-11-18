@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: router.py
 # Description: Command routing logic for the drone module
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-09
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -21,7 +21,7 @@ from aipass.drone.apps.handlers.router_handler import (
     execute_branch_command,
     caller_cwd,
     # Re-exported for apps/drone.py: the entry point keeps one seam into handlers.
-    registries_in,  # noqa: F401
+    registry_named_entries,  # noqa: F401
     resolve_caller_identity,
 )
 from .resolver import list_branches, resolve_branch

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_handler.py
 # Description: Handler for registry file operations
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-03-09
-# Modified: 2026-11-15
+# Modified: 2026-11-17
 # =============================================
 
 """
@@ -24,7 +24,7 @@ from .exceptions import (
     RegistryPermissionError,
 )
 from aipass.drone.apps.handlers.json import json_handler
-from .router_handler import caller_cwd, registries_in
+from .router_handler import caller_cwd, registry_named_entries
 
 
 def _validate_branch_path(branch_path: Path, project_root: Path, branch_name: str) -> bool:
@@ -226,7 +226,7 @@ def branch_interpreter(branch_path: str | Path) -> str:
 
 def _first_registry_in(directory: Path) -> Optional[Path]:
     """Return the alphabetically-first *_REGISTRY.json in *directory*, or None."""
-    matches = registries_in(directory)
+    matches = registry_named_entries(directory)
     return matches[0] if matches else None
 
 
