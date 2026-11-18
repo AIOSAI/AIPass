@@ -208,7 +208,7 @@
     {
       "file": "tests/conftest.py",
       "standard": "import_site",
-      "lines": [64, 65, 66, 67, 76, 77, 83, 84, 85, 86],
+      "lines": [68, 69, 70, 71, 80, 81],
       "reason": "The stub is the cure (compass 493; @devpulse's leg 11 ruling (a)). Each keeps a far side off the disk or the bus. 88-91 aipass.prax: the real logger writes every module's log file under logs/, and its json service writes operation logs. 115-116 handlers.json.json_handler: log_operation writes memory_json operation logs. 123-126 aipass.trigger: Trigger.fire posts real events to the bus. Leg 11 of DPLAN-0354; lines moved +1 by the four-rows split (2026-10-08), which added the support_config_verbs import; moved -6 when the three unrequested fixtures and their imports were cut (2026-10-10)."
     },
     {
