@@ -802,9 +802,13 @@ class TestExportSeeds:
         passport["identity"]["role"] = "explorer"
         (branch_dir(root) / ".trinity" / "passport.json").write_text(canonical_text(passport), encoding="utf-8")
 
+        before = seed_path_for(branch_dir(root)).read_text(encoding="utf-8")
         receipt = export_seeds(root, confirm=True)
         assert receipt["updated"] == 1
         assert json.loads(seed_path_for(branch_dir(root)).read_text(encoding="utf-8"))["identity"]["role"] == "explorer"
+        # Mutant: the refresh overwrites with no copy kept -> no backup in the recovery folder -> red.
+        [kept] = list((branch_dir(root) / ".spawn" / ".recovery").glob("passport.seed.json.*.backup"))
+        assert kept.read_text(encoding="utf-8") == before
 
     def test_residents_are_counted_but_never_exported(self, tmp_path):
         root = write_repo(tmp_path, branches=("wanderer",), residents=("lodger",))

@@ -23,6 +23,7 @@ from pathlib import Path
 from aipass.prax import logger
 
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
+from aipass.spawn.apps.handlers.json_merge import backup_json
 from aipass.spawn.apps.handlers.class_registry import resolve_template_class
 from aipass.spawn.apps.handlers.json import json_handler
 from aipass.spawn.apps.handlers.passport_migration import (
@@ -475,6 +476,9 @@ def export_seed(target, *, confirm: bool = False) -> dict:
 
     try:
         seed_file.parent.mkdir(parents=True, exist_ok=True)
+        if current is not None:
+            # A refresh replaces a seed: the old one is kept where update keeps its backups.
+            backup_json(seed_file, backup_dir=target.branch_dir / ".spawn" / ".recovery")
         atomic_write_text(seed_file, wanted)
     except OSError as exc:
         record["error"] = f"write failed: {exc}"
