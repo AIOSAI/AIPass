@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_registry_case_sweep.py
 # Description: Registry globs must not widen on a case-insensitive filesystem
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-08-31
-# Modified: 2026-11-14
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/handlers/paths.py's registry glob readers on a case-insensitive filesystem."""
@@ -221,6 +221,9 @@ class TestCallerRegistryNeverResolvesToACounter:
         caller = project / "src" / "seat"
         caller.mkdir(parents=True)
         _decoy(caller)
+        # The caller stands in its own branch: a name no registry knows is synthesized only there.
+        (caller / ".trinity").mkdir()
+        (caller / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
 
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(caller))
         monkeypatch.setenv("AIPASS_CALLER_IDENTITY_SOURCE", "assigned")

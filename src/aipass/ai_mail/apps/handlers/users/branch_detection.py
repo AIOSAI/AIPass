@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_detection.py
 # Description: Branch Auto-Detection Handler
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2025-11-18
-# Modified: 2026-10-17
+# Modified: 2026-11-18
 # =============================================
 
 """
@@ -104,7 +104,8 @@ def _get_branches_list(registry: dict) -> list:
 def _synthesize_external_branch(caller_branch: str) -> Optional[Dict]:
     """Build a synthetic branch info dict from env vars for an external project."""
     caller_cwd = os.environ.get("AIPASS_CALLER_CWD", "")
-    if not caller_cwd:
+    # A name no registry knows, standing in no branch, is no citizen: synthesis would put its mailbox where it stands.
+    if not caller_cwd or not find_branch_root(Path(caller_cwd)):
         return None
     cwd_path = Path(caller_cwd)
     name_key = caller_branch.lstrip("@").lower()
