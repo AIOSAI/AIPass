@@ -26,6 +26,12 @@
       "reason": "Stdlib-only by necessity (DPLAN-0356 item 3): it runs BEFORE aipass.hooks.apps exists in the hook process, and importing json_handler would import the source tree it is mounting the promoted copy in place of."
     },
     {
+      "file": "apps/handlers/bridges/safe_mode.py",
+      "standard": "json_structure",
+      "functions": ["<file>"],
+      "reason": "Stdlib-only by necessity: it runs when the hook engine cannot load, and importing json_handler would import the code that broke. Its trail is its own log, one line per command, outside the tree."
+    },
+    {
       "file": "apps/handlers/bridges/codex.py",
       "standard": "handlers",
       "functions": ["_run_calls"],

@@ -11,6 +11,11 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+### Added
+
+- **hooks: safe mode, the admin seat can recover a broken hook engine** (2026-11-19). When the engine could not load, the bridge refused every tool call of every agent, so none could put the broken code back; three outages each waited for a person at a terminal. The Claude bridge now lets one call through while the engine is broken: the admin seat running `python3 -I <path>/safe_mode.py` with `diagnose`, `park <path>` or `rollback`. `park` moves the uncommitted changes under one branch's `apps/` into a named git stash, a readable patch beside it; `rollback` serves the promoted hooks copy before the live one and undoes itself when that is no cure. Both refuse while the engine runs, nothing is deleted, every command is logged in `~/.aipass/recovery/log.jsonl`, and the `HOOKS BROKEN` text prints the command. A committed break, a broken config file and the Codex, OpenCode and Seed bridges are not covered.
+- **flow: the `recovery` playbook** (2026-11-19). One page for an agent with no memory, started outside the project when no agent inside can work: what the break is, what must never be done, and the steps with the same recovery command. `drone @flow create . "What broke" recovery pplan`, or read `src/aipass/flow/templates/playbook_plans/recovery.md` where it lies when drone does not run.
+
 ### Changed
 
 - **devpulse: one shared word no longer surfaces a Compass decision** (2026-11-19). Recall scored a decision as relevant when the prompt shared a single uncommon word with it ("console", "remaining"), which cleared the surfacing threshold. Relevance is now m / (4 + m): one shared word scores 0.2 and stays silent, two score 0.33 and may surface, so the unchanged threshold of 0.3 means "at least two uncommon words in common". Spacing, cooldown and the cap are as they were.

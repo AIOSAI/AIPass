@@ -13,7 +13,7 @@ How a plan type is registered, what makes one discoverable, and the three self-h
 | research_plans | RPLAN | rplan_registry.json | default |
 | team_dev_plans | TDPLAN | tdplan_registry.json | default |
 | audit_plans | APLAN | aplan_registry.json | default |
-| playbook_plans | PPLAN | pplan_registry.json | default, merge, prompt_change, weekly_update |
+| playbook_plans | PPLAN | pplan_registry.json | default, merge, prompt_change, recovery, weekly_update |
 | capture_plans | CPLAN | cplan_registry.json | default |
 
 Plans follow the naming convention `{PREFIX}-{NNNN}_topic_slug_YYYY-MM-DD.md` where NNNN auto-increments per type.

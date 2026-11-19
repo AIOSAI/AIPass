@@ -66,7 +66,25 @@ Each fail-closed gate also refuses the call it guards when it crashes internally
 
 ## A Blocked Seat
 
-When the engine cannot load, every PreToolUse in every session of the fleet is refused with `HOOKS BROKEN`, until a person fixes it. No agent can repair it: each agent's tools pass through the same bridge, so the agent can still read prompts and answer, but cannot run a command or edit a file. The repair is the owner's, from a terminal outside any agent session (a plain shell runs no hooks):
+When the engine cannot load, every PreToolUse in every session of the fleet is refused with `HOOKS BROKEN`. Each agent's tools pass through the same bridge, so an agent can still read prompts and answer, but cannot run a command or edit a file. One call is the exception, and only on Claude Code: **safe mode**.
+
+### Safe mode
+
+Before it refuses, `claude.py` loads `bridges/safe_mode.py` by path (standard library only, no `aipass` import) and asks `allows(payload)`. It answers yes for one shape of call: tool `Bash`, the command exactly `python3 -I <abs path>/safe_mode.py` followed by `diagnose`, `rollback` or `park <path>` and nothing else, from a session whose cwd is under `src/aipass/devpulse` of this checkout with a birth certificate that carries the admin privilege and verifies against the owner's signing key. The registry is not read. A file that cannot load, a payload that cannot be parsed or a missing key refuses, with the reason on stderr.
+
+| Command | What it does |
+|---|---|
+| `diagnose` | Runs the bridge's own steps on a harmless call in a child process, prints the traceback, lists uncommitted code under any branch's `apps/` |
+| `park <path>` | Only a path inside `src/aipass/<branch>/apps`, never through a symbolic link. Writes the diff to `~/.aipass/recovery/<stamp>_<path>.patch`, moves the uncommitted changes into a git stash named `safe mode <stamp>: <path>`, re-checks the engine |
+| `rollback` | Points `.live-current` at the newest kept copy older than the live one, re-checks the engine, and puts the pointer back when that copy does not run either |
+
+`park` and `rollback` refuse while the engine runs. Every command appends a line to `~/.aipass/recovery/log.jsonl`. Nothing is deleted, edited, committed or pushed. Safe mode has no switch and no timer: the bridge reaches it only while the engine is broken. On a healthy system the git gate refuses the command, as it refuses any program that launches git.
+
+It cures an uncommitted edit of code the engine loads, and a bad promoted copy. It does not cure a break that is committed, a broken config file outside `apps/`, or a session on Codex, OpenCode or Seed, whose bridges have no safe mode. The same file run from a plain shell is the recovery command of the `recovery` playbook (`src/aipass/flow/templates/playbook_plans/recovery.md`), written for an agent with no memory.
+
+### By hand
+
+The repair by hand is the owner's, from a terminal outside any agent session (a plain shell runs no hooks):
 
 1. Read the cause: `tail -5 src/aipass/hooks/logs/bridge.log` (from the repo root). Each line names the exception and the event.
 2. If the line names the promoted hooks copy (a module under `.live-<stamp>`), point back to the previous copy: `drone @hooks promote rollback`, or by hand, `ls -d src/aipass/hooks/.live-2*` lists the 3 kept, and `echo .live-<earlier stamp> > src/aipass/hooks/.live-current` serves it on the next hook call.
