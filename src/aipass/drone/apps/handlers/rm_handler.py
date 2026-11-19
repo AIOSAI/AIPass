@@ -291,7 +291,9 @@ def elsewhere_project(resolved: Path) -> tuple[Path | None, str]:
     for folder in [resolved, *resolved.parents]:
         if folder == home:
             break
-        if registry_named_entries(folder) or (folder / ".git").exists():
+        git = folder / ".git"
+        # A sandbox mounts an empty .git in each writable root; a worktree's .git is a file.
+        if registry_named_entries(folder) or git.is_file() or (git.is_dir() and any(git.iterdir())):
             if folder == resolved:
                 return None, f"Refusing to delete root directory itself: {resolved}"
             return folder, ""

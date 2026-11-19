@@ -967,6 +967,20 @@ class TestTheVerifiedAdminIsNotRefusedByLocation:
         assert (other_project / ".archive" / ".ai_mail.local" / "x.json").is_file()
         assert rm_ledger(tmp_path)[0]["exemption"] == "elsewhere+dot"
 
+    def test_an_empty_dot_git_folder_does_not_make_a_project(self, other_project, monkeypatch):
+        """A sandbox mounts an empty .git in each writable root: that is no repository."""
+        rail_answers(monkeypatch, True)
+        loose = Path.home() / "mounted"
+        (loose / ".git").mkdir(parents=True)
+        target = loose / "file.txt"
+        target.write_text("stays", encoding="utf-8")
+
+        ((_, ok, message),) = safe_delete([str(target)])
+
+        assert ok is False
+        assert "in no project" in message
+        assert target.read_text(encoding="utf-8") == "stays"
+
     @pytest.mark.parametrize("where", ["provider", "loose", "outside_home"])
     def test_the_admin_is_refused_provider_folders_a_path_in_no_project_and_beyond_the_home(
         self, other_project, monkeypatch, tmp_path_factory, where
