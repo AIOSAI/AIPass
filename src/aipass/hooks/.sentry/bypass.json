@@ -58,8 +58,8 @@
     {
       "file": "apps/modules/engine.py",
       "standard": "modules",
-      "functions": ["<file>", "_load_budget_state", "_save_budget_state", "dispatch"],
-      "reason": "dispatch() is the engine's core purpose: it IS the module's primary function, not a handler that belongs elsewhere. Its stdlib json is the stdin payload, handler stdouts and the per-seat budget state, never branch data. Moving dispatch to handlers/ would leave an empty module."
+      "functions": ["<file>", "dispatch"],
+      "reason": "dispatch() is the engine's core purpose: it IS the module's primary function, not a handler that belongs elsewhere. Its stdlib json is the stdin payload and handler stdouts, never branch data. Moving dispatch to handlers/ would leave an empty module."
     },
     {
       "file": "apps/sound.py",
@@ -1125,15 +1125,7 @@
       "file": "apps/modules/engine.py",
       "standard": "fallback",
       "lines": [
-        243
-      ],
-      "reason": "HELD from a raise: the per-session /tmp budget counts are read in dispatch, so a raise would crash every event, gates included. A corrupt copy is reset and later overwritten; the cost is budgeted injectors firing again. WARNING, escalated by @trigger, names it."
-    },
-    {
-      "file": "apps/modules/engine.py",
-      "standard": "fallback",
-      "lines": [
-        308
+        235
       ],
       "reason": "Fails closed: a fail-closed gate's exit 2 whose stdout does not parse reads as \"exited 2 without a decision\", which _refuse_broken_gate turns into a BLOCK logged at ERROR with a gate_broken row in engine.jsonl."
     },
@@ -1141,8 +1133,8 @@
       "file": "apps/modules/engine.py",
       "standard": "fallback",
       "lines": [
-        505,
-        541
+        408,
+        444
       ],
       "reason": "Sound is cosmetic: a timeout voice or hook chime that cannot play costs only the sound. The event itself is already recorded in engine.jsonl (the timeout row, or the hook's own row), and its output is delivered."
     },
@@ -1150,7 +1142,7 @@
       "file": "apps/modules/engine.py",
       "standard": "fallback",
       "lines": [
-        550
+        453
       ],
       "reason": "Not a default: a hook's exit 2 whose stdout does not parse is treated as a crash, never a block or an allow, and is logged at ERROR \"CRASHED exit=2\" with a crashed row in engine.jsonl. Fail-closed gates were already refused upstream."
     },
@@ -1248,7 +1240,7 @@
       "file": "apps/modules/engine.py",
       "standard": "silent_catch",
       "lines": [
-        354
+        281
       ],
       "reason": "The decode error is handed on as the value; the next lines refuse a PreToolUse payload at ERROR with an engine.jsonl row, and log any other event's at WARNING."
     },

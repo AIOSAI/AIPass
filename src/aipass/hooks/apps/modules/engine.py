@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: engine.py
-# Version: 2.8.0
+# Version: 2.9.0
 # Description: Hook engine — unified dispatcher; gates fail closed, injectors skip on error
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-18
-# Modified: 2026-11-17
+# Modified: 2026-11-19
 # =============================================
 
 """Hook engine — dispatches hook events to handlers, logs via prax + JSONL.
@@ -22,7 +22,6 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import traceback
@@ -35,7 +34,6 @@ from aipass.hooks.apps.handlers.config import gates
 from aipass.hooks.apps.handlers.config.diagnostics import log_entry as _log, tail_log, trail_event
 from aipass.hooks.apps.handlers.config.output_merge import combine_outputs
 from aipass.hooks.apps.handlers.json import json_handler
-from aipass.hooks.apps.modules import cadence
 
 CONSOLE = err_console
 BRANCH_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -222,77 +220,6 @@ def _matches(matcher: str, value: str) -> bool:
     return value in matcher.split("|")
 
 
-_BUDGET_KEYS = ("max_per_session", "min_spacing_turns", "cooldown_seconds")
-
-
-def _budget_state_path(session_id: str = "") -> Path | None:
-    if not session_id:
-        session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
-    if not session_id:
-        return None
-    return Path(tempfile.gettempdir()) / f"aipass-handler-budget-{session_id}.json"
-
-
-def _load_budget_state(session_id: str = "") -> dict:
-    path = _budget_state_path(session_id)
-    if path is None or not path.exists():
-        return {}
-    state: dict = {}
-    try:
-        state = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:  # an unreadable budget starts every count afresh
-        logger.warning("[HOOKS] budget: state read failed: %s", exc)
-    return state
-
-
-def _save_budget_state(state: dict, session_id: str = "") -> None:
-    path = _budget_state_path(session_id)
-    if path is None:
-        return
-    try:
-        path.write_text(json.dumps(state), encoding="utf-8")
-    except OSError as exc:
-        logger.warning("[HOOKS] budget: state write failed: %s", exc)
-
-
-def _open_budget_window(hook_name: str, hs: dict, hook_data: dict) -> None:
-    """Zero a handler's counts when a new context window has opened since it last counted.
-
-    The budget file is keyed by session id, which survives compaction. No window stamp, and the count stands.
-    """
-    window = cadence.window_opened_at(hook_data)
-    if window is None or hs.get("window") == window:
-        return
-    if hs.get("fire_count"):
-        logger.info("[HOOKS] budget: %s reopened for a new context window (%d fires)", hook_name, hs["fire_count"])
-    hs.update(fire_count=0, turns_since_fire=0, window=window)
-
-
-def _check_budget(hook_name: str, budget_cfg: dict, budget_state: dict) -> tuple[bool, str]:
-    """Check if handler is within its per-window budget (see _open_budget_window)."""
-    hs = budget_state.get(hook_name, {})
-    fire_count = hs.get("fire_count", 0)
-
-    max_fires = budget_cfg.get("max_per_session")
-    if max_fires is not None and fire_count >= max_fires:
-        return False, f"budget exhausted ({fire_count}/{max_fires})"
-
-    if fire_count > 0:
-        min_spacing = budget_cfg.get("min_spacing_turns")
-        if min_spacing is not None:
-            turns_since = hs.get("turns_since_fire", 0)
-            if turns_since < min_spacing:
-                return False, f"spacing ({turns_since}/{min_spacing})"
-
-        cooldown = budget_cfg.get("cooldown_seconds")
-        if cooldown is not None:
-            elapsed = time.time() - hs.get("last_fire_time", 0.0)
-            if elapsed < cooldown:
-                return False, f"cooldown ({int(cooldown - elapsed)}s)"
-
-    return True, "ok"
-
-
 def _gate_failure(result: dict, timeout_s: int) -> str | None:
     """Why a fail-closed gate did not answer, or None when it did (DPLAN-0356 item 2).
 
@@ -399,8 +326,6 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
     outputs = []
     ran = 0  # hooks that actually executed — outputs only counts those that wrote stdout
     total_start = time.monotonic()
-    budget_state = None
-    budget_dirty = False
 
     for hook_name, hook_def in event_hooks.items():
         if not hook_def.get("enabled", True):
@@ -442,28 +367,6 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
                 }
             )
             continue
-
-        budget_cfg = {k: hook_def[k] for k in _BUDGET_KEYS if k in hook_def}
-        if budget_cfg:
-            if budget_state is None:
-                budget_state = _load_budget_state(payload_session_id)
-            hs = budget_state.setdefault(hook_name, {})
-            _open_budget_window(hook_name, hs, parsed)
-            hs["turns_since_fire"] = hs.get("turns_since_fire", 0) + 1
-            budget_dirty = True
-            allowed, reason = _check_budget(hook_name, budget_cfg, budget_state)
-            if not allowed:
-                _log_detail("[HOOKS] %s.%s budget: %s", event_type, hook_name, reason)
-                _log(
-                    {
-                        "ts": time.time(),
-                        "event": event_type,
-                        "hook": hook_name,
-                        "action": "budget_suppressed",
-                        "reason": reason,
-                    }
-                )
-                continue
 
         hook_timeout = hook_def.get("timeout", 30)
         if handler:
@@ -591,15 +494,6 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
 
         if result["stdout"]:
             outputs.append((hook_name, handler, result["stdout"]))
-            if budget_cfg and budget_state is not None:
-                hs = budget_state.setdefault(hook_name, {})
-                hs["fire_count"] = hs.get("fire_count", 0) + 1
-                hs["last_fire_time"] = time.time()
-                hs["turns_since_fire"] = 0
-                budget_dirty = True
-
-    if budget_dirty and budget_state is not None:
-        _save_budget_state(budget_state, payload_session_id)
 
     total_ms = (time.monotonic() - total_start) * 1000
     _log_detail("[HOOKS] %s complete: %d hooks %dms", event_type, ran, total_ms)
