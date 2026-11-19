@@ -30,7 +30,7 @@ ENV PATH="/home/aipass/.local/bin:/opt/aipass/bin:$PATH"
 WORKDIR /home/aipass
 
 # Pinned: the installer checks the binary against that version's published checksum. Bumped at every merge.
-ARG CLAUDE_CODE_VERSION=2.1.326
+ARG CLAUDE_CODE_VERSION=2.1.327
 RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_CODE_VERSION}"
 
 # The two README steps, done at build: the release wheel, then the install it drives.
