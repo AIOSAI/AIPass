@@ -74,7 +74,9 @@ as `aipass.<name>`; a project citizen's stays the bare name.
 
 `restore_citizen(branch_name, registry_path)` is the same render for a repair: the folder comes
 from the citizen's registry row, and its name, class and role from its own seed, so no class or
-role list lives outside the seeds. It writes only the missing files and returns their names. An
+role list lives outside the seeds. It writes only the missing files and returns their names. A
+passport that is present but not a JSON object counts as missing: it is renamed beside itself to
+`passport.json.corrupt-<id>`, so its bytes are kept, and a fresh one is rendered. An
 unregistered name raises `LookupError`, and a citizen without a seed raises `FileNotFoundError`.
 
 Other branches that need to resolve a `citizen_class` read spawn's registry through the door

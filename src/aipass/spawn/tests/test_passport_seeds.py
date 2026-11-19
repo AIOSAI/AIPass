@@ -484,6 +484,27 @@ class TestRestoreCitizen:
         assert passport["identity"]["citizen_class"] == "specialist"
         assert passport["citizenship"]["registry_id"] == "pid-test"
 
+    def test_a_corrupt_passport_is_set_aside_and_restored(self, tmp_path):
+        """A passport that is present but not JSON is damage too; its bytes are kept beside the new one.
+
+        Mutant: only a missing passport is restored -> the corrupt file stays -> red."""
+        root = write_repo(tmp_path)
+        target = branch_dir(root)
+        seed_file = seed_path_for(target)
+        seed_file.parent.mkdir(parents=True)
+        seed_file.write_text(canonical_text(build_seed(make_passport())), encoding="utf-8")
+        passport_file = target / ".trinity" / "passport.json"
+        passport_file.write_text("{not json", encoding="utf-8")
+        home = SimpleNamespace(path=root, source="test", tried=())
+
+        with patch("aipass.spawn.apps.handlers.registry.resolve_aipass_home", return_value=home):
+            written = restore_citizen("WANDERER", root / "AIPASS_REGISTRY.json")
+
+        assert "passport.json(seed)" in written
+        assert json.loads(passport_file.read_text(encoding="utf-8"))["identity"]["citizen_class"] == "specialist"
+        [aside] = list(passport_file.parent.glob("passport.json.corrupt-*"))
+        assert aside.read_text(encoding="utf-8") == "{not json"
+
     def test_an_unregistered_name_is_refused_with_nothing_written(self, tmp_path):
         root = write_repo(tmp_path)
 

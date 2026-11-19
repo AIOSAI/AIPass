@@ -108,6 +108,18 @@ def restore_citizen(branch_name: str, registry_path: Path) -> list[str]:
         raise FileNotFoundError(reason)
     seed = load_seed(seed_file)
     identity = seed.get("identity", {})
+    passport_file = target / ".trinity" / "passport.json"
+    if passport_file.is_file():
+        try:
+            readable = isinstance(json.loads(passport_file.read_text(encoding="utf-8")), dict)
+        except (OSError, ValueError) as exc:
+            logger.error("[spawn] restore: %s passport at %s is not readable: %s", branch_name, passport_file, exc)
+            readable = False
+        if not readable:
+            # Present but corrupt is damage too. Its bytes stay beside the new passport; nothing is overwritten.
+            aside = passport_file.with_name(f"{passport_file.name}.corrupt-{uuid.uuid4().hex[:8]}")
+            passport_file.replace(aside)
+            logger.error("[spawn] restore: corrupt passport for %s set aside as %s", branch_name, aside)
     return render_bootstrap_trinity(
         seed["branch_info"]["branch_name"],
         target,
