@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rm.py
 # Description: drone rm: containment, carve-outs, the sibling fence and the admin crossing
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-06-02
-# Modified: 2026-11-16
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/rm.py and the rm_handler containment it drives."""
@@ -25,6 +25,7 @@ import pytest
 
 from aipass.drone.apps.handlers import rm_handler
 from aipass.drone.apps.handlers.rm_handler import (
+    DOT_FLAG,
     check_carveouts,
     check_containment,
     get_allowed_roots,
@@ -34,6 +35,8 @@ from aipass.drone.apps.handlers.rm_handler import (
 from .conftest import RAIL, rail_answers, rm_ledger
 
 POSIX_TMP = Path(os.sep, "tmp")
+# Written here, not read from the product: a carve-out dropped there must fail a test.
+CARVEOUTS = (".agents", ".aipass", ".codex", ".git", ".trinity")
 
 #: A mode-0 folder only stops a caller the kernel holds to permissions: not as root.
 _PERMISSIONS_DO_NOT_BIND = os.geteuid() == 0
@@ -872,3 +875,115 @@ class TestTheVerifiedAdminCrossesTheSiblingFence:
         assert ok is False
         assert "contains citizen" in message
         assert (at_drone_beside_api / ".trinity").is_dir()
+
+
+@pytest.fixture()
+def other_project(at_drone_beside_api, project_dir, tmp_path_factory, monkeypatch):
+    """A second project under the owner's home, outside every allowed root; it holds a citizen."""
+    home = tmp_path_factory.mktemp("home").resolve()
+    monkeypatch.setenv("HOME", str(home))
+    other = home / "Projects" / "Other"
+    citizen = other / "src" / "vera"
+    (citizen / ".trinity").mkdir(parents=True)
+    (other / "OTHER_REGISTRY.json").write_text("{}", encoding="utf-8")
+    for relative in ("logs/run.log", "src/vera/notes.md", ".ai_mail.local/x.json", ".archive/old.md"):
+        (other / relative).parent.mkdir(parents=True, exist_ok=True)
+        (other / relative).write_text(relative, encoding="utf-8")
+    for carveout in CARVEOUTS:
+        # Below the root: a .trinity at the root would make the project itself a citizen.
+        (other / "work" / carveout).mkdir(parents=True)
+        (other / "work" / carveout / "kept").write_text("kept", encoding="utf-8")
+    with patch.object(rm_handler, "get_allowed_roots", return_value=[project_dir.resolve()]):
+        yield other
+
+
+class TestTheVerifiedAdminIsNotRefusedByLocation:
+    def test_the_admin_moves_a_file_in_another_project_into_the_archive_beside_it(
+        self, other_project, monkeypatch, tmp_path
+    ):
+        rail_answers(monkeypatch, True)
+        target = other_project / "logs"
+
+        ((_, ok, message),) = safe_delete([str(target)])
+
+        assert ok is True, message
+        assert not target.exists()
+        assert (other_project / "logs" / ".archive").exists() is False
+        assert (other_project / ".archive" / "logs" / "run.log").read_text(encoding="utf-8") == "logs/run.log"
+        (record,) = rm_ledger(tmp_path)
+        assert (record["outcome"], record["exemption"]) == ("moved", "elsewhere")
+
+    def test_the_admin_crosses_into_a_citizen_there_and_both_exemptions_are_recorded(
+        self, other_project, monkeypatch, tmp_path
+    ):
+        rail_answers(monkeypatch, True)
+
+        ((_, ok, message),) = safe_delete([str(other_project / "src" / "vera" / "notes.md")])
+
+        assert ok is True, message
+        assert (other_project / "src" / "vera" / ".archive" / "notes.md").is_file()
+        assert rm_ledger(tmp_path)[0]["exemption"] == "elsewhere+admin"
+
+    def test_a_citizen_is_still_refused_there_by_location(self, other_project, monkeypatch, tmp_path):
+        rail_answers(monkeypatch, False)
+        target = other_project / "logs"
+
+        ((_, ok, message),) = safe_delete([str(target)])
+
+        assert ok is False
+        assert "outside allowed roots" in message
+        assert target.is_dir()
+        assert "exemption" not in rm_ledger(tmp_path)[0]
+
+    @pytest.mark.parametrize(
+        ("relative", "refusal"),
+        [
+            *((("work", name, "kept"), f"inside {name}/") for name in CARVEOUTS),
+            ((".archive", "old.md"), "inside .archive/"),
+            (("src", "vera"), "sibling branch vera/"),
+            (("src",), "contains citizen vera/"),
+            ((), "root directory itself"),
+            ((".ai_mail.local",), "dot name"),
+        ],
+    )
+    def test_every_other_rule_still_holds_for_the_admin_outside_the_tree(
+        self, other_project, monkeypatch, relative, refusal
+    ):
+        rail_answers(monkeypatch, True)
+        target = other_project.joinpath(*relative)
+
+        ((_, ok, message),) = safe_delete([str(target)])
+
+        assert ok is False
+        assert refusal in message
+        assert target.exists()
+
+    def test_the_admin_moves_a_dot_name_there_with_dot(self, other_project, monkeypatch, tmp_path):
+        rail_answers(monkeypatch, True)
+
+        ((_, ok, message),) = safe_delete([DOT_FLAG, str(other_project / ".ai_mail.local")])
+
+        assert ok is True, message
+        assert (other_project / ".archive" / ".ai_mail.local" / "x.json").is_file()
+        assert rm_ledger(tmp_path)[0]["exemption"] == "elsewhere+dot"
+
+    @pytest.mark.parametrize("where", ["provider", "loose", "outside_home"])
+    def test_the_admin_is_refused_provider_folders_a_path_in_no_project_and_beyond_the_home(
+        self, other_project, monkeypatch, tmp_path_factory, where
+    ):
+        rail_answers(monkeypatch, True)
+        home = Path.home()
+        spots = {
+            "provider": (home / ".claude" / "settings.json", "provider settings"),
+            "loose": (home / "loose" / "file.txt", "in no project"),
+            "outside_home": (tmp_path_factory.mktemp("beyond") / "file.txt", "outside the owner's home"),
+        }
+        target, refusal = spots[where]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("stays", encoding="utf-8")
+
+        ((_, ok, message),) = safe_delete([str(target)])
+
+        assert ok is False
+        assert refusal in message
+        assert target.read_text(encoding="utf-8") == "stays"

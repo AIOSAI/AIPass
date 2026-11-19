@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rm_handler.py
 # Description: Contained safe-delete: in-tree targets move to the local .archive
-# Version: 1.9.0
+# Version: 1.10.0
 # Created: 2026-06-02
-# Modified: 2026-11-15
+# Modified: 2026-11-18
 # =============================================
 
 """Contained safe-delete handler.
@@ -28,7 +28,7 @@ from typing import Any
 from aipass.prax import logger
 from aipass.drone.apps.handlers import deletion_log
 from aipass.drone.apps.handlers.git import repo_door
-from aipass.drone.apps.handlers.router_handler import caller_cwd, find_project_root
+from aipass.drone.apps.handlers.router_handler import caller_cwd, find_project_root, registry_named_entries
 from aipass.drone.apps.handlers.json import json_handler
 
 _CARVEOUT_DIRS = frozenset((".git", ".trinity", ".aipass", ".codex", ".agents"))
@@ -42,7 +42,15 @@ ADMIN_EXEMPTION = "admin"
 # The owner's ruling: a dot name is a settings, identity or system file; moved by accident it can take a seat down.
 DOT_FLAG = "--dot"
 DOT_EXEMPTION = "dot"
-_EXEMPTION_NOTES = {ADMIN_EXEMPTION: "across the sibling fence", DOT_EXEMPTION: f"dot guard lifted by {DOT_FLAG}"}
+# The owner's ruling: the verified admin seat reaches any project under the owner's home.
+ELSEWHERE_EXEMPTION = "elsewhere"
+# The provider settings folders are the owner's by standing rule, refused to every seat.
+_PROVIDER_DIRS = (".claude", ".codex")
+_EXEMPTION_NOTES = {
+    ADMIN_EXEMPTION: "across the sibling fence",
+    DOT_EXEMPTION: f"dot guard lifted by {DOT_FLAG}",
+    ELSEWHERE_EXEMPTION: "in another project",
+}
 SIBLING_NEXT_STEP = " — not yours to remove: mail @devpulse the path and why"
 RECORDED_LINE = "This attempt is recorded in .ai_central/deletions.jsonl."
 
@@ -268,6 +276,28 @@ def check_containment(path: Path, roots: list[Path]) -> tuple[bool, str]:
     return False, (f"Path {path} is outside allowed roots.\n  Allowed: {allowed_str}")
 
 
+def elsewhere_project(resolved: Path) -> tuple[Path | None, str]:
+    """The project *resolved* sits in, for the verified admin outside the allowed roots; ``(None, why)`` when none.
+
+    A project is the nearest folder below the owner's home holding a ``*_REGISTRY.json`` or ``.git``.
+    The project root itself, the provider settings folders and anything beyond the home are refused.
+    """
+    home = Path.home().resolve()
+    if not resolved.is_relative_to(home) or resolved == home:
+        return None, f"Refused: {resolved} is outside the owner's home {home}, refused to every seat"
+    for name in _PROVIDER_DIRS:
+        if resolved.is_relative_to(home / name):
+            return None, f"Refused: {resolved} is in the provider settings folder ~/{name}, the owner's alone"
+    for folder in [resolved, *resolved.parents]:
+        if folder == home:
+            break
+        if registry_named_entries(folder) or (folder / ".git").exists():
+            if folder == resolved:
+                return None, f"Refusing to delete root directory itself: {resolved}"
+            return folder, ""
+    return None, f"Refused: {resolved} is in no project (no *_REGISTRY.json or .git above it below {home})"
+
+
 def safe_delete(paths: list[str]) -> list[tuple[str, bool, str]]:
     """Delete *paths* with containment checks; a refused path does not block others.
 
@@ -339,17 +369,21 @@ def _safe_delete_direct(paths: list[str], lift_dot: bool) -> list[tuple[str, boo
         else:
             resolved = absolute.resolve()
 
+        judged_root, elsewhere = project_root, None
         allowed, reason = check_containment(resolved, roots)
+        if not allowed and not any(resolved.is_relative_to(root) for root in roots) and seat.is_admin("location"):
+            judged_root, reason = elsewhere_project(resolved)
+            allowed, elsewhere = judged_root is not None, ELSEWHERE_EXEMPTION
         if not allowed:
             results.append(_refuse(path_str, resolved, reason, _shown(reason, resolved), target=target))
             continue
 
-        verdict = judge(resolved, project_root, seat, lift_dot=lift_dot)
+        verdict = judge(resolved, judged_root, seat, lift_dot=lift_dot)
         if verdict.refusal is not None:
             shown = _shown(verdict.refusal, resolved)
             results.append(_refuse(path_str, resolved, verdict.refusal, shown, target=target))
             continue
-        exemption = verdict.exemption
+        exemption = "+".join(name for name in (elsewhere, verdict.exemption) if name) or None
 
         measurement = deletion_log.measure(absolute)
 

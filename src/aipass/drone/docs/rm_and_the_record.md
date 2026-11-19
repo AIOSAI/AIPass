@@ -59,7 +59,7 @@ A record carries: `timestamp`, `lane`, `outcome`, `caller`, `cwd`, `requested` (
 `path` (resolved), `reason`, `kind`, `size_bytes`, `entry_count`, `measured`. A move's record has
 outcome `moved` and one key more, `moved_to`, the path it now lives at; the admin seat's crossing
 of the sibling guard adds `exemption: "admin"`, its `--dot` lift `exemption: "dot"`, and both
-together `exemption: "admin+dot"`. A stale-mode record
+together `exemption: "admin+dot"`; a move in another project leads with `elsewhere`. A stale-mode record
 carries two more, `mode` and `age` (as typed), and its prax line names both; a plain delete's
 record keeps exactly the twelve, byte for byte.
 
@@ -151,6 +151,24 @@ apply, and the target moves into the `.archive` beside it, in that branch. The r
 - **Still refused for the admin:** every carve-out (judged first), a target inside a `.archive`,
   the sibling's branch root itself (retiring a citizen is @spawn's), and a folder that contains a
   citizen, which is a separate guard below.
+
+### The admin seat reaches another project
+
+The allowed roots are the caller's project (`find_project_root()`, the walk up from the cwd) and
+the system temp dir (`get_allowed_roots()`). A target outside both is refused for every seat but
+the verified admin, which the same rail answers, asked only then. For the admin seat the target's
+location is no reason to refuse: `elsewhere_project()` finds the target's own project, the nearest
+folder below the owner's home holding a `*_REGISTRY.json` or `.git`, and `judge()` decides against
+that project exactly as inside the tree. The target moves into the `.archive` beside it, and
+crossing a citizen's tree there adds the sibling exemption too. The record lands in the caller's
+`.ai_central/deletions.jsonl` with `exemption: "elsewhere"` (`"elsewhere+admin"`,
+`"elsewhere+dot"`).
+
+- **Every other rule holds:** carve-outs, a `.archive` target, a citizen's branch root, a folder
+  holding a citizen, that project's root itself, the dot-name rule with `--dot`, no overwrite.
+- **Refused to every seat, the admin included:** the provider settings folders `~/.claude` and
+  `~/.codex`, a path in no project, the home itself and anything outside it.
+- **The command is the same one:** `drone rm <absolute path>`, with `--dot` for a dot name.
 
 ---
 

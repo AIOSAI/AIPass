@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rm.py
 # Description: Module orchestrator for contained safe-delete: in-tree targets move to .archive
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-06-02
-# Modified: 2026-11-15
+# Modified: 2026-11-18
 # =============================================
 
 """Module orchestrator for contained safe-delete.
@@ -169,6 +169,11 @@ def print_help() -> None:
     console.print("  • The verified admin seat alone may work inside other citizens' trees (never")
     console.print("    a branch root, a carve-out or a .archive); unverifiable means refused")
     console.print("  • A project folder that CONTAINS another citizen is refused, naming it")
+    console.print("  • Outside the allowed roots, the verified admin seat reaches any project under")
+    console.print("    the owner's home (the nearest folder holding a *_REGISTRY.json or .git): the")
+    console.print("    target moves into the .archive beside it and every rule here still holds,")
+    console.print("    judged against that project. Refused to every seat: the provider settings")
+    console.print("    folders ~/.claude and ~/.codex, a path in no project, anything outside home")
     console.print("  • A dot name is a settings, identity or system file: a target whose OWN name")
     console.print("    starts with a dot, file or folder, is refused. Citizens: always (mail")
     console.print("    @devpulse the path and why). The verified admin seat moves it with --dot,")
