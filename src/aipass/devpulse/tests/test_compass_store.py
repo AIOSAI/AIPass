@@ -3,7 +3,7 @@
 # Description: Tests for the compass SQLite/FTS5 storage core
 # Version: 1.1.1
 # Created: 2026-06-16
-# Modified: 2026-11-17
+# Modified: 2026-11-19
 # =============================================
 
 """Tests for apps/handlers/compass/store.py through the compass package API, on a tmp_path db_path."""
@@ -20,6 +20,7 @@ import pytest
 
 from aipass.devpulse.apps.handlers import compass
 from aipass.devpulse.apps.handlers.compass import store as store_mod
+from aipass.memory import new_state, should_surface
 
 
 @pytest.fixture
@@ -537,6 +538,17 @@ class TestRecall:
         hits = compass.recall_decisions("alpha beta gamma delta", limit=2, db_path=db)
         assert hits[0]["decision"] == "dense match"
         assert hits[0]["relevance"] > hits[1]["relevance"]
+
+    def test_recall_one_shared_word_stays_under_the_surfacing_threshold(self, db):
+        """The gate the recall hook asks refuses one shared rare word and lets two through."""
+        compass.add_decision("kestrel migration notes", "one word ruling", "good", db_path=db)
+        one = compass.recall_decisions("where is the kestrel", db_path=db)
+        assert one and one[0]["relevance"] == pytest.approx(0.2)
+        surfaced, reason, _ = should_surface("1", one[0]["relevance"], new_state(), record=False)
+        assert not surfaced and reason.startswith("Below threshold")
+        two = compass.recall_decisions("the kestrel migration", db_path=db)
+        assert two[0]["relevance"] == pytest.approx(2 / 6)
+        assert should_surface("1", two[0]["relevance"], new_state(), record=False)[0]
 
     def test_recall_invalid_limit_raises(self, db):
         """Non-positive limit fails honestly."""
