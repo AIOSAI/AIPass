@@ -93,15 +93,19 @@ def init_project(clean_venv: CleanVenv, tmp_path_factory: pytest.TempPathFactory
 
     ``aipass init`` REFUSES when a ``*_REGISTRY.json`` sits in or above CWD
     (``_guard_init``), so we run it from a pristine tmp dir whose parents have
-    no registry. ``AIPASS_HOME`` is left UNSET so the .venv-symlink step is
-    skipped.
+    no registry. A wheel in a clean venv is not an AIPass home, and init refuses
+    without one, so the fixture names a minimal home: a folder holding only
+    ``AIPASS_REGISTRY.json``. It has no .venv, so the symlink step is skipped.
     """
     neutral = tmp_path_factory.mktemp("neutral_init_cwd")
     proj = neutral / "proj"
+    home = tmp_path_factory.mktemp("aipass_home")
+    (home / "AIPASS_REGISTRY.json").write_text('{"branches": []}', encoding="utf-8")
 
     env = {
         "PATH": _path_env(),
         "HOME": str(neutral),
+        "AIPASS_HOME": str(home),
     }
 
     result = subprocess.run(
@@ -215,10 +219,12 @@ def _hook_env(work: Path) -> dict:
     return env
 
 
-def _engine_log(clean_venv: CleanVenv) -> Path | None:
-    """Glob the installed package for aipass/hooks/logs/engine.jsonl."""
-    hits = sorted(clean_venv.site_packages.glob("aipass/hooks/logs/engine.jsonl"))
-    return hits[0] if hits else None
+def _engine_log(clean_venv: CleanVenv, work: Path) -> Path | None:
+    """The installed hooks package's own engine log, asked of the package under the hook's env."""
+    probe = "from aipass.hooks.apps.handlers.config.diagnostics import LOG_FILE; print(LOG_FILE)"
+    proc = _run([str(clean_venv.python), "-c", probe], env=_hook_env(work))
+    path = Path(proc.stdout.strip())
+    return path if proc.returncode == 0 and path.is_file() else None
 
 
 def _trust_registry(clean_venv: CleanVenv, op: str, work: Path) -> None:
@@ -287,8 +293,9 @@ def test_t2a_rm_gate_blocks(clean_venv: CleanVenv, hook_workspace: Path) -> None
     assert decision.get("decision") == "block", f"stdout was: {proc.stdout!r}"
 
     # Oracle: the engine log must hold a record with OUR sentinel AND hook==rm_gate.
-    log = _engine_log(clean_venv)
-    assert log is not None and log.is_file(), "engine.jsonl not found in installed package"
+    log = _engine_log(clean_venv, hook_workspace)
+    assert log is not None and log.is_file(), "engine.jsonl not found where the installed package writes it"
+    assert log == hook_workspace / ".aipass" / "state" / "hooks" / "logs" / "engine.jsonl"
     assert _log_has_sentinel_for_hook(log, sentinel, "rm_gate"), (
         f"no engine.jsonl record found for sentinel {sentinel} + hook rm_gate"
     )
