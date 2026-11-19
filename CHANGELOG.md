@@ -11,12 +11,24 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+## [2026-11-19] — v2.8.39: the Docker image builds, the README says what install does
+
+### Fixed
+
+- **hooks: an installed Codex that is not logged in no longer fails the install** (2026-11-18). Wire verify held a fresh machine's Codex hooks as "never approved", an error nobody could cure before logging in, and the first Docker image build stopped on it. A Codex with no login has no seat to gate: verify says so in one info line and checks its approvals once it is logged in. A logged-in Codex is checked as before.
+- **README: a non-interactive install makes machine changes only with `--yes`** (2026-11-19). The front page said it made them unasked; `setup.sh` skips them and names each one. Also corrected: `aipass doctor --fix` restores a passport and is a person's command, and git has one narrow CI-fix writer beside the manager.
+- **changelog: passport seeds were new for project agents in v2.8.38**, not for the fleet, whose citizens have carried them since August.
+
+### Changed
+
+- **flow: the merge playbook builds the Docker image before the push** (2026-11-18) and checks that the image published after the tag. v2.8.38 reached PyPI while its image build failed; nothing before the tag had run that build.
+
 ## [2026-11-18] — v2.8.38: a repair that keeps what it touches, passport seeds for every citizen, one import door per branch
 
 ### Added
 
 - **aipass: `aipass doctor --fix` repairs a lost or corrupt passport** (2026-11-18). Doctor fails a citizen with no readable passport or no passport seed; the fix writes a missing seed, then restores the passport from it, then seats the owner. Memory, mail, plans, the registry and provider settings are not touched. It is a command for a person at a terminal.
-- **spawn: every citizen is born with a passport seed** (2026-11-18), in the fleet and in a project. A project seed is the passport as it stands, minus the machine ids. `drone @spawn export-seeds` writes the seeds of citizens born before them.
+- **spawn: every citizen is born with a passport seed** (2026-11-18): a project's agents now get one too, as the fleet's have since August. A project seed is the passport as it stands, minus the machine ids. `drone @spawn export-seeds` writes the seeds of citizens born before them.
 - **drone: `drone rm` reaches another project for the verified admin seat** (2026-11-18). The target moves into the `.archive` beside it under the same rules as inside the tree; provider settings folders and anything outside the home stay refused.
 
 ### Fixed

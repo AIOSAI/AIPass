@@ -55,7 +55,7 @@ To work on AIPass itself, install from a clone instead (this route skips the pho
 git clone https://github.com/AIOSAI/AIPass.git && cd AIPass && ./aipass install
 ```
 
-Install adds AIPass hooks and deny rules to your user-level Claude Code settings, a few lines to your shell rc, and command links on your PATH; it may also set git's `pull.rebase` and add one npm package. [See every change it makes](#what-install-changes). Something off afterwards? `aipass doctor` names it and `aipass doctor --fix` cures what it can.
+Install adds AIPass hooks and deny rules to your user-level Claude Code settings, a few lines to your shell rc, and command links on your PATH; it may also set git's `pull.rebase` and add one npm package. [See every change it makes](#what-install-changes). Something off afterwards? `aipass doctor` names it and `aipass doctor --fix` cures what it can, a lost or corrupt agent passport included (restored from the agent's seed, the old file kept beside it). `--fix` is yours to run at a terminal: an agent is refused.
 
 ## Start here
 
@@ -125,7 +125,7 @@ An agent's identity is a file it can read, `.trinity/passport.json`, trimmed her
 }
 ```
 
-**One owner seat.** Each project has one manager agent you steer through. Every agent can read git through the bus; only a project's manager writes to it.
+**One owner seat.** Each project has one manager agent you steer through. Every agent can read git through the bus; only a project's manager writes to it, plus one narrow door that commits and pushes a CI fix on `dev` and nothing else.
 
 **No index.** Nothing indexes your codebase. An agent finds its way the way a new colleague does: the bus, the owning agent's README, and its own memory of what it did last time.
 
@@ -148,7 +148,7 @@ The boring stuff works. One human and these agents built it, and use it every da
 <details>
 <summary>The full list</summary>
 
-Install builds the environment, puts `aipass` and `drone` on your PATH, and sets up the 18 agents. It ends on a health check that fixes what it can, an install report in devpulse's dropbox, and a final screen with what still needs attention. In a terminal it asks where AIPass should live (unless `--path`), your git identity (only if it is not set globally), one yes or no before the changes outside the repo listed below (on no it skips them, says what will not work, and `./setup.sh` makes them later), and Enter before the phone pairing code. Your name comes from git's `user.name`, else your login. A non-interactive shell asks nothing and makes the changes; on the clone route `--no-finish` skips the health check and the report.
+Install builds the environment, puts `aipass` and `drone` on your PATH, and sets up the 18 agents. It ends on a health check that fixes what it can, an install report in devpulse's dropbox, and a final screen with what still needs attention. In a terminal it asks where AIPass should live (unless `--path`), your git identity (only if it is not set globally), one yes or no before the changes outside the repo listed below (on no it skips them, says what will not work, and `./setup.sh` makes them later), and Enter before the phone pairing code. Your name comes from git's `user.name`, else your login. A non-interactive shell asks nothing and makes those changes only when you pass `--yes`; without it they are skipped, each one named as a warning, and `aipass install --yes` makes them later; on the clone route `--no-finish` skips the health check and the report.
 
 Install changes a few things outside the repo, and you should know what. It adds AIPass deny rules to your user-level Claude Code settings (no raw git writes: `commit`, `push`, `reset`, `rebase`, `merge`, `config` and the destructive `checkout`, `restore`, `stash` and `branch` forms; no reading `~/.secrets/`), and these apply to every Claude Code project on the machine. It merges its hooks with any you already have. It adds a `claude` shell function that, inside an agent directory, boots that agent's seat, attaching to it if one is already live. It sets `git config --global pull.rebase true` when it sets your git identity. It installs the `@anthropic-ai/sandbox-runtime` npm package if it is missing. `sudo` may ask once to place the `/usr/local/bin` symlinks. Re-running install rebuilds `.venv`. The list below names every file it touches.
 
