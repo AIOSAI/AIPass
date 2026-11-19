@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_wire_verify.py
-# Version: 1.9.0
+# Version: 1.10.0
 # Description: Tests for wire_verify module — provider ↔ project hook wiring checker
 # Branch: hooks
 # Created: 2026-07-09
-# Modified: 2026-11-15
+# Modified: 2026-11-18
 # =============================================
 
 """Tests for apps/modules/wire_verify.py."""
@@ -640,6 +640,52 @@ def _on_path(tmp_path, monkeypatch, *clis: str):
         (bin_dir / cli).write_text("#!/bin/sh\n", encoding="utf-8")
         (bin_dir / cli).chmod(0o755)
     monkeypatch.setenv("PATH", str(bin_dir))
+
+
+@pytest.fixture(autouse=True)
+def _no_host_clis(tmp_path, monkeypatch):
+    """verify runs `codex login status`: an empty PATH keeps the host's own codex out of every test."""
+    _on_path(tmp_path, monkeypatch)
+
+
+class TestCodexLogin:
+    """An installed Codex with no login has no seat: its approvals are not checked, and verify says so."""
+
+    def _seat(self, tmp_path, monkeypatch, status: int):
+        """Codex on PATH answering `login status` with *status*, one never-approved file, real verify_wiring."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex_home"))
+        _on_path(tmp_path, monkeypatch, "codex")
+        stub = f'#!/bin/sh\n[ "$1 $2" = "login status" ] && exit {status}\nexit 0\n'
+        (tmp_path / "bin" / "codex").write_text(stub, encoding="utf-8")
+        codex_path = tmp_path / "codex_home" / "hooks.json"
+        codex_path.parent.mkdir()
+        rows = {e: [_APPROVED[e][0]] for e in ("Stop", "PreToolUse")}
+        codex_path.write_text(json.dumps({"hooks": rows}), encoding="utf-8")
+        provider = tmp_path / "settings.json"
+        provider.write_text(json.dumps({"hooks": _PRETOOL}), encoding="utf-8")
+        real = wire_verify.verify_wiring
+
+        def _real_verify(**kwargs):
+            return real(provider_path=provider, project_config={"hooks_enabled": True}, **kwargs)
+
+        monkeypatch.setattr(wire_verify, "verify_wiring", _real_verify)
+
+    def test_not_logged_in_passes_with_no_approval_errors_and_says_so(self, tmp_path, monkeypatch, capsys):
+        self._seat(tmp_path, monkeypatch, status=1)
+        assert wire_verify.handle_command("verify", []) is True
+        err = " ".join(capsys.readouterr().err.split())
+        assert "(Codex) row" not in err
+        assert "Codex: not logged in, no seat to gate: its approvals are not checked" in err
+
+    def test_logged_in_and_never_approved_stays_an_error(self, tmp_path, monkeypatch, capsys):
+        self._seat(tmp_path, monkeypatch, status=0)
+        with pytest.raises(SystemExit) as exc:
+            wire_verify.handle_command("verify", [])
+        assert exc.value.code != 0
+        err = " ".join(capsys.readouterr().err.split())
+        assert "Stop (Codex) row 0: never approved" in err
+        assert "not logged in" not in err
 
 
 class TestHandleCommand:

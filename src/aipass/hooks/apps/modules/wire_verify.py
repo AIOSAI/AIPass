@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: wire_verify.py
-# Version: 1.11.0
+# Version: 1.12.0
 # Description: Wire verification — cross-checks provider settings vs project hook config
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-09
-# Modified: 2026-11-17
+# Modified: 2026-11-18
 # =============================================
 
 """Wire verification — catches silent hook-wiring breaks.
@@ -14,6 +14,7 @@ Cross-checks ~/.claude/settings.json (provider hooks) against .aipass/hooks.json
 A handler wired only in Codex's user-level hooks.json, or only in the manifest's cli.opencode rows that
 OpenCode's plugin runs, counts as wired; that file or plugin missing (or the plugin stale) is an ERROR.
 A provider CLI that is not installed is not checked (INFO), by the test setup.sh wires it by.
+A Codex not logged in (`codex login status` non-zero) has no seat: its rows' approvals are not checked (INFO).
 A Seed head's hooks.json is checked for one seed.py row per event Seed fires; `seed install` writes them.
 Detects: empty provider hook arrays; enabled handlers with no bridge entry; duplicate and orphaned
 entries; a tool a gate guards that the provider's PreToolUse bridge never sees (R7: NotebookEdit).
@@ -25,6 +26,7 @@ import os
 import re
 import shlex
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -149,10 +151,11 @@ def _check_codex_trust(codex_path, codex_hooks, errors) -> None:
             errors.append(f"{event} (Codex) row {gi}: {status}, so Codex skips it without a word{gates}. {fix}")
 
 
-def _codex_wired(codex_path, errors) -> frozenset[str]:
+def _codex_wired(codex_path, errors, info) -> frozenset[str]:
     """Every ``Event:hook`` a Codex hooks.json sends through the Codex bridge; none when there is no file.
 
     A *codex_path* naming no file is an ERROR, and so is a guarded tool its PreToolUse rows miss.
+    Approvals are checked only for a seat: a Codex with no login runs no session to skip a row in.
     """
     if codex_path is None:
         return frozenset()
@@ -164,7 +167,10 @@ def _codex_wired(codex_path, errors) -> frozenset[str]:
         return frozenset()
     codex_hooks = _read_provider_hooks(errors, codex_path)
     _check_guarded_tools(codex_hooks, errors, _CODEX_MARKER, _CODEX_GUARDED_TOOLS, " (Codex)")
-    _check_codex_trust(codex_path, codex_hooks, errors)
+    if _codex_logged_in():
+        _check_codex_trust(codex_path, codex_hooks, errors)
+    else:
+        info.append("Codex: not logged in, no seat to gate: its approvals are not checked")
     wired: set[str] = set()
     for entries in codex_hooks.values():
         for entry in entries:
@@ -390,7 +396,7 @@ def verify_wiring(
 
     provider_index = _build_provider_index(provider_hooks, errors)
     _check_guarded_tools(provider_hooks, errors)
-    elsewhere = {"Codex": _codex_wired(codex_path, errors)}
+    elsewhere = {"Codex": _codex_wired(codex_path, errors, info)}
     if opencode_plugin is not None:
         elsewhere["OpenCode"] = _opencode_wired(opencode_plugin, manifest_path, errors)
     _seed_wired(seed_path, errors, warnings, info)
@@ -438,6 +444,18 @@ def _installed(cli: str) -> bool:
     if shutil.which(cli) is not None:
         return True
     return cli == "opencode" and os.access(Path.home() / ".opencode" / "bin" / "opencode", os.X_OK)
+
+
+def _codex_logged_in() -> bool:
+    """Doctor's own test, `codex login status` exit 0. No answer counts as logged in: the check stays on."""
+    try:
+        done = subprocess.run(
+            ["codex", "login", "status"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=False
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("[WIRE_VERIFY] codex login status gave no answer, approvals checked: %s", exc)
+        return True
+    return done.returncode == 0
 
 
 def print_introspection():
